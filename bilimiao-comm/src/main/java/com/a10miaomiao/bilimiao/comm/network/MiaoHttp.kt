@@ -12,8 +12,10 @@ import kotlinx.serialization.serializer
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.io.IOException
 import java.lang.reflect.Type
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -28,7 +30,7 @@ class MiaoHttp(var url: String? = null) {
         }
     }
 
-    private var client = OkHttpClient()
+    private val client get() = sharedClient
     val headers = mutableMapOf<String, String>()
     var method = GET
 
@@ -65,10 +67,14 @@ class MiaoHttp(var url: String? = null) {
             if (isWbiEnabled && isApiBili && !hasSign && !isExcluded) {
                 val beforeUrl = url
                 url = WbiSigner.signUrlBlocking(url ?: throw IllegalStateException("url must be set"))
-                android.util.Log.i("MiaoHttp-WBI", "签名前: $beforeUrl")
-                android.util.Log.i("MiaoHttp-WBI", "签名后: $url")
+                if (com.a10miaomiao.bilimiao.comm.BuildConfig.DEBUG) {
+                    android.util.Log.i("MiaoHttp-WBI", "签名前: $beforeUrl")
+                    android.util.Log.i("MiaoHttp-WBI", "签名后: $url")
+                }
             } else {
-                android.util.Log.d("MiaoHttp-WBI", "跳过WBI: isWbiEnabled=$isWbiEnabled api=$isApiBili hasSign=$hasSign excluded=$isExcluded isWebApi=$isWebApi url=$url")
+                if (com.a10miaomiao.bilimiao.comm.BuildConfig.DEBUG) {
+                    android.util.Log.d("MiaoHttp-WBI", "跳过WBI: isWbiEnabled=$isWbiEnabled api=$isApiBili hasSign=$hasSign excluded=$isExcluded isWebApi=$isWebApi url=$url")
+                }
             }
         }
         val cookie = getCookie(url)
@@ -141,6 +147,24 @@ class MiaoHttp(var url: String? = null) {
         /** WBI 签名开关，由 FlagsSettingPage 同步写入 */
         @Volatile
         var isWbiEnabled: Boolean = true
+
+        /**
+         * 全局共享 OkHttpClient：复用连接池 + 启用 HTTP 缓存，避免每个请求新建 client。
+         * OkHttp 5.x 默认支持 HTTP/2 与 ALPN，无需额外配置。
+         * 缓存仅对带 Cache-Control/Expires 的响应生效，B 站 API 多数不带，不会误缓存实时数据。
+         */
+        private val sharedClient: OkHttpClient by lazy {
+            val app = BilimiaoCommApp.commApp.app
+            val cacheDir = File(app.cacheDir, "miao-http").apply { mkdirs() }
+            OkHttpClient.Builder()
+                .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .cache(Cache(cacheDir, 50L * 1024 * 1024)) // 50MB
+                .retryOnConnectionFailure(true)
+                .build()
+        }
 
         fun request(url: String? = null, init: (MiaoHttp.() -> Unit)? = null) = MiaoHttp(url).apply {
             init?.invoke(this)

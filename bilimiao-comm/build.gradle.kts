@@ -19,6 +19,18 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
+
+        // 凭证加密 AES 密钥：可通过 gradle.properties 的 BILIMIAO_AES_KEY 覆盖，默认值兜底
+        // 仅提高反编译门槛，非真正安全（要更高安全性需 NDK native 存储）
+        buildConfigField(
+            "String",
+            "AES_KEY",
+            "\"${project.findProperty("BILIMIAO_AES_KEY") as String? ?: "Message Word"}\""
+        )
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {

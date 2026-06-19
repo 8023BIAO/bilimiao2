@@ -24,7 +24,7 @@ class BilimiaoCommApp(
         private set
 
     private val authFilePath get() = app.filesDir.path + "/auth_hd"
-    private val key = "Message Word"
+    private val key get() = com.a10miaomiao.bilimiao.comm.BuildConfig.AES_KEY
     private var _bilibiliBuvid = ""
 
     companion object {

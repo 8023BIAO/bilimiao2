@@ -168,27 +168,8 @@ class MainActivity
                 if (mainUi == null) {
                     initRootView(savedInstanceState)
                 }
-                // 主题变更时重置ViewConfig缓存，使config重新解析当前主题属性
-                resetViewConfig()
-                val themeColor = it.color
-                var bgColor = if (it.appBarType == 0) {
-                    val hct = Hct.fromInt(themeColor)
-                    val isDark = when(it.darkMode) {
-                        0 -> themeDelegate.isSystemInDark()
-                        1 -> false
-                        else -> true
-                    }
-                    val tone = if (isDark) 20.0 else 90.0
-                    Hct.from(hct.hue, 10.0, tone).toInt()
-                } else {
-                    config.blockBackgroundColor
-                }
-                bgColor = (bgColor and 0x00FFFFFF) or (0xF8000000).toInt()
-                // 延迟到下一帧确保AppCompat主题已完全应用
-                ui.mAppBar.post {
-                    ui.mAppBar.updateTheme(themeColor, bgColor, config.foregroundAlpha45Color)
-                }
-                themeDelegate.setThemeColor(themeColor)
+                // 复用统一主题应用逻辑（与 onConfigurationChanged 共用，避免重复代码）
+                applyAppBarTheme(it)
             }
         }
 
@@ -323,32 +304,30 @@ class MainActivity
 
 
     fun setMyPageConfig(config: MyPageConfigInfo) {
-        if (true) {
-            pageConfig = config
-            ui.mAppBar.canBack =  config.menu?.checkable != true
-            ui.mAppBar.setProp {
-                title = config.title
-                menus = config.getMenuItems()
-                isNavigationMenu = config.menu?.checkable == true
-                navigationKey = config.menu?.checkedKey ?: 0
-            }
-            ui.root.slideUpBottomAppBar()
+        pageConfig = config
+        ui.mAppBar.canBack =  config.menu?.checkable != true
+        ui.mAppBar.setProp {
+            title = config.title
+            menus = config.getMenuItems()
+            isNavigationMenu = config.menu?.checkable == true
+            navigationKey = config.menu?.checkedKey ?: 0
+        }
+        ui.root.slideUpBottomAppBar()
 
-            val searchConfig = config.search
-            val pageSearchMethod = if (searchConfig?.name.isNullOrBlank()) {
-                null
-            } else {
-                object : PageSearchMethod {
-                    override val name: String
-                        get() = searchConfig?.name ?: ""
+        val searchConfig = config.search
+        val pageSearchMethod = if (searchConfig?.name.isNullOrBlank()) {
+            null
+        } else {
+            object : PageSearchMethod {
+                override val name: String
+                    get() = searchConfig?.name ?: ""
 
-                    override fun onSearch(keyword: String) {
-                        searchSelfPage(keyword)
-                    }
+                override fun onSearch(keyword: String) {
+                    searchSelfPage(keyword)
                 }
             }
-            startViewWrapper.setPageSearchMethod(pageSearchMethod)
         }
+        startViewWrapper.setPageSearchMethod(pageSearchMethod)
     }
 
     private fun goBackHome(): Boolean {
@@ -385,16 +364,6 @@ class MainActivity
         if (state == DrawerBehaviorDelegate.STATE_COLLAPSED) {
             startViewWrapper.closeSearchDialog()
         }
-        // 太麻烦
-//        supportFragmentManager.beginTransaction().also {
-//            if (state == AppBarBehaviorDelegate.STATE_COLLAPSED
-//                && leftFragment.isVisible) {
-//                leftFragment.hideSoftInput()
-//                it.hide(leftFragment)
-//            } else if (leftFragment.isHidden) {
-//                it.show(leftFragment)
-//            }
-//        }.commit()
     }
 
     fun searchSelfPage(keyword: String) {
@@ -650,11 +619,6 @@ class MainActivity
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         basePlayerDelegate.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        if (isInPictureInPictureMode) { // 进入画中画模式，则隐藏其它控件
-
-        } else {
-
-        }
     }
 
     /** 统一主题应用：stateFlow 和 onConfigurationChanged 共用 */
@@ -704,12 +668,8 @@ class MainActivity
     }
 
     private fun onHostNavBack(): Boolean {
-//        if (ui.mAppBar.canBack) {
-            currentNav.onBackPressed()
-            return true
-//        } else {
-//            return false
-//        }
+        currentNav.onBackPressed()
+        return true
     }
 
     override fun onBackPressed() {

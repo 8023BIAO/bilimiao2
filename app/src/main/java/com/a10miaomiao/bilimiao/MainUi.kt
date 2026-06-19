@@ -9,7 +9,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.RelativeLayout
-import androidx.fragment.app.FragmentContainerView
 import cn.a10miaomiao.bilimiao.compose.StartViewWrapper
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.widget.scaffold.AppBarView
@@ -23,7 +22,6 @@ import com.a10miaomiao.bilimiao.widget.scaffold.behavior.MaskBehavior
 import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
 import com.a10miaomiao.bilimiao.widget.scaffold.behavior.MyBottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetBehavior
-import splitties.dimensions.dip
 import splitties.experimental.InternalSplittiesApi
 import splitties.views.backgroundColor
 import splitties.views.dsl.core.*
@@ -43,11 +41,6 @@ class MainUi(
         }
     }
 
-//    val mLeftContainerView = inflate<FragmentContainerView>(R.layout.left_fragment) {
-//        backgroundColor = config.windowBackgroundColor
-//        elevation = dip(20).toFloat()
-//        visibility = View.INVISIBLE
-//    }
     val mLeftContainerView = startViewWrapper.getView()
 
     val mContainerView = inflate<View>(R.layout.container_fragment) {
@@ -66,11 +59,16 @@ class MainUi(
         try {
             (parent as? ViewGroup)?.removeAllViews()
             // 直接替换旧PlayerView的Context
-            val clazz = View::class.java
-            val mContextField = clazz.getDeclaredField("mContext")
-            mContextField.isAccessible = true
-            if (mContextField.get(this) is Context) {
-                mContextField.set(this, ctx)
+            // 注意：View.mContext 是非公开 API，Android 13+ 收紧了反射访问。
+            // SDK_INT 守卫：仅旧版本尝试反射，新版本直接复用（Context 通常无需替换）；
+            // 失败则降级，不会导致 Activity 重建崩溃。
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                val clazz = View::class.java
+                val mContextField = clazz.getDeclaredField("mContext")
+                mContextField.isAccessible = true
+                if (mContextField.get(this) is Context) {
+                    mContextField.set(this, ctx)
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -81,7 +79,6 @@ class MainUi(
 
     val mPlayerLayout = frameLayout {
         backgroundColor = 0xFF000000.toInt()
-//        elevation = dip(19).toFloat()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             outlineSpotShadowColor = config.shadowColor
         }
@@ -133,13 +130,6 @@ class MainUi(
             width = wrapContent
             height = wrapContent
         })
-
-//        addView(frameLayout {
-//            backgroundColor = config.blockBackgroundColor
-//            elevation = dip(20).toFloat()
-//        }, lParams {
-//            behavior = PlayerDraggableBehavior(ctx, null)
-//        })
 
         addView(mLeftContainerView, lParams {
             height = matchParent

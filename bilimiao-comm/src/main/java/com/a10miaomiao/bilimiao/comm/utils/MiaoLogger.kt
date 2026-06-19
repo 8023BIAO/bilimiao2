@@ -1,6 +1,7 @@
 package com.a10miaomiao.bilimiao.comm.utils
 
 import android.util.Log
+import com.a10miaomiao.bilimiao.comm.BuildConfig
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.InvocationKind
 import kotlin.contracts.contract
@@ -56,6 +57,8 @@ class MiaoLogger(
     }
 
     private fun println(vararg msgs: Any?) {
+        // Release 包只保留 ERROR 级别，DEBUG/INFO 静默，减少开销与信息泄露
+        if (!BuildConfig.DEBUG && level != Log.ERROR) return
         var msgStr = if (msgs.size > 1) {
             StringBuilder().apply {
                 msgs.forEachIndexed { index, msg ->
