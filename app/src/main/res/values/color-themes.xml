@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="theme_pink">PinkTheme</string>
+    <string name="theme_pink_DayNight">PinkTheme.DayNight</string>
+    <string name="theme_red">RedTheme</string>
+    <string name="theme_red_DayNight">RedTheme.DayNight</string>
+    <string name="theme_yellow">YellowTheme</string>
+    <string name="theme_yellow_DayNight">YellowTheme.DayNight</string>
+    <string name="theme_green">GreenTheme</string>
+    <string name="theme_green_DayNight">GreenTheme.DayNight</string>
+    <string name="theme_blue">BlueTheme</string>
+    <string name="theme_blue_DayNight">BlueTheme.DayNight</string>
+    <string name="theme_purple">PurpleTheme</string>
+    <string name="theme_purple_DayNight">PurpleTheme.DayNight</string>
+
+    <style name="PinkTheme" parent="Theme.Bilimiao">
+        <item name="themeName">@string/theme_pink</item>
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/pink</item>
+        <item name="colorPrimaryVariant">@color/pink</item>
+        <item name="colorOnPrimary">@color/pink</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/pink</item>
+        <item name="colorSecondaryVariant">@color/pink</item>
+
+        <item name="colorSurfaceVariant">@color/pink_surface</item>
+    </style>
+
+    <style name="RedTheme" parent="Theme.Bilimiao">
+        <item name="themeName">@string/theme_red</item>
+        <item name="colorPrimary">@color/red</item>
+        <item name="colorPrimaryVariant">@color/red</item>
+        <item name="colorOnPrimary">@color/red</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/red</item>
+        <item name="colorSecondaryVariant">@color/red</item>
+
+        <item name="colorSurfaceVariant">@color/red_surface</item>
+    </style>
+
+    <style name="YellowTheme" parent="Theme.Bilimiao">
+        <item name="themeName">@string/theme_yellow</item>
+        <item name="colorPrimary">@color/orange</item>
+        <item name="colorPrimaryVariant">@color/orange</item>
+        <item name="colorOnPrimary">@color/orange</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/orange</item>
+        <item name="colorSecondaryVariant">@color/orange</item>
+
+        <item name="colorSurfaceVariant">@color/yellow_surface</item>
+    </style>
+
+    <style name="GreenTheme" parent="Theme.Bilimiao">
+        <item name="themeName">@string/theme_green</item>
+        <item name="colorPrimary">@color/green_light</item>
+        <item name="colorPrimaryVariant">@color/green_light</item>
+        <item name="colorOnPrimary">@color/green_light</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/green_light</item>
+        <item name="colorSecondaryVariant">@color/green_light</item>
+
+        <item name="colorSurfaceVariant">@color/green_light_surface</item>
+    </style>
+
+    <style name="BlueTheme" parent="Theme.Bilimiao">
+        <item name="themeName">@string/theme_blue</item>
+        <item name="colorPrimary">@color/blue</item>
+        <item name="colorPrimaryVariant">@color/blue</item>
+        <item name="colorOnPrimary">@color/blue</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/blue</item>
+        <item name="colorSecondaryVariant">@color/blue</item>
+
+        <item name="colorSurfaceVariant">@color/blue_surface</item>
+    </style>
+
+    <style name="PurpleTheme" parent="Theme.Bilimiao">
+        <item name="themeName">@string/theme_purple</item>
+        <item name="colorPrimary">@color/purple</item>
+        <item name="colorPrimaryVariant">@color/purple</item>
+        <item name="colorOnPrimary">@color/purple</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/purple</item>
+        <item name="colorSecondaryVariant">@color/purple</item>
+
+        <item name="colorSurfaceVariant">@color/purple_surface</item>
+    </style>
+
+
+    <style name="MaterialYouTheme" parent="Theme.Bilimiao">
+    </style>
+
+</resources>
