@@ -1,0 +1,52 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+*/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+app/signing.properties
+
+/docs
+
+# Kotlin build cache/errors
+.kotlin/
+
+# 临时文件 - 禁止提交
+temp/
+*.bat
+!gradlew.bat
+*.ps1
+*.bak
+*.orig
+
+# 非源代码 - 禁止提交
+img/
+fastlane/
+task-summary_*
+tmp_build_log*
+
+# 个人笔记/记忆文件
+MEMORY.md
+AGENTS.md
+SOUL.md
+USER.md
+IDENTITY.md
+TOOLS.md
+HEARTBEAT.md
+memory/
+
+# IDE
+*.swp
+*.swo
+*~
+/build_log.txt
+app/release.keystore
+
+# 自己 - 不上传 GitHub
+.gitignore
+问题.txt
