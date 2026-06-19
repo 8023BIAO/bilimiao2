@@ -1,7 +1,6 @@
 package com.a10miaomiao.bilimiao.comm.utils
 
 import com.a10miaomiao.bilimiao.comm.BuildConfig
-import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import kotlinx.coroutines.Dispatchers
@@ -38,8 +37,6 @@ object WbiSigner {
         mixKey = data["mixKey"] as? String
         lastFetchDay = data["lastFetchDay"] as? Int ?: -1
     }
-
-    private val REGEX_FILTER = Regex("[!'()*]")
 
     /** 获取 mix_key（每天刷新一次） */
     suspend fun getMixKey(): String {
