@@ -110,6 +110,10 @@ class VideoDownloadDialogState(
     val seasonCheckedMap: Map<Long, Boolean> get() = _seasonCheckedMap
     val seasonCheckedSize: Int get() = _seasonCheckedMap.count { it.value }
 
+    // 合集已下载 avid 集合（与分P的 downloadedSet 同机制，按 avid 匹配）
+    private val _seasonDownloadedSet = mutableStateOf(setOf<Long>())
+    val seasonDownloadedSet: Set<Long> get() = _seasonDownloadedSet.value
+
     private val _tabIndex = mutableStateOf(0)
     val tabIndex: Int get() = _tabIndex.value
 
@@ -150,8 +154,14 @@ class VideoDownloadDialogState(
         if (ugcSeasonEpisodes != null) {
             _seasonEpisodes.value = ugcSeasonEpisodes
             _seasonCheckedMap.clear()
+            // 查询合集内已下载的视频（按 avid 匹配）
+            _seasonDownloadedSet.value = getDownloadedSeasonList(
+                service,
+                ugcSeasonEpisodes.map { it.aid }.toSet()
+            )
         } else {
             _seasonEpisodes.value = emptyList()
+            _seasonDownloadedSet.value = emptySet()
         }
         if (qualityList.isEmpty()) {
             if (videoPages.isNotEmpty() && videoArc != null) {
@@ -174,6 +184,22 @@ class VideoDownloadDialogState(
             .downloadList
             .mapNotNull { it.entry.source?.cid ?: it.entry.page_data?.cid }
             .filter { cidSet.contains(it) }
+            .toSet()
+    }
+
+    /**
+     * 查询合集中已下载的视频 avid 集合。
+     * 匹配逻辑：downloadList 中 entry.avid 命中本次合集传入的 aidSet。
+     * 注意：合集下载的 entry 有 season_id，但 avid 同样存在，可直接用 avid 匹配。
+     */
+    private fun getDownloadedSeasonList(
+        service: DownloadService,
+        aidSet: Set<Long>,
+    ): Set<Long> {
+        return service
+            .downloadList
+            .mapNotNull { it.entry.avid }
+            .filter { aidSet.contains(it) }
             .toSet()
     }
 
@@ -259,21 +285,31 @@ class VideoDownloadDialogState(
 
     // ===== 合集选择 =====
     fun seasonCheckedChange(aid: Long) {
+        // 已下载项不可改状态（与分P tab 的 disabled 行为一致）
+        if (seasonDownloadedSet.contains(aid)) return
         val current = _seasonCheckedMap[aid] ?: false
         _seasonCheckedMap[aid] = !current
     }
 
     fun seasonSelectAll() {
-        _seasonEpisodes.value.forEach { _seasonCheckedMap[it.aid] = true }
+        // 只勾选未下载的，已下载的保持其默认勾选态
+        _seasonEpisodes.value.forEach { ep ->
+            if (!seasonDownloadedSet.contains(ep.aid)) {
+                _seasonCheckedMap[ep.aid] = true
+            }
+        }
     }
 
     fun seasonDeselectAll() {
+        // 只清未下载的勾选，已下载项不参与勾选 map（其"已勾选"态由 UI 层根据 downloadedSet 渲染）
         _seasonCheckedMap.clear()
     }
 
-    val seasonAllSelectable: Boolean get() = _seasonEpisodes.value.isNotEmpty()
+    // 全选按钮是否可用：存在未下载项才显示
+    val seasonAllSelectable: Boolean get() = _seasonEpisodes.value.any { !seasonDownloadedSet.contains(it.aid) }
+    // 全选状态：未下载项全部勾选（已下载项不计入）
     val seasonAllSelected: Boolean get() = _seasonEpisodes.value.isNotEmpty()
-            && _seasonEpisodes.value.all { _seasonCheckedMap[it.aid] == true }
+            && _seasonEpisodes.value.all { seasonDownloadedSet.contains(it.aid) || _seasonCheckedMap[it.aid] == true }
 
     fun setQuality(quality: Int) {
         _quality.intValue = quality
@@ -316,7 +352,10 @@ class VideoDownloadDialogState(
             toast("成功创建${checkedSize}条记录")
         } else {
             // 合集下载：逐个视频获取pages并下载
-            val checkedAids = _seasonCheckedMap.filter { it.value }.keys.toList()
+            // 过滤已下载项（双保险，理论上 checkedMap 不含已下载 aid）
+            val checkedAids = _seasonCheckedMap.filter { it.value }.keys
+                .filter { !seasonDownloadedSet.contains(it) }
+                .toList()
             if (checkedAids.isEmpty()) {
                 showSnackbar("请选择要下载的视频")
                 return
@@ -494,6 +533,7 @@ private fun VideoDownloadItem(
 @Composable
 private fun SeasonDownloadItem(
     item: VideoDownloadDialogState.SeasonEpisodeItem,
+    enabled: Boolean,
     checked: Boolean,
     onCheckedChange: ((Boolean) -> Unit)?,
 ) {
@@ -506,7 +546,7 @@ private fun SeasonDownloadItem(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onCheckedChange?.invoke(!checked) },
+                .clickable(enabled = enabled) { onCheckedChange?.invoke(!checked) },
             shape = RoundedCornerShape(10.dp),
             color = Color.Transparent
         ) {
@@ -522,18 +562,29 @@ private fun SeasonDownloadItem(
                     Text(
                         text = item.title,
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.outline,
                         maxLines = 2,
                     )
-                    Text(
-                        text = item.duration,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
+                    Row {
+                        Text(
+                            text = item.duration,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                        if (!enabled) {
+                            Text(
+                                text = "  · 已下载",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                        }
+                    }
                 }
                 Checkbox(
+                    enabled = enabled,
                     checked = checked,
-                    onCheckedChange = { onCheckedChange?.invoke(!checked) }
+                    onCheckedChange = onCheckedChange
                 )
             }
         }
@@ -668,9 +719,13 @@ fun VideoDownloadDialog(
                                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                                             items(state.seasonEpisodes.size, { state.seasonEpisodes[it].aid }) { index ->
                                                 val item = state.seasonEpisodes[index]
-                                                val isChecked = state.seasonCheckedMap[item.aid] ?: false
+                                                val isEnabled = !state.seasonDownloadedSet.contains(item.aid)
+                                                val isChecked = if (isEnabled) {
+                                                    state.seasonCheckedMap[item.aid] ?: false
+                                                } else { true }
                                                 SeasonDownloadItem(
                                                     item = item,
+                                                    enabled = isEnabled,
                                                     checked = isChecked,
                                                     onCheckedChange = { state.seasonCheckedChange(item.aid) }
                                                 )
@@ -683,9 +738,13 @@ fun VideoDownloadDialog(
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 items(state.seasonEpisodes.size, { state.seasonEpisodes[it].aid }) { index ->
                                     val item = state.seasonEpisodes[index]
-                                    val isChecked = state.seasonCheckedMap[item.aid] ?: false
+                                    val isEnabled = !state.seasonDownloadedSet.contains(item.aid)
+                                    val isChecked = if (isEnabled) {
+                                        state.seasonCheckedMap[item.aid] ?: false
+                                    } else { true }
                                     SeasonDownloadItem(
                                         item = item,
+                                        enabled = isEnabled,
                                         checked = isChecked,
                                         onCheckedChange = { state.seasonCheckedChange(item.aid) }
                                     )
