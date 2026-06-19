@@ -328,7 +328,7 @@ internal fun SearchByTypeContent(
                 top = 0.dp,
             )
         ) {
-            items(list) {
+            items(list, key = { it.param }) {
                 val cardItem = it.cardItem
                 if (cardItem != null) {
                     SearchItemCard(

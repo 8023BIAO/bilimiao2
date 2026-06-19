@@ -404,7 +404,7 @@ fun UserMedialistDetailContent(
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(300.dp),
             ) {
-                items(list) { item ->
+                items(list, key = { it.id }) { item ->
                     VideoItemBox(
                         modifier = Modifier.padding(10.dp),
                         title = item.title,

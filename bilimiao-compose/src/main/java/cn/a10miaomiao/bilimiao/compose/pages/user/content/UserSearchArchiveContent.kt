@@ -169,7 +169,7 @@ fun UserSearchArchiveContent(
             top = 0.dp,
         )
     ) {
-        items(list) {
+        items(list, key = { it.aid }) {
             VideoItemBox(
                 modifier = Modifier.padding(10.dp),
                 title = it.title,

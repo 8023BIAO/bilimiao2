@@ -30,14 +30,14 @@ object BiliPalyUrlHelper {
         val page = entry.page_data
         if (page != null) {
             DownloadService.logToFile("playUrl: video path (page_data), avid=${entry.avid}")
-            android.util.Log.d("BilimiaoDL", "playUrl: video path (page_data), avid=${entry.avid}")
+            if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "playUrl: video path (page_data), avid=${entry.avid}")
             return videoPlayUrl(entry, page)
         }
         val ep = entry.ep
         val source = entry.source
         if (ep != null && source != null) {
             DownloadService.logToFile("playUrl: bangumi path, season_id=${entry.season_id} ep_id=${ep.episode_id} cid=${source.cid}")
-            android.util.Log.d("BilimiaoDL", "playUrl: bangumi path, season_id=${entry.season_id} ep_id=${ep.episode_id} cid=${source.cid}")
+            if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "playUrl: bangumi path, season_id=${entry.season_id} ep_id=${ep.episode_id} cid=${source.cid}")
             return bangumiPlayUrl(entry, source, ep)
         }
         DownloadService.logToFile("playUrl: NO path! page_data=null ep=${ep != null} source=${source != null}")
@@ -52,11 +52,11 @@ object BiliPalyUrlHelper {
         try {
             videoPlayUrlGrpc(entry, pageData)?.let {
                 DownloadService.logToFile("video GRPC OK")
-                android.util.Log.d("BilimiaoDL", "video GRPC OK")
+                if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "video GRPC OK")
                 return it
             }
             DownloadService.logToFile("video GRPC returned null, fallback JSON")
-            android.util.Log.d("BilimiaoDL", "video GRPC returned null, fallback JSON")
+            if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "video GRPC returned null, fallback JSON")
         } catch (e: Exception) {
             DownloadService.logToFile("video GRPC FAILED: ${e.message}")
             android.util.Log.e("BilimiaoDL", "video GRPC FAILED: ${e.message}", e)
@@ -179,11 +179,11 @@ object BiliPalyUrlHelper {
         try {
             bangumiPlayUrlGrpc(entry, source, ep)?.let {
                 DownloadService.logToFile("bangumi GRPC OK")
-                android.util.Log.d("BilimiaoDL", "bangumi GRPC OK")
+                if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "bangumi GRPC OK")
                 return it
             }
             DownloadService.logToFile("bangumi GRPC returned null, fallback JSON")
-            android.util.Log.d("BilimiaoDL", "bangumi GRPC returned null, fallback JSON")
+            if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "bangumi GRPC returned null, fallback JSON")
         } catch (e: Exception) {
             DownloadService.logToFile("bangumi GRPC FAILED: ${e.message}")
             android.util.Log.e("BilimiaoDL", "bangumi GRPC FAILED: ${e.message}", e)

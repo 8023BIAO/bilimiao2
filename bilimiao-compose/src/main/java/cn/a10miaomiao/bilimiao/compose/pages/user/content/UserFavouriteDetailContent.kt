@@ -751,7 +751,7 @@ internal fun UserFavouriteDetailContent(
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(300.dp)
             ) {
-                items(filteredList) { item ->
+                items(filteredList, key = { it.id }) { item ->
                     val vid = item.id
                     Box {
                         VideoItemBox(

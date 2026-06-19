@@ -249,17 +249,17 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 )
                 val dmUrl = BiliPalyUrlHelper.danmakuXMLUrl(biliDownInfo.entry)
                 logToFile("danmaku url=$dmUrl entry.season_id=${entry.season_id} avid=${entry.avid} cid=$id")
-                android.util.Log.d("BilimiaoDL", "danmaku url=$dmUrl entry.season_id=${entry.season_id} avid=${entry.avid} cid=$id")
+                if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "danmaku url=$dmUrl entry.season_id=${entry.season_id} avid=${entry.avid} cid=$id")
                 val res = MiaoHttp.request {
                     url = dmUrl
                 }.awaitCall()
                 val bodyBytes = res.body?.bytes() ?: ByteArray(0)
                 logToFile("danmaku status=${res.code} bodyLen=${bodyBytes.size}")
-                android.util.Log.d("BilimiaoDL", "danmaku status=${res.code} bodyLen=${bodyBytes.size}")
+                if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "danmaku status=${res.code} bodyLen=${bodyBytes.size}")
                 val xmlBytes = CompressionTools.decompressXML(bodyBytes)
                 danmakuXMLFile.writeBytes(xmlBytes)
                 logToFile("danmaku OK, start playUrl")
-                android.util.Log.d("BilimiaoDL", "danmaku OK, start playUrl")
+                if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "danmaku OK, start playUrl")
             } catch (e: Exception){
                 logToFile("danmaku FAILED: ${e.message}")
                 android.util.Log.e("BilimiaoDL", "danmaku FAILED: ${e.message}", e)
@@ -293,10 +293,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             )
             //获取播放地址并下载
             logToFile("playUrl: season_id=${entry.season_id} avid=${entry.avid} ep.episode_id=${entry.ep?.episode_id} cid=${entry.source?.cid} prefered_quality=${entry.prefered_video_quality} media_type=${entry.media_type}")
-            android.util.Log.d("BilimiaoDL", "playUrl: season_id=${entry.season_id} avid=${entry.avid} ep.episode_id=${entry.ep?.episode_id} cid=${entry.source?.cid} prefered_quality=${entry.prefered_video_quality} media_type=${entry.media_type}")
+            if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "playUrl: season_id=${entry.season_id} avid=${entry.avid} ep.episode_id=${entry.ep?.episode_id} cid=${entry.source?.cid} prefered_quality=${entry.prefered_video_quality} media_type=${entry.media_type}")
             val mediaFileInfo = BiliPalyUrlHelper.playUrl(entry)
             logToFile("playUrl done: type=${mediaFileInfo::class.simpleName}")
-            android.util.Log.d("BilimiaoDL", "playUrl done: type=${mediaFileInfo::class.simpleName}")
+            if (cn.a10miaomiao.bilimiao.download.BuildConfig.DEBUG) android.util.Log.d("BilimiaoDL", "playUrl done: type=${mediaFileInfo::class.simpleName}")
             val httpHeader = mediaFileInfo.httpHeader()
             val mediaJsonFile = File(videoDir, "index.json")
             val mediaJsonStr = MiaoJson.toJson(mediaFileInfo)

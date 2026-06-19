@@ -162,7 +162,7 @@ fun UserDynamicListContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(list) {
+        items(list, key = { it.extend?.dynIdStr ?: "" }) {
             DynamicItemCard(
                 modifier = Modifier
                     .widthIn(max = 600.dp)

@@ -136,7 +136,7 @@ fun UserArchiveListContent(
             }
         }
 
-        items(list) {
+        items(list, key = { it.param }) {
             VideoItemBox(
                 modifier = Modifier.padding(10.dp),
                 title = it.title,

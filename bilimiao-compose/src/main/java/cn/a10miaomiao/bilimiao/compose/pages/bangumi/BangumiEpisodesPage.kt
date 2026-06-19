@@ -463,7 +463,7 @@ private fun BangumiEpisodesPageContent(
                 }
             }
             if (currentSection.hasLongTitle) {
-                items(currentSection.episodes) {
+                items(currentSection.episodes, key = { it.id }) {
                     ComplexEpisodeItem (
                         modifier = Modifier
                             .fillMaxSize()
@@ -476,7 +476,7 @@ private fun BangumiEpisodesPageContent(
                     )
                 }
             } else {
-                items(currentSection.episodes) {
+                items(currentSection.episodes, key = { it.id }) {
                     SimpleEpisodeItem(
                         modifier = Modifier
                             .fillMaxSize()

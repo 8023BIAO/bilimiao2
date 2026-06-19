@@ -418,7 +418,7 @@ internal fun DownloadListPageContent(
                     }
                 }
             }
-            items(filteredList) { info ->
+            items(filteredList, key = { it.dir_path }) { info ->
                 DownloadListItem(
                     curDownload = curDownload, item = info,
                     onClick = { viewModel.toDetailPage(info) },
