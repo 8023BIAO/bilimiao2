@@ -298,7 +298,7 @@ internal fun SearchAllContent(
                 top = 0.dp,
             )
         ) {
-            items(list, key = { it.param }) {
+            items(list) {
                 val cardItem = it.cardItem
                 if (cardItem != null) {
                     SearchItemCard(

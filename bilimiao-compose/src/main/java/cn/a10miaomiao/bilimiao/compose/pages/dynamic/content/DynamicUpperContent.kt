@@ -230,7 +230,7 @@ fun DynamicUpperContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(list, key = { it.extend?.dynIdStr ?: "" }) {
+            items(list) {
                 DynamicItemCard(
                     modifier = Modifier
                         .widthIn(max = 600.dp)
