@@ -546,10 +546,10 @@ private fun FlagsSettingPageContent(
             preference(
                 key = "github_repo",
                 title = { Text("GitHub 仓库") },
-                summary = { Text("8023BIAO/bilimiao-mod") },
+                summary = { Text("8023BIAO/bilimiao2") },
                 onClick = {
                     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
-                    intent.data = android.net.Uri.parse("https://github.com/8023BIAO/bilimiao-mod")
+                    intent.data = android.net.Uri.parse("https://github.com/8023BIAO/bilimiao2")
                     context.startActivity(intent)
                 },
             )

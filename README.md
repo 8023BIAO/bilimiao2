@@ -1,4 +1,4 @@
-# bilimiao-mod
+# bilimiao2
 > 基于原版 bilimiao2 v2.4.8.1 的第三方修改版
 
 
