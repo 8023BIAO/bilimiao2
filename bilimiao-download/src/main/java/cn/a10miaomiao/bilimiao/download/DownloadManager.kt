@@ -76,7 +76,7 @@ class DownloadManager(
                 downloadInfo.status = CurrentDownloadInfo.STATUS_COMPLETED
                 return@flow
             }
-            request.addHeader("RANGE", "bytes=$downloadLength-${info.size}")
+            request.addHeader("RANGE", "bytes=$downloadLength-")
         }
         downloadLength += downloadedLength
         for (keys in info.header.keys) {
@@ -85,34 +85,41 @@ class DownloadManager(
         val call = mClient.newCall(request.build())
         val response = call.execute()
         if (!response.isSuccessful) {
+            response.close()
             throw IOException("HTTP ${response.code}: ${response.message}")
         }
         val body = response.body
             ?: throw IOException("Response body is null for url: ${info.url}")
         downloadInfo.status = CurrentDownloadInfo.STATUS_DOWNLOADING
-        var fileOutputStream: FileOutputStream? = null
         if (info.size == 0L) {
             info.size = body.contentLength()
             emit(info)
         }
-        val `is` = body.byteStream()
-        val bis = BufferedInputStream(`is`)
-        fileOutputStream = FileOutputStream(file, true)
-        var buffer = ByteArray(2048) //缓冲数组2kB
-        var len: Int = bis.read(buffer)
-        while (len != -1 && downloadInfo.status == CurrentDownloadInfo.STATUS_DOWNLOADING) {
-            fileOutputStream.write(buffer, 0, len)
-            downloadLength += len
-            info.progress = downloadLength
-            emit(info)
-            len = bis.read(buffer)
+        try {
+            body.byteStream().use { `is` ->
+                BufferedInputStream(`is`).use { bis ->
+                    FileOutputStream(file, true).use { fos ->
+                        var buffer = ByteArray(2048) //缓冲数组2kB
+                        var len: Int = bis.read(buffer)
+                        while (len != -1 && downloadInfo.status == CurrentDownloadInfo.STATUS_DOWNLOADING) {
+                            fos.write(buffer, 0, len)
+                            downloadLength += len
+                            info.progress = downloadLength
+                            emit(info)
+                            len = bis.read(buffer)
+                        }
+                        if (downloadInfo.status == CurrentDownloadInfo.STATUS_PAUSE) {
+                            call.cancel()
+                        } else {
+                            downloadInfo.status = CurrentDownloadInfo.STATUS_COMPLETED
+                        }
+                        fos.flush()
+                    }
+                }
+            }
+        } finally {
+            response.close()
         }
-        if (downloadInfo.status == CurrentDownloadInfo.STATUS_PAUSE) {
-            call.cancel()
-        } else {
-            downloadInfo.status = CurrentDownloadInfo.STATUS_COMPLETED
-        }
-        fileOutputStream.flush()
     }
 
     /**

@@ -29,6 +29,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -271,6 +272,10 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     fun setPlayer(player: ExoPlayer) {
+        // 释放旧 session player（可能是 dummy 或 ForwardingPlayer 包装的旧 exoPlayer）
+        mediaSession?.player?.let { old ->
+            try { old.release() } catch (_: Exception) {}
+        }
         exoPlayer?.release()
         exoPlayer = player
         if (showNotification) {
@@ -338,6 +343,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
         // 兜底释放（notifyPlaybackComplete 已清理时 mediaSession 为 null，这里不执行）
         mediaSession?.run {

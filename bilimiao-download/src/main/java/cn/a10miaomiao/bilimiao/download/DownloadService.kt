@@ -124,8 +124,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         val downloadDir = File(getDownloadPath())
         val list = mutableListOf<BiliDownloadEntryAndPathInfo>()
         downloadDir.listFiles()
-            .filter { it.isDirectory }
-            .forEach {
+            ?.filter { it.isDirectory }
+            ?.forEach {
                 list.addAll(readDownloadDirectory(it))
             }
         downloadList = list.reversed().toMutableList()
@@ -136,10 +136,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             return emptyList()
         }
         return dir.listFiles()
-            .filter { pageDir -> pageDir.isDirectory }
-            .map { File(it.path, "entry.json") }
-            .filter { it.exists() }
-            .mapNotNull {
+            ?.filter { pageDir -> pageDir.isDirectory }
+            ?.map { File(it.path, "entry.json") }
+            ?.filter { it.exists() }
+            ?.mapNotNull {
                 try {
                     val entryJson = it.readText()
                     val entry = MiaoJson.fromJson<BiliDownloadEntryInfo>(entryJson)
@@ -153,6 +153,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                     null
                 }
             }
+            ?: emptyList()
     }
 
     /**
@@ -440,7 +441,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             if (entryDir.exists()) {
                 entryDir.deleteRecursively()
             }
-            if (downloadDir.listFiles().size === 0) {
+            if (downloadDir.listFiles()?.isEmpty() == true) {
                 downloadDir.delete()
             }
         }
