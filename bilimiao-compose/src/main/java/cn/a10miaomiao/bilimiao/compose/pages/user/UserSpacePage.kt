@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -280,8 +281,9 @@ private fun UserSpacePageDetailContent(
 
     val maxHeaderSize = remember { mutableStateOf(0 to 0) }
     val density = LocalDensity.current
+    // maxScrollPosition = header height + status bar spacing (like VideoDetailPage's Spacer pattern)
     val chainScrollableLayoutState = rememberChainScrollableLayoutState(
-        density.run { maxHeaderSize.value.second.toDp() },
+        density.run { maxHeaderSize.value.second.toDp() + windowInsets.topDp.dp },
         windowInsets.topDp.dp,
     )
     val isLargeScreen = remember(maxHeaderSize.value.first) {
@@ -296,7 +298,12 @@ private fun UserSpacePageDetailContent(
         modifier = Modifier.fillMaxSize(),
         state = chainScrollableLayoutState,
     ) { state ->
-        val alpha = (state.maxPx + state.getOffsetYValue()) / state.maxPx
+        val headerHeightPx = density.run { maxHeaderSize.value.second.toDp().toPx() }
+        val alpha = if (headerHeightPx > 0f) {
+            ((headerHeightPx + state.getOffsetYValue()) / headerHeightPx).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -312,7 +319,9 @@ private fun UserSpacePageDetailContent(
                 .nestedScroll(state.nestedScroll)
                 .scrollable(scrollableState, Orientation.Vertical),
         ) {
-            UserSpaceHeader(
+            Column {
+                Spacer(Modifier.height(windowInsets.topDp.dp))
+                UserSpaceHeader(
                 modifier = Modifier
                     .height(IntrinsicSize.Min)
                     .fillMaxWidth()
@@ -330,6 +339,7 @@ private fun UserSpacePageDetailContent(
                 viewModel = viewModel,
                 archiveViewModel = archiveViewModel,
             )
+            }
         }
         val combinedTabClick = combinedTabDoubleClick(
             pagerState = viewModel.pagerState,
