@@ -39,7 +39,7 @@ android {
             // 跳过 lintVital，节省大量时间
             lint { checkReleaseBuilds = false }
             proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
+                getDefaultProguardFile("proguard-android.txt"),
                 "proguard-rules.pro"
             )
             // 使用debug签名（指纹A9:7D...）

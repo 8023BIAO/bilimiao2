@@ -1,0 +1,2142 @@
+Compiled from "GSYVideoView.java"
+public abstract class com.shuyu.gsyvideoplayer.video.base.GSYVideoView extends com.shuyu.gsyvideoplayer.video.base.GSYTextureRenderView implements com.shuyu.gsyvideoplayer.listener.GSYMediaPlayerListener,com.shuyu.gsyvideoplayer.utils.GSYAudioFocusManager$GSYAudioFocusListener {
+  public static final int CURRENT_STATE_NORMAL;
+
+  public static final int CURRENT_STATE_PREPAREING;
+
+  public static final int CURRENT_STATE_PLAYING;
+
+  public static final int CURRENT_STATE_PLAYING_BUFFERING_START;
+
+  public static final int CURRENT_STATE_PAUSE;
+
+  public static final int CURRENT_STATE_AUTO_COMPLETE;
+
+  public static final int CURRENT_STATE_ERROR;
+
+  public static final int CHANGE_DELAY_TIME;
+
+  protected int mCurrentState;
+
+  protected int mPlayPosition;
+
+  protected int mScreenWidth;
+
+  protected int mScreenHeight;
+
+  protected int mBufferPoint;
+
+  protected int mBackUpPlayingBufferState;
+
+  protected long mSeekOnStart;
+
+  protected long mCurrentPosition;
+
+  protected long mSaveChangeViewTIme;
+
+  protected float mSpeed;
+
+  protected boolean mCache;
+
+  protected boolean mIfCurrentIsFullscreen;
+
+  protected boolean mLooping;
+
+  protected boolean mHadPlay;
+
+  protected boolean mNetChanged;
+
+  protected boolean mSoundTouch;
+
+  protected boolean mShowPauseCover;
+
+  protected boolean mPauseBeforePrepared;
+
+  protected boolean mStartAfterPrepared;
+
+  protected boolean mHadPrepared;
+
+  protected boolean mReleaseWhenLossAudio;
+
+  protected com.shuyu.gsyvideoplayer.utils.GSYAudioFocusManager mAudioFocusManager;
+
+  protected java.lang.String mPlayTag;
+
+  protected android.content.Context mContext;
+
+  protected java.lang.String mOriginUrl;
+
+  protected java.lang.String mUrl;
+
+  protected java.lang.String mTitle;
+
+  protected java.lang.String mNetSate;
+
+  protected java.lang.String mOverrideExtension;
+
+  protected java.io.File mCachePath;
+
+  protected com.shuyu.gsyvideoplayer.listener.VideoAllCallBack mVideoAllCallBack;
+
+  protected java.util.Map<java.lang.String, java.lang.String> mMapHeadData;
+
+  protected com.shuyu.gsyvideoplayer.utils.NetInfoModule mNetInfoModule;
+
+  public com.shuyu.gsyvideoplayer.video.base.GSYVideoView(android.content.Context);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: invokespecial #1                  // Method com/shuyu/gsyvideoplayer/video/base/GSYTextureRenderView."<init>":(Landroid/content/Context;)V
+       5: aload_0
+       6: iconst_m1
+       7: putfield      #7                  // Field mCurrentState:I
+      10: aload_0
+      11: bipush        -22
+      13: putfield      #13                 // Field mPlayPosition:I
+      16: aload_0
+      17: iconst_m1
+      18: putfield      #16                 // Field mBackUpPlayingBufferState:I
+      21: aload_0
+      22: ldc2_w        #19                 // long -1l
+      25: putfield      #21                 // Field mSeekOnStart:J
+      28: aload_0
+      29: lconst_0
+      30: putfield      #25                 // Field mSaveChangeViewTIme:J
+      33: aload_0
+      34: fconst_1
+      35: putfield      #28                 // Field mSpeed:F
+      38: aload_0
+      39: iconst_0
+      40: putfield      #32                 // Field mCache:Z
+      43: aload_0
+      44: iconst_0
+      45: putfield      #36                 // Field mIfCurrentIsFullscreen:Z
+      48: aload_0
+      49: iconst_0
+      50: putfield      #39                 // Field mLooping:Z
+      53: aload_0
+      54: iconst_0
+      55: putfield      #42                 // Field mHadPlay:Z
+      58: aload_0
+      59: iconst_0
+      60: putfield      #45                 // Field mNetChanged:Z
+      63: aload_0
+      64: iconst_0
+      65: putfield      #48                 // Field mSoundTouch:Z
+      68: aload_0
+      69: iconst_0
+      70: putfield      #51                 // Field mShowPauseCover:Z
+      73: aload_0
+      74: iconst_0
+      75: putfield      #54                 // Field mPauseBeforePrepared:Z
+      78: aload_0
+      79: iconst_1
+      80: putfield      #57                 // Field mStartAfterPrepared:Z
+      83: aload_0
+      84: iconst_0
+      85: putfield      #60                 // Field mHadPrepared:Z
+      88: aload_0
+      89: iconst_1
+      90: putfield      #63                 // Field mReleaseWhenLossAudio:Z
+      93: aload_0
+      94: ldc           #66                 // String
+      96: putfield      #68                 // Field mPlayTag:Ljava/lang/String;
+      99: aload_0
+     100: ldc           #72                 // String NORMAL
+     102: putfield      #74                 // Field mNetSate:Ljava/lang/String;
+     105: aload_0
+     106: new           #77                 // class java/util/HashMap
+     109: dup
+     110: invokespecial #79                 // Method java/util/HashMap."<init>":()V
+     113: putfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+     116: aload_0
+     117: aload_1
+     118: invokevirtual #86                 // Method init:(Landroid/content/Context;)V
+     121: return
+
+  public com.shuyu.gsyvideoplayer.video.base.GSYVideoView(android.content.Context, android.util.AttributeSet);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: aload_2
+       3: invokespecial #89                 // Method com/shuyu/gsyvideoplayer/video/base/GSYTextureRenderView."<init>":(Landroid/content/Context;Landroid/util/AttributeSet;)V
+       6: aload_0
+       7: iconst_m1
+       8: putfield      #7                  // Field mCurrentState:I
+      11: aload_0
+      12: bipush        -22
+      14: putfield      #13                 // Field mPlayPosition:I
+      17: aload_0
+      18: iconst_m1
+      19: putfield      #16                 // Field mBackUpPlayingBufferState:I
+      22: aload_0
+      23: ldc2_w        #19                 // long -1l
+      26: putfield      #21                 // Field mSeekOnStart:J
+      29: aload_0
+      30: lconst_0
+      31: putfield      #25                 // Field mSaveChangeViewTIme:J
+      34: aload_0
+      35: fconst_1
+      36: putfield      #28                 // Field mSpeed:F
+      39: aload_0
+      40: iconst_0
+      41: putfield      #32                 // Field mCache:Z
+      44: aload_0
+      45: iconst_0
+      46: putfield      #36                 // Field mIfCurrentIsFullscreen:Z
+      49: aload_0
+      50: iconst_0
+      51: putfield      #39                 // Field mLooping:Z
+      54: aload_0
+      55: iconst_0
+      56: putfield      #42                 // Field mHadPlay:Z
+      59: aload_0
+      60: iconst_0
+      61: putfield      #45                 // Field mNetChanged:Z
+      64: aload_0
+      65: iconst_0
+      66: putfield      #48                 // Field mSoundTouch:Z
+      69: aload_0
+      70: iconst_0
+      71: putfield      #51                 // Field mShowPauseCover:Z
+      74: aload_0
+      75: iconst_0
+      76: putfield      #54                 // Field mPauseBeforePrepared:Z
+      79: aload_0
+      80: iconst_1
+      81: putfield      #57                 // Field mStartAfterPrepared:Z
+      84: aload_0
+      85: iconst_0
+      86: putfield      #60                 // Field mHadPrepared:Z
+      89: aload_0
+      90: iconst_1
+      91: putfield      #63                 // Field mReleaseWhenLossAudio:Z
+      94: aload_0
+      95: ldc           #66                 // String
+      97: putfield      #68                 // Field mPlayTag:Ljava/lang/String;
+     100: aload_0
+     101: ldc           #72                 // String NORMAL
+     103: putfield      #74                 // Field mNetSate:Ljava/lang/String;
+     106: aload_0
+     107: new           #77                 // class java/util/HashMap
+     110: dup
+     111: invokespecial #79                 // Method java/util/HashMap."<init>":()V
+     114: putfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+     117: aload_0
+     118: aload_1
+     119: invokevirtual #86                 // Method init:(Landroid/content/Context;)V
+     122: return
+
+  public com.shuyu.gsyvideoplayer.video.base.GSYVideoView(android.content.Context, android.util.AttributeSet, int);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: aload_2
+       3: iload_3
+       4: invokespecial #92                 // Method com/shuyu/gsyvideoplayer/video/base/GSYTextureRenderView."<init>":(Landroid/content/Context;Landroid/util/AttributeSet;I)V
+       7: aload_0
+       8: iconst_m1
+       9: putfield      #7                  // Field mCurrentState:I
+      12: aload_0
+      13: bipush        -22
+      15: putfield      #13                 // Field mPlayPosition:I
+      18: aload_0
+      19: iconst_m1
+      20: putfield      #16                 // Field mBackUpPlayingBufferState:I
+      23: aload_0
+      24: ldc2_w        #19                 // long -1l
+      27: putfield      #21                 // Field mSeekOnStart:J
+      30: aload_0
+      31: lconst_0
+      32: putfield      #25                 // Field mSaveChangeViewTIme:J
+      35: aload_0
+      36: fconst_1
+      37: putfield      #28                 // Field mSpeed:F
+      40: aload_0
+      41: iconst_0
+      42: putfield      #32                 // Field mCache:Z
+      45: aload_0
+      46: iconst_0
+      47: putfield      #36                 // Field mIfCurrentIsFullscreen:Z
+      50: aload_0
+      51: iconst_0
+      52: putfield      #39                 // Field mLooping:Z
+      55: aload_0
+      56: iconst_0
+      57: putfield      #42                 // Field mHadPlay:Z
+      60: aload_0
+      61: iconst_0
+      62: putfield      #45                 // Field mNetChanged:Z
+      65: aload_0
+      66: iconst_0
+      67: putfield      #48                 // Field mSoundTouch:Z
+      70: aload_0
+      71: iconst_0
+      72: putfield      #51                 // Field mShowPauseCover:Z
+      75: aload_0
+      76: iconst_0
+      77: putfield      #54                 // Field mPauseBeforePrepared:Z
+      80: aload_0
+      81: iconst_1
+      82: putfield      #57                 // Field mStartAfterPrepared:Z
+      85: aload_0
+      86: iconst_0
+      87: putfield      #60                 // Field mHadPrepared:Z
+      90: aload_0
+      91: iconst_1
+      92: putfield      #63                 // Field mReleaseWhenLossAudio:Z
+      95: aload_0
+      96: ldc           #66                 // String
+      98: putfield      #68                 // Field mPlayTag:Ljava/lang/String;
+     101: aload_0
+     102: ldc           #72                 // String NORMAL
+     104: putfield      #74                 // Field mNetSate:Ljava/lang/String;
+     107: aload_0
+     108: new           #77                 // class java/util/HashMap
+     111: dup
+     112: invokespecial #79                 // Method java/util/HashMap."<init>":()V
+     115: putfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+     118: aload_0
+     119: aload_1
+     120: invokevirtual #86                 // Method init:(Landroid/content/Context;)V
+     123: return
+
+  public com.shuyu.gsyvideoplayer.video.base.GSYVideoView(android.content.Context, java.lang.Boolean);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: invokespecial #1                  // Method com/shuyu/gsyvideoplayer/video/base/GSYTextureRenderView."<init>":(Landroid/content/Context;)V
+       5: aload_0
+       6: iconst_m1
+       7: putfield      #7                  // Field mCurrentState:I
+      10: aload_0
+      11: bipush        -22
+      13: putfield      #13                 // Field mPlayPosition:I
+      16: aload_0
+      17: iconst_m1
+      18: putfield      #16                 // Field mBackUpPlayingBufferState:I
+      21: aload_0
+      22: ldc2_w        #19                 // long -1l
+      25: putfield      #21                 // Field mSeekOnStart:J
+      28: aload_0
+      29: lconst_0
+      30: putfield      #25                 // Field mSaveChangeViewTIme:J
+      33: aload_0
+      34: fconst_1
+      35: putfield      #28                 // Field mSpeed:F
+      38: aload_0
+      39: iconst_0
+      40: putfield      #32                 // Field mCache:Z
+      43: aload_0
+      44: iconst_0
+      45: putfield      #36                 // Field mIfCurrentIsFullscreen:Z
+      48: aload_0
+      49: iconst_0
+      50: putfield      #39                 // Field mLooping:Z
+      53: aload_0
+      54: iconst_0
+      55: putfield      #42                 // Field mHadPlay:Z
+      58: aload_0
+      59: iconst_0
+      60: putfield      #45                 // Field mNetChanged:Z
+      63: aload_0
+      64: iconst_0
+      65: putfield      #48                 // Field mSoundTouch:Z
+      68: aload_0
+      69: iconst_0
+      70: putfield      #51                 // Field mShowPauseCover:Z
+      73: aload_0
+      74: iconst_0
+      75: putfield      #54                 // Field mPauseBeforePrepared:Z
+      78: aload_0
+      79: iconst_1
+      80: putfield      #57                 // Field mStartAfterPrepared:Z
+      83: aload_0
+      84: iconst_0
+      85: putfield      #60                 // Field mHadPrepared:Z
+      88: aload_0
+      89: iconst_1
+      90: putfield      #63                 // Field mReleaseWhenLossAudio:Z
+      93: aload_0
+      94: ldc           #66                 // String
+      96: putfield      #68                 // Field mPlayTag:Ljava/lang/String;
+      99: aload_0
+     100: ldc           #72                 // String NORMAL
+     102: putfield      #74                 // Field mNetSate:Ljava/lang/String;
+     105: aload_0
+     106: new           #77                 // class java/util/HashMap
+     109: dup
+     110: invokespecial #79                 // Method java/util/HashMap."<init>":()V
+     113: putfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+     116: aload_0
+     117: aload_2
+     118: invokevirtual #95                 // Method java/lang/Boolean.booleanValue:()Z
+     121: putfield      #36                 // Field mIfCurrentIsFullscreen:Z
+     124: aload_0
+     125: aload_1
+     126: invokevirtual #86                 // Method init:(Landroid/content/Context;)V
+     129: return
+
+  protected void showPauseCover();
+    Code:
+       0: aload_0
+       1: getfield      #7                  // Field mCurrentState:I
+       4: iconst_5
+       5: if_icmpne     149
+       8: aload_0
+       9: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      12: ifnull        149
+      15: aload_0
+      16: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      19: invokevirtual #105                // Method android/graphics/Bitmap.isRecycled:()Z
+      22: ifne          149
+      25: aload_0
+      26: getfield      #51                 // Field mShowPauseCover:Z
+      29: ifeq          149
+      32: aload_0
+      33: getfield      #110                // Field mSurface:Landroid/view/Surface;
+      36: ifnull        149
+      39: aload_0
+      40: getfield      #110                // Field mSurface:Landroid/view/Surface;
+      43: invokevirtual #114                // Method android/view/Surface.isValid:()Z
+      46: ifeq          149
+      49: aload_0
+      50: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      53: invokeinterface #123,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.isSurfaceSupportLockCanvas:()Z
+      58: ifeq          149
+      61: new           #128                // class android/graphics/RectF
+      64: dup
+      65: fconst_0
+      66: fconst_0
+      67: aload_0
+      68: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+      71: invokevirtual #134                // Method com/shuyu/gsyvideoplayer/render/GSYRenderView.getWidth:()I
+      74: i2f
+      75: aload_0
+      76: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+      79: invokevirtual #140                // Method com/shuyu/gsyvideoplayer/render/GSYRenderView.getHeight:()I
+      82: i2f
+      83: invokespecial #143                // Method android/graphics/RectF."<init>":(FFFF)V
+      86: astore_1
+      87: aload_0
+      88: getfield      #110                // Field mSurface:Landroid/view/Surface;
+      91: new           #146                // class android/graphics/Rect
+      94: dup
+      95: iconst_0
+      96: iconst_0
+      97: aload_0
+      98: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+     101: invokevirtual #134                // Method com/shuyu/gsyvideoplayer/render/GSYRenderView.getWidth:()I
+     104: aload_0
+     105: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+     108: invokevirtual #140                // Method com/shuyu/gsyvideoplayer/render/GSYRenderView.getHeight:()I
+     111: invokespecial #148                // Method android/graphics/Rect."<init>":(IIII)V
+     114: invokevirtual #151                // Method android/view/Surface.lockCanvas:(Landroid/graphics/Rect;)Landroid/graphics/Canvas;
+     117: astore_2
+     118: aload_2
+     119: ifnull        141
+     122: aload_2
+     123: aload_0
+     124: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+     127: aconst_null
+     128: aload_1
+     129: aconst_null
+     130: invokevirtual #155                // Method android/graphics/Canvas.drawBitmap:(Landroid/graphics/Bitmap;Landroid/graphics/Rect;Landroid/graphics/RectF;Landroid/graphics/Paint;)V
+     133: aload_0
+     134: getfield      #110                // Field mSurface:Landroid/view/Surface;
+     137: aload_2
+     138: invokevirtual #161                // Method android/view/Surface.unlockCanvasAndPost:(Landroid/graphics/Canvas;)V
+     141: goto          149
+     144: astore_1
+     145: aload_1
+     146: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+     149: return
+    Exception table:
+       from    to  target type
+          61   141   144   Class java/lang/Exception
+
+  protected void releasePauseCover();
+    Code:
+       0: aload_0
+       1: getfield      #7                  // Field mCurrentState:I
+       4: iconst_5
+       5: if_icmpeq     44
+       8: aload_0
+       9: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      12: ifnull        44
+      15: aload_0
+      16: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      19: invokevirtual #105                // Method android/graphics/Bitmap.isRecycled:()Z
+      22: ifne          44
+      25: aload_0
+      26: getfield      #51                 // Field mShowPauseCover:Z
+      29: ifeq          44
+      32: aload_0
+      33: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      36: invokevirtual #170                // Method android/graphics/Bitmap.recycle:()V
+      39: aload_0
+      40: aconst_null
+      41: putfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      44: goto          52
+      47: astore_1
+      48: aload_1
+      49: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      52: return
+    Exception table:
+       from    to  target type
+           0    44    47   Class java/lang/Exception
+
+  public int getCurrentVideoWidth();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: ifnull        17
+       7: aload_0
+       8: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      11: invokeinterface #173,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getVideoWidth:()I
+      16: ireturn
+      17: iconst_0
+      18: ireturn
+
+  public int getCurrentVideoHeight();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: ifnull        17
+       7: aload_0
+       8: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      11: invokeinterface #176,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getVideoHeight:()I
+      16: ireturn
+      17: iconst_0
+      18: ireturn
+
+  public int getVideoSarNum();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: ifnull        17
+       7: aload_0
+       8: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      11: invokeinterface #179,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getVideoSarNum:()I
+      16: ireturn
+      17: iconst_0
+      18: ireturn
+
+  public int getVideoSarDen();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: ifnull        17
+       7: aload_0
+       8: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      11: invokeinterface #182,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getVideoSarDen:()I
+      16: ireturn
+      17: iconst_0
+      18: ireturn
+
+  protected void updatePauseCover();
+    Code:
+       0: aload_0
+       1: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+       4: ifnull        17
+       7: aload_0
+       8: getfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      11: invokevirtual #105                // Method android/graphics/Bitmap.isRecycled:()Z
+      14: ifeq          41
+      17: aload_0
+      18: getfield      #51                 // Field mShowPauseCover:Z
+      21: ifeq          41
+      24: aload_0
+      25: invokevirtual #185                // Method initCover:()V
+      28: goto          41
+      31: astore_1
+      32: aload_1
+      33: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      36: aload_0
+      37: aconst_null
+      38: putfield      #101                // Field mFullPauseBitmap:Landroid/graphics/Bitmap;
+      41: return
+    Exception table:
+       from    to  target type
+          24    28    31   Class java/lang/Exception
+
+  protected android.content.Context getActivityContext();
+    Code:
+       0: aload_0
+       1: invokevirtual #188                // Method getContext:()Landroid/content/Context;
+       4: invokestatic  #192                // Method com/shuyu/gsyvideoplayer/utils/CommonUtil.getActivityContext:(Landroid/content/Context;)Landroid/app/Activity;
+       7: areturn
+
+  protected void init(android.content.Context);
+    Code:
+       0: aload_0
+       1: invokevirtual #198                // Method getActivityContext:()Landroid/content/Context;
+       4: ifnull        18
+       7: aload_0
+       8: aload_0
+       9: invokevirtual #198                // Method getActivityContext:()Landroid/content/Context;
+      12: putfield      #200                // Field mContext:Landroid/content/Context;
+      15: goto          23
+      18: aload_0
+      19: aload_1
+      20: putfield      #200                // Field mContext:Landroid/content/Context;
+      23: aload_0
+      24: aload_0
+      25: getfield      #200                // Field mContext:Landroid/content/Context;
+      28: invokevirtual #204                // Method initInflate:(Landroid/content/Context;)V
+      31: aload_0
+      32: aload_0
+      33: getstatic     #207                // Field com/shuyu/gsyvideoplayer/R$id.surface_container:I
+      36: invokevirtual #212                // Method findViewById:(I)Landroid/view/View;
+      39: checkcast     #216                // class android/view/ViewGroup
+      42: putfield      #218                // Field mTextureViewContainer:Landroid/view/ViewGroup;
+      45: aload_0
+      46: invokevirtual #222                // Method isInEditMode:()Z
+      49: ifeq          53
+      52: return
+      53: aload_0
+      54: aload_0
+      55: getfield      #200                // Field mContext:Landroid/content/Context;
+      58: invokevirtual #225                // Method android/content/Context.getResources:()Landroid/content/res/Resources;
+      61: invokevirtual #231                // Method android/content/res/Resources.getDisplayMetrics:()Landroid/util/DisplayMetrics;
+      64: getfield      #237                // Field android/util/DisplayMetrics.widthPixels:I
+      67: putfield      #242                // Field mScreenWidth:I
+      70: aload_0
+      71: aload_0
+      72: getfield      #200                // Field mContext:Landroid/content/Context;
+      75: invokevirtual #225                // Method android/content/Context.getResources:()Landroid/content/res/Resources;
+      78: invokevirtual #231                // Method android/content/res/Resources.getDisplayMetrics:()Landroid/util/DisplayMetrics;
+      81: getfield      #245                // Field android/util/DisplayMetrics.heightPixels:I
+      84: putfield      #248                // Field mScreenHeight:I
+      87: aload_0
+      88: invokevirtual #251                // Method initAudioFocusManager:()V
+      91: return
+
+  protected void initInflate(android.content.Context);
+    Code:
+       0: aload_1
+       1: aload_0
+       2: invokevirtual #254                // Method getLayoutId:()I
+       5: aload_0
+       6: invokestatic  #257                // Method android/view/View.inflate:(Landroid/content/Context;ILandroid/view/ViewGroup;)Landroid/view/View;
+       9: pop
+      10: goto          52
+      13: astore_2
+      14: aload_2
+      15: invokevirtual #265                // Method android/view/InflateException.toString:()Ljava/lang/String;
+      18: ldc_w         #269                // String GSYImageCover
+      21: invokevirtual #271                // Method java/lang/String.contains:(Ljava/lang/CharSequence;)Z
+      24: ifeq          48
+      27: ldc_w         #277                // String ********************\n*****   注意   *************************\n*该版本需要清除布局文件中的GSYImageCover\n****  Attention  ***\n*Please remove GSYImageCover from Layout in this Version\n********************\n
+      30: invokestatic  #279                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfError:(Ljava/lang/String;)V
+      33: aload_2
+      34: invokevirtual #285                // Method android/view/InflateException.printStackTrace:()V
+      37: new           #263                // class android/view/InflateException
+      40: dup
+      41: ldc_w         #286                // String 该版本需要清除布局文件中的GSYImageCover，please remove GSYImageCover from your layout
+      44: invokespecial #288                // Method android/view/InflateException."<init>":(Ljava/lang/String;)V
+      47: athrow
+      48: aload_2
+      49: invokevirtual #285                // Method android/view/InflateException.printStackTrace:()V
+      52: return
+    Exception table:
+       from    to  target type
+           0    10    13   Class android/view/InflateException
+
+  protected void initAudioFocusManager();
+    Code:
+       0: aload_0
+       1: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+       4: ifnonnull     18
+       7: aload_0
+       8: new           #294                // class com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager
+      11: dup
+      12: invokespecial #296                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager."<init>":()V
+      15: putfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      18: aload_0
+      19: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      22: aload_0
+      23: getfield      #200                // Field mContext:Landroid/content/Context;
+      26: aload_0
+      27: invokevirtual #297                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager.initialize:(Landroid/content/Context;Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager$GSYAudioFocusListener;)V
+      30: goto          64
+      33: astore_1
+      34: new           #301                // class java/lang/StringBuilder
+      37: dup
+      38: invokespecial #303                // Method java/lang/StringBuilder."<init>":()V
+      41: ldc_w         #304                // String Failed to initialize AudioFocusManager:
+      44: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      47: aload_1
+      48: invokevirtual #310                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+      51: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      54: invokevirtual #313                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      57: invokestatic  #279                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfError:(Ljava/lang/String;)V
+      60: aload_1
+      61: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      64: return
+    Exception table:
+       from    to  target type
+           0    30    33   Class java/lang/Exception
+
+  protected void startButtonLogic();
+    Code:
+       0: aload_0
+       1: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+       4: ifnull        60
+       7: aload_0
+       8: getfield      #7                  // Field mCurrentState:I
+      11: ifeq          23
+      14: aload_0
+      15: getfield      #7                  // Field mCurrentState:I
+      18: bipush        6
+      20: if_icmpne     60
+      23: ldc_w         #318                // String onClickStartIcon
+      26: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+      29: aload_0
+      30: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      33: aload_0
+      34: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      37: iconst_2
+      38: anewarray     #326                // class java/lang/Object
+      41: dup
+      42: iconst_0
+      43: aload_0
+      44: getfield      #328                // Field mTitle:Ljava/lang/String;
+      47: aastore
+      48: dup
+      49: iconst_1
+      50: aload_0
+      51: aastore
+      52: invokeinterface #331,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onClickStartIcon:(Ljava/lang/String;[Ljava/lang/Object;)V
+      57: goto          101
+      60: aload_0
+      61: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      64: ifnull        101
+      67: ldc_w         #336                // String onClickStartError
+      70: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+      73: aload_0
+      74: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      77: aload_0
+      78: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      81: iconst_2
+      82: anewarray     #326                // class java/lang/Object
+      85: dup
+      86: iconst_0
+      87: aload_0
+      88: getfield      #328                // Field mTitle:Ljava/lang/String;
+      91: aastore
+      92: dup
+      93: iconst_1
+      94: aload_0
+      95: aastore
+      96: invokeinterface #338,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onClickStartError:(Ljava/lang/String;[Ljava/lang/Object;)V
+     101: aload_0
+     102: invokevirtual #340                // Method prepareVideo:()V
+     105: return
+
+  protected void prepareVideo();
+    Code:
+       0: aload_0
+       1: invokevirtual #343                // Method startPrepare:()V
+       4: return
+
+  protected void startPrepare();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: invokeinterface #346,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.listener:()Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;
+       9: ifnull        26
+      12: aload_0
+      13: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      16: invokeinterface #346,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.listener:()Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;
+      21: invokeinterface #350,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener.onCompletion:()V
+      26: aload_0
+      27: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      30: ifnull        67
+      33: ldc_w         #355                // String onStartPrepared
+      36: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+      39: aload_0
+      40: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      43: aload_0
+      44: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      47: iconst_2
+      48: anewarray     #326                // class java/lang/Object
+      51: dup
+      52: iconst_0
+      53: aload_0
+      54: getfield      #328                // Field mTitle:Ljava/lang/String;
+      57: aastore
+      58: dup
+      59: iconst_1
+      60: aload_0
+      61: aastore
+      62: invokeinterface #357,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onStartPrepared:(Ljava/lang/String;[Ljava/lang/Object;)V
+      67: aload_0
+      68: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      71: aload_0
+      72: invokeinterface #359,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setListener:(Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;)V
+      77: aload_0
+      78: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      81: aload_0
+      82: getfield      #68                 // Field mPlayTag:Ljava/lang/String;
+      85: invokeinterface #363,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setPlayTag:(Ljava/lang/String;)V
+      90: aload_0
+      91: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      94: aload_0
+      95: getfield      #13                 // Field mPlayPosition:I
+      98: invokeinterface #366,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setPlayPosition:(I)V
+     103: aload_0
+     104: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+     107: ifnull        118
+     110: aload_0
+     111: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+     114: invokevirtual #370                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager.requestAudioFocus:()Z
+     117: pop
+     118: aload_0
+     119: getfield      #200                // Field mContext:Landroid/content/Context;
+     122: instanceof    #373                // class android/app/Activity
+     125: ifeq          144
+     128: aload_0
+     129: getfield      #200                // Field mContext:Landroid/content/Context;
+     132: checkcast     #373                // class android/app/Activity
+     135: invokevirtual #375                // Method android/app/Activity.getWindow:()Landroid/view/Window;
+     138: sipush        128
+     141: invokevirtual #381                // Method android/view/Window.addFlags:(I)V
+     144: goto          152
+     147: astore_1
+     148: aload_1
+     149: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+     152: aload_0
+     153: iconst_m1
+     154: putfield      #16                 // Field mBackUpPlayingBufferState:I
+     157: aload_0
+     158: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+     161: aload_0
+     162: getfield      #386                // Field mUrl:Ljava/lang/String;
+     165: aload_0
+     166: getfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+     169: ifnonnull     182
+     172: new           #77                 // class java/util/HashMap
+     175: dup
+     176: invokespecial #79                 // Method java/util/HashMap."<init>":()V
+     179: goto          186
+     182: aload_0
+     183: getfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+     186: aload_0
+     187: getfield      #39                 // Field mLooping:Z
+     190: aload_0
+     191: getfield      #28                 // Field mSpeed:F
+     194: aload_0
+     195: getfield      #32                 // Field mCache:Z
+     198: aload_0
+     199: getfield      #389                // Field mCachePath:Ljava/io/File;
+     202: aload_0
+     203: getfield      #393                // Field mOverrideExtension:Ljava/lang/String;
+     206: invokeinterface #396,  8          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.prepare:(Ljava/lang/String;Ljava/util/Map;ZFZLjava/io/File;Ljava/lang/String;)V
+     211: aload_0
+     212: iconst_1
+     213: invokevirtual #400                // Method setStateAndUi:(I)V
+     216: return
+    Exception table:
+       from    to  target type
+         118   144   147   Class java/lang/Exception
+
+  public void onAudioFocusGain();
+    Code:
+       0: return
+
+  public void onAudioFocusLoss();
+    Code:
+       0: new           #403                // class android/os/Handler
+       3: dup
+       4: invokestatic  #405                // Method android/os/Looper.getMainLooper:()Landroid/os/Looper;
+       7: invokespecial #411                // Method android/os/Handler."<init>":(Landroid/os/Looper;)V
+      10: new           #414                // class com/shuyu/gsyvideoplayer/video/base/GSYVideoView$1
+      13: dup
+      14: aload_0
+      15: invokespecial #416                // Method com/shuyu/gsyvideoplayer/video/base/GSYVideoView$1."<init>":(Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoView;)V
+      18: invokevirtual #419                // Method android/os/Handler.post:(Ljava/lang/Runnable;)Z
+      21: pop
+      22: return
+
+  public void onAudioFocusLossTransient();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: invokeinterface #346,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.listener:()Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;
+       9: astore_1
+      10: aload_1
+      11: ifnull        37
+      14: aload_1
+      15: aload_0
+      16: if_acmpne     37
+      19: aload_0
+      20: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      23: invokeinterface #423,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.isPlaying:()Z
+      28: ifeq          37
+      31: aload_1
+      32: invokeinterface #426,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener.onVideoPause:()V
+      37: goto          45
+      40: astore_1
+      41: aload_1
+      42: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      45: return
+    Exception table:
+       from    to  target type
+           0    37    40   Class java/lang/Exception
+
+  public void onAudioFocusLossTransientCanDuck();
+    Code:
+       0: return
+
+  public boolean setUp(java.lang.String, boolean, java.lang.String);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: iload_2
+       3: aconst_null
+       4: checkcast     #429                // class java/io/File
+       7: aload_3
+       8: invokevirtual #431                // Method setUp:(Ljava/lang/String;ZLjava/io/File;Ljava/lang/String;)Z
+      11: ireturn
+
+  public boolean setUp(java.lang.String, boolean, java.io.File, java.util.Map<java.lang.String, java.lang.String>, java.lang.String);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: iload_2
+       3: aload_3
+       4: aload         5
+       6: invokevirtual #431                // Method setUp:(Ljava/lang/String;ZLjava/io/File;Ljava/lang/String;)Z
+       9: ifeq          60
+      12: aload_0
+      13: getfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+      16: ifnull        31
+      19: aload_0
+      20: getfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+      23: invokeinterface #435,  1          // InterfaceMethod java/util/Map.clear:()V
+      28: goto          42
+      31: aload_0
+      32: new           #77                 // class java/util/HashMap
+      35: dup
+      36: invokespecial #79                 // Method java/util/HashMap."<init>":()V
+      39: putfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+      42: aload         4
+      44: ifnull        58
+      47: aload_0
+      48: getfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+      51: aload         4
+      53: invokeinterface #440,  2          // InterfaceMethod java/util/Map.putAll:(Ljava/util/Map;)V
+      58: iconst_1
+      59: ireturn
+      60: iconst_0
+      61: ireturn
+
+  public boolean setUp(java.lang.String, boolean, java.io.File, java.lang.String);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: iload_2
+       3: aload_3
+       4: aload         4
+       6: iconst_1
+       7: invokevirtual #444                // Method setUp:(Ljava/lang/String;ZLjava/io/File;Ljava/lang/String;Z)Z
+      10: ireturn
+
+  protected boolean setUp(java.lang.String, boolean, java.io.File, java.lang.String, boolean);
+    Code:
+       0: aload_0
+       1: iload_2
+       2: putfield      #32                 // Field mCache:Z
+       5: aload_0
+       6: aload_3
+       7: putfield      #389                // Field mCachePath:Ljava/io/File;
+      10: aload_0
+      11: aload_1
+      12: putfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      15: aload_0
+      16: invokevirtual #447                // Method isCurrentMediaListener:()Z
+      19: ifeq          39
+      22: invokestatic  #450                // Method java/lang/System.currentTimeMillis:()J
+      25: aload_0
+      26: getfield      #25                 // Field mSaveChangeViewTIme:J
+      29: lsub
+      30: ldc2_w        #456                // long 2000l
+      33: lcmp
+      34: ifge          39
+      37: iconst_0
+      38: ireturn
+      39: aload_0
+      40: iconst_0
+      41: putfield      #7                  // Field mCurrentState:I
+      44: aload_0
+      45: aload_1
+      46: putfield      #386                // Field mUrl:Ljava/lang/String;
+      49: aload_0
+      50: aload         4
+      52: putfield      #328                // Field mTitle:Ljava/lang/String;
+      55: iload         5
+      57: ifeq          65
+      60: aload_0
+      61: iconst_0
+      62: invokevirtual #400                // Method setStateAndUi:(I)V
+      65: iconst_1
+      66: ireturn
+
+  public void onVideoReset();
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #400                // Method setStateAndUi:(I)V
+       5: return
+
+  public void onVideoPause();
+    Code:
+       0: aload_0
+       1: getfield      #7                  // Field mCurrentState:I
+       4: iconst_1
+       5: if_icmpne     13
+       8: aload_0
+       9: iconst_1
+      10: putfield      #54                 // Field mPauseBeforePrepared:Z
+      13: aload_0
+      14: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      17: ifnull        66
+      20: aload_0
+      21: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      24: invokeinterface #423,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.isPlaying:()Z
+      29: ifeq          66
+      32: aload_0
+      33: iconst_5
+      34: invokevirtual #400                // Method setStateAndUi:(I)V
+      37: aload_0
+      38: aload_0
+      39: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      42: invokeinterface #458,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getCurrentPosition:()J
+      47: putfield      #461                // Field mCurrentPosition:J
+      50: aload_0
+      51: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      54: ifnull        66
+      57: aload_0
+      58: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      61: invokeinterface #464,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.pause:()V
+      66: goto          74
+      69: astore_1
+      70: aload_1
+      71: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      74: return
+    Exception table:
+       from    to  target type
+          13    66    69   Class java/lang/Exception
+
+  public void onVideoResume();
+    Code:
+       0: aload_0
+       1: iconst_1
+       2: invokevirtual #467                // Method onVideoResume:(Z)V
+       5: return
+
+  public void onVideoResume(boolean);
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: putfield      #54                 // Field mPauseBeforePrepared:Z
+       5: aload_0
+       6: getfield      #7                  // Field mCurrentState:I
+       9: iconst_5
+      10: if_icmpne     95
+      13: aload_0
+      14: getfield      #461                // Field mCurrentPosition:J
+      17: lconst_0
+      18: lcmp
+      19: iflt          87
+      22: aload_0
+      23: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      26: ifnull        87
+      29: iload_1
+      30: ifeq          46
+      33: aload_0
+      34: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      37: aload_0
+      38: getfield      #461                // Field mCurrentPosition:J
+      41: invokeinterface #471,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.seekTo:(J)V
+      46: aload_0
+      47: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      50: invokeinterface #475,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.start:()V
+      55: aload_0
+      56: iconst_2
+      57: invokevirtual #400                // Method setStateAndUi:(I)V
+      60: aload_0
+      61: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      64: ifnull        82
+      67: aload_0
+      68: getfield      #63                 // Field mReleaseWhenLossAudio:Z
+      71: ifne          82
+      74: aload_0
+      75: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      78: invokevirtual #370                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager.requestAudioFocus:()Z
+      81: pop
+      82: aload_0
+      83: lconst_0
+      84: putfield      #461                // Field mCurrentPosition:J
+      87: goto          95
+      90: astore_2
+      91: aload_2
+      92: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      95: return
+    Exception table:
+       from    to  target type
+          13    87    90   Class java/lang/Exception
+
+  protected void netWorkErrorLogic();
+    Code:
+       0: aload_0
+       1: invokevirtual #478                // Method getCurrentPositionWhenPlaying:()J
+       4: lstore_1
+       5: new           #301                // class java/lang/StringBuilder
+       8: dup
+       9: invokespecial #303                // Method java/lang/StringBuilder."<init>":()V
+      12: ldc_w         #481                // String ******* Net State Changed. renew player to connect *******
+      15: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      18: lload_1
+      19: invokevirtual #483                // Method java/lang/StringBuilder.append:(J)Ljava/lang/StringBuilder;
+      22: invokevirtual #313                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      25: invokestatic  #279                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfError:(Ljava/lang/String;)V
+      28: aload_0
+      29: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      32: invokeinterface #486,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.releaseMediaPlayer:()V
+      37: aload_0
+      38: new           #489                // class com/shuyu/gsyvideoplayer/video/base/GSYVideoView$2
+      41: dup
+      42: aload_0
+      43: lload_1
+      44: invokespecial #491                // Method com/shuyu/gsyvideoplayer/video/base/GSYVideoView$2."<init>":(Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoView;J)V
+      47: ldc2_w        #494                // long 500l
+      50: invokevirtual #496                // Method postDelayed:(Ljava/lang/Runnable;J)Z
+      53: pop
+      54: return
+
+  protected void deleteCacheFileWhenError();
+    Code:
+       0: aload_0
+       1: invokevirtual #500                // Method clearCurrentCache:()V
+       4: new           #301                // class java/lang/StringBuilder
+       7: dup
+       8: invokespecial #303                // Method java/lang/StringBuilder."<init>":()V
+      11: ldc_w         #503                // String Link Or mCache Error, Please Try Again
+      14: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      17: aload_0
+      18: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      21: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      24: invokevirtual #313                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      27: invokestatic  #279                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfError:(Ljava/lang/String;)V
+      30: aload_0
+      31: getfield      #32                 // Field mCache:Z
+      34: ifeq          63
+      37: new           #301                // class java/lang/StringBuilder
+      40: dup
+      41: invokespecial #303                // Method java/lang/StringBuilder."<init>":()V
+      44: ldc_w         #505                // String mCache Link
+      47: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      50: aload_0
+      51: getfield      #386                // Field mUrl:Ljava/lang/String;
+      54: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      57: invokevirtual #313                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      60: invokestatic  #279                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfError:(Ljava/lang/String;)V
+      63: aload_0
+      64: aload_0
+      65: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      68: putfield      #386                // Field mUrl:Ljava/lang/String;
+      71: return
+
+  public void onPrepared();
+    Code:
+       0: aload_0
+       1: getfield      #7                  // Field mCurrentState:I
+       4: iconst_1
+       5: if_icmpeq     9
+       8: return
+       9: aload_0
+      10: iconst_1
+      11: putfield      #60                 // Field mHadPrepared:Z
+      14: aload_0
+      15: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      18: ifnull        62
+      21: aload_0
+      22: invokevirtual #447                // Method isCurrentMediaListener:()Z
+      25: ifeq          62
+      28: ldc_w         #507                // String onPrepared
+      31: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+      34: aload_0
+      35: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      38: aload_0
+      39: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      42: iconst_2
+      43: anewarray     #326                // class java/lang/Object
+      46: dup
+      47: iconst_0
+      48: aload_0
+      49: getfield      #328                // Field mTitle:Ljava/lang/String;
+      52: aastore
+      53: dup
+      54: iconst_1
+      55: aload_0
+      56: aastore
+      57: invokeinterface #509,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onPrepared:(Ljava/lang/String;[Ljava/lang/Object;)V
+      62: aload_0
+      63: getfield      #57                 // Field mStartAfterPrepared:Z
+      66: ifne          79
+      69: aload_0
+      70: iconst_5
+      71: invokevirtual #400                // Method setStateAndUi:(I)V
+      74: aload_0
+      75: invokevirtual #511                // Method onVideoPause:()V
+      78: return
+      79: aload_0
+      80: invokevirtual #512                // Method startAfterPrepared:()V
+      83: return
+
+  public void onAutoCompletion();
+    Code:
+       0: aload_0
+       1: bipush        6
+       3: invokevirtual #400                // Method setStateAndUi:(I)V
+       6: aload_0
+       7: lconst_0
+       8: putfield      #25                 // Field mSaveChangeViewTIme:J
+      11: aload_0
+      12: lconst_0
+      13: putfield      #461                // Field mCurrentPosition:J
+      16: aload_0
+      17: getfield      #218                // Field mTextureViewContainer:Landroid/view/ViewGroup;
+      20: invokevirtual #515                // Method android/view/ViewGroup.getChildCount:()I
+      23: ifle          33
+      26: aload_0
+      27: getfield      #218                // Field mTextureViewContainer:Landroid/view/ViewGroup;
+      30: invokevirtual #518                // Method android/view/ViewGroup.removeAllViews:()V
+      33: aload_0
+      34: getfield      #36                 // Field mIfCurrentIsFullscreen:Z
+      37: ifne          50
+      40: aload_0
+      41: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      44: aconst_null
+      45: invokeinterface #521,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setLastListener:(Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;)V
+      50: aload_0
+      51: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      54: ifnull        64
+      57: aload_0
+      58: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      61: invokevirtual #524                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager.abandonAudioFocus:()V
+      64: aload_0
+      65: getfield      #200                // Field mContext:Landroid/content/Context;
+      68: instanceof    #373                // class android/app/Activity
+      71: ifeq          98
+      74: aload_0
+      75: getfield      #200                // Field mContext:Landroid/content/Context;
+      78: checkcast     #373                // class android/app/Activity
+      81: invokevirtual #375                // Method android/app/Activity.getWindow:()Landroid/view/Window;
+      84: sipush        128
+      87: invokevirtual #527                // Method android/view/Window.clearFlags:(I)V
+      90: goto          98
+      93: astore_1
+      94: aload_1
+      95: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      98: aload_0
+      99: invokevirtual #530                // Method releaseNetWorkState:()V
+     102: aload_0
+     103: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+     106: ifnull        150
+     109: aload_0
+     110: invokevirtual #447                // Method isCurrentMediaListener:()Z
+     113: ifeq          150
+     116: ldc_w         #533                // String onAutoComplete
+     119: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+     122: aload_0
+     123: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+     126: aload_0
+     127: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+     130: iconst_2
+     131: anewarray     #326                // class java/lang/Object
+     134: dup
+     135: iconst_0
+     136: aload_0
+     137: getfield      #328                // Field mTitle:Ljava/lang/String;
+     140: aastore
+     141: dup
+     142: iconst_1
+     143: aload_0
+     144: aastore
+     145: invokeinterface #535,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onAutoComplete:(Ljava/lang/String;[Ljava/lang/Object;)V
+     150: aload_0
+     151: iconst_0
+     152: putfield      #42                 // Field mHadPlay:Z
+     155: return
+    Exception table:
+       from    to  target type
+          74    90    93   Class java/lang/Exception
+
+  public void onCompletion();
+    Code:
+       0: aload_0
+       1: iconst_0
+       2: invokevirtual #400                // Method setStateAndUi:(I)V
+       5: aload_0
+       6: lconst_0
+       7: putfield      #25                 // Field mSaveChangeViewTIme:J
+      10: aload_0
+      11: lconst_0
+      12: putfield      #461                // Field mCurrentPosition:J
+      15: aload_0
+      16: getfield      #218                // Field mTextureViewContainer:Landroid/view/ViewGroup;
+      19: invokevirtual #515                // Method android/view/ViewGroup.getChildCount:()I
+      22: ifle          32
+      25: aload_0
+      26: getfield      #218                // Field mTextureViewContainer:Landroid/view/ViewGroup;
+      29: invokevirtual #518                // Method android/view/ViewGroup.removeAllViews:()V
+      32: aload_0
+      33: getfield      #36                 // Field mIfCurrentIsFullscreen:Z
+      36: ifne          59
+      39: aload_0
+      40: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      43: aconst_null
+      44: invokeinterface #359,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setListener:(Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;)V
+      49: aload_0
+      50: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      53: aconst_null
+      54: invokeinterface #521,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setLastListener:(Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;)V
+      59: aload_0
+      60: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      63: iconst_0
+      64: invokeinterface #537,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setCurrentVideoHeight:(I)V
+      69: aload_0
+      70: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      73: iconst_0
+      74: invokeinterface #540,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setCurrentVideoWidth:(I)V
+      79: aload_0
+      80: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      83: ifnull        93
+      86: aload_0
+      87: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      90: invokevirtual #524                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager.abandonAudioFocus:()V
+      93: aload_0
+      94: getfield      #200                // Field mContext:Landroid/content/Context;
+      97: instanceof    #373                // class android/app/Activity
+     100: ifeq          127
+     103: aload_0
+     104: getfield      #200                // Field mContext:Landroid/content/Context;
+     107: checkcast     #373                // class android/app/Activity
+     110: invokevirtual #375                // Method android/app/Activity.getWindow:()Landroid/view/Window;
+     113: sipush        128
+     116: invokevirtual #527                // Method android/view/Window.clearFlags:(I)V
+     119: goto          127
+     122: astore_1
+     123: aload_1
+     124: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+     127: aload_0
+     128: invokevirtual #530                // Method releaseNetWorkState:()V
+     131: aload_0
+     132: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+     135: ifnull        172
+     138: ldc_w         #543                // String onComplete
+     141: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+     144: aload_0
+     145: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+     148: aload_0
+     149: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+     152: iconst_2
+     153: anewarray     #326                // class java/lang/Object
+     156: dup
+     157: iconst_0
+     158: aload_0
+     159: getfield      #328                // Field mTitle:Ljava/lang/String;
+     162: aastore
+     163: dup
+     164: iconst_1
+     165: aload_0
+     166: aastore
+     167: invokeinterface #545,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onComplete:(Ljava/lang/String;[Ljava/lang/Object;)V
+     172: aload_0
+     173: iconst_0
+     174: putfield      #42                 // Field mHadPlay:Z
+     177: return
+    Exception table:
+       from    to  target type
+         103   119   122   Class java/lang/Exception
+
+  public void onSeekComplete();
+    Code:
+       0: ldc_w         #547                // String onSeekComplete
+       3: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+       6: return
+
+  public void onError(int, int);
+    Code:
+       0: aload_0
+       1: getfield      #45                 // Field mNetChanged:Z
+       4: ifeq          52
+       7: aload_0
+       8: iconst_0
+       9: putfield      #45                 // Field mNetChanged:Z
+      12: aload_0
+      13: invokevirtual #549                // Method netWorkErrorLogic:()V
+      16: aload_0
+      17: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      20: ifnull        51
+      23: aload_0
+      24: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      27: aload_0
+      28: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      31: iconst_2
+      32: anewarray     #326                // class java/lang/Object
+      35: dup
+      36: iconst_0
+      37: aload_0
+      38: getfield      #328                // Field mTitle:Ljava/lang/String;
+      41: aastore
+      42: dup
+      43: iconst_1
+      44: aload_0
+      45: aastore
+      46: invokeinterface #552,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onPlayError:(Ljava/lang/String;[Ljava/lang/Object;)V
+      51: return
+      52: iload_1
+      53: bipush        38
+      55: if_icmpeq     123
+      58: iload_1
+      59: bipush        -38
+      61: if_icmpeq     123
+      64: aload_0
+      65: bipush        7
+      67: invokevirtual #400                // Method setStateAndUi:(I)V
+      70: aload_0
+      71: invokevirtual #555                // Method deleteCacheFileWhenError:()V
+      74: aload_0
+      75: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      78: ifnull        123
+      81: aload_0
+      82: getfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+      85: aload_0
+      86: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      89: iconst_4
+      90: anewarray     #326                // class java/lang/Object
+      93: dup
+      94: iconst_0
+      95: aload_0
+      96: getfield      #328                // Field mTitle:Ljava/lang/String;
+      99: aastore
+     100: dup
+     101: iconst_1
+     102: aload_0
+     103: aastore
+     104: dup
+     105: iconst_2
+     106: iload_1
+     107: invokestatic  #558                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+     110: aastore
+     111: dup
+     112: iconst_3
+     113: iload_2
+     114: invokestatic  #558                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+     117: aastore
+     118: invokeinterface #552,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/listener/VideoAllCallBack.onPlayError:(Ljava/lang/String;[Ljava/lang/Object;)V
+     123: return
+
+  public void onInfo(int, int);
+    Code:
+       0: iload_1
+       1: sipush        701
+       4: if_icmpne     45
+       7: aload_0
+       8: aload_0
+       9: getfield      #7                  // Field mCurrentState:I
+      12: putfield      #16                 // Field mBackUpPlayingBufferState:I
+      15: aload_0
+      16: getfield      #42                 // Field mHadPlay:Z
+      19: ifeq          171
+      22: aload_0
+      23: getfield      #7                  // Field mCurrentState:I
+      26: iconst_1
+      27: if_icmpeq     171
+      30: aload_0
+      31: getfield      #7                  // Field mCurrentState:I
+      34: ifle          171
+      37: aload_0
+      38: iconst_3
+      39: invokevirtual #400                // Method setStateAndUi:(I)V
+      42: goto          171
+      45: iload_1
+      46: sipush        702
+      49: if_icmpne     111
+      52: aload_0
+      53: getfield      #16                 // Field mBackUpPlayingBufferState:I
+      56: iconst_m1
+      57: if_icmpeq     171
+      60: aload_0
+      61: getfield      #16                 // Field mBackUpPlayingBufferState:I
+      64: iconst_3
+      65: if_icmpne     73
+      68: aload_0
+      69: iconst_2
+      70: putfield      #16                 // Field mBackUpPlayingBufferState:I
+      73: aload_0
+      74: getfield      #42                 // Field mHadPlay:Z
+      77: ifeq          103
+      80: aload_0
+      81: getfield      #7                  // Field mCurrentState:I
+      84: iconst_1
+      85: if_icmpeq     103
+      88: aload_0
+      89: getfield      #7                  // Field mCurrentState:I
+      92: ifle          103
+      95: aload_0
+      96: aload_0
+      97: getfield      #16                 // Field mBackUpPlayingBufferState:I
+     100: invokevirtual #400                // Method setStateAndUi:(I)V
+     103: aload_0
+     104: iconst_m1
+     105: putfield      #16                 // Field mBackUpPlayingBufferState:I
+     108: goto          171
+     111: iload_1
+     112: aload_0
+     113: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+     116: invokeinterface #566,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getRotateInfoFlag:()I
+     121: if_icmpne     171
+     124: aload_0
+     125: iload_2
+     126: putfield      #569                // Field mRotate:I
+     129: new           #301                // class java/lang/StringBuilder
+     132: dup
+     133: invokespecial #303                // Method java/lang/StringBuilder."<init>":()V
+     136: ldc_w         #572                // String Video Rotate Info
+     139: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+     142: iload_2
+     143: invokevirtual #574                // Method java/lang/StringBuilder.append:(I)Ljava/lang/StringBuilder;
+     146: invokevirtual #313                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+     149: invokestatic  #320                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfLog:(Ljava/lang/String;)V
+     152: aload_0
+     153: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+     156: ifnull        171
+     159: aload_0
+     160: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+     163: aload_0
+     164: getfield      #569                // Field mRotate:I
+     167: i2f
+     168: invokevirtual #577                // Method com/shuyu/gsyvideoplayer/render/GSYRenderView.setRotation:(F)V
+     171: return
+
+  public void onVideoSizeChanged();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: invokeinterface #581,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getCurrentVideoWidth:()I
+       9: istore_1
+      10: aload_0
+      11: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      14: invokeinterface #584,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getCurrentVideoHeight:()I
+      19: istore_2
+      20: iload_1
+      21: ifeq          42
+      24: iload_2
+      25: ifeq          42
+      28: aload_0
+      29: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+      32: ifnull        42
+      35: aload_0
+      36: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+      39: invokevirtual #587                // Method com/shuyu/gsyvideoplayer/render/GSYRenderView.requestLayout:()V
+      42: return
+
+  protected void setDisplay(android.view.Surface);
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: aload_1
+       5: invokeinterface #590,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setDisplay:(Landroid/view/Surface;)V
+      10: return
+
+  protected void releaseSurface(android.view.Surface);
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: aload_1
+       5: invokeinterface #594,  2          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.releaseSurface:(Landroid/view/Surface;)V
+      10: return
+
+  public void clearCurrentCache();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: invokeinterface #597,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.isCacheFile:()Z
+       9: ifeq          77
+      12: aload_0
+      13: getfield      #32                 // Field mCache:Z
+      16: ifeq          77
+      19: new           #301                // class java/lang/StringBuilder
+      22: dup
+      23: invokespecial #303                // Method java/lang/StringBuilder."<init>":()V
+      26: ldc_w         #600                // String Play Error
+      29: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      32: aload_0
+      33: getfield      #386                // Field mUrl:Ljava/lang/String;
+      36: invokevirtual #306                // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      39: invokevirtual #313                // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      42: invokestatic  #279                // Method com/shuyu/gsyvideoplayer/utils/Debuger.printfError:(Ljava/lang/String;)V
+      45: aload_0
+      46: aload_0
+      47: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      50: putfield      #386                // Field mUrl:Ljava/lang/String;
+      53: aload_0
+      54: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      57: aload_0
+      58: getfield      #200                // Field mContext:Landroid/content/Context;
+      61: aload_0
+      62: getfield      #389                // Field mCachePath:Ljava/io/File;
+      65: aload_0
+      66: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+      69: invokeinterface #602,  4          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.clearCache:(Landroid/content/Context;Ljava/io/File;Ljava/lang/String;)V
+      74: goto          118
+      77: aload_0
+      78: getfield      #386                // Field mUrl:Ljava/lang/String;
+      81: ifnull        118
+      84: aload_0
+      85: getfield      #386                // Field mUrl:Ljava/lang/String;
+      88: ldc_w         #606                // String 127.0.0.1
+      91: invokevirtual #271                // Method java/lang/String.contains:(Ljava/lang/CharSequence;)Z
+      94: ifeq          118
+      97: aload_0
+      98: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+     101: aload_0
+     102: invokevirtual #188                // Method getContext:()Landroid/content/Context;
+     105: aload_0
+     106: getfield      #389                // Field mCachePath:Ljava/io/File;
+     109: aload_0
+     110: getfield      #323                // Field mOriginUrl:Ljava/lang/String;
+     113: invokeinterface #602,  4          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.clearCache:(Landroid/content/Context;Ljava/io/File;Ljava/lang/String;)V
+     118: return
+
+  public long getCurrentPositionWhenPlaying();
+    Code:
+       0: lconst_0
+       1: lstore_1
+       2: aload_0
+       3: getfield      #7                  // Field mCurrentState:I
+       6: iconst_2
+       7: if_icmpeq     26
+      10: aload_0
+      11: getfield      #7                  // Field mCurrentState:I
+      14: iconst_5
+      15: if_icmpeq     26
+      18: aload_0
+      19: getfield      #7                  // Field mCurrentState:I
+      22: iconst_3
+      23: if_icmpne     46
+      26: aload_0
+      27: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      30: invokeinterface #458,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getCurrentPosition:()J
+      35: lstore_1
+      36: goto          46
+      39: astore_3
+      40: aload_3
+      41: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      44: lload_1
+      45: lreturn
+      46: lload_1
+      47: lconst_0
+      48: lcmp
+      49: ifne          66
+      52: aload_0
+      53: getfield      #461                // Field mCurrentPosition:J
+      56: lconst_0
+      57: lcmp
+      58: ifle          66
+      61: aload_0
+      62: getfield      #461                // Field mCurrentPosition:J
+      65: lreturn
+      66: lload_1
+      67: lreturn
+    Exception table:
+       from    to  target type
+          26    36    39   Class java/lang/Exception
+
+  public long getDuration();
+    Code:
+       0: lconst_0
+       1: lstore_1
+       2: aload_0
+       3: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       6: invokeinterface #608,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getDuration:()J
+      11: lstore_1
+      12: goto          22
+      15: astore_3
+      16: aload_3
+      17: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      20: lload_1
+      21: lreturn
+      22: lload_1
+      23: lreturn
+    Exception table:
+       from    to  target type
+           2    12    15   Class java/lang/Exception
+
+  public void release();
+    Code:
+       0: aload_0
+       1: lconst_0
+       2: putfield      #25                 // Field mSaveChangeViewTIme:J
+       5: aload_0
+       6: invokevirtual #447                // Method isCurrentMediaListener:()Z
+       9: ifeq          31
+      12: invokestatic  #450                // Method java/lang/System.currentTimeMillis:()J
+      15: aload_0
+      16: getfield      #25                 // Field mSaveChangeViewTIme:J
+      19: lsub
+      20: ldc2_w        #456                // long 2000l
+      23: lcmp
+      24: ifle          31
+      27: aload_0
+      28: invokevirtual #611                // Method releaseVideos:()V
+      31: aload_0
+      32: invokevirtual #614                // Method releaseAudioFocusManager:()V
+      35: return
+
+  public void startAfterPrepared();
+    Code:
+       0: aload_0
+       1: getfield      #60                 // Field mHadPrepared:Z
+       4: ifne          11
+       7: aload_0
+       8: invokevirtual #340                // Method prepareVideo:()V
+      11: aload_0
+      12: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      15: ifnull        27
+      18: aload_0
+      19: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      22: invokeinterface #475,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.start:()V
+      27: aload_0
+      28: iconst_2
+      29: invokevirtual #400                // Method setStateAndUi:(I)V
+      32: aload_0
+      33: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      36: ifnull        66
+      39: aload_0
+      40: getfield      #21                 // Field mSeekOnStart:J
+      43: lconst_0
+      44: lcmp
+      45: ifle          66
+      48: aload_0
+      49: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      52: aload_0
+      53: getfield      #21                 // Field mSeekOnStart:J
+      56: invokeinterface #471,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.seekTo:(J)V
+      61: aload_0
+      62: lconst_0
+      63: putfield      #21                 // Field mSeekOnStart:J
+      66: goto          74
+      69: astore_1
+      70: aload_1
+      71: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      74: aload_0
+      75: invokevirtual #617                // Method addTextureView:()V
+      78: aload_0
+      79: invokevirtual #620                // Method createNetWorkState:()V
+      82: aload_0
+      83: invokevirtual #623                // Method listenerNetWorkState:()V
+      86: aload_0
+      87: iconst_1
+      88: putfield      #42                 // Field mHadPlay:Z
+      91: aload_0
+      92: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+      95: ifnull        105
+      98: aload_0
+      99: getfield      #130                // Field mTextureView:Lcom/shuyu/gsyvideoplayer/render/GSYRenderView;
+     102: invokevirtual #626                // Method com/shuyu/gsyvideoplayer/render/GSYRenderView.onResume:()V
+     105: aload_0
+     106: getfield      #54                 // Field mPauseBeforePrepared:Z
+     109: ifeq          121
+     112: aload_0
+     113: invokevirtual #511                // Method onVideoPause:()V
+     116: aload_0
+     117: iconst_0
+     118: putfield      #54                 // Field mPauseBeforePrepared:Z
+     121: return
+    Exception table:
+       from    to  target type
+          11    66    69   Class java/lang/Exception
+
+  protected boolean isCurrentMediaListener();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: invokeinterface #346,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.listener:()Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;
+       9: ifnull        29
+      12: aload_0
+      13: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      16: invokeinterface #346,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.listener:()Lcom/shuyu/gsyvideoplayer/listener/GSYMediaPlayerListener;
+      21: aload_0
+      22: if_acmpne     29
+      25: iconst_1
+      26: goto          30
+      29: iconst_0
+      30: ireturn
+
+  protected void createNetWorkState();
+    Code:
+       0: aload_0
+       1: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+       4: ifnonnull     44
+       7: aload_0
+       8: new           #633                // class com/shuyu/gsyvideoplayer/utils/NetInfoModule
+      11: dup
+      12: aload_0
+      13: getfield      #200                // Field mContext:Landroid/content/Context;
+      16: invokevirtual #635                // Method android/content/Context.getApplicationContext:()Landroid/content/Context;
+      19: new           #638                // class com/shuyu/gsyvideoplayer/video/base/GSYVideoView$3
+      22: dup
+      23: aload_0
+      24: invokespecial #640                // Method com/shuyu/gsyvideoplayer/video/base/GSYVideoView$3."<init>":(Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoView;)V
+      27: invokespecial #641                // Method com/shuyu/gsyvideoplayer/utils/NetInfoModule."<init>":(Landroid/content/Context;Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule$NetChangeListener;)V
+      30: putfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+      33: aload_0
+      34: aload_0
+      35: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+      38: invokevirtual #644                // Method com/shuyu/gsyvideoplayer/utils/NetInfoModule.getCurrentConnectionType:()Ljava/lang/String;
+      41: putfield      #74                 // Field mNetSate:Ljava/lang/String;
+      44: return
+
+  protected void listenerNetWorkState();
+    Code:
+       0: aload_0
+       1: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+       4: ifnull        14
+       7: aload_0
+       8: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+      11: invokevirtual #647                // Method com/shuyu/gsyvideoplayer/utils/NetInfoModule.onHostResume:()V
+      14: return
+
+  protected void unListenerNetWorkState();
+    Code:
+       0: aload_0
+       1: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+       4: ifnull        14
+       7: aload_0
+       8: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+      11: invokevirtual #650                // Method com/shuyu/gsyvideoplayer/utils/NetInfoModule.onHostPause:()V
+      14: return
+
+  protected void releaseNetWorkState();
+    Code:
+       0: aload_0
+       1: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+       4: ifnull        19
+       7: aload_0
+       8: getfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+      11: invokevirtual #650                // Method com/shuyu/gsyvideoplayer/utils/NetInfoModule.onHostPause:()V
+      14: aload_0
+      15: aconst_null
+      16: putfield      #629                // Field mNetInfoModule:Lcom/shuyu/gsyvideoplayer/utils/NetInfoModule;
+      19: return
+
+  protected abstract boolean backFromFull(android.content.Context);
+
+  protected abstract void releaseVideos();
+
+  protected abstract void setStateAndUi(int);
+
+  public abstract com.shuyu.gsyvideoplayer.video.base.GSYVideoViewBridge getGSYVideoManager();
+
+  public abstract int getLayoutId();
+
+  public abstract void startPlayLogic();
+
+  public int getCurrentState();
+    Code:
+       0: aload_0
+       1: getfield      #7                  // Field mCurrentState:I
+       4: ireturn
+
+  public boolean isInPlayingState();
+    Code:
+       0: aload_0
+       1: getfield      #7                  // Field mCurrentState:I
+       4: iflt          36
+       7: aload_0
+       8: getfield      #7                  // Field mCurrentState:I
+      11: ifeq          36
+      14: aload_0
+      15: getfield      #7                  // Field mCurrentState:I
+      18: bipush        6
+      20: if_icmpeq     36
+      23: aload_0
+      24: getfield      #7                  // Field mCurrentState:I
+      27: bipush        7
+      29: if_icmpeq     36
+      32: iconst_1
+      33: goto          37
+      36: iconst_0
+      37: ireturn
+
+  public java.lang.String getPlayTag();
+    Code:
+       0: aload_0
+       1: getfield      #68                 // Field mPlayTag:Ljava/lang/String;
+       4: areturn
+
+  public void setPlayTag(java.lang.String);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: putfield      #68                 // Field mPlayTag:Ljava/lang/String;
+       5: return
+
+  public int getPlayPosition();
+    Code:
+       0: aload_0
+       1: getfield      #13                 // Field mPlayPosition:I
+       4: ireturn
+
+  public void setPlayPosition(int);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: putfield      #13                 // Field mPlayPosition:I
+       5: return
+
+  public long getNetSpeed();
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: invokeinterface #653,  1          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.getNetSpeed:()J
+       9: lreturn
+
+  public java.lang.String getNetSpeedText();
+    Code:
+       0: aload_0
+       1: invokevirtual #656                // Method getNetSpeed:()J
+       4: lstore_1
+       5: lload_1
+       6: invokestatic  #657                // Method com/shuyu/gsyvideoplayer/utils/CommonUtil.getTextSpeed:(J)Ljava/lang/String;
+       9: areturn
+
+  public long getSeekOnStart();
+    Code:
+       0: aload_0
+       1: getfield      #21                 // Field mSeekOnStart:J
+       4: lreturn
+
+  public void setSeekOnStart(long);
+    Code:
+       0: aload_0
+       1: lload_1
+       2: putfield      #21                 // Field mSeekOnStart:J
+       5: return
+
+  public int getBuffterPoint();
+    Code:
+       0: aload_0
+       1: getfield      #661                // Field mBufferPoint:I
+       4: ireturn
+
+  public boolean isIfCurrentIsFullscreen();
+    Code:
+       0: aload_0
+       1: getfield      #36                 // Field mIfCurrentIsFullscreen:Z
+       4: ireturn
+
+  public void setIfCurrentIsFullscreen(boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: putfield      #36                 // Field mIfCurrentIsFullscreen:Z
+       5: return
+
+  public boolean isLooping();
+    Code:
+       0: aload_0
+       1: getfield      #39                 // Field mLooping:Z
+       4: ireturn
+
+  public void setLooping(boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: putfield      #39                 // Field mLooping:Z
+       5: return
+
+  public void setVideoAllCallBack(com.shuyu.gsyvideoplayer.listener.VideoAllCallBack);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: putfield      #314                // Field mVideoAllCallBack:Lcom/shuyu/gsyvideoplayer/listener/VideoAllCallBack;
+       5: return
+
+  public float getSpeed();
+    Code:
+       0: aload_0
+       1: getfield      #28                 // Field mSpeed:F
+       4: freturn
+
+  public void setSpeed(float);
+    Code:
+       0: aload_0
+       1: fload_1
+       2: iconst_0
+       3: iconst_1
+       4: invokevirtual #664                // Method setSpeed:(FZZ)V
+       7: return
+
+  public void setSpeed(float, boolean);
+    Code:
+       0: aload_0
+       1: fload_1
+       2: iload_2
+       3: iconst_1
+       4: invokevirtual #664                // Method setSpeed:(FZZ)V
+       7: return
+
+  public void setSpeed(float, boolean, boolean);
+    Code:
+       0: aload_0
+       1: fload_1
+       2: putfield      #28                 // Field mSpeed:F
+       5: aload_0
+       6: iload_2
+       7: putfield      #48                 // Field mSoundTouch:Z
+      10: aload_0
+      11: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      14: ifnull        32
+      17: iload_3
+      18: ifeq          32
+      21: aload_0
+      22: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      25: fload_1
+      26: iload_2
+      27: invokeinterface #668,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setSpeed:(FZ)V
+      32: return
+
+  public void setSpeedPlaying(float, boolean);
+    Code:
+       0: aload_0
+       1: fload_1
+       2: iload_2
+       3: invokevirtual #671                // Method setSpeed:(FZ)V
+       6: aload_0
+       7: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      10: fload_1
+      11: iload_2
+      12: invokeinterface #672,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.setSpeedPlaying:(FZ)V
+      17: return
+
+  public boolean isShowPauseCover();
+    Code:
+       0: aload_0
+       1: getfield      #51                 // Field mShowPauseCover:Z
+       4: ireturn
+
+  public void setShowPauseCover(boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: putfield      #51                 // Field mShowPauseCover:Z
+       5: return
+
+  public void seekTo(long);
+    Code:
+       0: aload_0
+       1: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+       4: ifnull        23
+       7: lload_1
+       8: lconst_0
+       9: lcmp
+      10: iflt          23
+      13: aload_0
+      14: invokevirtual #119                // Method getGSYVideoManager:()Lcom/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge;
+      17: lload_1
+      18: invokeinterface #471,  3          // InterfaceMethod com/shuyu/gsyvideoplayer/video/base/GSYVideoViewBridge.seekTo:(J)V
+      23: goto          31
+      26: astore_3
+      27: aload_3
+      28: invokevirtual #167                // Method java/lang/Exception.printStackTrace:()V
+      31: return
+    Exception table:
+       from    to  target type
+           0    23    26   Class java/lang/Exception
+
+  public boolean isStartAfterPrepared();
+    Code:
+       0: aload_0
+       1: getfield      #57                 // Field mStartAfterPrepared:Z
+       4: ireturn
+
+  public void setStartAfterPrepared(boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: putfield      #57                 // Field mStartAfterPrepared:Z
+       5: return
+
+  public boolean isReleaseWhenLossAudio();
+    Code:
+       0: aload_0
+       1: getfield      #63                 // Field mReleaseWhenLossAudio:Z
+       4: ireturn
+
+  public void setReleaseWhenLossAudio(boolean);
+    Code:
+       0: aload_0
+       1: iload_1
+       2: putfield      #63                 // Field mReleaseWhenLossAudio:Z
+       5: return
+
+  public java.util.Map<java.lang.String, java.lang.String> getMapHeadData();
+    Code:
+       0: aload_0
+       1: getfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+       4: areturn
+
+  public void setMapHeadData(java.util.Map<java.lang.String, java.lang.String>);
+    Code:
+       0: aload_1
+       1: ifnull        9
+       4: aload_0
+       5: aload_1
+       6: putfield      #82                 // Field mMapHeadData:Ljava/util/Map;
+       9: return
+
+  public java.lang.String getOverrideExtension();
+    Code:
+       0: aload_0
+       1: getfield      #393                // Field mOverrideExtension:Ljava/lang/String;
+       4: areturn
+
+  public void setOverrideExtension(java.lang.String);
+    Code:
+       0: aload_0
+       1: aload_1
+       2: putfield      #393                // Field mOverrideExtension:Ljava/lang/String;
+       5: return
+
+  protected android.media.AudioManager getAudioManager();
+    Code:
+       0: aload_0
+       1: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+       4: ifnull        17
+       7: aload_0
+       8: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      11: invokevirtual #675                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager.getAudioManager:()Landroid/media/AudioManager;
+      14: goto          18
+      17: aconst_null
+      18: areturn
+
+  protected void releaseAudioFocusManager();
+    Code:
+       0: aload_0
+       1: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+       4: ifnull        19
+       7: aload_0
+       8: getfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      11: invokevirtual #679                // Method com/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager.release:()V
+      14: aload_0
+      15: aconst_null
+      16: putfield      #290                // Field mAudioFocusManager:Lcom/shuyu/gsyvideoplayer/utils/GSYAudioFocusManager;
+      19: return
+}
