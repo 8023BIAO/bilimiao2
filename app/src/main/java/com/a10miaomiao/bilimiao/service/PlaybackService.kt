@@ -384,6 +384,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 )
             }.collect { (order, random) ->
                 refreshCustomLayout(order, random)
+                playerDelegate?.syncPlayMode(order, random)
             }
         }
     }

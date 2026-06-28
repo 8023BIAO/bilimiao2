@@ -309,6 +309,9 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
     @Override
     public void setLooping(boolean looping) {
         isLooping = looping;
+        if (mInternalPlayer != null) {
+            mInternalPlayer.setRepeatMode(looping ? REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+        }
     }
 
     @Override
