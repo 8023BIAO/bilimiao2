@@ -552,6 +552,12 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
         //缓冲时顺序为：STATE_BUFFERING -》STATE_READY
         //Log.e(TAG, "onPlayerStateChanged: playWhenReady = " + playWhenReady + ", playbackState = " + playbackState);
         if (isLastReportedPlayWhenReady != playWhenReady || lastReportedPlaybackState != playbackState) {
+            // 方案 A 修复：状态变量必须在所有 notify 之前更新。
+            // notifyOnCompletion() 等回调可能触发 GSY 层重入本方法（同线程），
+            // 若状态在通知之后才更新，重入时 guard 再次通过 → 反馈循环。
+            isLastReportedPlayWhenReady = playWhenReady;
+            lastReportedPlaybackState = playbackState;
+
             int buffer = 0;
             if (mInternalPlayer != null) {
                 buffer = mInternalPlayer.getBufferedPercentage();
@@ -589,8 +595,7 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
                     break;
             }
         }
-        isLastReportedPlayWhenReady = playWhenReady;
-        lastReportedPlaybackState = playbackState;
+        // 状态变量已在 guard 块顶部更新，此处不再重复
     }
 
     @Override
