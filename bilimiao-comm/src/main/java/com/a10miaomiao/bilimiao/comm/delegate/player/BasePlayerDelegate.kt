@@ -33,4 +33,5 @@ interface BasePlayerDelegate: BaseDelegate {
     fun mediaGetTitle(): String? = null
     fun mediaGetSubtitle(): String? = null
     fun mediaGetCoverUrl(): String? = null
+    fun syncPlayMode(order: Int, random: Boolean) {}
 }

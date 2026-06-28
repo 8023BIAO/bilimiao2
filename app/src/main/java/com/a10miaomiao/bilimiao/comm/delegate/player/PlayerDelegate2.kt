@@ -1087,4 +1087,21 @@ class PlayerDelegate2(
     override fun mediaGetCoverUrl(): String? {
         return playerSource?.coverUrl
     }
+
+    /** 同步播放模式：通知栏切换后即时更新当前播放器循环状态 */
+    override fun syncPlayMode(order: Int, random: Boolean) {
+        val nextBits = SettingConstants.PLAYER_ORDER_NEXT_P or
+                SettingConstants.PLAYER_ORDER_NEXT_VIDEO or
+                SettingConstants.PLAYER_ORDER_NEXT_EPISODE
+        val hasLoop = (order and SettingConstants.PLAYER_ORDER_LOOP) != 0
+        val hasNext = (order and nextBits) != 0
+        val isLoop = hasLoop && !hasNext  // 单集循环
+        playerSource?.isLoop = isLoop
+        // 直达 ExoPlayer repeatMode：gsyVideoManager.player 即 IPlayerManager（运行期为 Media3ExoPlayerManager），
+        // getMediaPlayer() 返回 ExoMediaPlayer，setLooping → mInternalPlayer.setRepeatMode（主线程，与 ExoPlayer 同线程）
+        val manager = player?.gsyVideoManager?.player
+        if (manager is com.a10miaomiao.bilimiao.widget.player.media3.Media3ExoPlayerManager) {
+            manager.getMediaPlayer()?.setLooping(isLoop)
+        }
+    }
 }

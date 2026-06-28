@@ -132,7 +132,7 @@ object WbiSigner {
         val sortedKeys = params.keys.sorted()
         val queryString = sortedKeys.joinToString("&") { key ->
             val encodedKey = URLEncoder.encode(key, "UTF-8")
-            val encodedValue = URLEncoder.encode(params[key] ?: "", "UTF-8")
+            val encodedValue = URLEncoder.encode(params[key] ?: "", "UTF-8").replace("+", "%20")
             "$encodedKey=$encodedValue"
         }
 
@@ -173,7 +173,7 @@ object WbiSigner {
         val sortedKeys = params.keys.sorted()
         val queryString = sortedKeys.joinToString("&") { key ->
             val encodedKey = URLEncoder.encode(key, "UTF-8")
-            val encodedValue = URLEncoder.encode(params[key] ?: "", "UTF-8")
+            val encodedValue = URLEncoder.encode(params[key] ?: "", "UTF-8").replace("+", "%20")
             "$encodedKey=$encodedValue"
         }
 
