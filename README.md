@@ -11,4 +11,3 @@
 - [DanmakuFlameMaster](https://github.com/bilibili/DanmakuFlameMaster)
 - [mojito](https://github.com/mikaelzero/mojito)
 - [DialogX](https://github.com/kongzue/DialogX)
-- [scale](https://github.com/jvziyaoyao/scale)
