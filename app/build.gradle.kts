@@ -13,8 +13,8 @@ android {
         applicationId = "com.a10miaomiao.bilimiao.mod"
         minSdk = 23
         targetSdk = 36
-        versionCode = 53
-        versionName = "v2026.06.24-01"
+        versionCode = 54
+        versionName = "v2026.06.28-01"
 
         flavorDimensions("default")
 
@@ -39,7 +39,7 @@ android {
             // 跳过 lintVital，节省大量时间
             lint { checkReleaseBuilds = false }
             proguardFiles(
-                getDefaultProguardFile("proguard-android.txt"),
+                getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
             // 使用debug签名（指纹A9:7D...）

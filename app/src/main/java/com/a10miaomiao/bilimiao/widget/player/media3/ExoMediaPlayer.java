@@ -54,7 +54,7 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
     private static final String TAG = "IjkExo2MediaPlayer";
 
     protected Context mAppContext;
-    protected ExoPlayer mInternalPlayer;
+    protected volatile ExoPlayer mInternalPlayer;
     protected EventLogger mEventLogger;
     protected DefaultRenderersFactory mRendererFactory;
     protected MediaSource mMediaSource;
@@ -547,7 +547,7 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
     }
 
     @Override
-    public void onPlayWhenReadyChanged(boolean playWhenReady, int playbackState) {
+    public synchronized void onPlayWhenReadyChanged(boolean playWhenReady, int playbackState) {
         //重新播放状态顺序为：STATE_IDLE -》STATE_BUFFERING -》STATE_READY
         //缓冲时顺序为：STATE_BUFFERING -》STATE_READY
         //Log.e(TAG, "onPlayerStateChanged: playWhenReady = " + playWhenReady + ", playbackState = " + playbackState);
