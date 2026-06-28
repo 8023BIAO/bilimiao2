@@ -7,7 +7,6 @@
 - [Splitties](https://github.com/LouisCAD/Splitties)
 - [okhttp](https://github.com/square/okhttp)
 - [glide](https://github.com/bumptech/glide)
-- [BaseRecyclerViewAdapterHelper](https://github.com/CymChad/BaseRecyclerViewAdapterHelper)
 - [GSYVideoPlayer](https://github.com/CarGuo/GSYVideoPlayer)
 - [DanmakuFlameMaster](https://github.com/bilibili/DanmakuFlameMaster)
 - [mojito](https://github.com/mikaelzero/mojito)
