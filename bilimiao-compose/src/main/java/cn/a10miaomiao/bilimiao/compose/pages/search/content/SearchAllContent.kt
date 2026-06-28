@@ -79,6 +79,18 @@ private class SearchAllContentViewModel(
     val list = FlowPaginationInfo<SearchItem>()
     val isRefreshing = MutableStateFlow(false)
 
+    /** 已看视频URI集合，刷新时保留，上限500防OOM */
+    private val seenUris = object : java.util.LinkedHashSet<String>(500, 0.75f) {
+        override fun add(element: String): Boolean {
+            if (size >= 500) {
+                val it = iterator()
+                it.next()
+                it.remove()
+            }
+            return super.add(element)
+        }
+    }
+
     val rankOrderList = listOf(
         0 to "默认排序",
         2 to "新发布",
@@ -132,14 +144,27 @@ private class SearchAllContentViewModel(
             } else {
                 result.item
             }
+            // 去重：同BV号不放行（同批次+跨批次，上限500）
+            val batchSeen = mutableSetOf<String>()
+            val filteredItems = itemList.filter { item ->
+                val id = item.uri
+                id !in seenUris && id !in batchSeen
+            }
+            filteredItems.forEach { item ->
+                val id = item.uri
+                if (id.isNotEmpty()) {
+                    batchSeen.add(id)
+                    seenUris.add(id)
+                }
+            }
             _next = result.pagination?.next ?: ""
-            list.finished.value = itemList.isEmpty() || _next.isBlank()
+            list.finished.value = filteredItems.isEmpty() || _next.isBlank()
             if (next.isBlank()) {
-                list.data.value = itemList
+                list.data.value = filteredItems
             } else {
                 list.data.value = list.data.value
                     .toMutableList()
-                    .apply { addAll(itemList) }
+                    .apply { addAll(filteredItems) }
             }
         } catch (e: Exception) {
             e.printStackTrace()
