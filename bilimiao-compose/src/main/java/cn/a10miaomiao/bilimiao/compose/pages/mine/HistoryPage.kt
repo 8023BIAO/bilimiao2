@@ -105,9 +105,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.Clock
 import kotlinx.datetime.DateTimeUnit
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
@@ -474,7 +473,7 @@ private fun HistoryPageContent(
 
     val today = remember {
         val now = java.lang.System.currentTimeMillis()
-        kotlinx.datetime.Instant.fromEpochMilliseconds(now).toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date
+        kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date
     }
     val currentDate = remember {
         mutableStateOf(today)

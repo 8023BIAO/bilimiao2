@@ -157,7 +157,7 @@ private class AtMessageContentModel(
         if (item.item.business_id == 1) {
             val aid = item.item.subject_id
             val targetId = item.item.target_id
-            val videoPageUrl = "bilimiao://video/$aid}"
+            val videoPageUrl = "bilimiao://video/$aid"
             if (targetId == 0L) {
                 pageNavigation.navigateToVideoInfo(aid.toString())
             } else {

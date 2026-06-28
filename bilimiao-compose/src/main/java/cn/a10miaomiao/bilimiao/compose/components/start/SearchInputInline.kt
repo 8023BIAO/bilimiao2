@@ -333,7 +333,7 @@ fun SearchInputInline(
                                                 pageNavigation.navigateByUri(Uri.parse("bilimiao://video/${item.value}"))
                                             }
                                             SearchInputViewModel.SuggestType.SS -> {
-                                                pageNavigation.navigateByUri(Uri.parse("bilimiao://video/${item.value}"))
+                                                pageNavigation.navigateByUri(Uri.parse("bilimiao://bangumi/${item.value}"))
                                             }
                                             else -> {
                                                 startSearch(item.value)
