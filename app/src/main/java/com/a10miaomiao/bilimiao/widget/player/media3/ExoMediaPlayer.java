@@ -402,6 +402,7 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
                         if (isLooping) {
                             mInternalPlayer.setRepeatMode(REPEAT_MODE_ALL);
                         }
+                        android.util.Log.d("LoopDebug", "prepareAsyncInternal isLooping=" + isLooping + " repeatMode=" + mInternalPlayer.getRepeatMode());
                         if (mSurface != null)
                             mInternalPlayer.setVideoSurface(mSurface);
                         mInternalPlayer.setMediaSource(mMediaSource);
@@ -592,6 +593,7 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
                 case Player.STATE_READY:
                     break;
                 case Player.STATE_ENDED:
+                    android.util.Log.d("LoopDebug", "STATE_ENDED->notifyOnCompletion isLooping=" + isLooping + " repeatMode=" + (mInternalPlayer != null ? mInternalPlayer.getRepeatMode() : -1));
                     notifyOnCompletion();
                     break;
                 default:

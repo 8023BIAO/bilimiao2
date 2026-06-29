@@ -791,6 +791,7 @@ class PlayerController(
      * 播放结束
      */
     override fun onAutoCompletion() {
+        android.util.Log.d("LoopDebug", "onAutoCompletion ENTRY src=${delegate.playerSource?.id} srcIsLoop=${delegate.playerSource?.isLoop}")
         delegate.historyReport(player?.currentPosition ?: 0L)
         scope.launch {
             val currentPlayerSourceInfo = delegate.playerSource ?: return@launch

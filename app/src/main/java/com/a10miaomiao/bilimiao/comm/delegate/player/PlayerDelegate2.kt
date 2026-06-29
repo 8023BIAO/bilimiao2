@@ -783,6 +783,7 @@ class PlayerDelegate2(
     }
 
     override fun openPlayer(source: BasePlayerSource) {
+        android.util.Log.d("LoopDebug", "openPlayer src=${source.id} srcIsLoop=${source.isLoop} playerClosed=$playerClosed")
         playerClosed = false
         loadingBoxController.showLoading(source.title, source.coverUrl)
         loadingBoxController.print("初始化播放器...")
