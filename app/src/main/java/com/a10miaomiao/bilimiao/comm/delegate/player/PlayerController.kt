@@ -791,7 +791,8 @@ class PlayerController(
      * 播放结束
      */
     override fun onAutoCompletion() {
-        android.util.Log.d("LoopDebug", "onAutoCompletion ENTRY src=${delegate.playerSource?.id} srcIsLoop=${delegate.playerSource?.isLoop}")
+        // OMP-DIAG: android.util.Log.e("LoopDebug", "onAutoCompletion ENTRY src=${delegate.playerSource?.id} srcIsLoop=${delegate.playerSource?.isLoop}")
+        // OMP-DIAG: try { java.io.File("/storage/emulated/0/Download/BiliMiao/loopdebug.txt").appendText("onAutoCompletion ENTRY src=${delegate.playerSource?.id} srcIsLoop=${delegate.playerSource?.isLoop}\n") } catch (_: Exception) {}
         delegate.historyReport(player?.currentPosition ?: 0L)
         scope.launch {
             val currentPlayerSourceInfo = delegate.playerSource ?: return@launch

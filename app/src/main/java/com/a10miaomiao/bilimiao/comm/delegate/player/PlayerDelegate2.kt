@@ -783,7 +783,8 @@ class PlayerDelegate2(
     }
 
     override fun openPlayer(source: BasePlayerSource) {
-        android.util.Log.d("LoopDebug", "openPlayer src=${source.id} srcIsLoop=${source.isLoop} playerClosed=$playerClosed")
+        // OMP-DIAG: android.util.Log.e("LoopDebug", "openPlayer src=${source.id} srcIsLoop=${source.isLoop} playerClosed=$playerClosed")
+        // OMP-DIAG: try { java.io.File("/storage/emulated/0/Download/BiliMiao/loopdebug.txt").appendText("openPlayer src=${source.id} srcIsLoop=${source.isLoop} playerClosed=$playerClosed\n") } catch (_: Exception) {}
         playerClosed = false
         loadingBoxController.showLoading(source.title, source.coverUrl)
         loadingBoxController.print("初始化播放器...")
