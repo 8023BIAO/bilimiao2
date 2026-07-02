@@ -23,6 +23,7 @@ import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences.dataStore
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -274,7 +275,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     fun setPlayer(player: ExoPlayer) {
         // 释放旧 session player（可能是 dummy 或 ForwardingPlayer 包装的旧 exoPlayer）
         mediaSession?.player?.let { old ->
-            try { old.release() } catch (_: Exception) {}
+            try { old.release() } catch (e: Exception) { miaoLogger() error "release old player failed: ${e.message}" }
         }
         exoPlayer?.release()
         exoPlayer = player
@@ -347,8 +348,8 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         stopForeground(STOP_FOREGROUND_REMOVE)
         // 兜底释放（notifyPlaybackComplete 已清理时 mediaSession 为 null，这里不执行）
         mediaSession?.run {
-            try { player.release() } catch (_: Exception) {}
-            try { release() } catch (_: Exception) {}
+            try { player.release() } catch (e: Exception) { miaoLogger() error "onDestroy player.release failed: ${e.message}" }
+            try { release() } catch (e: Exception) { miaoLogger() error "onDestroy session.release failed: ${e.message}" }
         }
         mediaSession = null
         exoPlayer?.release()

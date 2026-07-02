@@ -402,8 +402,6 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
                         if (isLooping) {
                             mInternalPlayer.setRepeatMode(REPEAT_MODE_ALL);
                         }
-                        // OMP-DIAG: android.util.Log.e("LoopDebug", "prepareAsyncInternal isLooping=" + isLooping + " repeatMode=" + mInternalPlayer.getRepeatMode());
-                        // OMP-DIAG: try { java.io.FileWriter fw = new java.io.FileWriter("/storage/emulated/0/Download/BiliMiao/loopdebug.txt", true); fw.write("prepareAsyncInternal isLooping=" + isLooping + " repeatMode=" + mInternalPlayer.getRepeatMode() + "\n"); fw.close(); } catch (Exception ignored) {}
                         if (mSurface != null)
                             mInternalPlayer.setVideoSurface(mSurface);
                         mInternalPlayer.setMediaSource(mMediaSource);
@@ -594,8 +592,6 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
                 case Player.STATE_READY:
                     break;
                 case Player.STATE_ENDED:
-                    // OMP-DIAG: android.util.Log.e("LoopDebug", "STATE_ENDED->notifyOnCompletion isLooping=" + isLooping + " repeatMode=" + (mInternalPlayer != null ? mInternalPlayer.getRepeatMode() : -1));
-                    // OMP-DIAG: try { java.io.FileWriter fw = new java.io.FileWriter("/storage/emulated/0/Download/BiliMiao/loopdebug.txt", true); fw.write("STATE_ENDED->notifyOnCompletion isLooping=" + isLooping + " repeatMode=" + (mInternalPlayer != null ? mInternalPlayer.getRepeatMode() : -1) + "\n"); fw.close(); } catch (Exception ignored) {}
                     notifyOnCompletion();
                     break;
                 default:

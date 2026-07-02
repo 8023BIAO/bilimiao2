@@ -97,7 +97,7 @@ import java.net.UnknownHostException
 
 
 class PlayerDelegate2(
-    private var activity: AppCompatActivity,
+    private val activity: AppCompatActivity,
     override val di: DI,
 ) : BasePlayerDelegate, DIAware, ExoMediaSourceInterceptListener {
 
@@ -440,7 +440,7 @@ class PlayerDelegate2(
     @OptIn(markerClass = [UnstableApi::class])
     private fun initPlayer() {
         BilimiaoPlayerManager.initConfig()
-        GSYVideoType.setRenderType(GSYVideoType.TEXTURE);
+        GSYVideoType.setRenderType(GSYVideoType.TEXTURE)
         ExoSourceManager.setExoMediaSourceInterceptListener(this)
     }
 
@@ -783,8 +783,6 @@ class PlayerDelegate2(
     }
 
     override fun openPlayer(source: BasePlayerSource) {
-        // OMP-DIAG: android.util.Log.e("LoopDebug", "openPlayer src=${source.id} srcIsLoop=${source.isLoop} playerClosed=$playerClosed")
-        // OMP-DIAG: try { java.io.File("/storage/emulated/0/Download/BiliMiao/loopdebug.txt").appendText("openPlayer src=${source.id} srcIsLoop=${source.isLoop} playerClosed=$playerClosed\n") } catch (_: Exception) {}
         playerClosed = false
         loadingBoxController.showLoading(source.title, source.coverUrl)
         loadingBoxController.print("初始化播放器...")
@@ -813,6 +811,7 @@ class PlayerDelegate2(
             if (playerClosed || activity.isFinishing) return@post
             setThumbImageView(source.coverUrl)
             playerCoroutineScope.launch(Dispatchers.Main) {
+                var selectedHost = "default"
                 SettingPreferences.getData(activity) {
                     fnval = it[PlayerFnval] ?: SettingConstants.PLAYER_FNVAL_DASH
                     // 番剧/影视强制使用 MP4 源：fnval 必须为 MP4，否则 API 返回的
@@ -823,16 +822,10 @@ class PlayerDelegate2(
                     quality = it[PlayerQuality] ?: 64
                     speed = it[PlayerSpeed] ?: 1f
                     showNotification = it[PlayerNotification] ?: true
-                }
-                // ───── CDN 设置 ─────
-                source.cdnRaceEnabled = SettingPreferences.mapData(activity) { prefs ->
-                    prefs[SettingPreferences.CdnRaceEnabled] ?: false
-                }
-                source.audioIndependentCdn = SettingPreferences.mapData(activity) { prefs ->
-                    prefs[SettingPreferences.AudioIndependentCdn] ?: false
-                }
-                val selectedHost = SettingPreferences.mapData(activity) { prefs ->
-                    prefs[SettingPreferences.SelectedCdnHost] ?: "default"
+                    // ───── CDN 设置（合并读取，减少 DataStore IO） ─────
+                    source.cdnRaceEnabled = it[SettingPreferences.CdnRaceEnabled] ?: false
+                    source.audioIndependentCdn = it[SettingPreferences.AudioIndependentCdn] ?: false
+                    selectedHost = it[SettingPreferences.SelectedCdnHost] ?: "default"
                 }
                 if (selectedHost.isNotEmpty()) {
                     val cdnInfo = CdnHosts.list.find { it.key == selectedHost }
@@ -985,7 +978,7 @@ class PlayerDelegate2(
         val danmaku = controller.createDanmaku(type).apply {
             text = danmakuText
             textColor = danmakuTextColor
-            textSize = danmakuTextSize * (dispDensity - 0.6f);
+            textSize = danmakuTextSize * (dispDensity - 0.6f)
             time = currentPosition + 100
             borderColor = 0xFFFFFFFF.toInt()
         }

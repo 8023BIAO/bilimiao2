@@ -16,7 +16,7 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 
 class ErrorMessageBoxController(
-    private var activity: AppCompatActivity,
+    private val activity: AppCompatActivity,
     private val delegate: PlayerDelegate2,
     override val di: DI,
 ) : DIAware {

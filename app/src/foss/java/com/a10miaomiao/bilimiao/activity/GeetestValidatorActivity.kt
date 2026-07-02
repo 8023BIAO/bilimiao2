@@ -65,6 +65,15 @@ class GeetestValidatorActivity : AppCompatActivity() {
         getGTApi(ui.webView)
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // 真正关闭时清理静态回调引用，避免 Activity 泄漏；
+        // 旋转重建(isFinishing=false)时保留 tempCallback 供 onCreate 恢复
+        if (isFinishing) {
+            tempCallback = null
+        }
+    }
+
     private fun getGTApi(
         webView: WebView
     ) = lifecycleScope.launch {

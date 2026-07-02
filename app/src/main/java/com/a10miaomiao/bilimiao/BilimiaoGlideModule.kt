@@ -11,6 +11,7 @@ import com.bumptech.glide.load.engine.cache.LruResourceCache
 import com.bumptech.glide.module.AppGlideModule
 import com.bumptech.glide.request.RequestOptions
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 @GlideModule
 class BilimiaoGlideModule : AppGlideModule() {
@@ -19,9 +20,12 @@ class BilimiaoGlideModule : AppGlideModule() {
         // 读取用户设置的图片缓存大小，默认50MB
         val cacheSizeMb = try {
             runBlocking {
-                SettingPreferences.mapData(context) { prefs ->
-                    prefs[SettingPreferences.ImageDiskCacheSize] ?: 50
-                }
+                // 超时上限防止 DataStore 异常时主线程无限阻塞；超时/异常均降级为默认50
+                withTimeoutOrNull(500L) {
+                    SettingPreferences.mapData(context) { prefs ->
+                        prefs[SettingPreferences.ImageDiskCacheSize] ?: 50
+                    }
+                } ?: 50
             }
         } catch (e: Exception) {
             50

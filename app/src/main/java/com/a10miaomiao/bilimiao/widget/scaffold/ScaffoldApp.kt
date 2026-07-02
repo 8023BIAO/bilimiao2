@@ -2,7 +2,6 @@ package com.a10miaomiao.bilimiao.widget.scaffold
 
 import android.app.Activity
 import android.view.View
-import androidx.appcompat.app.AppCompatActivity
 import android.view.ViewGroup
 import androidx.core.view.size
 import androidx.fragment.app.Fragment
@@ -25,13 +24,13 @@ fun <T: View> getView(viewGroup: ViewGroup, clazz: Class<T>): T? {
 fun Activity.getScaffoldView(): ScaffoldView {
     val rootView = findViewById<ViewGroup>(android.R.id.content)
     return getView(rootView, ScaffoldView::class.java)
-        ?: throw Exception("NOT ScaffoldView")
+        ?: throw IllegalStateException("NOT ScaffoldView")
 }
 
 fun Activity.getAppBarView(): AppBarView {
     val rootView = findViewById<ViewGroup>(android.R.id.content)
     return getView(rootView, AppBarView::class.java)
-        ?: throw Exception("NOT AppBarView")
+        ?: throw IllegalStateException("NOT AppBarView")
 }
 
 inline fun Fragment.getAppBarView (): AppBarView {

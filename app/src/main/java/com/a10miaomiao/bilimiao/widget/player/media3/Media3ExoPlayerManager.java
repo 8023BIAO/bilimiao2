@@ -5,6 +5,7 @@ import android.media.AudioManager;
 import android.net.TrafficStats;
 import android.net.Uri;
 import android.os.Message;
+import android.util.Log;
 import android.view.Surface;
 
 import androidx.annotation.Nullable;
@@ -103,7 +104,7 @@ public class Media3ExoPlayerManager extends BasePlayerManager {
                 mediaPlayer.setSpeed(gsyModel.getSpeed(), 1);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e("Media3ExoPlayer", "initVideoPlayer failed", e);
         }
         initSuccess(gsyModel);
     }
@@ -128,7 +129,7 @@ public class Media3ExoPlayerManager extends BasePlayerManager {
             try {
                 mediaPlayer.setSpeed(speed, 1);
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.e("Media3ExoPlayer", "setSpeed failed", e);
             }
         }
     }

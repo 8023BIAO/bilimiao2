@@ -8,6 +8,7 @@ import android.view.ContextThemeWrapper
 import androidx.appcompat.widget.PopupMenu
 import com.a10miaomiao.bilimiao.MainActivity
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 
 class MainBackPopupMenu(
     private val activity: Activity,
@@ -47,7 +48,8 @@ class MainBackPopupMenu(
         try {
             popupMenu.show()
         } catch (e: Exception) {
-            // 忽略窗口未附加时的异常
+            // 窗口未附加时 PopupMenu.show() 会抛异常，记录日志后忽略
+            miaoLogger() error "MainBackPopupMenu show failed: ${e.message}"
         }
     }
 

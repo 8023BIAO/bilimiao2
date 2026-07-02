@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ContextThemeWrapper
 import androidx.appcompat.widget.PopupMenu
 import com.a10miaomiao.bilimiao.comm.utils.setCheckMarkTint
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 
 class MyPopupMenu(
     private val activity: Activity,
@@ -17,7 +18,7 @@ class MyPopupMenu(
 ): PopupMenu.OnMenuItemClickListener {
 
     private val popupMenu = PopupMenu(ContextThemeWrapper(activity, com.a10miaomiao.bilimiao.R.style.Theme_Bilimiao), anchorView)
-    private var currentCheckedKey = myPageMenu.checkedKey
+    private val currentCheckedKey = myPageMenu.checkedKey
 
     init {
         popupMenu.menu.apply {
@@ -84,7 +85,8 @@ class MyPopupMenu(
         try {
             popupMenu.show()
         } catch (e: Exception) {
-            // 忽略窗口未附加时的异常
+            // 窗口未附加时 PopupMenu.show() 会抛异常，记录日志后忽略
+            miaoLogger() error "MyPopupMenu show failed: ${e.message}"
         }
     }
 

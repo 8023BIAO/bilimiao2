@@ -36,7 +36,6 @@ import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.service.PlaybackService
 import com.a10miaomiao.bilimiao.widget.player.ChapterInfo
-import android.widget.Toast
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerSeekBus
 import com.a10miaomiao.bilimiao.widget.player.DanmakuTextFilter
@@ -65,7 +64,7 @@ import org.kodein.di.instance
 
 
 class PlayerController(
-    private var activity: AppCompatActivity,
+    private val activity: AppCompatActivity,
     private val delegate: PlayerDelegate2,
     private val scope: CoroutineScope,
     override val di: DI,
@@ -599,7 +598,7 @@ class PlayerController(
                 SettingConstants.PLAYER_FULL_MODE_REVERSE_LANDSCAPE -> R.id.full_mode_rl
                 SettingConstants.PLAYER_FULL_MODE_UNSPECIFIED -> R.id.full_mode_u
                 SettingConstants.PLAYER_FULL_MODE_AUTO -> R.id.full_mode_auto
-                else -> SettingConstants.PLAYER_FULL_MODE_AUTO
+                else -> R.id.full_mode_auto
             }
             popupMenu.inflate(R.menu.player_full_mode)
             popupMenu.menu.findItem(checkMenuId).isChecked = true
@@ -791,8 +790,6 @@ class PlayerController(
      * 播放结束
      */
     override fun onAutoCompletion() {
-        // OMP-DIAG: android.util.Log.e("LoopDebug", "onAutoCompletion ENTRY src=${delegate.playerSource?.id} srcIsLoop=${delegate.playerSource?.isLoop}")
-        // OMP-DIAG: try { java.io.File("/storage/emulated/0/Download/BiliMiao/loopdebug.txt").appendText("onAutoCompletion ENTRY src=${delegate.playerSource?.id} srcIsLoop=${delegate.playerSource?.isLoop}\n") } catch (_: Exception) {}
         delegate.historyReport(player?.currentPosition ?: 0L)
         scope.launch {
             val currentPlayerSourceInfo = delegate.playerSource ?: return@launch
@@ -903,6 +900,7 @@ class PlayerController(
                 try {
                     it.updatePictureInPictureActions(state)
                 } catch (e: Exception) {
+                    miaoLogger() error "updatePictureInPictureActions failed: ${e.message}"
                 }
             }
         }

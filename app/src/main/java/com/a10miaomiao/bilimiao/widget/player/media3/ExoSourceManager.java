@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.net.Uri;
 import android.text.TextUtils;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
@@ -115,7 +116,7 @@ public class ExoSourceManager{
             try {
                 rawResourceDataSource.open(dataSpec);
             } catch (RawResourceDataSource.RawResourceDataSourceException e) {
-                e.printStackTrace();
+                Log.e("ExoSourceManager", "dataSource error", e);
             }
             DataSource.Factory factory = new DataSource.Factory() {
                 @Override
@@ -132,7 +133,7 @@ public class ExoSourceManager{
             try {
                 rawResourceDataSource.open(dataSpec);
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.e("ExoSourceManager", "dataSource error", e);
             }
             DataSource.Factory factory = new DataSource.Factory() {
                 @Override
@@ -248,7 +249,7 @@ public class ExoSourceManager{
                 mCache.release();
                 mCache = null;
             } catch (Exception e) {
-                e.printStackTrace();
+                Log.e("ExoSourceManager", "dataSource error", e);
             }
         }
     }
@@ -271,7 +272,7 @@ public class ExoSourceManager{
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e("ExoSourceManager", "dataSource error", e);
         }
     }
 
@@ -282,7 +283,7 @@ public class ExoSourceManager{
             try {
                 cache.removeSpan(cachedSpan);
             } catch (Exception e) {
-                // Do nothing.
+                Log.e("ExoSourceManager", "removeCache failed", e);
             }
         }
     }

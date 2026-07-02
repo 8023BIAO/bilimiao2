@@ -2,21 +2,14 @@ package com.a10miaomiao.bilimiao.widget.scaffold
 
 import android.content.Context
 import android.content.res.ColorStateList
-import android.graphics.drawable.Drawable
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.View
-import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityNodeInfo
-import android.widget.FrameLayout
 import android.widget.LinearLayout
-import androidx.annotation.DrawableRes
-import androidx.core.view.marginTop
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.config.config
 import splitties.dimensions.dip
 import splitties.views.dsl.core.*
-import splitties.views.rightPadding
 
 open class MenuItemView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null

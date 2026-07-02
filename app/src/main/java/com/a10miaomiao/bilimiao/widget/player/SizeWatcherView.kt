@@ -12,10 +12,7 @@ class SizeWatcherView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-//        if (w != oldw && h != oldh){
-//            DebugMiao.log("SizeWatcherView->[($w,$h),($oldw,$oldh)]")
         onSizeChangedListener?.invoke()
-//        }
     }
 
 }

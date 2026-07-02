@@ -33,6 +33,6 @@ class MyBottomSheetBehavior(context: Context)
         consumed: IntArray
     ) {
         // 消费未消费的滚动
-        super.onNestedPreScroll(coordinatorLayout, child, target, dxUnconsumed, dyUnconsumed, consumed, type)
+        super.onNestedScroll(coordinatorLayout, child, target, dxConsumed, dyConsumed, dxUnconsumed, dyUnconsumed, type, consumed)
     }
 }

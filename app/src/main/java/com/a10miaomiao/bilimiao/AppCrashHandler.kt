@@ -32,6 +32,7 @@ class AppCrashHandler private constructor(
 
     // 单例模式
     companion object {
+        @Volatile
         private var instance: AppCrashHandler? = null
         fun getInstance(context: Context): AppCrashHandler? {
             if (instance == null) {
@@ -62,7 +63,7 @@ class AppCrashHandler private constructor(
             Thread.sleep(2000)
         } catch (e: Exception) {
         }
-        exitProcess(0)
+        exitProcess(2)
     }
 
     /**
@@ -104,7 +105,7 @@ class AppCrashHandler private constructor(
         info["渠道标识"] = appChannel
 
         val pm = context.packageManager
-        val pi = pm.getPackageInfo(context.packageName, PackageManager.GET_ACTIVITIES)
+        val pi = pm.getPackageInfo(context.packageName, 0)
         if (pi != null) {
             info["应用版本"] = pi.versionName ?: "unknown"
             info["应用版本号"] = "${PackageInfoCompat.getLongVersionCode(pi)}"

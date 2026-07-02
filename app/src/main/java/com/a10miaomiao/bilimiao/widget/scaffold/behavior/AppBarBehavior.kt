@@ -102,7 +102,7 @@ class AppBarBehavior : CoordinatorLayout.Behavior<View> {
                     left = 0
                     top = parentRef!!.measuredHeight - height
                     right = parentRef!!.measuredWidth
-                    bottom = parentRef!!.measuredHeight + parentRef!!.measuredHeight + height
+                    bottom = parentRef!!.measuredHeight + height
                 }
             }
             if (ev.x > left && ev.x < right && ev.y > top && ev.y < bottom) {

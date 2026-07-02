@@ -95,7 +95,7 @@ class DlnaManager(private val context: Context) {
         try {
             upnpService?.registry?.removeListener(registryListener)
             upnpService?.shutdown()
-        } catch (_: Exception) {}
+        } catch (e: Exception) { miaoLogger() error "stopDiscovery failed: ${e.message}" }
         upnpService = null
         _devices.clear()
     }

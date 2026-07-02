@@ -205,7 +205,7 @@ object SettingPreferences {
     val BottomBarLock = booleanPreferencesKey("bottom_bar_lock")
     // 视频播放磁盘缓存大小（MB, 默认500）
     val PlayerDiskCacheSize = intPreferencesKey("player_disk_cache_size")
-    // 图片缓存大小限制（MB, 默认250）
+    // 图片缓存大小限制（MB, 默认50）
     val ImageDiskCacheSize = intPreferencesKey("image_disk_cache_size")
 
     // 已关注UP主白名单：开启后已关注UP的视频不受屏蔽规则影响

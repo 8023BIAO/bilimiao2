@@ -10,7 +10,6 @@ import androidx.coordinatorlayout.widget.CoordinatorLayout
 import androidx.core.animation.addListener
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
-import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.widget.scaffold.ScaffoldView
 import splitties.dimensions.dip
 import kotlin.math.max
@@ -19,7 +18,6 @@ import kotlin.math.min
 
 class PlayerBehavior : CoordinatorLayout.Behavior<View> {
 
-    val logger = miaoLogger()
 
     var playerX = -1
     var playerY = -1

@@ -11,7 +11,7 @@ import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
 import com.shuyu.gsyvideoplayer.video.StandardGSYVideoPlayer
 
 class PlayerViews(
-    private var activity: AppCompatActivity,
+    private val activity: AppCompatActivity,
 ) {
 
     val videoPlayer: DanmakuVideoPlayer? get() = activity.findViewById(R.id.video_player)
