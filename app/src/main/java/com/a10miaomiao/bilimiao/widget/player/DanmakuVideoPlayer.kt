@@ -1371,6 +1371,25 @@ initDanmakuTouchListener()
     }
 
     private var mDialogOffsetText: TextView? = null
+    /**
+     * Activity 窗口 token 是否仍有效，可用于安全弹出 Dialog。
+     * 切后台 / 销毁中时 token 失效，此时 Dialog.show() 会抛
+     * WindowManager.BadTokenException 导致崩溃（见 /sdcard/log.log）。
+     */
+    private fun canShowDialog(): Boolean {
+        val act = activityContext as? Activity ?: return false
+        return !act.isFinishing && !act.isDestroyed
+    }
+
+    override fun showVolumeDialog(deltaY: Float, volumePercent: Int) {
+        if (!canShowDialog()) return
+        try {
+            super.showVolumeDialog(deltaY, volumePercent)
+        } catch (_: Exception) {
+            // Activity token 已失效（切后台/销毁中），忽略弹窗避免崩溃
+        }
+    }
+
     override fun showProgressDialog(
         deltaX: Float,
         seekTime: String?,
@@ -1378,6 +1397,7 @@ initDanmakuTouchListener()
         totalTime: String,
         totalTimeDuration: Long
     ) {
+        if (!canShowDialog()) return
         if (mProgressDialog == null) {
             val localView = LayoutInflater.from(activityContext).inflate(
                 R.layout.layout_video_progress_dialog, null
@@ -1417,7 +1437,11 @@ initDanmakuTouchListener()
             mProgressDialog.window!!.attributes = localLayoutParams
         }
         if (!mProgressDialog.isShowing) {
-            mProgressDialog.show()
+            try {
+                mProgressDialog.show()
+            } catch (_: Exception) {
+                // Activity token 已失效，忽略弹窗
+            }
         }
         if (mDialogSeekTime != null) {
             mDialogSeekTime.text = seekTime
@@ -1442,6 +1466,7 @@ initDanmakuTouchListener()
     }
 
     override fun showBrightnessDialog(percent: Float) {
+        if (!canShowDialog()) return
         if (mBrightnessDialog == null) {
             val localView = LayoutInflater.from(activityContext).inflate(
                 brightnessLayoutId, null
@@ -1475,7 +1500,11 @@ initDanmakuTouchListener()
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
         mBrightnessDialog!!.window!!.attributes = localLayoutParams
-        super.showBrightnessDialog(percent)
+        try {
+            super.showBrightnessDialog(percent)
+        } catch (_: Exception) {
+            // Activity token 已失效，忽略弹窗
+        }
     }
 
     /** 递归查找 ProgressBar 并应用主题色 */
