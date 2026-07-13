@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.view.KeyEvent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -265,6 +266,39 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             "bilimiao.next_episode" -> playerDelegate?.mediaPlayNext()
         }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+    }
+
+    override fun onMediaButtonEvent(
+        session: MediaSession,
+        controller: MediaSession.ControllerInfo,
+        intent: Intent,
+    ): Boolean {
+        if (intent.action == Intent.ACTION_MEDIA_BUTTON) {
+            val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+            if (event != null && event.action == KeyEvent.ACTION_UP) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                        // 匹配通知栏当前按钮：prevNextMode+有上一集 → 上一集，否则快退10秒
+                        if (prevNextMode && playerDelegate?.hasPreviousEpisode() == true) {
+                            playerDelegate?.mediaPlayPrevious()
+                        } else {
+                            playerDelegate?.mediaSeekBack()
+                        }
+                        return true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                        // 匹配通知栏当前按钮：prevNextMode+有下一集 → 下一集，否则快进10秒
+                        if (prevNextMode && playerDelegate?.hasNextEpisode() == true) {
+                            playerDelegate?.mediaPlayNext()
+                        } else {
+                            playerDelegate?.mediaSeekForward()
+                        }
+                        return true
+                    }
+                }
+            }
+        }
+        return super.onMediaButtonEvent(session, controller, intent)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

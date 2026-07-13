@@ -5,7 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
@@ -22,9 +22,14 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,9 +59,16 @@ fun StartLibraryCard(
     val userLibraryStore by rememberInstance<UserLibraryStore>()
     val userLibraryState by userLibraryStore.stateFlow.collectAsState()
     val isLogin = userId != null
-    BoxWithConstraints {
-        val columnCount = if (maxWidth < 300.dp) 1 else 2
-        val cardWidth = (maxWidth - (8.dp * (columnCount - 1))) / columnCount
+    var containerWidthPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val containerWidth = with(density) { containerWidthPx.toDp() }
+    val columnCount = if (containerWidth < 300.dp) 1 else 2
+    val cardWidth = if (containerWidth > 0.dp) (containerWidth - (8.dp * (columnCount - 1))) / columnCount else 0.dp
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onSizeChanged { containerWidthPx = it.width }
+    ) {
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth(),

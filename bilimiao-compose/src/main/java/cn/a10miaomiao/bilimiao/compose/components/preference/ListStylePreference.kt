@@ -2,7 +2,7 @@ package cn.a10miaomiao.bilimiao.compose.components.preference
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,6 +28,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.zhanghai.compose.preference.Preference
@@ -98,10 +101,13 @@ fun ListStylePreference(
                             .fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        BoxWithConstraints(
+                        var style1WidthPx by remember { mutableIntStateOf(0) }
+                        val style1Density = LocalDensity.current
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(80.dp),
+                                .height(80.dp)
+                                .onSizeChanged { style1WidthPx = it.width },
                         ) {
                             ListStyle1(
                                 modifier = Modifier
@@ -110,7 +116,7 @@ fun ListStylePreference(
                                     .align(Alignment.Center)
                                     .padding(top = 8.dp)
                                     .height(50.dp),
-                                maxWidth = maxWidth,
+                                maxWidth = with(style1Density) { style1WidthPx.toDp() },
                             )
                         }
                         Text(
@@ -140,10 +146,13 @@ fun ListStylePreference(
                             .fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        BoxWithConstraints(
+                        var style2WidthPx by remember { mutableIntStateOf(0) }
+                        val style2Density = LocalDensity.current
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(80.dp),
+                                .height(80.dp)
+                                .onSizeChanged { style2WidthPx = it.width },
                         ) {
                             ListStyle2(
                                 modifier = Modifier
@@ -152,7 +161,7 @@ fun ListStylePreference(
                                     .align(Alignment.Center)
                                     .padding(top = 8.dp)
                                     .height(50.dp),
-                                maxWidth = maxWidth,
+                                maxWidth = with(style2Density) { style2WidthPx.toDp() },
                             )
                         }
                         Text(

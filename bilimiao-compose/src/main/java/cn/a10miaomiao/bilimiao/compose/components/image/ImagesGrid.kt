@@ -3,17 +3,22 @@ package cn.a10miaomiao.bilimiao.compose.components.image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import cn.a10miaomiao.bilimiao.compose.R
@@ -113,43 +118,36 @@ fun ImagesGrid(
             previewerController = previewerController,
             previewerState = previewerState,
         )
-    } else if (count <= 4) {
-        BoxWithConstraints {
-            val width = min(maxWidth.value, 300f)
-            FlowRow(
-                modifier = Modifier.width(width.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                for (index in 0 until count) {
-                    ImagesGridItem(
-                        modifier = Modifier.size((width / 2 - 4).dp),
-                        index = index,
-                        imageModels = imageModels,
-                        previewerController = previewerController,
-                        previewerState = previewerState,
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-            }
-        }
     } else {
-        BoxWithConstraints {
-            val width = min(maxWidth.value, 330f)
-            FlowRow(
-                modifier = Modifier.width(width.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                for (index in 0 until count) {
-                    ImagesGridItem(
-                        modifier = Modifier.size((width / 3 - 3).dp),
-                        index = index,
-                        imageModels = imageModels,
-                        previewerController = previewerController,
-                        previewerState = previewerState,
-                        contentScale = ContentScale.Crop,
-                    )
+        val isSmallGrid = count <= 4
+        val maxCap = if (isSmallGrid) 300f else 330f
+        val columns = if (isSmallGrid) 2 else 3
+        val spacingVal = if (isSmallGrid) 4f else 3f
+        var containerWidthPx by remember { mutableIntStateOf(0) }
+        val density = LocalDensity.current
+        Box(
+            modifier = Modifier
+                .widthIn(max = maxCap.dp)
+                .onSizeChanged { containerWidthPx = it.width }
+        ) {
+            if (containerWidthPx > 0) {
+                val width = min(with(density) { containerWidthPx.toDp().value }, maxCap)
+                FlowRow(
+                    modifier = Modifier.width(width.dp),
+                    horizontalArrangement = Arrangement.spacedBy(spacingVal.dp),
+                    verticalArrangement = Arrangement.spacedBy(spacingVal.dp)
+                ) {
+                    val itemSize = (width / columns - spacingVal).dp
+                    for (index in 0 until count) {
+                        ImagesGridItem(
+                            modifier = Modifier.size(itemSize),
+                            index = index,
+                            imageModels = imageModels,
+                            previewerController = previewerController,
+                            previewerState = previewerState,
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
                 }
             }
         }
