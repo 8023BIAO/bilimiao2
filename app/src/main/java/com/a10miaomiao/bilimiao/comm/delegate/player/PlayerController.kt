@@ -805,16 +805,27 @@ class PlayerController(
                     SettingConstants.PLAYER_ORDER_NEXT_P or
                     SettingConstants.PLAYER_ORDER_NEXT_VIDEO or
                     SettingConstants.PLAYER_ORDER_NEXT_EPISODE)) != 0
+            // ★ 防御1：未开循环时，若 next() 返回的就是当前视频，视为无下一项，直接完成。
+            // 防止 onAutoCompletion → openPlayer(同视频) → STATE_ENDED → 死循环。
+            val nextIsSameAsCurrent = nextPlayerSourceInfo != null
+                && nextPlayerSourceInfo!!.id == currentPlayerSourceInfo.id
+            if (nextIsSameAsCurrent && !isLoop) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity.isInPictureInPictureMode) {
+                    activity.moveTaskToBack(true)
+                }
+                delegate.completionBoxController.show()
+                return@launch
+            }
             if (nextPlayerSourceInfo is VideoPlayerSource
                 && order and SettingConstants.PLAYER_ORDER_NEXT_P != 0) {
                 // 自动播放下一P
-                delegate.openPlayer(nextPlayerSourceInfo)
+                delegate.openPlayer(nextPlayerSourceInfo!!)
                 return@launch
             } else if (nextPlayerSourceInfo is BangumiPlayerSource
                 && order and SettingConstants.PLAYER_ORDER_NEXT_EPISODE != 0
                 && !orderRandom) {
                 // 自动播放下一集（顺序模式；随机模式跳过 next() 走播单路径）
-                delegate.openPlayer(nextPlayerSourceInfo)
+                delegate.openPlayer(nextPlayerSourceInfo!!)
                 return@launch
             }
             // 播单自动连播：仅非单曲循环时走播单（单曲循环=LOOP但无任何next标志）
@@ -863,8 +874,11 @@ class PlayerController(
                 val nextVideo = playerStore.nextVideo(
                     orderRandom, isLoop
                 )
-                if (nextVideo != null) {
-                    delegate.openPlayer(nextVideo.toVideoPlayerSource())
+                // ★ 防御2：nextVideo 返回当前视频且未开循环时，不 openPlayer，走完成。
+                if (nextVideo != null && nextVideo!!.aid == (currentPlayerSourceInfo as? VideoPlayerSource)?.aid && !isLoop) {
+                    // same video, not looping → skip
+                } else if (nextVideo != null) {
+                    delegate.openPlayer(nextVideo!!.toVideoPlayerSource())
                     return@launch
                 }
             }

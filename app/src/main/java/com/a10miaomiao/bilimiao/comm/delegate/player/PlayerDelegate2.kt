@@ -677,6 +677,11 @@ class PlayerDelegate2(
                 source.title
             )
             loadingBoxController.hideLoading()
+            // ★ P0 守卫：lastPosition 接近末尾时从头开始，避免 seek 到末尾立即 STATE_ENDED
+            // 触发 onAutoCompletion 死循环（自动连播到同一视频时 PlaybackService 会返回末尾位置）
+            if (sourceInfo.duration > 0L && lastPosition >= sourceInfo.duration - 2000) {
+                lastPosition = 0L
+            }
             if (lastPosition > 0L) {
                 player?.seekOnStart = lastPosition
                 lastPosition = 0L
@@ -792,8 +797,11 @@ class PlayerDelegate2(
         errorMessageBoxController.hide()
         areaLimitBoxController.hide()
         lastPosition = PlaybackService.instance?.getSavedPosition(source.id) ?: 0L
-        // 循环播放或预设跳转位置（空降/恢复播放）时，清除 lastPosition 从头开始
-        if (source.isLoop || source.defaultPlayerSource.lastPlayTime > 0L) {
+        // ★ 防御3：自动连播到同一视频时，从头开始，避免 PlaybackService 返回的末尾位置
+        // 导致 seek 到末尾 → STATE_ENDED → 死循环。
+        // 循环模式或预设跳转位置（空降/恢复播放）时，也从0开始。
+        val isReopeningSameVideo = playerSource != null && playerSource!!.id == source.id
+        if (source.isLoop || source.defaultPlayerSource.lastPlayTime > 0L || isReopeningSameVideo) {
             lastPosition = 0L
         }
         // 不同视频 → 释放旧播放器；同一视频 → 保留走快速重连

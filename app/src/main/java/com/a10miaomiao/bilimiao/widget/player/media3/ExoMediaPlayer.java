@@ -603,7 +603,6 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
 
     @Override
     public void onRepeatModeChanged(int repeatMode) {
-
     }
 
     @Override

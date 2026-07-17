@@ -701,9 +701,10 @@ initDanmakuTouchListener()
     }
 
     override fun onBrightnessSlide(percent: Float) {
+        val act = getActivity() ?: return
         // 先读 App 已设的亮度（window.screenBrightness），没有才读系统亮度
         var brightness = try {
-            (context as Activity).window.attributes.screenBrightness
+            act.window.attributes.screenBrightness
         } catch (_: Exception) { -1f }
 
         if (brightness <= 0f) {
@@ -726,9 +727,9 @@ initDanmakuTouchListener()
         lastGestureBrightness = newBrightness
 
         try {
-            val lp = (context as Activity).window.attributes
+            val lp = act.window.attributes
             lp.screenBrightness = newBrightness
-            (context as Activity).window.attributes = lp
+            act.window.attributes = lp
         } catch (_: Exception) {}
         showBrightnessDialog(newBrightness)
     }
@@ -1099,7 +1100,6 @@ initDanmakuTouchListener()
 
     override fun startPrepare() {
         // super.startPrepare()
-        // 重写方法，加入音频焦点开关
         this.gsyVideoManager.listener()?.onCompletion()
 
         if (mVideoAllCallBack != null) {
@@ -1131,7 +1131,6 @@ initDanmakuTouchListener()
         onPrepareDanmaku(this)
         videoPlayerCallBack?.onPrepared()
     }
-
     override fun onAutoCompletion() {
         super.onAutoCompletion()
         videoPlayerCallBack?.onAutoCompletion()
@@ -1187,7 +1186,6 @@ initDanmakuTouchListener()
             danmakuOnPause()
         }
     }
-
     override fun onCompletion() {
         super.onCompletion()
         releaseDanmaku()
@@ -1371,13 +1369,28 @@ initDanmakuTouchListener()
     }
 
     private var mDialogOffsetText: TextView? = null
+
+    /**
+     * 从 View/Context 链中解包出 Activity。
+     * Compose 的 AndroidView 给 View 的 context 是 ContextThemeWrapper，
+     * 直接 as? Activity 会失败，需要逐层解包。
+     */
+    private fun getActivity(): Activity? {
+        var ctx: android.content.Context? = context
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is Activity) return ctx
+            ctx = ctx.baseContext
+        }
+        return null
+    }
+
     /**
      * Activity 窗口 token 是否仍有效，可用于安全弹出 Dialog。
      * 切后台 / 销毁中时 token 失效，此时 Dialog.show() 会抛
      * WindowManager.BadTokenException 导致崩溃（见 /sdcard/log.log）。
      */
     private fun canShowDialog(): Boolean {
-        val act = activityContext as? Activity ?: return false
+        val act = getActivity() ?: return false
         return !act.isFinishing && !act.isDestroyed
     }
 
