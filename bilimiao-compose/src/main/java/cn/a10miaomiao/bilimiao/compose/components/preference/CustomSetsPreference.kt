@@ -101,7 +101,7 @@ fun CustomSetsPreference(
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                value.forEach { text ->
+                value.sortedBy { it.toDouble() }.forEach { text ->
                     SuggestionChip(
                         onClick = {
                             if (valueCanEdit(text)) {
@@ -198,11 +198,40 @@ fun CustomSetsPreference(
             }
         )
     } else if (editDialogStateValue is EditDialogState.Update) {
+        val text = remember { mutableStateOf(editDialogStateValue.value) }
+        val errorMessage = remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = {
                 editDialogState.value = EditDialogState.Closed
             },
             confirmButton = {
+                TextButton(
+                    onClick = {
+                        val v = text.value.toDoubleOrNull()
+                        if (v == null || v <= 0) {
+                            errorMessage.value = "请输入有效值"
+                        } else if (v > 10) {
+                            errorMessage.value = "最高10倍速"
+                        } else if (v.toString() != editDialogStateValue.value
+                            && v in value.filter { it != editDialogStateValue.value }
+                                .map { it.toDouble() }
+                        ) {
+                            errorMessage.value = "已存在$v"
+                        } else {
+                            onValueChange(
+                                value.filter {
+                                    it != editDialogStateValue.value
+                                }.toSet() + setOf(v.toString())
+                            )
+                            editDialogState.value = EditDialogState.Closed
+                            toast("修改成功")
+                        }
+                    }
+                ) {
+                    Text(text = "确认修改")
+                }
+            },
+            dismissButton = {
                 TextButton(
                     onClick = {
                         onValueChange(
@@ -220,23 +249,25 @@ fun CustomSetsPreference(
                     )
                 }
             },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        editDialogState.value = EditDialogState.Closed
-                    }
-                ) {
-                    Text(text = "取消")
-                }
-            },
             title = {
-                Text(text = "编辑")
+                Text(text = "编辑倍速")
             },
             text = {
                 TextField(
-                    value = editDialogStateValue.value,
-                    onValueChange = {  },
-                    enabled = false,
+                    value = text.value,
+                    onValueChange = { text.value = it },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                    ),
+                    supportingText = {
+                        if (errorMessage.value.isNotEmpty()) {
+                            Text(
+                                modifier = Modifier.fillMaxWidth(),
+                                text = errorMessage.value,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                 )
             }
         )
