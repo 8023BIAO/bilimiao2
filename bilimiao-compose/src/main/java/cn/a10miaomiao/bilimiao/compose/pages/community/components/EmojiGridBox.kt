@@ -75,7 +75,10 @@ fun EmojiGridBox(
                 val result = res.requireData()
                 packageList.clear()
                 result.packages?.let { packages ->
-                    packageList.addAll(packages.filter { !it.text.contains("24年度") && !it.text.contains("热词系列一") })
+                    val allowed = listOf("小黄脸", "小电视", "颜文字")
+                    packageList.addAll(packages.filter { pkg ->
+                        allowed.any { pkg.text.contains(it) }
+                    })
                 }
             }
         } catch (e: Exception) {

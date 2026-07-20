@@ -134,11 +134,10 @@ fun SearchInputInline(
         viewModel.addSearchHistory(keyword)
         if (mode == 0) {
             val videoPage = when {
-                keyword.matches(Regex("^BV1[A-Za-z0-9]{9}$")) -> VideoDetailPage(keyword)
-                keyword.matches(Regex("^[aA][vV](\\d+)$")) -> VideoDetailPage(
-                    Regex("^[aA][vV](\\d+)$").find(keyword)!!.groupValues[1]
+                keyword.matches(Regex("^[Bb][Vv]1[A-Za-z0-9]{9}$")) -> VideoDetailPage(keyword)
+                keyword.matches(Regex("^[Aa][Vv][0-9]+$")) -> VideoDetailPage(
+                    Regex("^[Aa][Vv]([0-9]+)$").find(keyword)!!.groupValues[1]
                 )
-                keyword.matches(Regex("^\\d+$")) -> VideoDetailPage(keyword)
                 else -> null
             }
             if (videoPage != null) {
