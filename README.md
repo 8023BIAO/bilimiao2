@@ -1,6 +1,7 @@
 
 [releases APK](../../releases/latest)
 
+- [blbl](https://github.com/cat3399/blbl)
 - [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)
 - [Kodein-DI](https://github.com/Kodein-Framework/Kodein-DI)
