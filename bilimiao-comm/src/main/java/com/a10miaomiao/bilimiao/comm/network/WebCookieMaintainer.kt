@@ -108,13 +108,7 @@ object WebCookieMaintainer {
             val body = JSONObject().put("payload", jsonData).toString()
                 .toRequestBody("application/json; charset=utf-8".toMediaType())
 
-            val cookie = buildList {
-                listOf("SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid", "buvid3").forEach { name ->
-                    val v = cookieStore.getCookieValue(name)?.takeIf { it.isNotBlank() } ?: return@forEach
-                    add("$name=$v")
-                }
-            }.joinToString("; ")
-
+            // Cookie 由 webClient 的 CookieJar 自动带上，无需手动添加 Cookie 头
             val req = Request.Builder()
                 .url("https://api.bilibili.com/x/internal/gaia-gateway/ExClimbWuzhi")
                 .post(body).addHeader("Content-Type", "application/json")
@@ -122,7 +116,6 @@ object WebCookieMaintainer {
                 .addHeader("x-bili-aurora-zone", "sh001").addHeader("x-bili-mid", mid.toString())
                 .addHeader("Referer", "https://www.bilibili.com")
                 .apply { genAuroraEid(mid)?.let { addHeader("x-bili-aurora-eid", it) } }
-                .apply { if (cookie.isNotBlank()) addHeader("Cookie", cookie) }
                 .build()
             webClient.newCall(req).execute().use { }
 
