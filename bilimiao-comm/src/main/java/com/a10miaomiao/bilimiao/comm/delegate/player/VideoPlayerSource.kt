@@ -142,10 +142,11 @@ class VideoPlayerSource(
                 playerSource.height = dash.height
                 playerSource.width = dash.width
 
-                // ───── CDN 竞速选最优节点 ─────
-                // 根据实验性开关决定是否启用 CDN 竞速和音频 CDN 独立
-                val finalVideoUrl: String
-                val finalAudioUrl: String?
+                // ───── CDN 候选列表构建 ─────
+                // 竞速选最快的放第一位，其余 backupUrl 跟在后面供运行时故障转移
+                // 格式: <primaryUrl>|<backup1>|<backup2>...  (单 URL 时无 |)
+                val finalVideoCandidates: String
+                val finalAudioCandidates: String?
                 if (cdnRaceEnabled) {
                     val videoUrls = buildList {
                         if (uposHost == "backup") {
@@ -157,8 +158,7 @@ class VideoPlayerSource(
                             dash.backupUrl.forEach { if (it.isNotBlank()) add(it) }
                         }
                     }
-                    val pickedVideoUrl = CdnSelector.pickFastest(videoUrls)
-                    finalVideoUrl = pickedVideoUrl
+                    finalVideoCandidates = CdnSelector.pickAndRank(videoUrls)
 
                     if (audio != null && !audioIndependentCdn) {
                         val audioUrls = buildList {
@@ -171,35 +171,47 @@ class VideoPlayerSource(
                                 audio.backupUrl.forEach { b -> if (b.isNotBlank()) add(b) }
                             }
                         }
-                        val pickedAudioUrl = CdnSelector.pickFastest(audioUrls)
-                        finalAudioUrl = pickedAudioUrl
+                        finalAudioCandidates = CdnSelector.pickAndRank(audioUrls)
                     } else {
-                        finalAudioUrl = audio?.let {
-                            if (uposHost.isNotBlank()) UrlUtil.replaceHost(it.baseUrl, uposHost) else it.baseUrl
+                        finalAudioCandidates = audio?.let {
+                            val u = if (uposHost.isNotBlank()) UrlUtil.replaceHost(it.baseUrl, uposHost) else it.baseUrl
+                            u
                         }
                     }
                 } else {
-                    // CDN 竞速关闭：直接使用 baseUrl + uposHost
-                    finalVideoUrl = if (uposHost.isNotBlank()) {
+                    // CDN 竞速关闭：baseUrl + backupUrl 仍供运行时故障转移
+                    finalVideoCandidates = buildList {
                         if (uposHost == "backup") {
-                            dash.backupUrl.firstOrNull { it.isNotBlank() } ?: dash.baseUrl
-                        } else {
-                            UrlUtil.replaceHost(dash.baseUrl, uposHost)
-                        }
-                    } else dash.baseUrl
-                    finalAudioUrl = audio?.let {
-                        if (uposHost == "backup") {
-                            it.backupUrl.firstOrNull { it.isNotBlank() } ?: it.baseUrl
+                            dash.backupUrl.firstOrNull { it.isNotBlank() }?.let { add(it) }
+                            add(dash.baseUrl)
                         } else if (uposHost.isNotBlank()) {
-                            UrlUtil.replaceHost(it.baseUrl, uposHost)
-                        } else it.baseUrl
+                            add(UrlUtil.replaceHost(dash.baseUrl, uposHost))
+                            dash.backupUrl.forEach { if (it.isNotBlank()) add(UrlUtil.replaceHost(it, uposHost)) }
+                        } else {
+                            add(dash.baseUrl)
+                            dash.backupUrl.forEach { if (it.isNotBlank()) add(it) }
+                        }
+                    }.joinToString("|")
+                    finalAudioCandidates = audio?.let {
+                        buildList {
+                            if (uposHost == "backup") {
+                                it.backupUrl.firstOrNull { b -> b.isNotBlank() }?.let { b -> add(b) }
+                                add(it.baseUrl)
+                            } else if (uposHost.isNotBlank()) {
+                                add(UrlUtil.replaceHost(it.baseUrl, uposHost))
+                                it.backupUrl.forEach { b -> if (b.isNotBlank()) add(UrlUtil.replaceHost(b, uposHost)) }
+                            } else {
+                                add(it.baseUrl)
+                                it.backupUrl.forEach { b -> if (b.isNotBlank()) add(b) }
+                            }
+                        }.joinToString("|")
                     }
                 }
 
-                playerSource.url = if (finalAudioUrl == null) {
-                    finalVideoUrl
+                playerSource.url = if (finalAudioCandidates == null) {
+                    finalVideoCandidates
                 } else {
-                    "[merging]\n$finalVideoUrl\n$finalAudioUrl"
+                    "[merging]\n$finalVideoCandidates\n$finalAudioCandidates"
                 }
             }
             is Stream.Content.SegmentVideo -> {

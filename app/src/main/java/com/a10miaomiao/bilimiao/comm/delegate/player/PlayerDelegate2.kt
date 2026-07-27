@@ -153,6 +153,20 @@ class PlayerDelegate2(
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
                 .setUpstreamDataSourceFactory(httpFactory)
         }
+
+        /**
+         * 当候选 URL >1 时，包装 CacheDataSource.Factory 为 CdnFailoverDataSourceFactory，
+         * 播放中某个 CDN 打开失败自动切下一个。单候选时原样返回。
+         */
+        private fun wrapWithFailover(
+            upstream: DataSource.Factory,
+            candidates: List<String>,
+        ): DataSource.Factory {
+            if (candidates.size <= 1) return upstream
+            val uris = candidates.map { Uri.parse(it) }
+            val state = CdnFailoverState(uris)
+            return CdnFailoverDataSourceFactory(upstream, state)
+        }
     }
 
     val DEFAULT_REFERER = "https://www.bilibili.com/"
@@ -479,20 +493,24 @@ class PlayerDelegate2(
             }
 
             "[merging]" -> {
-                // 音视频分离
-                val dataSourceFactory = createCachedFactory(activity, userAgent, header)
+                // 音视频分离 — 支持 | 分隔的多 CDN 候选（竞速赢家在前，运行时故障转移兜底）
+                val baseFactory = createCachedFactory(activity, userAgent, header)
+                val videoCandidates = dataSourceArr[1].split("|").filter { it.isNotBlank() }
+                val audioCandidates = dataSourceArr.getOrNull(2)?.split("|")?.filter { it.isNotBlank() }
+                val videoFactory = wrapWithFailover(baseFactory, videoCandidates)
+                val audioFactory = wrapWithFailover(baseFactory, audioCandidates ?: videoCandidates)
                 val videoMedia = MediaItem.Builder().apply {
-                    setUri(dataSourceArr[1])
+                    setUri(videoCandidates.firstOrNull() ?: dataSourceArr[1])
                     mediaMetadata?.let(::setMediaMetadata)
                 }.build()
                 val audioMedia = MediaItem.Builder().apply {
-                    setUri(dataSourceArr[2])
+                    setUri((audioCandidates ?: videoCandidates).firstOrNull() ?: dataSourceArr.getOrNull(2) ?: "")
                     mediaMetadata?.let(::setMediaMetadata)
                 }.build()
                 MergingMediaSource(
-                    ProgressiveMediaSource.Factory(dataSourceFactory)
+                    ProgressiveMediaSource.Factory(videoFactory)
                         .createMediaSource(videoMedia),
-                    ProgressiveMediaSource.Factory(dataSourceFactory)
+                    ProgressiveMediaSource.Factory(audioFactory)
                         .createMediaSource(audioMedia)
                 )
             }
@@ -833,7 +851,7 @@ class PlayerDelegate2(
                     speed = it[PlayerSpeed] ?: 1f
                     showNotification = it[PlayerNotification] ?: true
                     // ───── CDN 设置（合并读取，减少 DataStore IO） ─────
-                    source.cdnRaceEnabled = it[SettingPreferences.CdnRaceEnabled] ?: false
+                    source.cdnRaceEnabled = it[SettingPreferences.CdnRaceEnabled] ?: true
                     source.audioIndependentCdn = it[SettingPreferences.AudioIndependentCdn] ?: false
                     selectedHost = it[SettingPreferences.SelectedCdnHost] ?: "default"
                 }
@@ -856,9 +874,9 @@ class PlayerDelegate2(
                 // Media3 通过 ExoPlayer 自动处理通知栏，无需手动控制
                 player?.setSpeed(speed, true)
                 // 播放倍速提示
-                if (speed != 1f) {
-                    PopTip.show("注意，当前为${speed}倍速").showTop()
-                }
+               //if (speed != 1f) {
+                   // PopTip.show("注意，当前为${speed}倍速").showTop()
+               // }
             }
             // 是否显示分P和剧集按钮
             if (source is VideoPlayerSource && source.pages.size > 1) {
