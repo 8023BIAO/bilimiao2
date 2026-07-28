@@ -59,8 +59,8 @@ sealed class BiliDownloadMediaFileInfo {
     @Serializable
     data class Type2(
         val duration: Long = 0L,
-        val video: List<Type2File>,
-        val audio: List<Type2File>?,
+        val video: List<Type2File> = emptyList(),
+        val audio: List<Type2File>? = null,
         val user_agent: String? = null,
         val referer: String? = null,
     ): BiliDownloadMediaFileInfo() {
