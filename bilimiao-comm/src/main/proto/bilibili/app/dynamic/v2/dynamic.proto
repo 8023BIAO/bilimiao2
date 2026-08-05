@@ -3239,6 +3239,50 @@ message MdlDynDrawItem {
     repeated MdlDynDrawTag tags = 5;
 }
 
+// 动态列表渲染部分-详情模块-笔记
+message MdlDynNote {
+    // 笔记ID
+    int64 id = 1;
+    // 标题
+    string title = 2;
+    // 描述
+    string desc = 3;
+    // 类型
+    int32 type = 4;
+    // 时长(秒)
+    int64 duration = 5;
+    // 阅读数
+    int64 view = 6;
+    // 图片
+    NotePictures pictures = 7;
+    // 视频时间点
+    repeated NoteVideoTS video_ts = 8;
+    // 跳转地址
+    string outer_jump_url = 9;
+    // 跳转地址
+    string jump_url = 10;
+}
+
+// 笔记图片列表
+message NotePictures {
+    // 图片
+    repeated NotePicture pictures = 1;
+}
+
+// 笔记图片
+message NotePicture {
+    // 图片链接
+    string img_src = 1;
+    // 图片宽度
+    double img_width = 2;
+    // 图片高度
+    double img_height = 3;
+    // 图片大小
+    double img_size = 4;
+    // 裁剪比例
+    double crop_ratio = 5;
+}
+
 // 动态列表渲染部分-详情模块-图文-标签
 message MdlDynDrawTag {
     // 标签类型
@@ -3954,6 +3998,8 @@ message ModuleDynamic {
         MdlDynCourUp dyn_cour_batch_up = 18;
         //话题集合
         MdlDynTopicSet dyn_topic_set = 19;
+        //笔记
+        MdlDynNote dyn_note = 20;
     }
 }
 
@@ -3977,6 +4023,7 @@ enum ModuleDynamicType {
     mdl_dyn_subscription_new = 15; // 订阅卡
     mdl_dyn_cour_batch_up = 16;    // 课程
     mdl_dyn_topic_set = 17;        // 话题集合
+    mdl_dyn_note = 18;             // 笔记
 }
 
 // 动态-小卡模块

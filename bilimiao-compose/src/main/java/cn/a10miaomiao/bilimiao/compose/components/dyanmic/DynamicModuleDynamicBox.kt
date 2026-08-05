@@ -126,6 +126,70 @@ fun DynForwardBox(
 }
 
 @Composable
+fun DynNoteBox(
+    dynNote: bilibili.app.dynamic.v2.MdlDynNote
+) {
+    val uriHandler = LocalUriHandler.current
+    val pictures = dynNote.pictures?.pictures ?: emptyList()
+    val imageModels = remember(pictures) {
+        pictures.map {
+            val imgWidth = it.imgWidth.toInt()
+            val imgHeight = it.imgHeight.toInt()
+            val w = min(600, imgWidth)
+            val h = w * imgHeight / imgWidth
+            val url = UrlUtil.autoHttps(it.imgSrc)
+            PreviewImageModel(
+                previewUrl = url + "@${w}w_${h}h",
+                originalUrl = url,
+                height = imgHeight.toFloat(),
+                width = imgWidth.toFloat(),
+            )
+        }
+    }
+    Column(
+        modifier = Modifier
+            .padding(
+                horizontal = 10.dp,
+                vertical = 5.dp
+            )
+            .clip(RoundedCornerShape(5.dp))
+            .background(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            )
+            .clickable {
+                dynNote.jumpUrl.let { url ->
+                    if (url.isNotBlank()) {
+                        uriHandler.openUri(UrlUtil.autoHttps(url))
+                    }
+                }
+            }
+    ) {
+        if (dynNote.title.isNotBlank()) {
+            Text(
+                text = dynNote.title,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(
+                    start = 10.dp, end = 10.dp, top = 10.dp,
+                ),
+            )
+        }
+        if (dynNote.desc.isNotBlank()) {
+            Text(
+                text = dynNote.desc,
+                maxLines = 2,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(
+                    start = 10.dp, end = 10.dp, bottom = 5.dp,
+                ),
+            )
+        }
+        if (imageModels.isNotEmpty()) {
+            ImagesGrid(imageModels)
+        }
+    }
+}
+
+@Composable
 fun DynamicModuleDynamicBox(
     dynamic: ModuleDynamic
 ) {
@@ -142,6 +206,9 @@ fun DynamicModuleDynamicBox(
         }
         is ModuleDynamic.ModuleItem.DynForward -> {
             DynForwardBox(moduleItem.value)
+        }
+        is ModuleDynamic.ModuleItem.DynNote -> {
+            DynNoteBox(moduleItem.value)
         }
         else -> {
             // unsupported dynamic module: hide it to avoid showing ad placeholders
