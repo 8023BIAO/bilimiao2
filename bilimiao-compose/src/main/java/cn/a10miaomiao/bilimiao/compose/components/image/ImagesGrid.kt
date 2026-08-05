@@ -123,31 +123,29 @@ fun ImagesGrid(
         val maxCap = if (isSmallGrid) 300f else 330f
         val columns = if (isSmallGrid) 2 else 3
         val spacingVal = if (isSmallGrid) 4f else 3f
-        var containerWidthPx by remember { mutableIntStateOf(0) }
-        val density = LocalDensity.current
+        // 修复: 之前 Box 只 widthIn(max) 无内容时宽度=0, onSizeChanged 回调 0,
+        // 导致多图评论图片区域完全不渲染(单图正常/多图空白)
+        val gridWidth = maxCap.dp
         Box(
             modifier = Modifier
-                .widthIn(max = maxCap.dp)
-                .onSizeChanged { containerWidthPx = it.width }
+                .width(gridWidth)
         ) {
-            if (containerWidthPx > 0) {
-                val width = min(with(density) { containerWidthPx.toDp().value }, maxCap)
-                FlowRow(
-                    modifier = Modifier.width(width.dp),
-                    horizontalArrangement = Arrangement.spacedBy(spacingVal.dp),
-                    verticalArrangement = Arrangement.spacedBy(spacingVal.dp)
-                ) {
-                    val itemSize = (width / columns - spacingVal).dp
-                    for (index in 0 until count) {
-                        ImagesGridItem(
-                            modifier = Modifier.size(itemSize),
-                            index = index,
-                            imageModels = imageModels,
-                            previewerController = previewerController,
-                            previewerState = previewerState,
-                            contentScale = ContentScale.Crop,
-                        )
-                    }
+            val width = maxCap
+            FlowRow(
+                modifier = Modifier.width(width.dp),
+                horizontalArrangement = Arrangement.spacedBy(spacingVal.dp),
+                verticalArrangement = Arrangement.spacedBy(spacingVal.dp)
+            ) {
+                val itemSize = (width / columns - spacingVal).dp
+                for (index in 0 until count) {
+                    ImagesGridItem(
+                        modifier = Modifier.size(itemSize),
+                        index = index,
+                        imageModels = imageModels,
+                        previewerController = previewerController,
+                        previewerState = previewerState,
+                        contentScale = ContentScale.Crop,
+                    )
                 }
             }
         }
