@@ -121,6 +121,14 @@ private class WebPageViewModel(
             val url = request.url.toString()
             val re = BilibiliNavigation.navigationTo(pageNavigation, url)
             if (re) {
+                // ★ 无感返回：跳转 app 内页面成功后，把 WebPage 自身移出返回栈，
+                // 避免返回时出现空白中间层（b23.tv 短链 → 视频详情页场景）
+                // 顺序：先弹掉 WebPage(连同其上的目标页)，再重新导航目标页
+                view.post {
+                    if (pageNavigation.popBackStack(WebPage(startUrl), inclusive = true)) {
+                        BilibiliNavigation.navigationTo(pageNavigation, url)
+                    }
+                }
                 return true
             }
             if (url.indexOf("bilibili://") == 0) {

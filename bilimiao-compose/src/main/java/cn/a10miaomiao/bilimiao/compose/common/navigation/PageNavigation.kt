@@ -73,10 +73,12 @@ class PageNavigation(
         route: T,
         inclusive: Boolean,
         saveState: Boolean = false
-    ) {
-        if(!hostController.popBackStack(route, inclusive, saveState)) {
+    ): Boolean {
+        val popped = hostController.popBackStack(route, inclusive, saveState)
+        if (!popped) {
             onClose()
         }
+        return popped
     }
 
     fun navigateToVideoInfo(id: String) {
