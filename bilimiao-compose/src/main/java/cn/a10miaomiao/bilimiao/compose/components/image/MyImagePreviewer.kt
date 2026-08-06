@@ -178,10 +178,11 @@ fun MyImagePreviewer(
         imageLoader = { page ->
             val model = imagePreviewerState.imageModels[page]
             val imageUrl = model.originalUrl
-            // 超大图限制：图床 URL 加最长边 2000px 后缀，
+            // 超大图限制：图床 URL 加最长边 4096px 后缀（图床只缩不放，普通图无损），
             // 防止原图 bitmap 超限导致 Canvas 崩溃 (upstream #245: 175MB bitmap)
+            // 4096x4096 ≈ 67MB，远低于崩溃线，同时保留放大查看的清晰度
             val previewUrl = if (imageUrl.contains("hdslb.com") && "@" !in imageUrl) {
-                imageUrl + "@2000w_2000h"
+                imageUrl + "@4096w_4096h"
             } else {
                 imageUrl
             }

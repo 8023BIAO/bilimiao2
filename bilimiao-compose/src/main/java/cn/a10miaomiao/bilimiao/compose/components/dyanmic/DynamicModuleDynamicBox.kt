@@ -77,8 +77,9 @@ fun DynDrawBox(
     val items = dynDraw.items
     val imageModels = remember(items) {
         items.map {
-            val w = min(600, it.width)
-            val h = w * it.height / it.width
+            // 宽高元数据保护：width=0 时避免除零 (upstream #290 同类)
+            val w = if (it.width > 0) min(600, it.width) else 600
+            val h = if (it.width > 0) w * it.height / it.width else it.height.toFloat()
             val url = UrlUtil.autoHttps(it.src)
             PreviewImageModel(
                 previewUrl = url + "@${w}w_${h}h",
