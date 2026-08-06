@@ -7,6 +7,7 @@ import android.content.Context;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 
@@ -370,6 +371,16 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
                 new Runnable() {
                     @Override
                     public void run() {
+                        if (mMediaSource == null) {
+                            // 源构建失败/未设置时禁止进入 prepare：
+                            // 上游 issue #273 播放闪退（天玑设备上报）即 ExoPlayer.setMediaSource(null)
+                            // → MaskingMediaSource.isSingleWindow() NPE，主线程未捕获直接崩溃。
+                            // Media3ExoPlayerManager.initVideoPlayer 会吞掉 setDataSource 的异常，
+                            // 这里兜底转成播放错误而不是崩溃。
+                            Log.e(TAG, "prepareAsyncInternal: mMediaSource is null, abort prepare");
+                            notifyOnError(IMediaPlayer.MEDIA_ERROR_UNKNOWN, IMediaPlayer.MEDIA_ERROR_UNKNOWN);
+                            return;
+                        }
                         if (mTrackSelector == null) {
                             mTrackSelector = new DefaultTrackSelector(mAppContext);
                         }

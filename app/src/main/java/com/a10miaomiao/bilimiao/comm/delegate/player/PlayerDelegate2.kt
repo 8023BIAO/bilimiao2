@@ -472,7 +472,8 @@ class PlayerDelegate2(
         val mediaMetadata = getMediaMetadata(dataSource)
         val header = playerSourceInfo?.header ?: emptyMap()
         val userAgent = header["User-Agent"] ?: DEFAULT_USER_AGENT
-        return when (dataSourceArr[0]) {
+        return try {
+            when (dataSourceArr[0]) {
             "[local-merging]" -> {
                 // 本地音视频分离
                 val localSourceFactory = DefaultDataSource.Factory(activity)
@@ -553,6 +554,12 @@ class PlayerDelegate2(
             else -> {
                 return null
             }
+        }
+        } catch (e: Exception) {
+            // 源构建失败（如 DASH MPD 解析异常）不能抛出：Media3ExoPlayerManager
+            // 会吞掉异常后继续 prepareAsync，ExoPlayer.setMediaSource(null) → NPE 闪退
+            miaoLogger() error "getMediaSource 构建失败: ${e.message}"
+            null
         }
     }
 
