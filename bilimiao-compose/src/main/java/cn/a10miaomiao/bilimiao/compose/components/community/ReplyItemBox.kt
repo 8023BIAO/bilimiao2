@@ -207,10 +207,14 @@ fun ReplyItemBox(
         }
     }
     val picturesList = remember(item.content) {
-        item.content?.pictures?.map {
+        item.content?.pictures?.mapNotNull {
             val imgHeight = it.imgHeight.toInt()
             val imgWidth = it.imgWidth.toInt()
             val imgSize = it.imgSize.toInt()
+            // 元数据异常保护：宽或高为 0 时跳过该图，避免除零崩溃 (upstream #290)
+            if (imgWidth <= 0 || imgHeight <= 0) {
+                return@mapNotNull null
+            }
             val w = min(600, imgWidth)
             val h = w * imgHeight / imgWidth
             val url = UrlUtil.autoHttps(it.imgSrc)

@@ -178,10 +178,17 @@ fun MyImagePreviewer(
         imageLoader = { page ->
             val model = imagePreviewerState.imageModels[page]
             val imageUrl = model.originalUrl
-            val painterState = remember(imageUrl) { mutableStateOf<Painter?>(null) }
-            key(imageUrl) {
+            // 超大图限制：图床 URL 加最长边 2000px 后缀，
+            // 防止原图 bitmap 超限导致 Canvas 崩溃 (upstream #245: 175MB bitmap)
+            val previewUrl = if (imageUrl.contains("hdslb.com") && "@" !in imageUrl) {
+                imageUrl + "@2000w_2000h"
+            } else {
+                imageUrl
+            }
+            val painterState = remember(previewUrl) { mutableStateOf<Painter?>(null) }
+            key(previewUrl) {
                 GlideSubcomposition(
-                    model = imageUrl,
+                    model = previewUrl,
                 ) {
                     if (state is RequestState.Success) {
                         painterState.value = painter
