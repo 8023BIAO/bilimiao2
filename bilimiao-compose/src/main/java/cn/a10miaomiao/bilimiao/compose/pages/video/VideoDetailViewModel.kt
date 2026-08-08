@@ -570,28 +570,43 @@ class VideoDetailViewModel(
 
     fun openCoverActivity() {
         val arc = detailData.value?.getArcData() ?: return
-        val coverUrl = arc.pic.replace("http://", "https://")
+        var coverUrl = arc.pic.replace("http://", "https://")
+        // 去掉图床处理参数（@672w_378h_1c_ 等），取原始封面图
+        val atIndex = coverUrl.indexOf('@')
+        if (atIndex > 0) {
+            coverUrl = coverUrl.substring(0, atIndex)
+        }
         if (coverUrl.isBlank()) {
             toast("未获取到封面")
             return
         }
         viewModelScope.launch {
             try {
-                val bitmap = withContext(Dispatchers.IO) {
+                val bytes = withContext(Dispatchers.IO) {
                     val conn = URL(coverUrl).openConnection()
                     conn.connectTimeout = 10000
                     conn.doInput = true
                     conn.connect()
-                    BitmapFactory.decodeStream(conn.getInputStream())
+                    conn.getInputStream().use { it.readBytes() }
                 }
-                if (bitmap == null) {
+                if (bytes.isEmpty()) {
                     withContext(Dispatchers.Main) { toast("封面下载失败") }
                     return@launch
                 }
+                // 根据 URL 扩展名决定文件名与 MIME，保持原图格式
+                val path = coverUrl.substringBefore('?')
+                val ext = path.substringAfterLast('.', "").lowercase()
+                val (fileName, mime) = when (ext) {
+                    "png" -> "cover_${arc.aid}.png" to "image/png"
+                    "webp" -> "cover_${arc.aid}.webp" to "image/webp"
+                    "gif" -> "cover_${arc.aid}.gif" to "image/gif"
+                    "jpeg" -> "cover_${arc.aid}.jpeg" to "image/jpeg"
+                    else -> "cover_${arc.aid}.jpg" to "image/jpeg"
+                }
                 withContext(Dispatchers.IO) {
                     val values = ContentValues().apply {
-                        put(MediaStore.Images.Media.DISPLAY_NAME, "cover_${arc.aid}.jpg")
-                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                        put(MediaStore.Images.Media.MIME_TYPE, mime)
                         put(MediaStore.Images.Media.DESCRIPTION, arc.title)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Bilimiao")
@@ -601,7 +616,7 @@ class VideoDetailViewModel(
                     val uri = activity.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     uri?.let {
                         activity.contentResolver.openOutputStream(it)?.use { os ->
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, os)
+                            os.write(bytes)
                         }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             values.clear()
