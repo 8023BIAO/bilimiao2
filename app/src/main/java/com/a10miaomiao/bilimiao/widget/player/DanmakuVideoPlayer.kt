@@ -491,6 +491,9 @@ initDanmakuTouchListener()
     /** 亮度手势跟踪：每次手指抬起时重置，下次从系统亮度重新开始 */
     private var lastGestureBrightness = -1f
 
+    /** 显式持有的当前 Activity 引用（keepPlayerView 复用后替代失效的 View.mContext） */
+    private var currentActivity: Activity? = null
+
     /** 双指按下前保存的播放位置，缩放结束时重设。哨兵值 -1L 表示"未保存" */
     private var savedPositionForPinch = -1L
 
@@ -1376,12 +1379,22 @@ initDanmakuTouchListener()
      * 直接 as? Activity 会失败，需要逐层解包。
      */
     private fun getActivity(): Activity? {
+        // 优先使用显式刷新的 Activity（Activity 重建/keepPlayerView 复用后
+        // View.mContext 在 Android 13+ 无法反射替换，必须由外部显式更新）
+        currentActivity?.let { act ->
+            if (!act.isFinishing && !act.isDestroyed) return act
+        }
         var ctx: android.content.Context? = context
         while (ctx is android.content.ContextWrapper) {
             if (ctx is Activity) return ctx
             ctx = ctx.baseContext
         }
         return null
+    }
+
+    /** 显式刷新播放器持有的 Activity 引用（Activity 重建/复用播放器时调用） */
+    fun updateActivity(activity: Activity?) {
+        currentActivity = activity
     }
 
     /**

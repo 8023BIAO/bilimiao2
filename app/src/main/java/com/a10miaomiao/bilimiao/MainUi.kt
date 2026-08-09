@@ -1,5 +1,6 @@
 package com.a10miaomiao.bilimiao
 
+import android.app.Activity
 import android.content.Context
 import android.graphics.Color
 import android.os.Build
@@ -58,6 +59,9 @@ class MainUi(
     val mVideoPlayerView = keepPlayerView?.apply {
         try {
             (parent as? ViewGroup)?.removeAllViews()
+            // 显式刷新 Activity 引用：Android 13+ 反射改 mContext 已失效，
+            // 播放器 getActivity() 优先使用 updateActivity 传入的引用
+            (this as? DanmakuVideoPlayer)?.updateActivity(ctx as? Activity)
             // 直接替换旧PlayerView的Context
             // 注意：View.mContext 是非公开 API，Android 13+ 收紧了反射访问。
             // SDK_INT 守卫：仅旧版本尝试反射，新版本直接复用（Context 通常无需替换）；
