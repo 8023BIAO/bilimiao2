@@ -1510,22 +1510,37 @@ initDanmakuTouchListener()
                 setLayout(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             }
         }
-        // 每次显示都更新位置，适配屏幕旋转等变化
-        val localLayoutParams = mBrightnessDialog!!.window!!
-            .attributes
-        localLayoutParams.gravity = Gravity.TOP or Gravity.END
-        localLayoutParams.width = width
-        localLayoutParams.height = height
-        val location = IntArray(2)
-        getLocationOnScreen(location)
-        localLayoutParams.x = location[0]
-        localLayoutParams.y = location[1]
-        // 针对异型屏适配
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            localLayoutParams.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        val brightnessDialog = mBrightnessDialog ?: return
+        // GSY 每次手势结束会 dismiss 亮度弹窗；若窗口已分离还去 setAttributes，
+        // 会抛 IllegalArgumentException(View not attached to window manager)，先重新显示
+        if (!brightnessDialog.isShowing) {
+            try {
+                brightnessDialog.show()
+            } catch (_: Exception) {
+                // Activity token 已失效，忽略弹窗
+                return
+            }
         }
-        mBrightnessDialog!!.window!!.attributes = localLayoutParams
+        // 每次显示都更新位置，适配屏幕旋转等变化
+        try {
+            val localLayoutParams = brightnessDialog.window!!
+                .attributes
+            localLayoutParams.gravity = Gravity.TOP or Gravity.END
+            localLayoutParams.width = width
+            localLayoutParams.height = height
+            val location = IntArray(2)
+            getLocationOnScreen(location)
+            localLayoutParams.x = location[0]
+            localLayoutParams.y = location[1]
+            // 针对异型屏适配
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                localLayoutParams.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            brightnessDialog.window!!.attributes = localLayoutParams
+        } catch (_: Exception) {
+            // 窗口刚分离（竞态），本次跳过位置更新，基类仍会显示
+        }
         try {
             super.showBrightnessDialog(percent)
         } catch (_: Exception) {
