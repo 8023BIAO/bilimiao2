@@ -113,10 +113,7 @@ object BilibiliNavigation {
             return
         }
         val host = uri.host ?: ""
-        if ("bilibili.com" in host
-            || "bilibili.tv" in host
-            || "b23.tv" in host
-            || "b23.snm0516.aisee.tv" in host) {
+        if (isAllowedWebHost(host)) {
             // b站网页使用内部浏览器打开
             pageNavigation.navigate(
                 WebPage(url)
@@ -125,6 +122,19 @@ object BilibiliNavigation {
             // 非B站网页使用外部浏览器打开
             pageNavigation.launchWebBrowser(uri)
         }
+    }
+
+    /** 内嵌浏览器域名白名单：精确域名或其子域名，防止 bilibili.com.evil.com 之类伪造域名混入 */
+    private val WEB_ALLOWED_HOSTS = listOf(
+        "bilibili.com",
+        "bilibili.tv",
+        "b23.tv",
+        "b23.snm0516.aisee.tv",
+    )
+
+    fun isAllowedWebHost(host: String): Boolean {
+        if (host.isBlank()) return false
+        return WEB_ALLOWED_HOSTS.any { host == it || host.endsWith(".$it") }
     }
 
 }

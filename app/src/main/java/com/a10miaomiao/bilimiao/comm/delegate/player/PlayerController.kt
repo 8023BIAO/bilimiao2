@@ -160,9 +160,12 @@ class PlayerController(
         setGSYVideoProgressListener(that)
         updatePlayerMode(activity.resources.configuration)
         // 同步初始化弹幕过滤器，避免首次启动时因协程延迟导致过滤器未注册
+        // 带超时上限：防止 DataStore 异常/慢 IO 时主线程无限阻塞（超时则保持默认过滤器）
         kotlinx.coroutines.runBlocking {
-            SettingPreferences.getData(activity) {
-                initDanmakuContext(it)
+            kotlinx.coroutines.withTimeoutOrNull(500L) {
+                SettingPreferences.getData(activity) {
+                    initDanmakuContext(it)
+                }
             }
         }
         scope.launch {

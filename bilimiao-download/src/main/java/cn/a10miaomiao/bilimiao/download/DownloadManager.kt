@@ -25,13 +25,20 @@ class DownloadManager(
         .writeTimeout(120, TimeUnit.SECONDS)
         .build()
 
+    /** 当前进行中的请求，用于暂停时立即中断阻塞读 */
+    private var activeCall: okhttp3.Call? = null
+
     fun start(file: File, downloadedLength: Long = 0) {
         scope.launch {
             create(downloadInfo, file, downloadedLength).run {
                 throttleFirst(200)
             }.catch { e ->
-                downloadInfo.status = CurrentDownloadInfo.STATUS_FAIL_DOWNLOAD
-                callback.onTaskError(downloadInfo, e)
+                if (downloadInfo.status == CurrentDownloadInfo.STATUS_PAUSE) {
+                    // 用户主动暂停导致的取消属于正常终止，不按失败处理
+                } else {
+                    downloadInfo.status = CurrentDownloadInfo.STATUS_FAIL_DOWNLOAD
+                    callback.onTaskError(downloadInfo, e)
+                }
             }.onCompletion {
                 if (downloadInfo.status == CurrentDownloadInfo.STATUS_COMPLETED) {
                     callback.onTaskComplete(downloadInfo)
@@ -83,10 +90,19 @@ class DownloadManager(
             request.addHeader(keys, info.header[keys] ?: "")
         }
         val call = mClient.newCall(request.build())
+        activeCall = call
         val response = call.execute()
         if (!response.isSuccessful) {
             response.close()
             throw IOException("HTTP ${response.code}: ${response.message}")
+        }
+        // 断点续传必须校验 206：服务器忽略 Range 返回 200 全量时，
+        // 直接 append 会把全量内容接到半截文件后导致文件损坏
+        if (downloadLength > 0 && response.code != 206) {
+            FileOutputStream(file, false).use { } // 清空文件，从头下载
+            downloadLength = 0
+            info.progress = 0
+            emit(info)
         }
         val body = response.body
             ?: throw IOException("Response body is null for url: ${info.url}")
@@ -127,6 +143,8 @@ class DownloadManager(
      */
     fun cancel(): CurrentDownloadInfo? {
         downloadInfo.status = CurrentDownloadInfo.STATUS_PAUSE
+        // 立即中断阻塞读，否则暂停最长要等 120s readTimeout 才生效
+        activeCall?.cancel()
         return downloadInfo
     }
 

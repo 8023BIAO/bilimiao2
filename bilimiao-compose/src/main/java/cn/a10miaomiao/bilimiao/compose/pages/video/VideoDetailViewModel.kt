@@ -148,12 +148,17 @@ class VideoDetailViewModel(
         }
     }
 
+    private var loadJob: kotlinx.coroutines.Job? = null
+
     fun changeVideo(id: String) {
         _id = id
         loadData()
     }
 
-    fun loadData() = viewModelScope.launch {
+    fun loadData() {
+        // 取消上一未完成的加载：快速切换视频时避免乱序响应覆盖新视频数据
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
         try {
             _loading.value = true
             _fail.value = null
@@ -186,6 +191,7 @@ class VideoDetailViewModel(
         } finally {
             _isRefreshing.value = false
             _loading.value = false
+        }
         }
     }
 

@@ -558,6 +558,10 @@ initDanmakuTouchListener()
                 // UP/CANCEL 必须传给 super.onTouch，否则播放器内部状态会被卡住
                 if (event.action == MotionEvent.ACTION_UP
                     || event.action == MotionEvent.ACTION_CANCEL) {
+                    // pinch 收尾即解锁单指手势；此处早于统一复位分支，不置位会导致
+                    // 下一次单指手势被 isPinching 整体抑制直到抬手
+                    pendingPinchTime = 0L
+                    isPinching = false
                     super.onTouch(v, event)
                 }
                 return consumed

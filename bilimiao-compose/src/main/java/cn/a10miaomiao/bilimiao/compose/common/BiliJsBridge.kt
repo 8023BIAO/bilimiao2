@@ -1,6 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose.common
 
 import android.content.Intent
+import android.net.Uri
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.fragment.app.Fragment
@@ -66,6 +67,12 @@ class BiliJsBridge(
 
     @JavascriptInterface
     fun postMessage(eventString: String) {
+        // 来源校验：仅白名单域名页面可调用桥（内嵌浏览器可能被重定向到任意页面）
+        val pageHost = Uri.parse(webView.url ?: "").host ?: ""
+        if (!BilibiliNavigation.isAllowedWebHost(pageHost)) {
+            miaoLogger().d("postMessage rejected from host=$pageHost")
+            return
+        }
         miaoLogger().d("postMessage" to eventString)
         val event = MiaoJson.fromJson<MessageEventInfo>(eventString)
         var result = ""
@@ -109,13 +116,22 @@ class BiliJsBridge(
             }
             "ability.openScheme" -> {
                 val url = event.data.jsonObject["url"]?.jsonPrimitive?.content ?: return
+                val uri = Uri.parse(url)
+                val scheme = uri.scheme?.lowercase()
+                // 拒绝危险 scheme，防止桥被滥用执行脚本/访问文件
+                if (scheme == null || scheme in setOf("javascript", "file", "data", "content")) {
+                    return
+                }
                 activity.runOnUiThread {
                     val re = BilibiliNavigation.navigationTo(
                         pageNavigation,
                         url
                     )
                     if (!re) {
-                        webView.loadUrl(url)
+                        // 仅 http/https 允许留在内嵌浏览器加载，其余交由系统处理
+                        if (scheme == "http" || scheme == "https") {
+                            webView.loadUrl(url)
+                        }
                     }
                 }
             }

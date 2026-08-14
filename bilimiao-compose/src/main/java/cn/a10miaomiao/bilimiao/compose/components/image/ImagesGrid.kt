@@ -105,7 +105,8 @@ fun ImagesGrid(
     val previewerState = rememberPreviewerState(
         verticalDragType = VerticalDragType.Down,
         pageCount = { count },
-        getKey = { imageModels[it].originalUrl },
+        // 越界容错：预览状态可能持有旧列表引用，索引越界时返回空 key 而不是崩溃
+        getKey = { imageModels.getOrNull(it)?.originalUrl ?: "" },
     )
     if (count == 1) {
         ImagesGridItem(

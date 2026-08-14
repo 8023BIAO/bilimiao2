@@ -90,6 +90,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.instance
@@ -119,11 +121,14 @@ class PlayerDelegate2(
         private var videoCache: SimpleCache? = null
 
         private fun getCache(context: Context): SimpleCache {
+            // 用 applicationContext：StandaloneDatabaseProvider 会被静态 videoCache 持有，
+            // 传 Activity 会在进程存活期间 pin 住首个 Activity 实例
+            val appContext = context.applicationContext
             return videoCache ?: synchronized(this) {
                 videoCache ?: SimpleCache(
-                    File(context.externalCacheDir ?: context.cacheDir, "video_cache"),
-                    LeastRecentlyUsedCacheEvictor(getCacheMaxSize(context)),
-                    StandaloneDatabaseProvider(context)
+                    File(appContext.externalCacheDir ?: appContext.cacheDir, "video_cache"),
+                    LeastRecentlyUsedCacheEvictor(getCacheMaxSize(appContext)),
+                    StandaloneDatabaseProvider(appContext)
                 ).also { videoCache = it }
             }
         }
@@ -653,9 +658,12 @@ class PlayerDelegate2(
         }
     }
 
+    private val loadMutex = Mutex()
+
     suspend fun loadPlayerSource(
         isChangedQuality: Boolean = false
     ) {
+        loadMutex.withLock {
         // 新视频开始播放，重置退出标志
         controller.explicitExitSmallWindow = false
         val source = playerSource ?: return
@@ -767,6 +775,7 @@ class PlayerDelegate2(
         } catch (e: Exception) {
             e.printStackTrace()
             errorMessageBoxController.show(e.message ?: e.toString())
+        }
         }
     }
 

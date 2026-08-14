@@ -1,6 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose.pages.web
 
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -91,6 +92,14 @@ private class WebPageViewModel(
     }
 
     fun initWebView(view: WebView) {
+        // 深链入口（bilimiao://web?url= / bilibili://forward?-Btarget=）校验：
+        // 非白名单域名不允许进入带 JS 桥的内嵌浏览器
+        val startHost = Uri.parse(startUrl).host ?: ""
+        if (!BilibiliNavigation.isAllowedWebHost(startHost)) {
+            toast("不支持的链接：$startUrl")
+            view.post { pageNavigation.popBackStack() }
+            return
+        }
         val biliJsBridge = BiliJsBridge(fragment, pageNavigation, view)
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
         view.webViewClient = mWebViewClient
@@ -125,8 +134,19 @@ private class WebPageViewModel(
                 // 避免返回时出现空白中间层（b23.tv 短链 → 视频详情页场景）
                 // 顺序：先弹掉 WebPage(连同其上的目标页)，再重新导航目标页
                 view.post {
-                    if (pageNavigation.popBackStack(WebPage(startUrl), inclusive = true)) {
-                        BilibiliNavigation.navigationTo(pageNavigation, url)
+                    // 竞态防护：用户可能已先手动返回，此时 popBackStack 失败会走 onClose 误关整个 Activity。
+                    // 仅当 WebPage 仍存在于返回栈时才执行"无感返回"弹栈
+                    val entries = listOfNotNull(
+                        pageNavigation.hostController.currentBackStackEntry,
+                        pageNavigation.hostController.previousBackStackEntry,
+                    )
+                    val stillInStack = entries.any {
+                        (it.destination.route ?: "").startsWith("WebPage/")
+                    }
+                    if (stillInStack) {
+                        if (pageNavigation.popBackStack(WebPage(startUrl), inclusive = true)) {
+                            BilibiliNavigation.navigationTo(pageNavigation, url)
+                        }
                     }
                 }
                 return true
@@ -230,6 +250,9 @@ private fun WebPageContent(
                 }
             },
             onRelease = {
+                // 释放 WebView 原生资源，避免页面频繁进出时内存持续累积
+                viewModel.webView?.destroy()
+                viewModel.webView = null
                 it.removeAllViews()
             }
         )

@@ -45,8 +45,11 @@ object CdnSelector {
         if (urls.size == 1) return urls
 
         return withContext(Dispatchers.IO) {
-            // 去重并限制数量
-            val candidates = urls.distinct().take(MAX_CONCURRENT_TESTS)
+            // 去重；并发测速上限 5 个，其余候选不测速、直接排在末尾，
+            // 保证返回值覆盖全部候选（文档契约），CdnFailoverDataSource 兜底列表不丢候选
+            val distinct = urls.distinct()
+            val candidates = distinct.take(MAX_CONCURRENT_TESTS)
+            val rest = distinct.drop(MAX_CONCURRENT_TESTS)
 
             val results = candidates.map { url ->
                 async {
@@ -58,7 +61,7 @@ object CdnSelector {
             // 按延迟排序（成功的在前，超时/失败的 -1 排最后）
             val valid = results.filter { it.second > 0 }.sortedBy { it.second }.map { it.first }
             val failed = results.filter { it.second <= 0 }.map { it.first }
-            val ranked = valid + failed
+            val ranked = valid + failed + rest
 
             miaoLogger().d("CDN竞速结果",
                 "fastest" to "${ranked.firstOrNull()?.take(60)}... (${results.firstOrNull { it.first == ranked.firstOrNull() }?.second}ms)",

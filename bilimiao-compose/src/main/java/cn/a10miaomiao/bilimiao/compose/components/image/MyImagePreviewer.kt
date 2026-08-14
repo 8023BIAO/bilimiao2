@@ -87,11 +87,13 @@ private class MyImagePreviewerController(
                 isDownloading.value = false
             }
         }
+        // 先置下载中标志再发起请求：Glide 内存缓存命中时 onResourceReady 会同步回调，
+        // 标志后置会导致保存被跳过且下载对话框永久卡住
+        isDownloading.value = true
         Glide.with(activity)
             .asFile()
             .load(imageUrl)
             .into(target)
-        isDownloading.value = true
     }
 
     fun copyImageUrl(imageUrl: String) {

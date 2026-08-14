@@ -133,9 +133,11 @@ fun DynNoteBox(
     val uriHandler = LocalUriHandler.current
     val pictures = dynNote.pictures?.pictures ?: emptyList()
     val imageModels = remember(pictures) {
-        pictures.map {
+        pictures.mapNotNull {
             val imgWidth = it.imgWidth.toInt()
             val imgHeight = it.imgHeight.toInt()
+            // 坏元数据防护（同 #290）：宽或高 <=0 时跳过该图，避免整数除零崩溃
+            if (imgWidth <= 0 || imgHeight <= 0) return@mapNotNull null
             val w = min(600, imgWidth)
             val h = w * imgHeight / imgWidth
             val url = UrlUtil.autoHttps(it.imgSrc)

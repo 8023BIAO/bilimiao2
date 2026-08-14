@@ -50,7 +50,8 @@ class VideoPlayerSource(
             .getVideoPalyUrl(aid, id, quality, fnval)
 
         return defaultPlayerSource.also {
-            it.lastPlayCid = res.last_play_cid ?: ""
+            // 与番剧源一致：保留调用方预设的 lastPlayCid（如空降跳转），服务端无返回时不覆盖
+            it.lastPlayCid = res.last_play_cid ?: it.lastPlayCid
             it.lastPlayTime = res.last_play_time ?: 0
             it.quality = res.quality
             it.acceptList = res.accept_quality.mapIndexed { index, i ->

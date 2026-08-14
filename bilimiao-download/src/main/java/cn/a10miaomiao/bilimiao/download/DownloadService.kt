@@ -73,9 +73,11 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
 
         override fun onTaskError(info: CurrentDownloadInfo, error: Throwable) {
-            if (downloadManager?.downloadInfo?.status == CurrentDownloadInfo.STATUS_COMPLETED) {
-
-            }
+            // 音频下载失败：终止整个任务并给出失败提示（此前空实现导致任务永久卡在等待音频）
+            logToFile("audio download FAILED: ${error.message}")
+            curDownload.value = info.copy(status = CurrentDownloadInfo.STATUS_FAIL_DOWNLOAD)
+            downloadNotify.showErrorStatusNotify(info)
+            stopDownload()
         }
 
     }
@@ -90,6 +92,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
     private var curMediaFile: File? = null
     private var curMediaFileInfo: BiliDownloadMediaFileInfo? = null
+    /** Type1 多分片待下载队列（按 order 升序），全部完成后合并为单文件 */
+    private var pendingSegments = mutableListOf<BiliDownloadMediaFileInfo.Type1Segment>()
+    /** 公共目录回退私有目录的提示只弹一次，避免每次下载都打扰 */
+    private var warnedPrivateFallback = false
 
 
     override fun onCreate() {
@@ -313,19 +319,11 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             curMediaFileInfo = mediaFileInfo
             when(mediaFileInfo) {
                 is BiliDownloadMediaFileInfo.Type1 -> {
-                    // TODO: 多视频文件下载
-                    val firstSegment = mediaFileInfo.segment_list.firstOrNull()
-                        ?: throw Exception("segment_list为空")
-                    val dlInfo = currentDownloadInfo.copy(
-                        url = firstSegment.url,
-                        header = httpHeader,
-                        size = firstSegment.bytes,
-                        length = firstSegment.duration
-                    )
-                    downloadManager = DownloadManager(this, dlInfo, this).also {
-                        it.start(File(videoDir, "0" + "." + mediaFileInfo.format))
-                    }
-                    curDownload.value = dlInfo
+                    // 多分片：逐个下载临时分片，全部完成后按序合并（此前只下第一段会静默丢数据）
+                    val segments = mediaFileInfo.segment_list
+                    if (segments.isEmpty()) throw Exception("segment_list为空")
+                    pendingSegments = segments.sortedBy { it.order }.toMutableList()
+                    startNextSegment(currentDownloadInfo, mediaFileInfo, videoDir, httpHeader)
                 }
                 is BiliDownloadMediaFileInfo.Type2 -> {
                     val dlInfo = currentDownloadInfo.copy(
@@ -388,6 +386,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
 
     fun cancelDownload(taskId: Long) {
         if (taskId == currentTaskId) {
+            pendingSegments.clear()
             downloadManager?.cancel()
             audioDownloadManager?.cancel()
             downloadManager = null
@@ -398,9 +397,57 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     }
 
     /**
+     * 启动下一个 Type1 分片的下载；分片写为 part_<order>.<format>，完成后合并
+     */
+    private fun startNextSegment(
+        currentDownloadInfo: CurrentDownloadInfo,
+        mediaFileInfo: BiliDownloadMediaFileInfo.Type1,
+        videoDir: File,
+        httpHeader: Map<String, String>,
+    ) {
+        val seg = pendingSegments.removeAt(0)
+        val idx = mediaFileInfo.segment_list.size - pendingSegments.size - 1
+        val dlInfo = currentDownloadInfo.copy(
+            url = seg.url,
+            header = httpHeader,
+            size = seg.bytes,
+            length = seg.duration,
+            progress = 0L, // 新分片从 0 开始，避免继承上一分片进度误发 RANGE
+        )
+        downloadManager = DownloadManager(this, dlInfo, this).also {
+            it.start(File(videoDir, "part_$idx.${mediaFileInfo.format}"))
+        }
+        curDownload.value = dlInfo
+        logToFile("segment start $idx/${mediaFileInfo.segment_list.size} bytes=${seg.bytes}")
+    }
+
+    /**
+     * 按 order 顺序合并分片为 0.<format>（与旧单文件命名一致），随后删除临时分片
+     */
+    private fun mergeSegments(videoDir: File, mediaFileInfo: BiliDownloadMediaFileInfo.Type1) {
+        val target = File(videoDir, "0.${mediaFileInfo.format}")
+        val parts = mediaFileInfo.segment_list.indices.map { File(videoDir, "part_$it.${mediaFileInfo.format}") }
+        try {
+            FileOutputStream(target, false).use { out ->
+                parts.forEach { part ->
+                    if (part.exists()) {
+                        part.inputStream().use { it.copyTo(out) }
+                    }
+                }
+            }
+            parts.forEach { if (it.exists()) it.delete() }
+            logToFile("segment merge done -> ${target.name} size=${target.length()}")
+        } catch (e: Exception) {
+            logToFile("segment merge FAILED: ${e.message}")
+            throw e
+        }
+    }
+
+    /**
      * 结束当前任务
      */
     fun stopDownload () {
+        pendingSegments.clear()
         curDownload.value?.let { cur ->
             val entryAndPathInfo = downloadList.find {
                 cur.id == it.entry.key
@@ -416,7 +463,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 downloadManager?.cancel()
             }
         }
-        curDownload.value = null
+        // 失败状态保留给 UI 展示，非失败才清空（此前失败态被立即置空，用户看不到失败）
+        if (curDownload.value?.status != CurrentDownloadInfo.STATUS_FAIL_DOWNLOAD) {
+            curDownload.value = null
+        }
         curMediaFile = null
         curMediaFileInfo = null
         nextDownload()
@@ -521,6 +571,26 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         if (info.size > 0 && info.progress < info.size) {
             return
         }
+        // Type1 多分片：还有分片未下载则继续，全部完成则合并为单文件
+        if (curMediaFileInfo is BiliDownloadMediaFileInfo.Type1) {
+            val entryInfo = curBiliDownloadEntryAndPathInfo
+            if (entryInfo != null && pendingSegments.isNotEmpty()) {
+                val mediaInfo = curMediaFileInfo as BiliDownloadMediaFileInfo.Type1
+                startNextSegment(
+                    info,
+                    mediaInfo,
+                    File(entryInfo.entryDirPath, entryInfo.entry.type_tag),
+                    mediaInfo.httpHeader(),
+                )
+                return
+            }
+            if (entryInfo != null) {
+                mergeSegments(
+                    File(entryInfo.entryDirPath, entryInfo.entry.type_tag),
+                    curMediaFileInfo as BiliDownloadMediaFileInfo.Type1,
+                )
+            }
+        }
         when (audioDownloadManager?.downloadInfo?.status) {
             CurrentDownloadInfo.STATUS_DOWNLOADING -> {
                 // 等待音频下载完成
@@ -557,6 +627,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             )
             downloadListVersion.value++
         }
+        downloadNotify.showErrorStatusNotify(info)
         stopDownload()
     }
 
@@ -595,6 +666,17 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             val nomedia = File(privateDir, ".nomedia")
             if (!nomedia.exists()) nomedia.createNewFile()
             logToFile("getDownloadPath: FALLBACK PRIVATE ${privateDir.canonicalPath}")
+            // 提示用户实际保存位置（仅一次）：无存储权限时公共目录不可写，文件在应用私有目录
+            if (!warnedPrivateFallback) {
+                warnedPrivateFallback = true
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        this,
+                        "无存储权限，视频已保存到应用私有目录：${privateDir.path}（卸载应用会丢失）",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
             return privateDir.canonicalPath
         }
     }
