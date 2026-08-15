@@ -92,9 +92,12 @@ object CdnSelector {
                 }
                 conn.connect()
                 // 只要拿到响应码就算成功（206/200/403 都行，测的是连接延迟）
-                conn.getResponseCode()
-                // 读取并丢弃 1 字节响应体，确保完整测量首字节延迟
-                conn.inputStream.use { it.read() }
+                val code = conn.getResponseCode()
+                // 仅对 2xx 读取并丢弃 1 字节响应体，确保完整测量首字节延迟；
+                // 403/302/非 2xx 不读 body，避免 getInputStream() 抛异常被误判为超时
+                if (code in 200..299) {
+                    conn.inputStream.use { it.read() }
+                }
                 System.currentTimeMillis() - start
             } catch (e: Exception) {
                 -1L
