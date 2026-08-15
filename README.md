@@ -1,3 +1,4 @@
+此项目已经停止更新。
 
 [releases APK](../../releases/latest)
 
