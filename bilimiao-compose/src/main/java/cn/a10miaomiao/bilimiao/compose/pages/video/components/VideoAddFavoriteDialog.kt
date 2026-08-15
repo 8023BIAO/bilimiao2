@@ -62,8 +62,10 @@ import com.a10miaomiao.bilimiao.comm.entity.player.PlayListFrom
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -76,6 +78,8 @@ class VideoAddFavoriteDialogState(
 
     var aid: String = ""
         private set
+
+    private var loadJob: Job? = null
 
     private val _visible = mutableStateOf(false)
     val visible: Boolean get() = _visible.value
@@ -109,12 +113,15 @@ class VideoAddFavoriteDialogState(
                 .json<ResponseData<MediaResponseInfo>>()
             withContext(Dispatchers.Main) {
                 if (res.isSuccess) {
+                    _list.clear()
+                    _selectedMap.clear()
                     _list.addAll(res.requireData().list)
                 } else {
                     _listFail.value = res.message
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             e.printStackTrace()
             withContext(Dispatchers.Main) {
                 _listFail.value = e.message ?: e.toString()
@@ -183,11 +190,18 @@ class VideoAddFavoriteDialogState(
     }
 
     fun show(videoAid: String) {
-        if (videoAid != aid || list.isEmpty()) {
-            scope.launch {
+        if (videoAid != aid) {
+            // 切换视频时取消上一次请求，避免旧响应覆盖新视频的收藏夹状态
+            loadJob?.cancel()
+            aid = videoAid
+            _list.clear()
+            _selectedMap.clear()
+            _listFail.value = ""
+        }
+        if (list.isEmpty()) {
+            loadJob = scope.launch {
                 loadData()
             }
-            aid = videoAid
         }
         _visible.value = true
     }
