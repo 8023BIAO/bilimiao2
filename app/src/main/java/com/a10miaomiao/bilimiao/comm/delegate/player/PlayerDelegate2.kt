@@ -349,6 +349,12 @@ class PlayerDelegate2(
                 picInPicHelper?.updatePictureInPictureActions(player.currentState)
             }
         }
+        // 后台播放回到前台后，音频还在走但 Surface 可能没有恢复渲染。
+        // 静默重连 Surface：不触发暂停/播放 UI 闪变，不 seek，只恢复视频画面输出。
+        if (controller.isBackgroundPlay
+            && views.videoPlayer?.isInPlayingState == true) {
+            views.videoPlayer?.reconnectSurfaceQuietly()
+        }
     }
 
     override fun onPause() {

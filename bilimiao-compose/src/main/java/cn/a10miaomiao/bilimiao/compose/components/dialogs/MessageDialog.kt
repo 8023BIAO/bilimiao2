@@ -1,6 +1,9 @@
 package cn.a10miaomiao.bilimiao.compose.components.dialogs
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -22,7 +25,13 @@ fun MessageDialog(
                     Text(messageState.title)
                 },
                 text = {
-                    Text(messageState.text)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(messageState.text)
+                    }
                 },
                 confirmButton = {
                     TextButton(

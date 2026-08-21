@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -128,6 +128,17 @@ private class SearchPageViewModel(
         SearchResultPageTab.Column,
     )
 
+    /**
+     * Pager 状态放在 ViewModel 里，跨全屏/旋转等重组保持不变。
+     * 不要用 rememberPagerState + rememberSaveable：恢复时可能短暂拿到错误页，
+     * 导致退出全屏后搜索 Tab 跳到最后一个。
+     */
+    val pagerState = PagerState(
+        currentPage = 0,
+        currentPageOffsetFraction = 0f,
+        pageCount = { tabs.size },
+    )
+
 }
 
 
@@ -144,7 +155,7 @@ private fun SearchResultPageContent(
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(pageCount = { viewModel.tabs.size })
+    val pagerState = viewModel.pagerState
     val emitter = localEmitter()
     val combinedTabClick = combinedTabDoubleClick(
         pagerState = pagerState,

@@ -186,9 +186,9 @@ private class HomePopularContentViewModel(
     }
 
     fun refresh() {
+        // 先清空旧列表，避免屏蔽规则变化后，旧内容继续显示到新列表过滤完成，造成“闪一下又消失”
+        list.reset()
         isRefreshing.value = true
-        list.finished.value = false
-        list.fail.value = ""
         loadData(0)
     }
 
