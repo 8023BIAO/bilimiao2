@@ -1045,7 +1045,7 @@ class PlayerController(
                         startMs = from * 1000L,
                         endMs = to * 1000L
                     )
-                }
+                }.sortedBy { it.startMs }
 
                 withContext(Dispatchers.Main) {
                     currentChapters = chapters

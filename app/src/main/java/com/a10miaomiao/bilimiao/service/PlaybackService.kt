@@ -333,14 +333,32 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         args: Bundle,
     ): ListenableFuture<SessionResult> {
         when (customCommand.customAction) {
-            "bilimiao.seek_back" -> playerDelegate?.mediaSeekBack()
-            "bilimiao.seek_forward" -> playerDelegate?.mediaSeekForward()
+            "bilimiao.seek_back" -> {
+                playerDelegate?.mediaSeekBack()
+                refreshNotification()
+            }
+            "bilimiao.seek_forward" -> {
+                playerDelegate?.mediaSeekForward()
+                refreshNotification()
+            }
             "bilimiao.toggle_prev_next_mode" -> cycleControlMode()
             "bilimiao.toggle_play_mode" -> cyclePlayMode()
-            "bilimiao.prev_episode" -> playerDelegate?.mediaPlayPrevious()
-            "bilimiao.next_episode" -> playerDelegate?.mediaPlayNext()
-            "bilimiao.prev_chapter" -> playerDelegate?.mediaSeekToPreviousChapter()
-            "bilimiao.next_chapter" -> playerDelegate?.mediaSeekToNextChapter()
+            "bilimiao.prev_episode" -> {
+                playerDelegate?.mediaPlayPrevious()
+                refreshNotification()
+            }
+            "bilimiao.next_episode" -> {
+                playerDelegate?.mediaPlayNext()
+                refreshNotification()
+            }
+            "bilimiao.prev_chapter" -> {
+                playerDelegate?.mediaSeekToPreviousChapter()
+                refreshNotification()
+            }
+            "bilimiao.next_chapter" -> {
+                playerDelegate?.mediaSeekToNextChapter()
+                refreshNotification()
+            }
         }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
     }
@@ -362,6 +380,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             }
             ControlMode.SEEK -> playerDelegate?.mediaSeekBack()
         }
+        refreshNotification()
     }
 
     /** 下一项：下一集 → 下一章 → 前进10秒 */
@@ -381,6 +400,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             }
             ControlMode.SEEK -> playerDelegate?.mediaSeekForward()
         }
+        refreshNotification()
     }
 
     override fun onMediaButtonEvent(

@@ -77,6 +77,7 @@ import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.config.config
 import com.a10miaomiao.bilimiao.service.PlaybackService
 import com.a10miaomiao.bilimiao.store.WindowStore
+import com.a10miaomiao.bilimiao.widget.player.ChapterNavigator
 import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
 import com.a10miaomiao.bilimiao.widget.player.media3.ExoMediaSourceInterceptListener
 import com.a10miaomiao.bilimiao.widget.player.media3.ExoSourceManager
@@ -1126,24 +1127,32 @@ class PlayerDelegate2(
     // ========== 章节控制（通知栏/蓝牙） ==========
 
     override fun hasChapters(): Boolean {
-        return controller.currentChapters.size > 1
+        return ChapterNavigator.hasChapters(controller.currentChapters)
     }
 
     override fun hasPreviousChapter(): Boolean {
-        return controller.currentChapters.size > 1
+        val p = views.videoPlayer ?: return false
+        return ChapterNavigator.hasPrevious(
+            controller.currentChapters,
+            p.currentPositionWhenPlaying,
+        )
     }
 
     override fun hasNextChapter(): Boolean {
-        return controller.currentChapters.size > 1
+        val p = views.videoPlayer ?: return false
+        return ChapterNavigator.hasNext(
+            controller.currentChapters,
+            p.currentPositionWhenPlaying,
+        )
     }
 
     override fun mediaSeekToPreviousChapter(): Boolean {
         val p = views.videoPlayer ?: return false
         val chapters = controller.currentChapters
-        if (chapters.size <= 1) return false
+        if (!ChapterNavigator.hasChapters(chapters)) return false
         val pos = p.currentPositionWhenPlaying
-        // 1. 有上一章节 → 跳到上一章节起点
-        val chapterStart = chapters.lastOrNull { it.startMs < pos - 1000L }?.startMs
+        // 1. 有上一章节 → 直接跳到上一章节起点（不用时间窗口）
+        val chapterStart = ChapterNavigator.previousStart(chapters, pos)
         if (chapterStart != null) {
             p.seekTo(chapterStart)
             return true
@@ -1165,11 +1174,11 @@ class PlayerDelegate2(
     override fun mediaSeekToNextChapter(): Boolean {
         val p = views.videoPlayer ?: return false
         val chapters = controller.currentChapters
-        if (chapters.size <= 1) return false
+        if (!ChapterNavigator.hasChapters(chapters)) return false
         val pos = p.currentPositionWhenPlaying
         val duration = p.duration
-        // 1. 有下一章节 → 跳到下一章节起点
-        val chapterStart = chapters.firstOrNull { it.startMs > pos + 1000L }?.startMs
+        // 1. 有下一章节 → 直接跳到下一章节起点（不用时间窗口）
+        val chapterStart = ChapterNavigator.nextStart(chapters, pos)
         if (chapterStart != null) {
             p.seekTo(chapterStart)
             return true
