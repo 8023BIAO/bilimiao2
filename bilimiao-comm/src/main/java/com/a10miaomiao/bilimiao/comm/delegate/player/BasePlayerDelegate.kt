@@ -39,4 +39,11 @@ interface BasePlayerDelegate: BaseDelegate {
     fun hasPreviousEpisode(): Boolean = false
     fun hasNextEpisode(): Boolean = false
     fun isPlaylistSingle(): Boolean = false
+
+    // 视频章节控制（有章节数据的实现类覆盖）
+    fun hasChapters(): Boolean = false
+    fun hasPreviousChapter(): Boolean = false
+    fun hasNextChapter(): Boolean = false
+    fun mediaSeekToPreviousChapter(): Boolean = false
+    fun mediaSeekToNextChapter(): Boolean = false
 }

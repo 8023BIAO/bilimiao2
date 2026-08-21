@@ -1113,12 +1113,78 @@ class PlayerDelegate2(
     override fun mediaSeekForward() {
         val p = views.videoPlayer ?: return
         val dur = p.duration
+        // 时长未知时不要 seek，避免错误地跳回 0
+        if (dur <= 0L) return
         val target = (p.currentPositionWhenPlaying + 10000).coerceAtMost(dur)
         p.seekTo(target)
     }
 
     override fun mediaGetDuration(): Long {
         return views.videoPlayer?.duration ?: 0L
+    }
+
+    // ========== 章节控制（通知栏/蓝牙） ==========
+
+    override fun hasChapters(): Boolean {
+        return controller.currentChapters.size > 1
+    }
+
+    override fun hasPreviousChapter(): Boolean {
+        return controller.currentChapters.size > 1
+    }
+
+    override fun hasNextChapter(): Boolean {
+        return controller.currentChapters.size > 1
+    }
+
+    override fun mediaSeekToPreviousChapter(): Boolean {
+        val p = views.videoPlayer ?: return false
+        val chapters = controller.currentChapters
+        if (chapters.size <= 1) return false
+        val pos = p.currentPositionWhenPlaying
+        // 1. 有上一章节 → 跳到上一章节起点
+        val chapterStart = chapters.lastOrNull { it.startMs < pos - 1000L }?.startMs
+        if (chapterStart != null) {
+            p.seekTo(chapterStart)
+            return true
+        }
+        // 2. 没有上一章节，但还可以后退 10 秒 → 后退 10 秒
+        if (pos >= 10000L) {
+            p.seekTo(pos - 10000L)
+            return true
+        }
+        // 3. 不足 10 秒，有上一集 → 上一集
+        if (mediaPlayPrevious()) {
+            return true
+        }
+        // 4. 没有上一集 → 回到 0 秒
+        p.seekTo(0L)
+        return true
+    }
+
+    override fun mediaSeekToNextChapter(): Boolean {
+        val p = views.videoPlayer ?: return false
+        val chapters = controller.currentChapters
+        if (chapters.size <= 1) return false
+        val pos = p.currentPositionWhenPlaying
+        val duration = p.duration
+        // 1. 有下一章节 → 跳到下一章节起点
+        val chapterStart = chapters.firstOrNull { it.startMs > pos + 1000L }?.startMs
+        if (chapterStart != null) {
+            p.seekTo(chapterStart)
+            return true
+        }
+        // 2. 没有下一章节，但剩余时间还够前进 10 秒 → 前进 10 秒
+        if (duration > 0L && duration - pos >= 10000L) {
+            p.seekTo((pos + 10000L).coerceAtMost(duration))
+            return true
+        }
+        // 3. 剩余不足 10 秒，有下一集 → 下一集
+        if (mediaPlayNext()) {
+            return true
+        }
+        // 4. 没有下一集 → 不动
+        return false
     }
 
     override fun mediaGetTitle(): String? {

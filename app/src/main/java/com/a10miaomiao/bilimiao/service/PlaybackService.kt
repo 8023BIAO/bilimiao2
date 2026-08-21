@@ -35,6 +35,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
+private enum class ControlMode(val label: String) {
+    EPISODE("上/下集"),
+    CHAPTER("章节"),
+    SEEK("±10秒"),
+}
+
 class PlaybackService : MediaSessionService(), MediaSession.Callback {
 
     companion object {
@@ -107,6 +113,8 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     private val togglePlayModeCmd = SessionCommand("bilimiao.toggle_play_mode", Bundle.EMPTY)
     private val prevEpisodeCmd = SessionCommand("bilimiao.prev_episode", Bundle.EMPTY)
     private val nextEpisodeCmd = SessionCommand("bilimiao.next_episode", Bundle.EMPTY)
+    private val prevChapterCmd = SessionCommand("bilimiao.prev_chapter", Bundle.EMPTY)
+    private val nextChapterCmd = SessionCommand("bilimiao.next_chapter", Bundle.EMPTY)
 
     private val backButton = CommandButton.Builder()
         .setDisplayName("后退10秒")
@@ -118,12 +126,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         .setDisplayName("前进10秒")
         .setIconResId(R.drawable.media3_icon_skip_forward_10)
         .setSessionCommand(seekForwardCmd)
-        .build()
-
-    private val togglePrevNextModeButton = CommandButton.Builder()
-        .setDisplayName("切换模式")
-        .setIconResId(R.drawable.media3_icon_sync)
-        .setSessionCommand(togglePrevNextModeCmd)
         .build()
 
     private val prevEpisodeButton = CommandButton.Builder()
@@ -138,11 +140,24 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         .setSessionCommand(nextEpisodeCmd)
         .build()
 
+    private val prevChapterButton = CommandButton.Builder()
+        .setDisplayName("上一章节")
+        .setIconResId(R.drawable.media3_icon_previous_chapter)
+        .setSessionCommand(prevChapterCmd)
+        .build()
+
+    private val nextChapterButton = CommandButton.Builder()
+        .setDisplayName("下一章节")
+        .setIconResId(R.drawable.media3_icon_next_chapter)
+        .setSessionCommand(nextChapterCmd)
+        .build()
+
     // ========== 播放模式按钮 ==========
 
     private var currentOrder = SettingConstants.PLAYER_ORDER_DEFAULT
     private var currentRandom = false
-    private var prevNextMode = true  // true=显示上下集, false=显示播放模式
+    /** 三档控制模式：上/下集 → 章节 → ±10秒 */
+    private var controlMode = ControlMode.EPISODE
 
     /** 根据当前设置构建模式按钮（图标+文字动态变化） */
     private fun buildModeButton(order: Int, random: Boolean): CommandButton {
@@ -164,34 +179,97 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             .build()
     }
 
-    /** 构建 4 按钮布局：前两个根据 prevNextMode 动态替换；单视频时切换按钮变收藏 */
+    private fun hasAnyEpisode(): Boolean {
+        return playerDelegate?.hasPreviousEpisode() == true ||
+                playerDelegate?.hasNextEpisode() == true
+    }
+
+    /** 当前可用的三档模式（无章节/无上下集时自动退化） */
+    private fun availableControlModes(): List<ControlMode> {
+        return buildList {
+            if (hasAnyEpisode()) add(ControlMode.EPISODE)
+            if (playerDelegate?.hasChapters() == true) add(ControlMode.CHAPTER)
+            add(ControlMode.SEEK)
+        }
+    }
+
+    /** 第一个按钮：上一集 → 上一章 → 后退10秒，逐级退化 */
+    private fun buildBackButton(): CommandButton {
+        return when (controlMode) {
+            ControlMode.EPISODE -> when {
+                playerDelegate?.hasPreviousEpisode() == true -> prevEpisodeButton
+                playerDelegate?.hasChapters() == true -> prevChapterButton
+                else -> backButton
+            }
+            ControlMode.CHAPTER -> {
+                if (playerDelegate?.hasChapters() == true) prevChapterButton else backButton
+            }
+            ControlMode.SEEK -> backButton
+        }
+    }
+
+    /** 第二个按钮：下一集 → 下一章 → 前进10秒，逐级退化 */
+    private fun buildForwardButton(): CommandButton {
+        return when (controlMode) {
+            ControlMode.EPISODE -> when {
+                playerDelegate?.hasNextEpisode() == true -> nextEpisodeButton
+                playerDelegate?.hasChapters() == true -> nextChapterButton
+                else -> forwardButton
+            }
+            ControlMode.CHAPTER -> {
+                if (playerDelegate?.hasChapters() == true) nextChapterButton else forwardButton
+            }
+            ControlMode.SEEK -> forwardButton
+        }
+    }
+
+    /** 第三个切换按钮：位置不变，仅显示当前模式名 */
+    private fun buildToggleControlModeButton(): CommandButton {
+        return CommandButton.Builder()
+            .setDisplayName(controlMode.label)
+            .setIconResId(R.drawable.media3_icon_sync)
+            .setSessionCommand(togglePrevNextModeCmd)
+            .build()
+    }
+
+    /** 构建 4 按钮布局：前两个按三档模式替换；单视频时隐藏第三个切换按钮 */
     private fun buildCustomLayout(order: Int, random: Boolean): ImmutableList<CommandButton> {
         val modeButton = buildModeButton(order, random)
-        val first = if (prevNextMode && playerDelegate?.hasPreviousEpisode() == true) {
-            prevEpisodeButton
+        val first = buildBackButton()
+        val second = buildForwardButton()
+        // 只要有 ≥2 档可用模式就显示切换按钮：
+        // 单视频没有上下集但有章节时，用户仍需要在“章节 ↔ ±10秒”之间切换。
+        val third = if (availableControlModes().size > 1) {
+            buildToggleControlModeButton()
         } else {
-            backButton
+            null
         }
-        val second = if (prevNextMode && playerDelegate?.hasNextEpisode() == true) {
-            nextEpisodeButton
-        } else {
-            forwardButton
-        }
-        val third = if (playerDelegate?.isPlaylistSingle() == true) {
-            null  // 单视频：不显示切换/收藏按钮
-        } else {
-            togglePrevNextModeButton
-        }
-        val buttons = if (third != null) {
+        return if (third != null) {
             ImmutableList.of(first, second, third, modeButton)
         } else {
             ImmutableList.of(first, second, modeButton)
         }
-        return buttons
     }
 
-    /** 刷新通知栏按钮列表 */
-    private fun refreshNotification() {
+    /** 切换到下一档可用模式 */
+    private fun cycleControlMode() {
+        val modes = availableControlModes()
+        if (modes.isEmpty()) return
+        val index = modes.indexOf(controlMode)
+        controlMode = if (index >= 0) {
+            modes[(index + 1) % modes.size]
+        } else {
+            modes.first()
+        }
+        refreshNotification()
+    }
+
+    /** 刷新通知栏按钮列表（章节拉取成功/切换视频后也会调用） */
+    fun refreshNotification() {
+        val modes = availableControlModes()
+        if (modes.isNotEmpty() && controlMode !in modes) {
+            controlMode = modes.first()
+        }
         mediaSession?.setCustomLayout(buildCustomLayout(currentOrder, currentRandom))
     }
 
@@ -257,15 +335,52 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         when (customCommand.customAction) {
             "bilimiao.seek_back" -> playerDelegate?.mediaSeekBack()
             "bilimiao.seek_forward" -> playerDelegate?.mediaSeekForward()
-            "bilimiao.toggle_prev_next_mode" -> {
-                prevNextMode = !prevNextMode
-                refreshNotification()
-            }
+            "bilimiao.toggle_prev_next_mode" -> cycleControlMode()
             "bilimiao.toggle_play_mode" -> cyclePlayMode()
             "bilimiao.prev_episode" -> playerDelegate?.mediaPlayPrevious()
             "bilimiao.next_episode" -> playerDelegate?.mediaPlayNext()
+            "bilimiao.prev_chapter" -> playerDelegate?.mediaSeekToPreviousChapter()
+            "bilimiao.next_chapter" -> playerDelegate?.mediaSeekToNextChapter()
         }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+    }
+
+    /** 上一项：上一集 → 上一章 → 后退10秒 */
+    private fun onPreviousControl() {
+        when (controlMode) {
+            ControlMode.EPISODE -> when {
+                playerDelegate?.hasPreviousEpisode() == true -> playerDelegate?.mediaPlayPrevious()
+                playerDelegate?.hasChapters() == true -> playerDelegate?.mediaSeekToPreviousChapter()
+                else -> playerDelegate?.mediaSeekBack()
+            }
+            ControlMode.CHAPTER -> {
+                if (playerDelegate?.hasChapters() == true) {
+                    playerDelegate?.mediaSeekToPreviousChapter()
+                } else {
+                    playerDelegate?.mediaSeekBack()
+                }
+            }
+            ControlMode.SEEK -> playerDelegate?.mediaSeekBack()
+        }
+    }
+
+    /** 下一项：下一集 → 下一章 → 前进10秒 */
+    private fun onNextControl() {
+        when (controlMode) {
+            ControlMode.EPISODE -> when {
+                playerDelegate?.hasNextEpisode() == true -> playerDelegate?.mediaPlayNext()
+                playerDelegate?.hasChapters() == true -> playerDelegate?.mediaSeekToNextChapter()
+                else -> playerDelegate?.mediaSeekForward()
+            }
+            ControlMode.CHAPTER -> {
+                if (playerDelegate?.hasChapters() == true) {
+                    playerDelegate?.mediaSeekToNextChapter()
+                } else {
+                    playerDelegate?.mediaSeekForward()
+                }
+            }
+            ControlMode.SEEK -> playerDelegate?.mediaSeekForward()
+        }
     }
 
     override fun onMediaButtonEvent(
@@ -278,21 +393,11 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             if (event != null && event.action == KeyEvent.ACTION_UP) {
                 when (event.keyCode) {
                     KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                        // 匹配通知栏当前按钮：prevNextMode+有上一集 → 上一集，否则快退10秒
-                        if (prevNextMode && playerDelegate?.hasPreviousEpisode() == true) {
-                            playerDelegate?.mediaPlayPrevious()
-                        } else {
-                            playerDelegate?.mediaSeekBack()
-                        }
+                        onPreviousControl()
                         return true
                     }
                     KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                        // 匹配通知栏当前按钮：prevNextMode+有下一集 → 下一集，否则快进10秒
-                        if (prevNextMode && playerDelegate?.hasNextEpisode() == true) {
-                            playerDelegate?.mediaPlayNext()
-                        } else {
-                            playerDelegate?.mediaSeekForward()
-                        }
+                        onNextControl()
                         return true
                     }
                 }
@@ -325,6 +430,8 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             .add(togglePlayModeCmd)
             .add(prevEpisodeCmd)
             .add(nextEpisodeCmd)
+            .add(prevChapterCmd)
+            .add(nextChapterCmd)
             .build()
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
             .setCustomLayout(buildCustomLayout(currentOrder, currentRandom))

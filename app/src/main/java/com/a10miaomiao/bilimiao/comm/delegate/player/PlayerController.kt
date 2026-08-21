@@ -983,12 +983,18 @@ class PlayerController(
 
     // ========== 视频章节 ==========
 
+    /** 当前视频章节数据，供通知栏/蓝牙章节控制使用 */
+    var currentChapters: List<ChapterInfo> = emptyList()
+        private set
+
     private var chapterFetchJob: Job? = null
 
     private fun fetchChapters() {
         chapterFetchJob?.cancel()
         // 先隐藏旧章节，防止切换视频后残留
         player?.chapterManager?.hideChapters()
+        currentChapters = emptyList()
+        PlaybackService.instance?.refreshNotification()
         chapterFetchJob = scope.launch(Dispatchers.IO) {
             try {
                 val aid = playerStore.state.aid
@@ -1042,13 +1048,20 @@ class PlayerController(
                 }
 
                 withContext(Dispatchers.Main) {
+                    currentChapters = chapters
                     player?.chapterManager?.setChapters(chapters) { startMs ->
                         player?.seekTo(startMs)
                     }
+                    // 通知栏按钮需要根据是否有章节刷新
+                    PlaybackService.instance?.refreshNotification()
                 }
             } catch (e: Exception) {
                 miaoLogger().e("ChapterSegments", "获取章节异常", e)
-                withContext(Dispatchers.Main) { player?.chapterManager?.hideChapters() }
+                withContext(Dispatchers.Main) {
+                    currentChapters = emptyList()
+                    player?.chapterManager?.hideChapters()
+                    PlaybackService.instance?.refreshNotification()
+                }
             }
         }
     }
