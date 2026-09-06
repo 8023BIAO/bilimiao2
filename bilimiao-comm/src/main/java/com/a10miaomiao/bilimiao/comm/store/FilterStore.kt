@@ -21,7 +21,10 @@ import com.a10miaomiao.bilimiao.comm.store.base.BaseStore
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.toast
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.kodein.di.DI
 import org.kodein.di.instance
@@ -65,6 +68,21 @@ class FilterStore(override val di: DI) :
     var followWhitelistEnabled: Boolean = false
     // 屏蔽推广视频：card_goto 非 "av" 视为推广
     var blockPromotion: Boolean = false
+    // 屏蔽标签严格模式：标签查询失败时按已屏蔽处理（默认放行，避免网络波动误杀）
+    var filterTagStrict: Boolean = false
+
+    /**
+     * DataStore 首帧屏蔽设置是否就位。
+     * 时长/播放量/白名单/推广/标签严格模式由 DataStore 异步加载，初始为默认值（全部关闭）；
+     * 冷启动时若在网络返回后、首帧就位前过滤列表，会导致本应屏蔽的视频先显示、
+     * 下次刷新才被拦（“先显示后隐藏”）。列表加载前应先 awaitSettingsReady()。
+     */
+    private val settingsReady = MutableStateFlow(false)
+
+    /** 挂起直到屏蔽设置首帧就位（DataStore 读取异常时同样放行，使用默认值） */
+    suspend fun awaitSettingsReady() {
+        settingsReady.first { it }
+    }
 
     // ============================================================
     // Aho-Corasick 多模式匹配 —— O(文本长度) 替代 O(N×文本长度)
@@ -89,12 +107,19 @@ class FilterStore(override val di: DI) :
         // 从设置中加载视频过滤时长
         viewModelScope.launch {
             SettingPreferences.run {
-                activity.dataStore.data.collect {
-                    videoMinDuration = it[VideoMinDuration] ?: SettingConstants.VIDEO_MIN_DURATION_DEFAULT
-                    videoMinPlayCount = it[VideoMinPlayCount] ?: SettingConstants.VIDEO_MIN_PLAY_COUNT_DEFAULT
-                    followWhitelistEnabled = it[FollowWhitelistEnabled] ?: false
-                    blockPromotion = it[BlockPromotion] ?: false
-                }
+                activity.dataStore.data
+                    .catch {
+                        // DataStore 读取异常：以默认值放行并标记就位，避免列表加载被卡死
+                        settingsReady.value = true
+                    }
+                    .collect {
+                        videoMinDuration = it[VideoMinDuration] ?: SettingConstants.VIDEO_MIN_DURATION_DEFAULT
+                        videoMinPlayCount = it[VideoMinPlayCount] ?: SettingConstants.VIDEO_MIN_PLAY_COUNT_DEFAULT
+                        followWhitelistEnabled = it[FollowWhitelistEnabled] ?: false
+                        blockPromotion = it[BlockPromotion] ?: false
+                        filterTagStrict = it[FilterTagStrict] ?: false
+                        settingsReady.value = true
+                    }
             }
         }
         queryFilterWord()
@@ -359,9 +384,10 @@ class FilterStore(override val di: DI) :
             tagResultCache.put(id, tags)
             filterTag(tags)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             miaoLogger() error "filterTag gRPC failed for $id: ${e.message}"
-            // gRPC 失败时放行视频（不因网络波动误杀），不写缓存以允许下次重试
-            true
+            // gRPC 失败：严格模式下按已屏蔽处理；默认放行（不因网络波动误杀），不写缓存以允许下次重试
+            !filterTagStrict
         }
     }
 

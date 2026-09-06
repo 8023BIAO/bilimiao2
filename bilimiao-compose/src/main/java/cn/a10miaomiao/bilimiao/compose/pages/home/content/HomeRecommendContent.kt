@@ -66,13 +66,20 @@ import com.a10miaomiao.bilimiao.store.WindowStore
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import com.a10miaomiao.bilimiao.comm.toast
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.CancellationException
+import java.util.concurrent.atomic.AtomicLong
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
@@ -106,6 +113,11 @@ private class HomeRecommendContentViewModel(
     val isRefreshing = MutableStateFlow(false)
     val listStyle = MutableStateFlow(0)
 
+    // 在途加载请求（refresh 时取消，避免慢的旧批次用旧快照覆盖新列表）
+    private var loadJob: Job? = null
+    // 加载代数：每次 loadData 递增，过期批次不写列表/不重置 loading
+    private val loadEpoch = AtomicLong(0)
+
 
 
     init {
@@ -123,72 +135,93 @@ private class HomeRecommendContentViewModel(
 
     private fun loadData(
         idx: Long = lastIdx
-    ) = viewModelScope.launch(Dispatchers.IO) {
-        try {
-            list.loading.value = true
-            val res = BiliApiService.homeApi.recommendList(
-                idx = idx,
-            ).awaitCall().json<ResponseData<HomeRecommendInfo>>()
-            if (res.isSuccess) {
-                val itemsList = res.requireData().items
-                val batchSeen = mutableSetOf<String>()
-                val filterList = itemsList.mapNotNull { item ->
-                    // 白名单：已关注UP主不受任何屏蔽规则影响
-                    if (filterStore.isFollowWhitelisted(item.is_followed)) return@mapNotNull item
-                    val id = item.param.ifEmpty { item.uri }
-                    if ((item.goto?.isNotEmpty() ?: false)
-                            && id !in seenUris
-                            && id !in batchSeen
-                            && filterStore.filterPromotion(item.card_goto)        // 推广视频过滤
-                            && filterStore.filterDuration(item.cover_right_text)      // 先短路
-                            && filterStore.filterPlayCount(item.cover_left_text_1)    // 再短路
-                            && filterStore.filterWord(item.title)
-                            && item.args != null
-                            && item.args!!.up_id != null
-                            && filterStore.filterUpper(item.args!!.up_id!!)
-                            && filterStore.filterUpperName(item.args!!.up_name ?: "")) {
-                        if (id.isNotEmpty()) batchSeen.add(id)
-                        item
-                    } else {
-                        null
-                    }
-                }
-                val newList = if (idx == 0L) mutableListOf()
-                else list.data.value.toMutableList()
-                if (filterStore.filterTagListIsEmpty()) {
-                    newList.addAll(filterList)
-                    filterList.forEach {
-                        val id = it.param.ifEmpty { it.uri }
-                        if (id.isNotEmpty()) seenUris.add(id)
-                    }
-                    list.data.value = newList
-                } else {
-                    filterList.forEach {
-                        val id = it.param.ifEmpty { it.uri }
-                        // 无论 filterTag 结果如何都写入 seenUris，避免 gRPC 波动导致重复评估
-                        if (id.isNotEmpty()) seenUris.add(id)
-                        if (filterStore.filterTag(it.param)) {
-                            newList.add(it)
+    ) {
+        val epoch = loadEpoch.incrementAndGet()
+        // 同步置位（调用线程），堵住 loadMore 双发窗口（同 idx 重复请求/重复 key 崩溃）
+        list.loading.value = true
+        // 取消上一个在途请求（含慢的标签 gRPC 批次），避免旧结果覆盖新列表
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = BiliApiService.homeApi.recommendList(
+                    idx = idx,
+                ).awaitCall().json<ResponseData<HomeRecommendInfo>>()
+                if (res.isSuccess) {
+                    // 等屏蔽开关（时长/播放量/白名单/推广/标签严格）就位再过滤，
+                    // 避免冷启动第一批在默认值下漏过本应屏蔽的视频
+                    filterStore.awaitSettingsReady()
+                    val itemsList = res.requireData().items
+                    val batchSeen = mutableSetOf<String>()
+                    val filterList = itemsList.mapNotNull { item ->
+                        // 白名单：已关注UP主不受任何屏蔽规则影响
+                        if (filterStore.isFollowWhitelisted(item.is_followed)) return@mapNotNull item
+                        val id = item.param.ifEmpty { item.uri }
+                        if ((item.goto?.isNotEmpty() ?: false)
+                                && id !in seenUris
+                                && id !in batchSeen
+                                && filterStore.filterPromotion(item.card_goto)        // 推广视频过滤
+                                && filterStore.filterDuration(item.cover_right_text)      // 先短路
+                                && filterStore.filterPlayCount(item.cover_left_text_1)    // 再短路
+                                && filterStore.filterWord(item.title)
+                                && item.args != null
+                                && item.args!!.up_id != null
+                                && filterStore.filterUpper(item.args!!.up_id!!)
+                                && filterStore.filterUpperName(item.args!!.up_name ?: "")) {
+                            if (id.isNotEmpty()) batchSeen.add(id)
+                            item
+                        } else {
+                            null
                         }
                     }
+                    // 屏蔽标签：并行查询（限并发4路；原先逐视频串行 gRPC 一批要数秒~数十秒，
+                    // 期间一旦刷新就出现旧批次覆盖新列表的竞态）
+                    val passResults: List<Pair<RecommendCardInfo, Boolean>> =
+                        if (filterStore.filterTagListIsEmpty()) {
+                            filterList.map { it to true }
+                        } else {
+                            coroutineScope {
+                                val semaphore = Semaphore(4)
+                                filterList.map { item ->
+                                    async {
+                                        semaphore.withPermit {
+                                            item to filterStore.filterTag(item.param)
+                                        }
+                                    }
+                                }.awaitAll()
+                            }
+                        }
+                    // 过期批次（期间发生了刷新）直接丢弃：不写列表也不标记已看
+                    if (loadEpoch.get() != epoch) return@launch
+                    // 快照在写入前一刻才取，避免慢批次把并发期间的新内容覆盖回旧列表
+                    val newList = if (idx == 0L) mutableListOf()
+                    else list.data.value.toMutableList()
+                    passResults.forEach { (item, passed) ->
+                        val id = item.param.ifEmpty { item.uri }
+                        // 无论 filterTag 结果如何都写入 seenUris，避免 gRPC 波动导致重复评估
+                        if (id.isNotEmpty()) seenUris.add(id)
+                        if (passed) newList.add(item)
+                    }
                     list.data.value = newList
+                    list.finished.value = itemsList.isEmpty()
+                } else {
+                    toast(res.message)
+                    throw Exception(res.message)
                 }
-                list.finished.value = itemsList.isEmpty()
-            } else {
-                toast(res.message)
-                throw Exception(res.message)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                e.printStackTrace()
+                if (e is java.io.IOException) {
+                    // 网络错误（SSL、DNS、connection abort 等）静默忽略，下滑自动重试
+                } else {
+                    list.fail.value = e.message ?: e.toString()
+                }
+            } finally {
+                // 只有最新一代请求才复位加载标志（被取消的旧批次不得复位）
+                if (loadEpoch.get() == epoch) {
+                    list.loading.value = false
+                    isRefreshing.value = false
+                }
             }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            e.printStackTrace()
-            if (e is java.io.IOException) {
-                // 网络错误（SSL、DNS、connection abort 等）静默忽略，下滑自动重试
-            } else {
-                list.fail.value = e.message ?: e.toString()
-            }
-        } finally {
-            list.loading.value = false
-            isRefreshing.value = false
         }
     }
 

@@ -214,6 +214,9 @@ object SettingPreferences {
     // 屏蔽推广视频：card_goto 非 "av" 的视为推广/广告，直接过滤
     val BlockPromotion = booleanPreferencesKey("block_promotion")
 
+    // 屏蔽标签严格模式：标签 gRPC 查询失败时按已屏蔽处理（默认放行，避免网络波动误杀）
+    val FilterTagStrict = booleanPreferencesKey("filter_tag_strict")
+
     /**
      * Danmaku
      */

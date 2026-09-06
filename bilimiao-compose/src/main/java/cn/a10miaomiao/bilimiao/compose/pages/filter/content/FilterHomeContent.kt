@@ -119,6 +119,12 @@ fun FilterHomeContent() {
                 summary = { Text("直接过滤B站推广和广告类视频（非av类型卡片）") },
                 defaultValue = false,
             )
+            switchPreference(
+                key = SettingPreferences.FilterTagStrict.name,
+                title = { Text("标签查询失败时拦截") },
+                summary = { Text("开启后，标签信息查询失败的视频按已屏蔽处理（默认放行，避免网络波动误杀；开启可消除标签屏蔽视频时隐时现）") },
+                defaultValue = false,
+            )
 
             item("bottom") {
                 Spacer(
