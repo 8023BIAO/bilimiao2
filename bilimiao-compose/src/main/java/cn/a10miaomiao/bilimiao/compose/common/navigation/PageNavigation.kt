@@ -16,6 +16,7 @@ import androidx.navigation.NavOptionsBuilder
 import androidx.navigation.Navigator
 import androidx.navigation.navOptions
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
+import cn.a10miaomiao.bilimiao.compose.pages.article.ArticleReaderPage
 import cn.a10miaomiao.bilimiao.compose.pages.video.VideoDetailPage
 import cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
@@ -29,6 +30,27 @@ class PageNavigation(
     val hostController get() = navHostController()
 
     fun navigateByUri(deepLink: Uri): Boolean {
+        // opus 深链统一进专栏页（与搜索入口一致，两个入口共用 ArticleReaderPage）。
+        // 先剥离 query/编码残留再解析，避免 "For input string: 123?jump_opus=1" 崩溃
+        if ((deepLink.scheme == "bilibili" || deepLink.scheme == "bilimiao")
+            && deepLink.host == "opus"
+        ) {
+            val rawId = (deepLink.path ?: "")
+                .substringAfterLast('/')
+                .substringBefore('?')
+                .substringBefore('#')
+                .trim()
+            val opusId = rawId.toLongOrNull()
+            if (opusId != null) {
+                return runCatching {
+                    hostController.navigate(ArticleReaderPage(opusId), navOptions {
+                        launchSingleTop = true
+                    })
+                }.isSuccess.also {
+                    if (!it) miaoLogger() debug "[NotFoundPage]:opus=$opusId"
+                }
+            }
+        }
         return runCatching {
             hostController.navigate(deepLink, navOptions {
                 launchSingleTop = true

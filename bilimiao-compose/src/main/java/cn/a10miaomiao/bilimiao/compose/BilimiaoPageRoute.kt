@@ -34,7 +34,6 @@ import cn.a10miaomiao.bilimiao.compose.pages.download.DownloadBangumiCreatePage
 import cn.a10miaomiao.bilimiao.compose.pages.download.DownloadDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.download.DownloadListPage
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicDetailPage
-import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicOpusPage
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicPage
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.home.HomePage
@@ -146,13 +145,7 @@ class BilimiaoPageRoute (
                 )
             )
         )
-        composable<DynamicOpusPage>(
-            deepLinks = listOf(
-                navDeepLink<DynamicOpusPage>(
-                    basePath = "bilibili://opus/detail"
-                )
-            )
-        )
+        // opus 深链统一在 PageNavigation.navigateByUri 里转进 ArticleReaderPage（与搜索入口一致）
 
         // rank
         composable<RankPage>(

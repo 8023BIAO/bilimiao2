@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,6 +68,7 @@ import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
 import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerSource
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
+import com.a10miaomiao.bilimiao.comm.entity.ListAndCountInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.entity.media.MediaDetailInfo
 import com.a10miaomiao.bilimiao.comm.entity.media.MediaListInfo
@@ -87,7 +90,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -96,8 +101,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
@@ -432,6 +439,27 @@ class UserFavouriteDetailViewModel(
         }
     }
 
+    /**
+     * 移动选中视频到指定收藏夹（目标夹为用户选定；服务端一步完成加/删）
+     */
+    fun moveVideos(ids: List<String>, targetMediaId: String) = viewModelScope.launch(Dispatchers.IO) {
+        try {
+            val res = BiliApiService.userApi
+                .favMove(mediaId, targetMediaId, ids)
+                .awaitCall()
+                .json<MessageInfo>()
+            if (res.isSuccess) {
+                toast("已移动${ids.size}项")
+                refresh()
+            } else {
+                toast(res.message)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            toast(e.message ?: e.toString())
+        }
+    }
+
 
     fun isSelfFav(): Boolean {
         return mediaInfo.value?.let {
@@ -580,6 +608,9 @@ internal fun UserFavouriteDetailContent(
     var showDeleteDialog by remember {
         mutableStateOf(false)
     }
+    var showMoveDialog by remember {
+        mutableStateOf(false)
+    }
 
     PageListener(
         pageConfigId,
@@ -710,6 +741,15 @@ internal fun UserFavouriteDetailContent(
                 }
                 Row {
                     TextButton(onClick = {
+                        if (selectedIds.isNotEmpty()) {
+                            showMoveDialog = true
+                        } else {
+                            toast("请先选择要移动的视频")
+                        }
+                    }) {
+                        Text("移动")
+                    }
+                    TextButton(onClick = {
                         viewModel.deleteVideos(selectedIds.toList())
                         selectedIds.clear()
                         isEditMode = false
@@ -763,6 +803,11 @@ internal fun UserFavouriteDetailContent(
                                         else selectedIds.add(vid)
                                     },
                                     onLongClick = {
+                                        // 长按即进入编辑模式并选中（与 PiliPlus 一致），
+                                        // 之后可点"移动"或"删除"
+                                        if (!isEditMode) {
+                                            isEditMode = true
+                                        }
                                         if (vid in selectedIds) selectedIds.remove(vid)
                                         else selectedIds.add(vid)
                                     }
@@ -928,8 +973,125 @@ internal fun UserFavouriteDetailContent(
                 }
             }
         )
+    } else if (showMoveDialog) {
+        MoveToFolderDialog(
+            excludeMediaId = mediaId,
+            onConfirm = { targetId ->
+                showMoveDialog = false
+                val ids = selectedIds.toList()
+                selectedIds.clear()
+                isEditMode = false
+                viewModel.moveVideos(ids, targetId)
+            },
+            onDismiss = { showMoveDialog = false },
+        )
     }
 
     VideoDownloadDialog(state = viewModel.downloadDialogState)
 
+}
+/**
+ * 选择目标收藏夹（移动收藏视频用）：列出当前用户创建的其他收藏夹，单选后确认。
+ * 流程与 PiliPlus 一致：先选目标夹，再由服务端 x/v3/fav/resource/move 一步完成
+ * （加入目标夹 + 移出源夹）。
+ */
+@Composable
+private fun MoveToFolderDialog(
+    excludeMediaId: String,
+    onConfirm: (targetMediaId: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val userStore: UserStore by rememberInstance()
+    var folderList by remember { mutableStateOf<List<MediaListInfo>?>(null) }
+    var failMsg by remember { mutableStateOf<String?>(null) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val mid = userStore.stateFlow.value.info?.mid?.toString() ?: ""
+        if (mid.isBlank()) {
+            failMsg = "请先登录"
+            return@LaunchedEffect
+        }
+        try {
+            val res = BiliApiService.userApi
+                .favCreatedList(mid, pageNum = 1, pageSize = 100)
+                .awaitCall()
+                .json<ResponseData<ListAndCountInfo<MediaListInfo>>>()
+            if (res.isSuccess) {
+                folderList = res.requireData().list.filter { it.id != excludeMediaId }
+            } else {
+                failMsg = res.message
+            }
+        } catch (e: Exception) {
+            failMsg = e.message ?: e.toString()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("移动到") },
+        text = {
+            val list = folderList
+            when {
+                failMsg != null -> {
+                    Text(failMsg!!)
+                }
+                list == null -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+                list.isEmpty() -> {
+                    Text("没有其他收藏夹")
+                }
+                else -> {
+                    LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                        items(list, key = { it.id }) { folder ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedId = folder.id }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(
+                                    selected = selectedId == folder.id,
+                                    onClick = { selectedId = folder.id },
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = folder.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        text = "${folder.media_count} 个内容",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = selectedId != null,
+                onClick = { selectedId?.let(onConfirm) },
+            ) {
+                Text("确认")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }

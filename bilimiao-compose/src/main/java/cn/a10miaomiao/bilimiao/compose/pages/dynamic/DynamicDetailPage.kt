@@ -93,8 +93,14 @@ data class DynamicDetailPage(
 
 private class DynamicDetailPageViewModel(
     override val di: DI,
-    val dynId: String,
+    dynId: String,
 ) : ViewModel(), DIAware {
+
+    /**
+     * 深链可能带 query 或被整体编码进 path（同 DynamicOpusPage），剥离后再用，
+     * 避免动态详情/评论 gRPC 请求发出错误 id 导致"不显示"。
+     */
+    private val cleanDynId = dynId.substringBefore('?').substringBefore('#').trim()
 
     private val fragment by instance<Fragment>()
     val activity: AppCompatActivity by instance()
@@ -109,7 +115,7 @@ private class DynamicDetailPageViewModel(
     private val _detailData = MutableStateFlow<DynamicItem?>(null)
     val detailData: StateFlow<DynamicItem?> get() = _detailData
     init {
-        if (dynId.isNotBlank()) {
+        if (cleanDynId.isNotBlank()) {
             loadData()
         }
     }
@@ -120,7 +126,7 @@ private class DynamicDetailPageViewModel(
             _fail.value = null
             val req = DynDetailReq(
                 uid = userStore.state.info?.mid ?: 0L,
-                dynamicId = dynId,
+                dynamicId = cleanDynId,
                 shareId = "dt.opus-detail.0.0.pv",
                 shareMode = 3,
                 localTime = 8,

@@ -44,9 +44,6 @@ class ArticleReaderPage(
         val articleVM: ArticleReaderViewModel = diViewModel(
             key = "article_reader_$id"
         ) { ArticleReaderViewModel(it, id) }
-        val replyVM: MainReplyViewModel = diViewModel(
-            key = "article_reply_$id"
-        ) { MainReplyViewModel(it, id.toString(), type = 12) }
 
         val windowStore: WindowStore by rememberInstance()
         val windowState by windowStore.stateFlow.collectAsState()
@@ -118,6 +115,11 @@ class ArticleReaderPage(
                         bottomPadding = contentInsets.bottomDp.dp + windowStore.bottomAppBarHeightDp.dp,
                     )
                     1 -> CompositionLocalProvider(LocalSeekEnabled provides false) {
+                        // opus 评论 id/type 在数据加载后才知道（comment_id_str + type 11）
+                        val cid = articleVM.commentId.ifBlank { id.toString() }
+                        val replyVM: MainReplyViewModel = diViewModel(
+                            key = "article_reply_$cid"
+                        ) { MainReplyViewModel(it, cid, type = articleVM.replyType) }
                         MainReplyListPageContent(
                             headerContent = {},
                             viewModel = replyVM,

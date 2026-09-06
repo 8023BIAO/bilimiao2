@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,17 +37,23 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
+import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
+import org.kodein.di.compose.rememberInstance
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.localImagePreviewerController
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
@@ -70,7 +77,12 @@ fun ArticleReaderContent(
     bottomPadding: androidx.compose.ui.unit.Dp = 32.dp,
 ) {
     val context = LocalContext.current
-    val articleUrl = "https://www.bilibili.com/read/cv${viewModel.articleId}"
+    // 两个入口共用本页：opus id（长 id）复制动态链接；专栏 cv id 复制 read/cv 链接
+    val articleUrl = if (viewModel.articleId >= 1_000_000_000_000L) {
+        "https://t.bilibili.com/${viewModel.articleId}"
+    } else {
+        "https://www.bilibili.com/read/cv${viewModel.articleId}"
+    }
 
     val menu = rememberMyMenu {
         myItem {
@@ -273,11 +285,32 @@ fun ArticleReaderContent(
 }
 
 @Composable
-private fun TextParagraphItem(paragraph: ArticleParagraph.TextParagraph) {
+internal fun TextParagraphItem(paragraph: ArticleParagraph.TextParagraph) {
     val align = when (paragraph.align) {
         "center" -> TextAlign.Center
         "right" -> TextAlign.End
         else -> TextAlign.Start
+    }
+
+    val pageNavigation: PageNavigation by rememberInstance()
+    // 富文本节点点击处理：
+    //   at://{mid} → @用户空间；https:// → 内置浏览器；bilibili:// → 应用内路由
+    val linkInteractionListener = remember {
+        LinkInteractionListener { linkAnnotation ->
+            val link = (linkAnnotation as? LinkAnnotation.Clickable)?.tag ?: return@LinkInteractionListener
+            when {
+                link.startsWith("at://") -> {
+                    val mid = link.removePrefix("at://")
+                    pageNavigation.navigateByUri(Uri.parse("bilibili://space/$mid"))
+                }
+                link.startsWith("http://") || link.startsWith("https://") -> {
+                    pageNavigation.launchWebBrowser(link)
+                }
+                link.startsWith("bilibili://") || link.startsWith("bilimiao://") -> {
+                    pageNavigation.navigateByUri(Uri.parse(link))
+                }
+            }
+        }
     }
 
     Box(
@@ -308,16 +341,44 @@ private fun TextParagraphItem(paragraph: ArticleParagraph.TextParagraph) {
                             append(annotated)
                         }
                     } else {
-                        withStyle(
-                            SpanStyle(
-                                color = parseNodeColor(node.color),
-                                fontSize = node.fontSize.sp,
-                                fontWeight = if (node.bold) FontWeight.Bold else FontWeight.Normal,
-                                fontStyle = if (node.italic) FontStyle.Italic else FontStyle.Normal,
-                                textDecoration = if (node.underline) TextDecoration.Underline else TextDecoration.None,
-                            )
+                        val isRich = node.nodeKind.isNotBlank() && node.nodeKind != "formula"
+                        // 富文本节点用主题色高亮（纯文本类型除外），网页链接加 🔗、抽奖加 🎁
+                        val prefix = when (node.nodeKind) {
+                            "RICH_TEXT_NODE_TYPE_WEB" -> "\uD83D\uDD17"
+                            "RICH_TEXT_NODE_TYPE_LOTTERY" -> "\uD83C\uDF81"
+                            else -> ""
+                        }
+                        val textColor = if (
+                            isRich && node.nodeKind != "RICH_TEXT_NODE_TYPE_TEXT"
                         ) {
-                            append(node.text)
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            parseNodeColor(node.color)
+                        }
+                        val style = SpanStyle(
+                            color = textColor,
+                            fontSize = node.fontSize.sp,
+                            fontWeight = if (node.bold) FontWeight.Bold else FontWeight.Normal,
+                            fontStyle = if (node.italic) FontStyle.Italic else FontStyle.Normal,
+                            textDecoration = if (node.underline) TextDecoration.Underline else TextDecoration.None,
+                        )
+                        val clickable = node.atMid.isNotBlank() || node.jumpUrl.isNotBlank()
+                        if (clickable) {
+                            val tag = if (node.atMid.isNotBlank()) "at://${node.atMid}"
+                            else node.jumpUrl
+                            withLink(
+                                LinkAnnotation.Clickable(
+                                    tag = tag,
+                                    styles = TextLinkStyles(style = style),
+                                    linkInteractionListener = linkInteractionListener,
+                                )
+                            ) {
+                                append(prefix + node.text)
+                            }
+                        } else {
+                            withStyle(style) {
+                                append(prefix + node.text)
+                            }
                         }
                     }
                 }
@@ -372,7 +433,7 @@ private fun spannedToAnnotatedString(spanned: Spanned, baseFontSize: Int): Annot
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-private fun ImageParagraphItem(paragraph: ArticleParagraph.ImageParagraph) {
+internal fun ImageParagraphItem(paragraph: ArticleParagraph.ImageParagraph) {
     val imageUrl = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
         if (paragraph.url.startsWith("//")) "https:${paragraph.url}" else paragraph.url
     )

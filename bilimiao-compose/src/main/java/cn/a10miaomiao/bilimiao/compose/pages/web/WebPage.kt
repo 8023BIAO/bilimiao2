@@ -128,6 +128,11 @@ private class WebPageViewModel(
     private val mWebViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
+            // 内嵌浏览器里页面自身的"APP 打开"等 bilibili:// 唤起链接不再接管：
+            // 直接忽略（停在当前网页），避免跳错页面；外部来源的深链不受影响
+            if (url.startsWith("bilibili://") || url.startsWith("bilimiao://")) {
+                return true
+            }
             val re = BilibiliNavigation.navigationTo(pageNavigation, url)
             if (re) {
                 // ★ 无感返回：跳转 app 内页面成功后，把 WebPage 自身移出返回栈，

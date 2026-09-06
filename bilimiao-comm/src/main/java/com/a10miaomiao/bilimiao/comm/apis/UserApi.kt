@@ -257,6 +257,24 @@ class UserApi {
         )
     }
 
+    /**
+     * 移动收藏夹内容到另一个收藏夹（服务端一步完成：加入目标夹并移出源夹）
+     */
+    fun favMove(
+        mediaId: String,
+        targetMediaId: String,
+        resources: List<String>,
+    ) = MiaoHttp.request {
+        url = BiliApiService.biliApi("x/v3/fav/resource/move")
+        method = MiaoHttp.POST
+        formBody = ApiHelper.createParams(
+            "src_media_id" to mediaId,
+            "tar_media_id" to targetMediaId,
+            "resources" to resources.joinToString(",") { "$it:2" },
+            "platform" to "web",
+        )
+    }
+
     fun bangumiList(
         vmid: String,
         pageNum: Int,

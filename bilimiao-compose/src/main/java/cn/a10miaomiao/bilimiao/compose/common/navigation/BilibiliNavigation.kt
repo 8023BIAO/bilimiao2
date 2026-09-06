@@ -29,22 +29,47 @@ object BilibiliNavigation {
     ): Boolean {
         miaoLogger() debug url
         val uri = Uri.parse(url)
-        // ---- 优先匹配视频ID（独立于scheme），bilimiao://video/BVxxx 也能走类型安全路由 ----
-        var compile = Pattern.compile("BV([a-zA-Z0-9]{5,})")
-        var matcher = compile.matcher(url)
-        if (matcher.find()) {
-            val id = matcher.group(1)
-            pageNavigation.navigate(VideoDetailPage("BV$id"))
-            return true
-        }
-        compile = Pattern.compile("av(\\d+)")
-        matcher = compile.matcher(url.lowercase())
-        if (matcher.find()) {
-            pageNavigation.navigate(VideoDetailPage(matcher.group(1)))
-            return true
+        val scheme = uri.scheme
+        val host = uri.host
+        val path = uri.path ?: ""
+
+        // ---- 视频路由只匹配 path，且仅限视频深链/视频 URL ----
+        // 之前用 find() 扫整串 URL（含 query 参数），opus/动态深链里夹带的
+        // bvid= 兜底参数（如 BV1xx411c7mC）会被抢跳成视频详情页。
+        val isVideoDeepLink = (scheme == "bilibili" || scheme == "bilimiao") &&
+                (host == "video" || path.startsWith("/video/"))
+        if (isVideoDeepLink) {
+            var compile = Pattern.compile("BV([a-zA-Z0-9]{5,})")
+            var matcher = compile.matcher(path)
+            if (matcher.find()) {
+                val id = matcher.group(1)
+                pageNavigation.navigate(VideoDetailPage("BV$id"))
+                return true
+            }
+            compile = Pattern.compile("av(\\d+)")
+            matcher = compile.matcher(path.lowercase())
+            if (matcher.find()) {
+                pageNavigation.navigate(VideoDetailPage(matcher.group(1)))
+                return true
+            }
+            // 视频深链未匹配到 id 时交给路由表（类型安全路由兜底）
+            return pageNavigation.navigateByUri(uri)
         }
 
-        if (uri.scheme == "http" || uri.scheme == "https") {
+        if (scheme == "http" || scheme == "https") {
+            var compile = Pattern.compile("BV([a-zA-Z0-9]{5,})")
+            var matcher = compile.matcher(path)
+            if (matcher.find()) {
+                val id = matcher.group(1)
+                pageNavigation.navigate(VideoDetailPage("BV$id"))
+                return true
+            }
+            compile = Pattern.compile("av(\\d+)")
+            matcher = compile.matcher(path.lowercase())
+            if (matcher.find()) {
+                pageNavigation.navigate(VideoDetailPage(matcher.group(1)))
+                return true
+            }
             compile = Pattern.compile("ss(\\d+)")
             matcher = compile.matcher(url)
             if (matcher.find()) {
@@ -76,10 +101,9 @@ object BilibiliNavigation {
                 return true
             }
         }
-        val host = uri.host
         if (host == "space.bilibili.com") {
-            val path = (uri.path ?: "").replace("/", "")
-            val mid = if (isNumeric(path)) { path } else { "" }
+            val midPath = path.replace("/", "")
+            val mid = if (isNumeric(midPath)) { midPath } else { "" }
             if (mid.isNotBlank()) {
                 pageNavigation.navigate(
                     UserSpacePage(mid)
