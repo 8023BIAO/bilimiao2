@@ -304,12 +304,9 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     var isLock: Boolean = false
         set(value) {
             field = value
-            if (::pinchToZoom.isInitialized) {
-                pinchToZoom.enabled = !value
-                if (value) {
-                    pinchToZoom.resetImmediate()
-                }
-            }
+            // 锁定 → 禁用缩放并复位；解锁 → 按横屏/全屏状态重算
+            // （长屏非全屏时解锁也不该放开缩放）
+            updatePinchState()
             if (value) {
                 hideAllWidget()
                 mLockContainer.visibility = VISIBLE
@@ -430,7 +427,7 @@ initDanmakuTouchListener()
         if (!::pinchToZoom.isInitialized) return
         // isLandscapeLayout 由外部（PlayerController）基于 ScaffoldView.orientation 设置，
         // 适配 bilimiao 自身的横屏布局（非设备物理旋转）
-        val shouldDisable = isLandscapeLayout && mode != PlayerMode.FULL
+        val shouldDisable = isLock || (isLandscapeLayout && mode != PlayerMode.FULL)
         pinchToZoom.enabled = !shouldDisable
         if (shouldDisable) {
             pinchToZoom.resetImmediate()
@@ -540,6 +537,26 @@ initDanmakuTouchListener()
         speed = lastSpeed
     }
 
+    /**
+     * 中止当前单指手势（不提交 seek）。
+     *
+     * GSY 的 onTouch 只处理 DOWN/UP/MOVE，ACTION_CANCEL 直接落空，
+     * mChangePosition/mSeekTimePosition 会残留；清理前若来一次 UP，
+     * GSY 的 touchSurfaceUp() 就会按被中止手势的旧位置真跳一次。
+     */
+    private fun abortGesture() {
+        mChangePosition = false
+        mChangeVolume = false
+        mBrightness = false
+        mTouchingProgressBar = false
+        if (savedPositionForPinch >= 0) {
+            mSeekTimePosition = savedPositionForPinch
+        }
+        dismissProgressDialog()
+        dismissVolumeDialog()
+        dismissBrightnessDialog()
+    }
+
 
     override fun onTouch(v: View?, event: MotionEvent?): Boolean {
         // 捕获触摸来源 View 的实际宽度（TextureView 可能因视频比例窄于播放器容器）
@@ -576,7 +593,11 @@ initDanmakuTouchListener()
                 && ::pinchToZoom.isInitialized) {
                 pendingPinchTime = 0L
                 isPinching = true
-                // 发 CANCEL 让 GSY 放弃第一指的手势跟踪
+                // 显式中止第一指留下的手势状态：GSY 的 onTouch 只处理 DOWN/UP/MOVE
+                // （反编译 tableswitch 0..2），合成 CANCEL 落不到它的分支里，
+                // mChangePosition/mSeekTimePosition 会残留 → 抬手时按旧位置真跳一次
+                abortGesture()
+                // 发 CANCEL 让 GSY 放弃第一指的手势跟踪（含内部 GestureDetector）
                 val cancelEvent = MotionEvent.obtain(
                     event.downTime, event.eventTime,
                     MotionEvent.ACTION_CANCEL,
@@ -603,8 +624,18 @@ initDanmakuTouchListener()
             }
 
             when(event.action){
-                MotionEvent.ACTION_CANCEL,
-                MotionEvent.ACTION_UP-> {
+                MotionEvent.ACTION_CANCEL -> {
+                    // 手势被父容器（小窗拖拽）抢走：中止，不提交快进
+                    abortGesture()
+                    pendingPinchTime = 0L
+                    isPinching = false
+                    removeCallbacks(longClickControlTask)
+                    touchSurfaceDownTime = Long.MAX_VALUE
+                    if (isSpeedPlaying) {
+                        stopLongClickSpeedPlay()
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
                     pendingPinchTime = 0L
                     isPinching = false
                     removeCallbacks(longClickControlTask)
@@ -937,14 +968,14 @@ initDanmakuTouchListener()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (
-            id == com.shuyu.gsyvideoplayer.R.id.surface_container
-            && event.action == MotionEvent.ACTION_CANCEL
-            ) {
+        // 父容器（小窗拖拽）抢走触摸时框架只发 CANCEL，而 GSY 自己不处理 CANCEL。
+        // 原先这里用 id == surface_container 判定，但本 View 的 id 是 video_player，
+        // 整个分支从来没生效过 → 改成真正的手势中止处理。
+        if (event.action == MotionEvent.ACTION_CANCEL) {
             if (mHideKey && mShowVKey) {
                 return true
             }
-            touchSurfaceUp()
+            abortGesture()
         }
         return super.onTouchEvent(event)
     }
@@ -1017,6 +1048,9 @@ initDanmakuTouchListener()
             pinchToZoom.resetImmediate()
         }
         pinchToZoom = PinchToZoomHelper(wrapper, mRestoreScaleBtn)
+        // 新 helper 的 enabled 默认 true，必须重新套用"锁屏/横屏非全屏禁用"状态，
+        // 否则锁屏后自动连播下一集、或横屏小窗切剧集时双指缩放又会生效
+        updatePinchState()
         mRestoreScaleBtn.setOnClickListener {
             pinchToZoom.animateReset()
         }
@@ -1174,7 +1208,10 @@ initDanmakuTouchListener()
             isSilentReconnecting = true
             onVideoResume()
             if (savedState == CURRENT_STATE_PAUSE) {
-                mCurrentState = CURRENT_STATE_PAUSE
+                // GSY 的 onVideoResume() 对暂停中的播放器会真的 start() 并
+                // setStateAndUi(PLAYING)（反编译确认），只把 mCurrentState 改回 PAUSE
+                // 会让 UI/通知栏显示"播放中"而实际是暂停 → 用 setStateAndUi 一起同步
+                setStateAndUi(CURRENT_STATE_PAUSE)
                 gsyVideoManager.pause()
             }
         } catch (_: Exception) {
@@ -1200,6 +1237,8 @@ initDanmakuTouchListener()
 
     override fun release() {
         releaseDanmaku()
+        // 释放前清掉手势 HUD 弹窗，避免窗口泄漏（WindowLeaked）
+        dismissCachedDialogs()
         gsyVideoManager?.player?.stop()
         super.release()
     }
@@ -1212,6 +1251,9 @@ initDanmakuTouchListener()
     fun detachView() {
         // 不释放弹幕 — 重连时复用
         gsyVideoManager?.player?.pause()
+        // Activity 销毁时必须清掉手势 HUD：三个 Dialog 绑在旧 Activity 的 window
+        // token 上，留着会 WindowLeaked，复用后还可能 show 到错误的 Activity
+        dismissCachedDialogs()
         // 不调 super.release() —— GSYVideoManager 保留播放器
     }
 
@@ -1398,7 +1440,48 @@ initDanmakuTouchListener()
 
     /** 显式刷新播放器持有的 Activity 引用（Activity 重建/复用播放器时调用） */
     fun updateActivity(activity: Activity?) {
+        if (activity !== currentActivity) {
+            // Activity 重建：已缓存的 HUD 弹窗绑在旧 Activity 的 window token 上，
+            // 继续复用会 show() 失败（BadTokenException 被 catch 吞掉）→ 手势提示永久不显示
+            dismissCachedDialogs()
+        }
         currentActivity = activity
+    }
+
+    /**
+     * GSY 用这个方法创建音量/亮度/快进弹窗（StandardGSYVideoPlayer 内部 new Dialog(...)）。
+     * 基类实现从 View.getContext() 逐层解包 Activity，而播放器 View 跨 Activity 复用时
+     * （MainUi.keepPlayerView）Android 13+ 已无法反射替换 View.mContext，解包出来的是
+     * 已销毁的旧 Activity → Dialog 拿到失效 token，show() 抛 BadTokenException，
+     * 被 catch 吞掉后手势 HUD 就再也不显示，只能杀掉 App 重启才恢复。
+     * 这里改为优先返回显式维护的 currentActivity。
+     */
+    override fun getActivityContext(): Context {
+        return getActivity() ?: super.getActivityContext() ?: context
+    }
+
+    /**
+     * 丢弃缓存的手势弹窗（音量/亮度/快进），下次手势按当前 Activity 重建。
+     * GSY 抬手时会 dismiss 并置空，但 Activity 重建、show() 失败等场景下
+     * 仍会残留绑定旧 window token 的 Dialog。
+     */
+    private fun dismissCachedDialogs() {
+        for (dialog in listOf<Dialog?>(mProgressDialog, mVolumeDialog, mBrightnessDialog)) {
+            try {
+                if (dialog?.isShowing == true) dialog.dismiss()
+            } catch (_: Exception) {
+            }
+        }
+        mProgressDialog = null
+        mVolumeDialog = null
+        mBrightnessDialog = null
+        mDialogProgressBar = null
+        mDialogVolumeProgressBar = null
+        mBrightnessDialogTv = null
+        mDialogSeekTime = null
+        mDialogTotalTime = null
+        mDialogIcon = null
+        mDialogOffsetText = null
     }
 
     /**
@@ -1416,7 +1499,9 @@ initDanmakuTouchListener()
         try {
             super.showVolumeDialog(deltaY, volumePercent)
         } catch (_: Exception) {
-            // Activity token 已失效（切后台/销毁中），忽略弹窗避免崩溃
+            // Activity token 已失效（切后台/销毁/重建中）：丢弃弹窗避免崩溃，
+            // 下次手势会用当前 Activity 重建，否则会一直 show 失败 → 永久不显示
+            dismissCachedDialogs()
         }
     }
 
@@ -1470,7 +1555,9 @@ initDanmakuTouchListener()
             try {
                 mProgressDialog.show()
             } catch (_: Exception) {
-                // Activity token 已失效，忽略弹窗
+                // Activity token 已失效：丢弃弹窗，下次手势用当前 Activity 重建
+                dismissCachedDialogs()
+                return
             }
         }
         if (mDialogSeekTime != null) {
@@ -1521,7 +1608,9 @@ initDanmakuTouchListener()
             try {
                 brightnessDialog.show()
             } catch (_: Exception) {
-                // Activity token 已失效，忽略弹窗
+                // Activity token 已失效（Activity 已销毁/重建）：丢弃这个弹窗，
+                // 下次手势按当前 Activity 重建，否则会永久卡住不再显示
+                dismissCachedDialogs()
                 return
             }
         }

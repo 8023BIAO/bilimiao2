@@ -121,6 +121,22 @@ class PlayerDelegate2(
         @Volatile
         private var videoCache: SimpleCache? = null
 
+        /**
+         * 进程级"当前播放源"缓存。
+         *
+         * MainUi.keepPlayerView 跨 Activity 复用同一个播放器 View（ExoPlayer 也活在
+         * GSYVideoManager 单例里），画面能继续放；但 Activity 重建后新建的 PlayerDelegate2
+         * 是空的 —— playerSource/playerSourceInfo 均为 null，导致通知栏/蓝牙控制、
+         * 章节跳转、进度保存、播放源相关 UI 全部失效。
+         * 这里在 openPlayer/loadPlayerSource 时缓存，重建时由新 delegate 取回；
+         * 用户主动关闭播放器（closePlayer）时清空。
+         */
+        @Volatile
+        private var keptSource: BasePlayerSource? = null
+
+        @Volatile
+        private var keptSourceInfo: PlayerSourceInfo? = null
+
         private fun getCache(context: Context): SimpleCache {
             // 用 applicationContext：StandaloneDatabaseProvider 会被静态 videoCache 持有，
             // 传 Activity 会在进程存活期间 pin 住首个 Activity 实例
@@ -278,6 +294,47 @@ class PlayerDelegate2(
             errorMessageBoxController.hide()
             completionBoxController.hide()
         }
+
+        // Activity 重建（MainUi.keepPlayerView 复用播放器 View）：
+        // 画面还在放/暂停，但本 delegate 是新建的空壳 → 把播放源恢复回来，
+        // 否则通知栏/蓝牙控制、章节跳转、进度保存、播放源相关 UI 全部失效
+        if (playerSource == null && (isPlaying() || isPause())) {
+            restoreKeptSource()
+        }
+    }
+
+    /**
+     * Activity 重建后的 delegate 级状态恢复。
+     *
+     * 播放器 View 与 ExoPlayer 由 keepPlayerView + GSYVideoManager 保活，
+     * 这里只补 delegate 自己丢掉的数据，不重新 prepare、不打断正在播放的画面。
+     */
+    private fun restoreKeptSource() {
+        val source = keptSource ?: return
+        val p = views.videoPlayer ?: return
+        playerSource = source                 // 自定义 setter 会同步 PlayerStore
+        playerSourceInfo = keptSourceInfo
+        keptSourceInfo?.quality?.let { if (it > 0) quality = it }
+        // loadPlayerSource 里番剧被强制成 MP4，重建后切清晰度不能退回 DASH
+        if (source is BangumiPlayerSource) {
+            fnval = SettingConstants.PLAYER_FNVAL_MP4
+        }
+        // 分P/剧集按钮（View 复用时本来就在，这里兜底 View 被重建的情况）
+        when {
+            source is VideoPlayerSource && source.pages.size > 1 -> {
+                p.setExpandButtonText("分P")
+                p.showExpandButton()
+            }
+            source is BangumiPlayerSource && source.episodes.size > 1 -> {
+                p.setExpandButtonText("剧集")
+                p.showExpandButton()
+            }
+        }
+        // 章节：fetchChapters 只在 onPrepared 触发，重建后不会重来 →
+        // 从复用的播放器 View 上的 ChapterManager 取回（数据还在 View 里）
+        controller.restoreChapters(p.chapterManager.getChapters())
+        // 通知栏/蓝牙媒体键重新绑到本 delegate（服务可能仍持有旧 Activity 的 delegate）
+        PlaybackService.instance?.setPlayerDelegate(this)
     }
 
     private fun registerAudioReceiver() {
@@ -450,6 +507,9 @@ class PlayerDelegate2(
         playerCoroutineScope.onDestroy()
         playerSource = null
         playerSourceInfo = null
+        // 用户主动关闭播放器 → 清掉进程级缓存，避免 Activity 重建后"复活"已关闭的播放源
+        keptSource = null
+        keptSourceInfo = null
 
         // 释放播放器（GSY 内部走完整释放链路，含音频焦点回收）
         // 下次 openPlayer 走 setUp 重建播放器
@@ -706,6 +766,7 @@ class PlayerDelegate2(
             if (playerClosed) return
             quality = sourceInfo.quality
             playerSourceInfo = sourceInfo
+            keptSourceInfo = sourceInfo
             loadingBoxController.print("成功")
             player?.releaseDanmaku()
             player?.danmakuParser = danmukuParser
@@ -853,6 +914,7 @@ class PlayerDelegate2(
         }
         playerCoroutineScope.onCreate()
         playerSource = source
+        keptSource = source
         controller.resetAutoFullScreenCheck()
         scaffoldApp.showPlayer = true
         activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

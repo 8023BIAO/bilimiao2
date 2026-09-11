@@ -28,6 +28,16 @@ class PinchToZoomHelper(
     /** 还原按钮，变换后自动显示，还原后自动隐藏 */
     private val restoreButton: View,
 ) {
+    init {
+        // 容器尺寸变化（全屏↔小窗、窗口大小切换）后重新套用变换：
+        // pivot 是按尺寸算的，尺寸变了不重算会让缩放/旋转绕旧中心跑，画面偏出可视区
+        targetView.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                pushToView()
+            }
+        }
+    }
+
     // ---------- 模式开关 ----------
     /** 是否启用双指变换 */
     var enabled = true
@@ -72,6 +82,9 @@ class PinchToZoomHelper(
     private var pivotX = 0f
     private var pivotY = 0f
     private var pivotSet = false
+    /** 设置 pivot 时的容器尺寸：尺寸变了（全屏↔小窗）要按新中心重算 */
+    private var pivotWidth = 0
+    private var pivotHeight = 0
 
     // — 手势开始时锁存的参考值 —
     private var refSpan = 0f             // 双指间距（参考值）
@@ -230,12 +243,16 @@ class PinchToZoomHelper(
         val h = targetView.height
         if (w <= 0 || h <= 0) return
 
-        if (!pivotSet) {
+        if (!pivotSet || pivotWidth != w || pivotHeight != h) {
+            // 容器尺寸变了（全屏↔小窗切换）→ 按新中心重算，
+            // 否则缩放/旋转会绕着旧尺寸的中心跑，画面被转出可视区
             pivotX = w / 2f
             pivotY = h / 2f
             targetView.pivotX = pivotX
             targetView.pivotY = pivotY
             pivotSet = true
+            pivotWidth = w
+            pivotHeight = h
         }
 
         targetView.scaleX = currentScale

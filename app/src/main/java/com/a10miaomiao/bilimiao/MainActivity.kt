@@ -197,7 +197,9 @@ class MainActivity
         mainUi = MainUi(this, startViewWrapper)
         setContentView(ui.root)
         basePlayerDelegate.onCreate(savedInstanceState)
-        ui.root.showPlayer = basePlayerDelegate.isPlaying()
+        // 暂停中的播放器同样算"播放器还开着"：Activity 重建后要把小窗恢复出来，
+        // 否则 ExoPlayer 还占着、通知栏还在，UI 上却看不到播放器（只能重开视频）
+        ui.root.showPlayer = basePlayerDelegate.isPlaying() || basePlayerDelegate.isPause()
         ui.root.playerDelegate = basePlayerDelegate as PlayerDelegate2
         ui.root.onDrawerStateChanged = ::onDrawerStateChanged
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

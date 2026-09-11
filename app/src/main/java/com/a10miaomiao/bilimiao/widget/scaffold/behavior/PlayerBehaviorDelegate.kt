@@ -402,27 +402,33 @@ class PlayerBehaviorDelegate(
                         return false
                     }
                     if(draggingSide == HOLDBUTTON) {
-                        val evCapture = ev.let {
-                            it.action = MotionEvent.ACTION_DOWN
-                            it
+                        // 不能就地改框架事件的 action：onInterceptTouchEvent 返回后
+                        // ViewGroup 还会把同一个事件继续分发给子 View，播放器会收到
+                        // 一个假 ACTION_DOWN 被当成新手势（重置手势状态、抑制 200ms）
+                        val evCapture = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_DOWN }
+                        return try {
+                            dragger.captureChildView(playerView, evCapture.getPointerId(evCapture.actionIndex))
+                            dragger.shouldInterceptTouchEvent(evCapture)
+                            dragger.processTouchEvent(evCapture)
+                            dragger.viewDragState == ViewDragHelper.STATE_DRAGGING
+                        } finally {
+                            evCapture.recycle()
                         }
-                        dragger.captureChildView(playerView, ev.getPointerId(ev.actionIndex))
-                        dragger.shouldInterceptTouchEvent(evCapture)
-                        dragger.processTouchEvent(evCapture)
-                        return dragger.viewDragState == ViewDragHelper.STATE_DRAGGING
                     }
                     if(parent.isHoldUpPlayer || !parent.fullScreenDraggable){
                         return false
                     }
                     if(draggingSide == MIDAREA) {
-                        val evCapture = ev.let {
-                            it.action = MotionEvent.ACTION_DOWN
-                            it
+                        // 同上：用副本，别改框架分发的事件
+                        val evCapture = MotionEvent.obtain(ev).apply { action = MotionEvent.ACTION_DOWN }
+                        return try {
+                            dragger.captureChildView(playerView, evCapture.getPointerId(evCapture.actionIndex))
+                            dragger.shouldInterceptTouchEvent(evCapture)
+                            dragger.processTouchEvent(evCapture)
+                            dragger.viewDragState == ViewDragHelper.STATE_DRAGGING
+                        } finally {
+                            evCapture.recycle()
                         }
-                        dragger.captureChildView(playerView, ev.getPointerId(ev.actionIndex))
-                        dragger.shouldInterceptTouchEvent(evCapture)
-                        dragger.processTouchEvent(evCapture)
-                        return dragger.viewDragState == ViewDragHelper.STATE_DRAGGING
                     }
                 }
                 MotionEvent.ACTION_UP -> {

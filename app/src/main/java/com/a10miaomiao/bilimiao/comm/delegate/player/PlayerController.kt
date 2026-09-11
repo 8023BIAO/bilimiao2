@@ -989,6 +989,18 @@ class PlayerController(
 
     private var chapterFetchJob: Job? = null
 
+    /**
+     * Activity 重建后恢复章节数据。
+     *
+     * 章节网络请求只在 onPrepared 触发，重建后不会重来；而章节数据还留在复用的
+     * 播放器 View 的 ChapterManager 里 → 由 PlayerDelegate2 取回后灌进来，
+     * 并刷新通知栏（章节按钮的有无取决于这里）。
+     */
+    fun restoreChapters(chapters: List<ChapterInfo>) {
+        currentChapters = chapters
+        PlaybackService.instance?.refreshNotification()
+    }
+
     private fun fetchChapters() {
         chapterFetchJob?.cancel()
         // 先隐藏旧章节，防止切换视频后残留

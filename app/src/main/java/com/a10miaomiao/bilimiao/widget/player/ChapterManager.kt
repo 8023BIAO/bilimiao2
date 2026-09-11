@@ -21,6 +21,9 @@ class ChapterManager(
     private var chapters: List<ChapterInfo> = emptyList()
     private var chapterSeekAction: ((Long) -> Unit)? = null
 
+    /** 当前章节列表（Activity 重建后供 PlayerController 恢复用） */
+    fun getChapters(): List<ChapterInfo> = chapters
+
     /** 设置章节数据（有章节显示按钮，没有则隐藏） */
     fun setChapters(chapters: List<ChapterInfo>, onChapterClick: ((Long) -> Unit)? = null) {
         this.chapters = chapters
