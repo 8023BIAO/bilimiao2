@@ -906,15 +906,9 @@ class PlayerController(
     override fun onVideoPause() {
         // 暂停不计入"定时关闭"：作废计时基准，恢复播放后重新起算
         isTimerInitialized = false
-        // 通知栏/锁屏/蓝牙要跟着真播放器走：不推这一下，系统 UI 会一直以为还在播
-        // （图标不翻、进度条按旧状态空转、暂停键点了像没反应）
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun onVideoResume(isResume: Boolean) {
-        // 注意：这里不要重置计时基准——后台播放回到前台也会走 onVideoResume，
-        // 重置会把"后台一直在播"的那段时间白送掉。暂停侧已经在 onVideoPause 里作废基准了。
-        PlaybackService.instance?.refreshPlaybackState()
         if (isResume) {
             // 🚫 DLNA_DISABLED
             // dlnaManager.startDiscovery()
@@ -938,11 +932,6 @@ class PlayerController(
         } else {
             activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
-        // GSY 的所有播放状态变化都会汇到这里（点播放/暂停、缓冲、准备完成、静默重连、
-        // 换源/换清晰度、自动连播、播放完成…），而真播放器不会给 MediaSession 发事件，
-        // 统一在这里把最新状态推给通知栏/锁屏/蓝牙 —— 只靠 onVideoPause/onVideoResume
-        // 会漏掉一多半路径（最典型：播放器里点"播放"，GSY 根本不回调 onVideoResume）
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun onVideoClose() {

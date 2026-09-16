@@ -56,9 +56,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     private var mediaSession: MediaSession? = null
     private var playerDelegate: BasePlayerDelegate? = null
 
-    /** 正在收尾（播放完成/关闭播放器）时不要再刷新通知栏，否则会把已撤下的通知 post 回来 */
-    @Volatile private var shuttingDown = false
-
     // 播放位置暂存（Service 存活期 + 进程重启前有效）
     private var savedPosition: Long = 0L
     private var savedSourceId: String = ""
@@ -321,7 +318,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        shuttingDown = false
         createNotificationChannel()
         initializeSession()
         serviceScope.launch { initPlayerSetting() }
@@ -438,7 +434,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 } else {
                     playerDelegate?.mediaPlay()
                 }
-                refreshPlaybackState()
             }
         }
         return super.onStartCommand(intent, flags, startId)
@@ -464,7 +459,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             .build()
     }
 
-    @OptIn(UnstableApi::class)
     private fun initializeSession() {
         val dummy = MyForwardingPlayer(ExoPlayer.Builder(this).build())
         val intent = Intent(this, MainActivity::class.java)
@@ -495,38 +489,13 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     fun setPlayerDelegate(delegate: BasePlayerDelegate) {
-        // shuttingDown 是"本次播放收尾"的闩锁，不能只靠 onCreate 复位：
-        // stopSelf() 在仍有 MediaController 绑定时不会销毁 Service，
-        // 一旦闩锁留着 true，之后所有状态刷新都会静默失效（通知栏永久不更新）
-        shuttingDown = false
         playerDelegate = delegate
         refreshSessionIntent()
         refreshNotification()
-        refreshPlaybackState()
-    }
-
-    /**
-     * 通知栏/锁屏/蓝牙的状态刷新。
-     *
-     * 会话只在 player 派发事件时才会重新读取播放状态，而这里挂的是"空壳 ExoPlayer"
-     * （MyForwardingPlayer 覆写了状态 getter，空壳自己永远不会发事件）→ 真播放器
-     * 播放/暂停后通知栏一直停在旧状态：图标不翻、进度条按旧状态空转、按钮点了像没反应。
-     * 所以真播放器每次状态变化都要主动调一次这里。
-     */
-    fun refreshPlaybackState() {
-        if (!showNotification || shuttingDown) return
-        val wrapper = mediaSession?.player as? MyForwardingPlayer
-        if (wrapper == null) {
-            // 会话此刻挂的不是转发壳（通知栏关闭时的裸 ExoPlayer / setPlayer 路径）→ 静默跳过
-            miaoLogger() debug "refreshPlaybackState skipped: session player is not MyForwardingPlayer"
-            return
-        }
-        wrapper.refreshState()
     }
 
     /** 播放完成后释放通知栏 + 停止 Service */
     fun notifyPlaybackComplete() {
-        shuttingDown = true
         stopForeground(STOP_FOREGROUND_REMOVE)
         exoPlayer?.release()
         exoPlayer = null
@@ -569,13 +538,10 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 注意：exoPlayer 恒为 null（setPlayer() 全仓无调用者），会话挂的又是没有媒体项的
-        // 空壳播放器 —— 都不能用来判断"还在不在播"。原来恒判"该停"→ 从最近任务划掉 App 时
-        // 会话被释放，可真播放器还活在 GSYVideoManager 里继续出声，通知栏却没了、也控制不了。
-        // 这里直接问真播放器（delegate），播放中就保留 Service（后台播放语义）。
-        val playing = playerDelegate?.isPlaying() == true
-        if (!playing) {
-            shuttingDown = true
+        val shouldStop = exoPlayer?.let { p ->
+            !p.playWhenReady || p.mediaItemCount == 0 || p.playbackState == Player.STATE_ENDED
+        } ?: true  // exoPlayer 为 null = 播放器已关闭 → 停止 Service
+        if (shouldStop) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
@@ -602,32 +568,11 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         dataStore.data.map { it[PlayerNotification] ?: true }.collect {
             showNotification = it
             if (!init) {
-                // DataStore 任意设置变化都会重发同一个值，先判断是否真的发生了切换，
-                // 否则每次改别的设置都会重建（并泄漏）一个 ExoPlayer
                 if (it) {
-                    mediaSession?.let { session ->
-                        if (session.player !is MyForwardingPlayer) {
-                            // 重新打开：exoPlayer 恒为 null（setPlayer() 全仓无调用者），
-                            // 旧代码这里什么都不做 → 开关"关→开"后通知栏/线控永久失效。
-                            // 与 initializeSession() 一致，重建转发到 delegate 的 player
-                            val old = session.player
-                            session.player = MyForwardingPlayer(
-                                ExoPlayer.Builder(this@PlaybackService).build()
-                            )
-                            // MediaSession 不负责释放 player，旧的空 ExoPlayer 要自己释放
-                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
-                        }
-                    }
+                    exoPlayer?.let { p -> mediaSession?.player = MyForwardingPlayer(p) }
                 } else {
-                    mediaSession?.let { session ->
-                        if (session.player is MyForwardingPlayer) {
-                            val old = session.player
-                            session.player = ExoPlayer.Builder(this@PlaybackService).build()
-                            // 转发 player 只是包装，释放它即释放底层 ExoPlayer
-                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
-                        }
-                    }
                     stopForeground(STOP_FOREGROUND_REMOVE)
+                    mediaSession?.player = ExoPlayer.Builder(this@PlaybackService).build()
                 }
             }
             init = false
@@ -652,15 +597,9 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     @OptIn(UnstableApi::class)
-    inner class MyForwardingPlayer(private val dummy: Player) : ForwardingPlayer(dummy) {
+    inner class MyForwardingPlayer(player: Player) : ForwardingPlayer(player) {
         override fun getAvailableCommands(): Player.Commands {
             return super.getAvailableCommands().buildUpon()
-                // 空壳 ExoPlayer 的命令集里没有这些，通知栏就不会渲染播放/暂停按钮与元数据
-                .add(Player.COMMAND_PLAY_PAUSE)
-                .add(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)
-                .add(Player.COMMAND_GET_TIMELINE)
-                .add(Player.COMMAND_GET_METADATA)
-                .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                 .add(Player.COMMAND_SEEK_BACK)
                 .add(Player.COMMAND_SEEK_FORWARD)
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
@@ -670,50 +609,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 .build()
         }
 
-        /**
-         * 强制会话重新读取下面这些被覆写的状态。
-         *
-         * 底层是空壳 ExoPlayer：状态 getter 虽然转发到了真播放器，但会话只在 player
-         * 派发事件时才重新读取 —— 空壳自己永远不会发事件，于是通知栏/锁屏一直停在旧状态。
-         * 这里用一次反向 play/pause 拨动制造事件（空壳没有媒体项，不会真的出声）。
-         */
-        fun refreshState() {
-            // 只拨动"空壳"：一旦哪天 setPlayer() 真的把真播放器挂到会话上（mediaItemCount>0），
-            // 反向 play/pause 会真的把视频拨一下（瞬时停顿），必须直接返回
-            if (dummy.mediaItemCount > 0) return
-            if (playerDelegate?.isPlaying() == true) {
-                dummy.pause()
-                dummy.play()
-            } else {
-                dummy.play()
-                dummy.pause()
-            }
-        }
-
-        // ── 状态/元数据转发 ──
-        // 会话实际绑的是 dummy(空壳 ExoPlayer)，只有命令被转发到真播放器是不够的：
-        // 状态与元数据不转发的话，通知栏/锁屏/蓝牙永远显示"播放"图标、没有标题封面、
-        // 暂停键按下去也不会变成暂停（真播放器仍在播）。
-        // 播放完成后必须报 STATE_ENDED：否则系统一直以为还在播，
-        // 通知栏停在"播放中"、进度条还会继续空转
-        override fun getPlaybackState(): Int =
-            if (playerDelegate?.isCompleted() == true) Player.STATE_ENDED else Player.STATE_READY
-        override fun getPlayWhenReady(): Boolean = playerDelegate?.isPlaying() == true
-        override fun isPlaying(): Boolean = playerDelegate?.isPlaying() == true
-        override fun getCurrentPosition(): Long = playerDelegate?.currentPosition() ?: 0L
-        override fun getDuration(): Long = playerDelegate?.mediaGetDuration() ?: 0L
-        override fun getMediaMetadata(): androidx.media3.common.MediaMetadata {
-            val builder = androidx.media3.common.MediaMetadata.Builder()
-            playerDelegate?.mediaGetTitle()?.let { builder.setTitle(it) }
-            playerDelegate?.mediaGetSubtitle()?.let { builder.setArtist(it) }
-            // 只要 uri（Media3 自己会用 DataSourceBitmapLoader 去取图）。
-            // 注意必须是带 scheme 的绝对地址，协议相对的 "//i0.hdslb.com/..." 加载不出来
-            playerDelegate?.mediaGetCoverUrl()?.let {
-                runCatching { builder.setArtworkUri(android.net.Uri.parse(it)) }
-            }
-            return builder.build()
-        }
-
         override fun play() { playerDelegate?.mediaPlay() }
         override fun pause() { playerDelegate?.mediaPause() }
         override fun seekBack() { playerDelegate?.mediaSeekBack() }
@@ -721,8 +616,6 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         override fun seekTo(positionMs: Long) {
             playerDelegate?.mediaSeekTo(positionMs)
             super.seekTo(positionMs)
-            // 拖完进度条要立刻把新位置推给系统 UI，否则它会按旧位置继续"空转"
-            refreshState()
         }
         override fun stop() { super.stop(); playerDelegate?.closePlayer() }
     }

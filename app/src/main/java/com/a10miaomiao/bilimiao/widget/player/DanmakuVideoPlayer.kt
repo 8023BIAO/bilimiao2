@@ -1182,10 +1182,6 @@ initDanmakuTouchListener()
     override fun onVideoPause() {
         super.onVideoPause()
         danmakuOnPause()
-        // 不管是用户点的还是后台自动暂停，都要推一次给通知栏/锁屏。
-        // 注意：静默重连（isSilentReconnecting）会抑制下面的回调，但状态推送不能省，
-        // 否则通知栏会一直停在旧的播放/暂停按钮上（从桌面回到 App 续播时最明显）
-        PlaybackService.instance?.refreshPlaybackState()
         if (!isSilentReconnecting) {
             videoPlayerCallBack?.onVideoPause()
         }
@@ -1194,7 +1190,6 @@ initDanmakuTouchListener()
     override fun onVideoResume(isResume: Boolean) {
         super.onVideoResume(isResume)
         danmakuOnResume()
-        PlaybackService.instance?.refreshPlaybackState()
         if (!isSilentReconnecting) {
             videoPlayerCallBack?.onVideoResume(isResume)
         }
@@ -1222,10 +1217,6 @@ initDanmakuTouchListener()
         } catch (_: Exception) {
         } finally {
             isSilentReconnecting = false
-            // 重连结束后真播放器的状态可能已经变了（暂停中重连会被重新 start 再 pause），
-            // 而上面两次 onVideoPause/onVideoResume 的回调被 isSilentReconnecting 压掉了，
-            // 这里补一次状态推送，通知栏才不会停在旧的按钮状态
-            PlaybackService.instance?.refreshPlaybackState()
         }
     }
 

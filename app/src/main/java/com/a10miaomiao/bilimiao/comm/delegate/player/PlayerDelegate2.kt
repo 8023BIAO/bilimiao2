@@ -449,9 +449,6 @@ class PlayerDelegate2(
             && views.videoPlayer?.isInPlayingState == true) {
             views.videoPlayer?.reconnectSurfaceQuietly()
         }
-        // 回到前台这一路（续播/静默重连）不一定走 onVideoResume 回调，
-        // 这里兜底推一次，避免通知栏停在旧的播放/暂停按钮
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun onPause() {
@@ -466,9 +463,6 @@ class PlayerDelegate2(
             views.videoPlayer?.onVideoResume()
         }
         pausedByBackground = false
-        // 续播判断有可能不成立（比如此刻状态是 PREPARING/BUFFERING 而不是 PAUSE），
-        // 无论走没走 onVideoResume，都同步一次通知栏状态
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun onStop() {
@@ -876,9 +870,6 @@ class PlayerDelegate2(
             player?.setLooping(source.isLoop)
             player?.startPlayLogic()
             player?.requestLayout()
-            // 新源/新清晰度开始播放：标题、封面、时长、播放状态全变了，
-            // 推一次让通知栏立刻跟上（换视频/换清晰度/自动连播都走这里）
-            PlaybackService.instance?.refreshPlaybackState()
 
             if (isChangedQuality) {
                 if (sourceInfo.quality == quality) {
@@ -1081,11 +1072,6 @@ class PlayerDelegate2(
         return p.currentState == GSYVideoPlayer.CURRENT_STATE_PREPAREING
     }
 
-    override fun isCompleted(): Boolean {
-        val p = views.videoPlayer ?: return false
-        return p.currentState == GSYVideoPlayer.CURRENT_STATE_AUTO_COMPLETE
-    }
-
     override fun isOpened(): Boolean {
         return scaffoldApp.showPlayer
     }
@@ -1256,13 +1242,11 @@ class PlayerDelegate2(
             views.videoPlayer?.onVideoPause() // 阻止 GSY 因 surface 可见而自动 resume
             completionBoxController.hide()
             reloadPlayer()
-            PlaybackService.instance?.refreshPlaybackState()
             return
         }
         // 用 onVideoResume(false) 防止 GSY seek 回 onVideoPause 时保存的 mCurrentPosition，
         // 否则暂停期间通知栏拖动进度条后再点播放会回到暂停位置而非拖动位置
         views.videoPlayer?.onVideoResume(false)
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaPause() {
@@ -1270,19 +1254,16 @@ class PlayerDelegate2(
         // 否则回到前台会被 onStart 当成自动暂停而自动续播
         pausedByBackground = false
         views.videoPlayer?.onVideoPause()
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaSeekTo(position: Long) {
         views.videoPlayer?.seekTo(position)
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaSeekBack() {
         val p = views.videoPlayer ?: return
         val target = (p.currentPositionWhenPlaying - 10000).coerceAtLeast(0)
         p.seekTo(target)
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaSeekForward() {
@@ -1292,7 +1273,6 @@ class PlayerDelegate2(
         if (dur <= 0L) return
         val target = (p.currentPositionWhenPlaying + 10000).coerceAtMost(dur)
         p.seekTo(target)
-        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaGetDuration(): Long {
@@ -1321,16 +1301,6 @@ class PlayerDelegate2(
         )
     }
 
-    /**
-     * 通知栏/锁屏触发的定位：seek 之后必须主动推一次状态。
-     * GSY 的 seekTo 只改播放器位置、不给 MediaSession 发事件，
-     * 暂停状态下通知栏的进度条会一直停在旧位置
-     */
-    private fun seekAndSyncToNotification(position: Long) {
-        views.videoPlayer?.seekTo(position)
-        PlaybackService.instance?.refreshPlaybackState()
-    }
-
     override fun mediaSeekToPreviousChapter(): Boolean {
         val p = views.videoPlayer ?: return false
         val chapters = controller.currentChapters
@@ -1339,12 +1309,12 @@ class PlayerDelegate2(
         // 1. 有上一章节 → 直接跳到上一章节起点（不用时间窗口）
         val chapterStart = ChapterNavigator.previousStart(chapters, pos)
         if (chapterStart != null) {
-            seekAndSyncToNotification(chapterStart)
+            p.seekTo(chapterStart)
             return true
         }
         // 2. 没有上一章节，但还可以后退 10 秒 → 后退 10 秒
         if (pos >= 10000L) {
-            seekAndSyncToNotification(pos - 10000L)
+            p.seekTo(pos - 10000L)
             return true
         }
         // 3. 不足 10 秒，有上一集 → 上一集
@@ -1352,7 +1322,7 @@ class PlayerDelegate2(
             return true
         }
         // 4. 没有上一集 → 回到 0 秒
-        seekAndSyncToNotification(0L)
+        p.seekTo(0L)
         return true
     }
 
@@ -1365,12 +1335,12 @@ class PlayerDelegate2(
         // 1. 有下一章节 → 直接跳到下一章节起点（不用时间窗口）
         val chapterStart = ChapterNavigator.nextStart(chapters, pos)
         if (chapterStart != null) {
-            seekAndSyncToNotification(chapterStart)
+            p.seekTo(chapterStart)
             return true
         }
         // 2. 没有下一章节，但剩余时间还够前进 10 秒 → 前进 10 秒
         if (duration > 0L && duration - pos >= 10000L) {
-            seekAndSyncToNotification((pos + 10000L).coerceAtMost(duration))
+            p.seekTo((pos + 10000L).coerceAtMost(duration))
             return true
         }
         // 3. 剩余不足 10 秒，有下一集 → 下一集
@@ -1390,12 +1360,7 @@ class PlayerDelegate2(
     }
 
     override fun mediaGetCoverUrl(): String? {
-        val cover = playerSource?.coverUrl
-        if (cover.isNullOrBlank()) return null
-        // 通知栏/锁屏大图标用。coverUrl 常见是 "//i0.hdslb.com/..." 这种协议相对地址，
-        // 直接丢给图片库会因为没有 scheme 而失败 → 这里和画中画一样补成 https，
-        // 并取 300x300 缩略图（原图好几 MB，通知栏根本用不上）
-        return UrlUtil.autoHttps(cover) + "@300w_300h_1c_"
+        return playerSource?.coverUrl
     }
 
     override fun mediaPlayNext(): Boolean {
