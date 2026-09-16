@@ -993,7 +993,10 @@ internal fun UserFavouriteDetailContent(
             excludeMediaId = mediaId,
             onConfirm = { targetId ->
                 showMoveDialog = false
-                val ids = selectedIds.toList()
+                // 服务端是按数组顺序逐个"前插"进目标收藏夹的（x/v3/fav/resource/move），
+                // 直接按选中顺序提交会让顺序整个反过来（从上到下勾 A、B、C，移过去变成 C、B、A）
+                // → 这里倒序提交抵消掉（对齐 PiliPlus 3e030b202 的做法）
+                val ids = selectedIds.toList().asReversed()
                 selectedIds.clear()
                 isEditMode = false
                 viewModel.moveVideos(ids, targetId)

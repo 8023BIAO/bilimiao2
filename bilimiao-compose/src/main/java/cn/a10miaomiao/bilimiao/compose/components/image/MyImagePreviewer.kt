@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
@@ -54,6 +55,9 @@ import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.target.SimpleTarget
 import com.bumptech.glide.request.transition.Transition
 import com.a10miaomiao.bilimiao.comm.toast
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.kodein.di.compose.rememberInstance
 import java.io.File
 
@@ -63,6 +67,9 @@ private class MyImagePreviewerController(
 ) {
 
     val isDownloading = mutableStateOf(false)
+
+    /** 批量保存进度：null = 不是批量保存；(已完成, 总数) */
+    val savingAll = mutableStateOf<Pair<Int, Int>?>(null)
 
     fun saveImageFile(
         imageUrl: String,
@@ -100,6 +107,36 @@ private class MyImagePreviewerController(
             .asFile()
             .load(imageUrl)
             .into(target)
+    }
+
+    /**
+     * 保存图集里的全部图片（评论区/动态九宫格常用）：
+     * 逐张"下载 → 落盘"，串行执行 —— 并发下载会同时压图床和内存，反而更容易失败。
+     * 进度通过 savingAll 显示在同一个进度对话框里。
+     */
+    fun saveAllImages() {
+        val urls = imagePreviewerState.imageModels.map { it.originalUrl }
+        if (urls.isEmpty() || isDownloading.value) return
+        isDownloading.value = true
+        savingAll.value = 0 to urls.size
+        activity.lifecycleScope.launch {
+            var saved = 0
+            urls.forEachIndexed { index, url ->
+                val file = runCatching {
+                    // Glide 的 RequestManager 必须在主线程取（这里是 Main 协程），阻塞等待放 IO
+                    val future = Glide.with(activity).asFile().load(url).submit()
+                    withContext(Dispatchers.IO) { future.get() }
+                }.getOrNull()
+                if (file != null) {
+                    ImageSaveUtil.saveImage(activity, ImageSaveUtil.getFileName(url), file)
+                    saved++
+                }
+                savingAll.value = (index + 1) to urls.size
+            }
+            isDownloading.value = false
+            savingAll.value = null
+            toast("已保存 $saved/${urls.size} 张图片")
+        }
     }
 
     fun copyImageUrl(imageUrl: String) {
@@ -149,6 +186,9 @@ private class MyImagePreviewerController(
             1 -> {
                 copyImageUrl(model.originalUrl)
             }
+            2 -> {
+                saveAllImages()
+            }
         }
     }
 
@@ -178,6 +218,11 @@ fun MyImagePreviewer(
             myItem {
                 key = MenuKeys.save
                 title = "保存图片"
+                iconFileName = "ic_baseline_save_24"
+            }
+            myItem {
+                key = 2
+                title = "保存全部图片"
                 iconFileName = "ic_baseline_save_24"
             }
         }
@@ -227,7 +272,11 @@ fun MyImagePreviewer(
                 }
             },
             title = {
-                Text("正在下载图片")
+                val progress = controller.savingAll.value
+                Text(
+                    if (progress == null) "正在下载图片"
+                    else "正在保存全部图片 ${progress.first}/${progress.second}"
+                )
             },
             text = {
                 LinearProgressIndicator()

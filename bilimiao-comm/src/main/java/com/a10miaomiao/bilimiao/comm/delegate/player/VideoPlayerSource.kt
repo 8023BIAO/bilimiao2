@@ -36,23 +36,36 @@ class VideoPlayerSource(
 
     var pages = emptyList<PageInfo>()
 
-    override suspend fun getPlayerUrl(quality: Int, fnval: Int): PlayerSourceInfo {
+    override suspend fun getPlayerUrl(
+        quality: Int,
+        fnval: Int,
+        language: String?,
+    ): PlayerSourceInfo {
         // grpc (proto可能过期，异常时静默回退到JSON API)
-        try {
-            getGrpcPlayerUrl(quality, fnval)?.let {
-                return it
+        // 注意：gRPC 的 PlayViewReq 没有语言字段 → 选了 AI 翻译语言时必须走 HTTP
+        if (language.isNullOrBlank()) {
+            try {
+                getGrpcPlayerUrl(quality, fnval)?.let {
+                    return it
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
         // 如果grpc api获取失败则使用旧版api
         val res = BiliApiService.playerAPI
-            .getVideoPalyUrl(aid, id, quality, fnval)
+            .getVideoPalyUrl(aid, id, quality, fnval, language)
 
         return defaultPlayerSource.also {
+            it.languages = res.language?.items.orEmpty().map { item ->
+                PlayerSourceInfo.LanguageInfo(item.lang, item.title)
+            }
+            it.currentLanguage = language
             // 与番剧源一致：保留调用方预设的 lastPlayCid（如空降跳转），服务端无返回时不覆盖
             it.lastPlayCid = res.last_play_cid ?: it.lastPlayCid
-            it.lastPlayTime = res.last_play_time ?: 0
+            // 同理保留预设的 lastPlayTime：详情页带过来的云端进度（继续观看/空降）不能被
+            // "接口没返回"抹成 0 —— 之前是 `?: 0`，于是"本地和云端都有记录却从头播"
+            it.lastPlayTime = res.last_play_time ?: it.lastPlayTime
             it.quality = res.quality
             it.acceptList = res.accept_quality.mapIndexed { index, i ->
                 PlayerSourceInfo.AcceptInfo(i, res.accept_description[index])
@@ -92,6 +105,24 @@ class VideoPlayerSource(
                 }
 
             }
+        }
+    }
+
+    /**
+     * 只为拿 AI 翻译语言列表：HTTP playurl 的 language.items（gRPC 没有这个字段）。
+     * 走的是同一条 HTTP 接口但结果只用来填菜单，失败就当该视频没有 AI 翻译。
+     */
+    override suspend fun getTranslateLanguages(
+        quality: Int,
+        fnval: Int,
+    ): List<PlayerSourceInfo.LanguageInfo> {
+        return try {
+            BiliApiService.playerAPI
+                .getVideoPalyUrl(aid, id, quality, fnval)
+                .language?.items.orEmpty()
+                .map { PlayerSourceInfo.LanguageInfo(it.lang, it.title) }
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 

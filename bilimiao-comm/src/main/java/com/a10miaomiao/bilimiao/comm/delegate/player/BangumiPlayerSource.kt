@@ -44,24 +44,35 @@ class BangumiPlayerSource(
 
     var episodes = emptyList<EpisodeInfo>()
 
-    override suspend fun getPlayerUrl(quality: Int, fnval: Int): PlayerSourceInfo {
+    override suspend fun getPlayerUrl(
+        quality: Int,
+        fnval: Int,
+        language: String?,
+    ): PlayerSourceInfo {
         val proxy = proxyServer
         if (proxy != null) {
             return getProxyPlayerUrl(proxy, quality, fnval)
         }
         // grpc (proto可能过期，异常时静默回退到JSON API)
-        try {
-            getGrpcPlayerUrl(quality, fnval)?.let {
-                return it
+        // 注意：gRPC 的 PlayViewReq 没有语言字段 → 选了 AI 翻译语言时必须走 HTTP
+        if (language.isNullOrBlank()) {
+            try {
+                getGrpcPlayerUrl(quality, fnval)?.let {
+                    return it
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
         // 如果grpc api获取失败则使用旧版api
         val res = BiliApiService.playerAPI.getBangumiUrl(
-            epid, id, quality, fnval
+            epid, id, quality, fnval, language
         )
         return defaultPlayerSource.also {
+            it.languages = res.language?.items.orEmpty().map { item ->
+                PlayerSourceInfo.LanguageInfo(item.lang, item.title)
+            }
+            it.currentLanguage = language
             // 保留调用方预设的进度（如空降跳转），不覆盖
             val preLastPlayCid = it.lastPlayCid
             val preLastPlayTime = it.lastPlayTime
@@ -112,6 +123,21 @@ class BangumiPlayerSource(
             } else {
                 throw Exception("Missing both durl and dash in bangumi player response")
             }
+        }
+    }
+
+    /** 只为拿 AI 翻译语言列表（HTTP playurl 的 language.items）——番剧是 AI 翻译的主战场 */
+    override suspend fun getTranslateLanguages(
+        quality: Int,
+        fnval: Int,
+    ): List<PlayerSourceInfo.LanguageInfo> {
+        return try {
+            BiliApiService.playerAPI
+                .getBangumiUrl(epid, id, quality, fnval)
+                .language?.items.orEmpty()
+                .map { PlayerSourceInfo.LanguageInfo(it.lang, it.title) }
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 

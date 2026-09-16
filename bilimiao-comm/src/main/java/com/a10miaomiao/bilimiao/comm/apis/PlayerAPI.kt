@@ -58,6 +58,8 @@ class PlayerAPI {
         cid: String,
         quality: Int = 64,
         fnval: Int = 4048,
+        /** AI 原声翻译语言（null/空 = 原声）：写进 cur_language，服务端返回翻译后的音轨/字幕 */
+        language: String? = null,
     ): PlayurlData {
         val params = mutableMapOf<String, String?>(
             "avid" to avid,
@@ -69,6 +71,9 @@ class PlayerAPI {
             "type" to "",
             "otype" to "json",
         )
+        if (!language.isNullOrBlank()) {
+            params["cur_language"] = language
+        }
         if (fnval > 2) {
             params.put("fourk", "1")
         }
@@ -90,7 +95,9 @@ class PlayerAPI {
         epid: String,
         cid: String,
         qn: Int = 64,
-        fnval: Int = 4048
+        fnval: Int = 4048,
+        /** AI 原声翻译语言（null/空 = 原声） */
+        language: String? = null,
     ): PlayurlData {
         val params = mutableMapOf<String, String?>(
             "ep_id" to epid,
@@ -107,6 +114,9 @@ class PlayerAPI {
             "mobi_app" to "android",
             "platform" to "android"
         )
+        if (!language.isNullOrBlank()) {
+            params["cur_language"] = language
+        }
         if (fnval > 2) {
             params["fourk"] = "1"
         }
@@ -237,7 +247,25 @@ class PlayerAPI {
         val code: Int = 0,
         val support_formats: List<SupportFormats> = emptyList(),
         val last_play_time: Long? = null,
+        /**
+         * AI 原声翻译的可选语言（B 站"AI 翻译"）。
+         * 只有 HTTP playurl 会返回；带 cur_language 请求时返回对应语言的音轨/字幕。
+         */
+        val language: LanguageInfo? = null,
         val last_play_cid: String? = null,
+    )
+
+    /** AI 翻译语言列表（playurl 响应的 language 字段） */
+    @Serializable
+    data class LanguageInfo(
+        val items: List<LanguageItem> = emptyList(),
+    )
+
+    /** 单条 AI 翻译语言：lang 形如 ai-zh（AI 中文），title 是给用户看的名字 */
+    @Serializable
+    data class LanguageItem(
+        val lang: String = "",
+        val title: String? = null,
     )
 
     @Serializable

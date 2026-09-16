@@ -526,6 +526,12 @@ class PlayerController(
         )
         showSubtitle = preferences[SettingPreferences.PlayerSubtitleShow] ?: true
         showAiSubtitle = preferences[SettingPreferences.PlayerAiSubtitleShow] ?: false
+        player.longPressSpeedMultiplier =
+            (preferences[SettingPreferences.PlayerLongPressSpeed] ?: 300) / 100f
+        val seekStepSec = preferences[SettingPreferences.PlayerDoubleTapSeek] ?: 10
+        player.doubleTapSeekMs = seekStepSec * 1000L
+        // 通知栏 ±秒按钮、蓝牙线控、章节退化跳转用同一个步长（用户要求联动）
+        delegate.seekStepMs = seekStepSec * 1000L
         isBackgroundPlay = preferences[SettingPreferences.PlayerBackground] ?: false
         isPipOnBackground = preferences[SettingPreferences.PlayerPipOnBackground] ?: false
     }
@@ -906,6 +912,9 @@ class PlayerController(
     override fun onVideoPause() {
         // 暂停不计入"定时关闭"：作废计时基准，恢复播放后重新起算
         isTimerInitialized = false
+        // 立刻落一次位置：用户常见操作是"暂停 → 切桌面/微信 → 进程被杀"，
+        // 只靠每 5 秒一次的写入会丢掉最后这段，回来就只能从 0 播
+        delegate.savePlaybackPositionNow()
     }
 
     override fun onVideoResume(isResume: Boolean) {

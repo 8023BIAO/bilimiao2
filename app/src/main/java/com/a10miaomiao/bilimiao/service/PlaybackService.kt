@@ -14,6 +14,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
@@ -123,15 +124,30 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     private val prevChapterCmd = SessionCommand("bilimiao.prev_chapter", Bundle.EMPTY)
     private val nextChapterCmd = SessionCommand("bilimiao.next_chapter", Bundle.EMPTY)
 
-    private val backButton = CommandButton.Builder()
-        .setDisplayName("后退10秒")
-        .setIconResId(R.drawable.media3_icon_skip_back_10)
+    /** 收摊重入保护：teardownSession 里会回调 delegate（delegate 又可能回头通知服务） */
+    @Volatile private var tearingDown = false
+
+    /** 快进/快退步长（秒）：跟随"快进/快退步长"设置，通知栏按钮的文字与图标一起变 */
+    private var seekStepSec = 10
+
+    /** 取对应秒数的图标；media3 只自带 5/10/15/30，其它值退化成不带数字的箭头 */
+    private fun seekIconRes(forward: Boolean, sec: Int): Int = when (sec) {
+        5 -> if (forward) R.drawable.media3_icon_skip_forward_5 else R.drawable.media3_icon_skip_back_5
+        15 -> if (forward) R.drawable.media3_icon_skip_forward_15 else R.drawable.media3_icon_skip_back_15
+        30 -> if (forward) R.drawable.media3_icon_skip_forward_30 else R.drawable.media3_icon_skip_back_30
+        10 -> if (forward) R.drawable.media3_icon_skip_forward_10 else R.drawable.media3_icon_skip_back_10
+        else -> if (forward) R.drawable.media3_icon_skip_forward else R.drawable.media3_icon_skip_back
+    }
+
+    private fun buildSeekBackButton() = CommandButton.Builder()
+        .setDisplayName("后退${seekStepSec}秒")
+        .setIconResId(seekIconRes(forward = false, sec = seekStepSec))
         .setSessionCommand(seekBackCmd)
         .build()
 
-    private val forwardButton = CommandButton.Builder()
-        .setDisplayName("前进10秒")
-        .setIconResId(R.drawable.media3_icon_skip_forward_10)
+    private fun buildSeekForwardButton() = CommandButton.Builder()
+        .setDisplayName("前进${seekStepSec}秒")
+        .setIconResId(seekIconRes(forward = true, sec = seekStepSec))
         .setSessionCommand(seekForwardCmd)
         .build()
 
@@ -206,12 +222,12 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             ControlMode.EPISODE -> when {
                 playerDelegate?.hasPreviousEpisode() == true -> prevEpisodeButton
                 playerDelegate?.hasChapters() == true -> prevChapterButton
-                else -> backButton
+                else -> buildSeekBackButton()
             }
             ControlMode.CHAPTER -> {
-                if (playerDelegate?.hasChapters() == true) prevChapterButton else backButton
+                if (playerDelegate?.hasChapters() == true) prevChapterButton else buildSeekBackButton()
             }
-            ControlMode.SEEK -> backButton
+            ControlMode.SEEK -> buildSeekBackButton()
         }
     }
 
@@ -221,12 +237,12 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             ControlMode.EPISODE -> when {
                 playerDelegate?.hasNextEpisode() == true -> nextEpisodeButton
                 playerDelegate?.hasChapters() == true -> nextChapterButton
-                else -> forwardButton
+                else -> buildSeekForwardButton()
             }
             ControlMode.CHAPTER -> {
-                if (playerDelegate?.hasChapters() == true) nextChapterButton else forwardButton
+                if (playerDelegate?.hasChapters() == true) nextChapterButton else buildSeekForwardButton()
             }
-            ControlMode.SEEK -> forwardButton
+            ControlMode.SEEK -> buildSeekForwardButton()
         }
     }
 
@@ -329,6 +345,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         initializeSession()
         serviceScope.launch { initPlayerSetting() }
         serviceScope.launch { observeBackgroundPlay() }
+        serviceScope.launch { observeSeekStep() }
         observePlayMode()
     }
 
@@ -502,12 +519,11 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         refreshNotification()
     }
 
-    /** 播放完成后释放通知栏 + 停止 Service */
+    /** 播放完成后释放通知栏 + 停止 Service（同样要换掉会话 player，否则通知会被复活） */
     fun notifyPlaybackComplete() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
         exoPlayer?.release()
         exoPlayer = null
-        stopSelf()
+        teardownSession()
     }
 
     /** 根据当前播放内容动态更新通知栏点击跳转目标 */
@@ -546,15 +562,62 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 注意：exoPlayer 恒为 null（setPlayer() 全仓无调用者），会话挂的又是没有媒体项的
-        // 空壳播放器 —— 都不能用来判断"还在不在播"，必须问真播放器（delegate）。
-        // 语义（用户确认）：设置里开了"后台播放"且确实在播 → 保留 Service（通知栏跟着留）；
-        // 否则划掉最近任务就收掉通知栏并停止 Service，避免"声音还在响、通知栏却没了"。
-        val keepPlaying = backgroundPlayEnabled && playerDelegate?.isPlaying() == true
-        if (!keepPlaying) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        // 语义（用户确认）：
+        //   开了"后台播放"且确实在播 → 保留 Service（通知栏留着，重进 App 画面接上继续）；
+        //   否则彻底收摊（不能只 stopForeground + stopSelf：MediaController 还绑着时服务不会销毁，
+        //   会话状态一变通知就被重新 post 回来 —— 这就是"划掉最近任务后通知栏还显示上一个视频、
+        //   还能操作，但重进 App 已经没有画面"的原因）。
+        // 用户决定（2026-09-16）：不再区分后台播放开关 —— 划掉最近任务就**彻底收摊**。
+        // 之前的"保活"太刁钻：后台还在放、通知栏还在，但重进 App 接不上画面，
+        // 用户还以为杀掉了其实没杀。现在一律：停播 + 释放播放器 + 撤通知 + 断会话。
+        teardownSession()
+    }
+
+    /**
+     * 设置里关掉"通知栏"时，不要让 MediaSessionService 把通知再 post 回来。
+     *
+     * 以前是靠"把会话的 player 换成一个裸 ExoPlayer"来阻止 —— 副作用是播放链路被搞死：
+     * 用户一关通知栏，视频就暂停且点什么都没反应，只能重进页面/换视频。
+     * 这里改用官方钩子，**完全不碰播放器**。
+     */
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        if (!showNotification) {
+            return
         }
+        super.onUpdateNotification(session, startInForegroundRequired)
+    }
+
+    /**
+     * 彻底收摊：撤掉前台通知 + 把会话的 player 换成一个没有媒体的空播放器 + 断开 delegate。
+     * 换 player 是关键：会话状态随之清空，通知不会再被任何状态变化"复活"。
+     */
+    private fun teardownSession() {
+        if (tearingDown) return
+        tearingDown = true
+        // 先把真播放器停掉并释放（否则"划掉任务"后声音还在响）
+        try {
+            playerDelegate?.releasePlayback()
+        } catch (e: Exception) {
+            miaoLogger() error "teardown releasePlayback failed: ${e.message}"
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        mediaSession?.let { session ->
+            val old = session.player
+            try {
+                session.player = ExoPlayer.Builder(this@PlaybackService).build()
+            } catch (e: Exception) {
+                miaoLogger() error "teardown swap session player failed: ${e.message}"
+            }
+            try {
+                old.release()
+            } catch (e: Exception) {
+                miaoLogger() error "teardown release old player failed: ${e.message}"
+            }
+        }
+        // 断开真播放器：服务不再攥着旧 Activity 的 delegate
+        playerDelegate = null
+        tearingDown = false
+        stopSelf()
     }
 
     override fun onDestroy() {
@@ -578,33 +641,31 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         dataStore.data.map { it[PlayerNotification] ?: true }.collect {
             showNotification = it
             if (!init) {
-                // DataStore 任意设置变化都会重发同一个值，先判断是否真的发生了切换，
-                // 否则每次改别的设置都会重建（并泄漏）一个 ExoPlayer
+                // DataStore 任意设置变化都会重发同一个值；这里只处理真正的切换。
+                // 注意：**不要动会话的 player** —— 换 player 会把播放链路搞卡死
+                //（用户报过"关一下通知栏，视频就暂停且点什么都没反应"）。
+                // 关掉时靠 onUpdateNotification() 拦 post + 撤掉已有通知即可。
                 if (it) {
-                    mediaSession?.let { session ->
-                        if (session.player !is MyForwardingPlayer) {
-                            // 重新打开：exoPlayer 恒为 null（setPlayer() 全仓无调用者），
-                            // 旧写法这里是空操作 → 开关"关→开"后通知栏/线控永久失效。
-                            // 与 initializeSession() 一致：重建一个转发给 delegate 的空壳播放器
-                            val old = session.player
-                            session.player = MyForwardingPlayer(ExoPlayer.Builder(this@PlaybackService).build())
-                            // MediaSession 不负责释放旧 player，旧的空 ExoPlayer 要自己释放
-                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
-                        }
-                    }
+                                refreshNotification()
                 } else {
-                    mediaSession?.let { session ->
-                        if (session.player is MyForwardingPlayer) {
-                            val old = session.player
-                            session.player = ExoPlayer.Builder(this@PlaybackService).build()
-                            // 转发壳只是包装，release 它会连带释放底层的空壳 ExoPlayer
-                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
-                        }
+                                stopForeground(STOP_FOREGROUND_REMOVE)
+                    runCatching {
+                        getSystemService(NotificationManager::class.java)
+                            .cancel(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID)
                     }
-                    stopForeground(STOP_FOREGROUND_REMOVE)
                 }
             }
             init = false
+        }
+    }
+
+    /** 监听"快进/快退步长"设置：通知栏 ±秒按钮的文字和图标跟着变 */
+    private suspend fun observeSeekStep() {
+        dataStore.data.map { it[SettingPreferences.PlayerDoubleTapSeek] ?: 10 }.collect { sec ->
+            if (seekStepSec != sec) {
+                seekStepSec = sec
+                refreshNotification()
+            }
         }
     }
 

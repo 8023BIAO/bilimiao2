@@ -193,6 +193,10 @@ object SettingPreferences {
     val PlayerSubtitleShow = booleanPreferencesKey("player_subtitle_show")
     // AI字幕显示
     val PlayerAiSubtitleShow = booleanPreferencesKey("player_ai_subtitle_show")
+    // 长按倍速的倍率（存 ×100 的整数：150=1.5× 200=2× 300=3× 400=4×，默认 3×）
+    val PlayerLongPressSpeed = intPreferencesKey("player_long_press_speed")
+    // 双击快进/快退的秒数（默认 10 秒）
+    val PlayerDoubleTapSeek = intPreferencesKey("player_double_tap_seek")
     // 小屏显示面积
     val PlayerSmallShowArea = intPreferencesKey("player_small_show_area")
     // 挂起时显示面积

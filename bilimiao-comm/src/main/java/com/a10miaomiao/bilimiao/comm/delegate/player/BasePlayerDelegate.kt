@@ -10,6 +10,12 @@ import master.flame.danmaku.danmaku.model.BaseDanmaku
 interface BasePlayerDelegate: BaseDelegate {
     fun openPlayer(source: BasePlayerSource)
     fun closePlayer()
+
+    /** 划掉最近任务等"彻底收摊"场景：停播并释放播放器（不走 UI 路径，也不回头通知服务） */
+    fun releasePlayback() {}
+
+    /** 立刻持久化当前播放位置（暂停时调用：否则"暂停→切走→被杀"会丢位置，回来就从 0 播） */
+    fun savePlaybackPositionNow() {}
     fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration?)
     fun isOpened(): Boolean
     fun isPlaying(): Boolean

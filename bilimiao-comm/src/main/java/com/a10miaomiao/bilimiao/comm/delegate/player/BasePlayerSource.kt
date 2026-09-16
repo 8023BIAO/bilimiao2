@@ -12,8 +12,22 @@ abstract class BasePlayerSource() {
     abstract val coverUrl: String
     abstract val ownerId: String
     abstract val ownerName: String
-    abstract suspend fun getPlayerUrl(quality: Int, fnval: Int): PlayerSourceInfo
+    /**
+     * @param language AI 原声翻译语言（null = 原声）。gRPC 取流接口没有语言字段，
+     *   所以带语言时实现类必须走 HTTP playurl（见各实现的注释）。
+     */
+    abstract suspend fun getPlayerUrl(
+        quality: Int,
+        fnval: Int,
+        language: String? = null,
+    ): PlayerSourceInfo
     abstract fun getSourceIds(): PlayerSourceIds
+
+    /**
+     * 只为了拿 AI 翻译语言列表（HTTP playurl 的 language.items），不用于播放。
+     * 视频本身没有 AI 翻译时返回空列表。
+     */
+    open suspend fun getTranslateLanguages(quality: Int, fnval: Int): List<PlayerSourceInfo.LanguageInfo> = emptyList()
 
     open suspend fun getSubtitles(): List<SubtitleSourceInfo> = emptyList()
     open suspend fun getDanmakuParser(): BaseDanmakuParser? = null

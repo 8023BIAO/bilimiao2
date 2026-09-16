@@ -37,17 +37,25 @@ class SearchInputViewModel(
     private val searchHistoryDB = SearchHistoryDB(context, SearchHistoryDB.DB_NAME, null, 1)
 
     init {
-        updateHistoryList()
+        // 注意：这个 ViewModel 是在"点开搜索框"那一刻构造的，原来这里在主线程直接
+        // queryAllHistory() 读 SQLite —— 搜索历史攒多了会实打实拖慢弹出动画。
+        // 改成 IO 上读：historyListFlow 初始就是空列表，读完再补上，UI 不会卡。
+        refreshHistoryList()
     }
 
-    private fun updateHistoryList() {
-        historyListFlow.value = searchHistoryDB.queryAllHistory().map {
-            SuggestInfo(
-                text = it,
-                type = SuggestType.HISTORY,
-                value = it,
-            )
+    /** 在 IO 上重新读取搜索历史（先空后补，不在主线程碰 SQLite） */
+    private fun refreshHistoryList() {
+        viewModelScope.launch(Dispatchers.IO) {
+            historyListFlow.value = queryHistoryList()
         }
+    }
+
+    private fun queryHistoryList() = searchHistoryDB.queryAllHistory().map {
+        SuggestInfo(
+            text = it,
+            type = SuggestType.HISTORY,
+            value = it,
+        )
     }
 
     private fun getInitSuggestData(
@@ -109,20 +117,30 @@ class SearchInputViewModel(
             }
         }
 
+    // 下面三个写操作原来也在主线程上读写 SQLite（点"搜索"、点历史 chip 的删除、
+    // 清空历史都会各卡一下）。统一挪到 IO：写库 + 重新查列表放在同一个协程里，
+    // 保证"先写后读"的顺序，UI 那边订阅 historyListFlow，读回来自己会刷。
+
     fun addSearchHistory(text: String) {
-        searchHistoryDB.deleteHistory(text)
-        searchHistoryDB.insertHistory(text)
-        updateHistoryList()
+        viewModelScope.launch(Dispatchers.IO) {
+            searchHistoryDB.deleteHistory(text)
+            searchHistoryDB.insertHistory(text)
+            historyListFlow.value = queryHistoryList()
+        }
     }
 
     fun deleteSearchHistory(text: String) {
-        searchHistoryDB.deleteHistory(text)
-        updateHistoryList()
+        viewModelScope.launch(Dispatchers.IO) {
+            searchHistoryDB.deleteHistory(text)
+            historyListFlow.value = queryHistoryList()
+        }
     }
 
     fun deleteAllSearchHistory() {
-        searchHistoryDB.deleteAllHistory()
-        updateHistoryList()
+        viewModelScope.launch(Dispatchers.IO) {
+            searchHistoryDB.deleteAllHistory()
+            historyListFlow.value = queryHistoryList()
+        }
     }
 
     fun isNumeric(s: String): Boolean {

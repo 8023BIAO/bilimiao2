@@ -25,6 +25,7 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.MotionEvent
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
@@ -39,6 +40,8 @@ import com.a10miaomiao.bilimiao.R
 import com.a10miaomiao.bilimiao.comm.delegate.helper.StatusBarHelper
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerSeekBus
 import com.a10miaomiao.bilimiao.service.PlaybackService
+import com.a10miaomiao.bilimiao.comm.toast
+import com.a10miaomiao.bilimiao.comm.utils.ImageSaveUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.config.config
 import com.a10miaomiao.bilimiao.widget.menu.CheckPopupMenu
@@ -131,6 +134,20 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
 
     // 字幕开关文字
     private val mSubtitleSwitchTV: TextView by lazy { findViewById(R.id.subtitle_switch_text) }
+
+    // AI 原声翻译开关（底栏，只有视频支持 AI 翻译时才显示）
+    private val mAiTranslateSwitch: ViewGroup by lazy { findViewById(R.id.ai_translate_switch) }
+    private val mAiTranslateSwitchIV: ImageView by lazy { findViewById(R.id.ai_translate_switch_icon) }
+    private val mAiTranslateSwitchTV: TextView by lazy { findViewById(R.id.ai_translate_switch_text) }
+
+    // 听视频（仅音频）开关 + 黑屏遮罩
+    private val mAudioOnlySwitch: ViewGroup by lazy { findViewById(R.id.audio_only_switch) }
+    private val mAudioOnlySwitchIV: ImageView by lazy { findViewById(R.id.audio_only_switch_icon) }
+    private val mAudioOnlySwitchTV: TextView by lazy { findViewById(R.id.audio_only_switch_text) }
+    private val mAudioOnlyOverlay: View by lazy { findViewById(R.id.audio_only_overlay) }
+
+    // 截图
+    private val mScreenshotSwitch: ViewGroup by lazy { findViewById(R.id.screenshot_switch) }
 
     // 弹幕开关
     private val mDanmakuSwitch: ViewGroup by lazy { findViewById(R.id.danmaku_switch) }
@@ -225,6 +242,268 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             field = value
             updateCurrentSubtitleSource()
         }
+
+    /** 长按倍速的倍率（默认 3×；设置页可改，由 PlayerController.initVideoSetting 下发） */
+    var longPressSpeedMultiplier = 3f
+
+    /**
+     * 续播账本：我们自己的"最后位置"。
+     *
+     * 为什么不能只靠 GSY：它只有两个**一次性、条件写**的槽（源码 v13.0.0）——
+     *  - `mCurrentPosition`：只有 `onVideoPause()` 在底层 `isPlaying()` 为真时才写（:518-531），
+     *    暂停中/缓冲中调用它等于什么都没记；被 `onVideoResume()` 读一次就清零（:562）；
+     *  - `mSeekOnStart`：默认 -1，只在 `startAfterPrepared()` 里被消费一次然后清零（:844-846）。
+     * 实测：暂停→切走→回来时位置还是 89108ms，随后 GSY 在 surface 重建时自己
+     * 重新 prepare，两个槽都是空的 → 从 0 开始播。这就是"从 0 开始"的根因。
+     *
+     * 所以账本由我们记（暂停/退出/seek/播放中都记），槽只当"投递给 GSY 的通道"。
+     */
+    private var lastGoodPositionMs = 0L
+    private var lastGoodUpdateAt = 0L
+
+    /**
+     * "正在 prepare" 标记。
+     * 弹幕计时器跑在弹幕渲染线程上，能在 `super.startAfterPrepared()` 的
+     * `setStateAndUi(PLAYING)` 与紧随其后的 `seekTo(mSeekOnStart)` 之间插进来 ——
+     * 那时新播放器刚起、位置还是 0 附近，它会把投递槽写成 0/小值，
+     * 于是"换清晰度从 0 开始播"。prepare 期间一律不许计时器碰槽。
+     */
+    @Volatile
+    private var isPreparing = false
+
+    /**
+     * 用户的"暂停意图"。
+     *
+     * GSY 重新 prepare 后默认是**自动开播**的（`mStartAfterPrepared` 默认 true），
+     * 暂停着切后台再回来，surface 重建就会自己播起来。用这个标记在 prepare 后按回暂停。
+     * 更新点：onVideoPause → true；onVideoResume / 点播放 / 换视频 → false。
+     */
+    private var userPaused = false
+
+    /**
+     * "下一次 prepare 必须落在这里"的**显式投递位**（一次性）。
+     *
+     * 为什么不能直接用 GSY 的 `mSeekOnStart` 存：那个槽还有别的写者 ——
+     * 计时器保鲜（播放中每秒写当前位置）、`armResumeSlot()` 补空、`seekTo()` 同步。
+     * 换清晰度/换语言时它们会在 prepare 之前把显式落点盖成"当前位置"甚至 0，
+     * 结果就是**换个清晰度从头播**（实机回归 2026-09-17）。
+     * 所以显式落点单独存一格，只有 prepare 消费它，其它写者一律绕开。
+     */
+    private var pendingSeekMs = 0L
+
+    /** 显式投递"下次 prepare 的落点"（换清晰度 / 换语言 / 重试 / 续播 / 点播放用） */
+    fun armSeekOnPrepare(posMs: Long) {
+        if (posMs > 0L) {
+            pendingSeekMs = posMs
+            mSeekOnStart = posMs
+            // 兜底：万一这次 prepare 没把落点应用下去（seek 被底层吞掉/顺序错位），
+            // 0.8s 后检查一次"位置是不是掉到 0 附近"，是就拽回账本位置
+            scheduleRestartGuard()
+        }
+    }
+
+    /** 账本里的续播位置（播放器还活着就以底层真实位置为准；它返回 0 时还能兜住 mCurrentPosition） */
+    val resumePosition: Long
+        get() = currentPositionWhenPlaying.takeIf { it > 0L } ?: lastGoodPositionMs
+
+    /** 记一笔账（暂停 / 退出 / 播放中都调），保证任何时刻都有位置可投递 */
+    fun noteResumePosition(posMs: Long) {
+        if (posMs > 0L) {
+            lastGoodPositionMs = posMs
+            lastGoodUpdateAt = System.currentTimeMillis()
+        }
+    }
+
+    /**
+     * 槽感知补位：GSY 的两个槽是一次性的，谁读到就清零，而写又是有条件的（见账本注释）。
+     * 在"紧接着可能 re-prepare"的时刻（回前台 / 退出 / 点播放）把**空槽**补上：
+     *  - `mSeekOnStart`：下一次 prepare 的定位（画面重建也走 prepare —— GSY 的
+     *    `addTextureView()` 只在 `startAfterPrepared()` 里被调用，源码 :852）；
+     *  - `mCurrentPosition`：`onVideoResume()` 要读的那个槽（回前台自动续播）。
+     * 已有值不覆盖：GSY 自己刚写的值比账本更新。
+     */
+    fun armResumeSlot() {
+        val pos = currentPositionWhenPlaying.takeIf { it > 0L } ?: lastGoodPositionMs
+        if (pos <= 0L) return
+        if (mCurrentPosition <= 0L) mCurrentPosition = pos
+        if (mSeekOnStart <= 0L) mSeekOnStart = pos
+    }
+
+    /** 换视频 / 播放完成：账本整个复位（否则会把新视频或重播拽到上一段的位置） */
+    fun resetRestartGuard() {
+        lastGoodPositionMs = 0L
+        userPaused = false
+        pendingSeekMs = 0L
+        // 连 GSY 的"prepare 后定位"一起清掉，否则残留值会漏到下一个视频
+        mSeekOnStart = 0L
+        removeCallbacks(restartGuardRunnable)
+    }
+
+    /** 同一个视频的重载（换清晰度 / 换语言 / 网络重试）：只撤掉待执行的兜底检查，账本留着 */
+    fun resetRestartGuardKeepPosition() {
+        removeCallbacks(restartGuardRunnable)
+    }
+
+    /** 用户明确要播（重播 / 重试 / 通知栏播放）：清掉"暂停意图"，否则 prepare 完会被按回暂停 */
+    fun clearPausedIntent() {
+        userPaused = false
+    }
+
+    private val restartGuardRunnable = Runnable {
+        val p = try { currentPosition } catch (_: Exception) { 0L }
+        val state = mCurrentState
+        val shouldRestore = lastGoodPositionMs > 0L &&
+            p < 3_000L &&
+            (state == CURRENT_STATE_PLAYING || state == CURRENT_STATE_PAUSE)
+        if (shouldRestore) {
+            try { seekTo(lastGoodPositionMs) } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * GSY 重新 prepare 完成后一定会走这里（surface 被销毁后重建、播放器被释放后重建都会），
+     * 而 `mSeekOnStart` 就是在这个方法里被消费来"prepare 后定位"的（源码 v13.0.0:844 行）。
+     *
+     * 两件事：
+     *  1. super 之前把空槽补上账本位置 → 重新 prepare 出来的**第一帧就在正确位置**，
+     *     不会先闪一下 0:00 再被兜底拽回来；
+     *  2. 如果用户是"暂停着离开"的，补 `mPauseBeforePrepared` → prepare 完自动按回暂停
+     *     （GSY 默认 mStartAfterPrepared=true，重建后会自己播起来）。
+     */
+    override fun startAfterPrepared() {
+        // 显式落点优先级最高：换清晰度/换语言/重试/点播放投递的位置必须落到这一帧上
+        if (pendingSeekMs > 0L) {
+            mSeekOnStart = pendingSeekMs
+            pendingSeekMs = 0L
+        }
+        // 位置已经贴着结尾了就别投递：seek 到末尾会立刻 STATE_ENDED 再走一遍播放完成（连播死循环）
+        val totalDuration = try { duration } catch (_: Exception) { 0L }
+        if (totalDuration > 0L && mSeekOnStart >= totalDuration - 2_000L) {
+            mSeekOnStart = 0L
+        }
+        if (mSeekOnStart <= 0L && lastGoodPositionMs > 0L) {
+            mSeekOnStart = lastGoodPositionMs
+        }
+        if (userPaused) {
+            mPauseBeforePrepared = true
+        }
+        isPreparing = true
+        try {
+            super.startAfterPrepared()
+        } finally {
+            isPreparing = false
+        }
+        // GSY 在 mPauseBeforePrepared 分支里会紧接着 onVideoPause()，而此时 seek 可能还没落地，
+        // 它读到的 0 会被写进 mCurrentPosition（= 下一次续播位置）→ 用账本补回来
+        if (mCurrentPosition <= 0L && lastGoodPositionMs > 0L) {
+            mCurrentPosition = lastGoodPositionMs
+        }
+    }
+
+    /** 启动动作（点播放/回前台续播）后挂一次检查 */
+    private fun scheduleRestartGuard() {
+        if (lastGoodPositionMs <= 0L) return
+        removeCallbacks(restartGuardRunnable)
+        // 0.8s：够晚（避免播放还没起来误判），又尽量早（别让用户看见那一下）
+        postDelayed(restartGuardRunnable, 800)
+    }
+
+    /** 听视频（仅音频）：黑掉画面继续放声音。刻意不碰 surface/播放器，避免 GSY 因 surface 变化误暂停 */
+    var isAudioOnly = false
+        private set
+
+    /**
+     * 当前帧截图（不含弹幕层）。
+     * 我们是 TextureView 渲染（GSYVideoType.TEXTURE），TextureView.bitmap 拿到的就是这一帧画面。
+     */
+    fun takeScreenshot(): Boolean {
+        val act = getActivity() ?: return false
+        val textureView = findTextureView(mSurfaceContainer)
+        if (textureView == null || !textureView.isAvailable) {
+            toast("截图失败：画面还没准备好")
+            return false
+        }
+        val bitmap = try {
+            textureView.bitmap
+        } catch (e: Exception) {
+            null
+        }
+        if (bitmap == null) {
+            toast("截图失败")
+            return false
+        }
+        // 复用相册保存（内部会 toast 文件名；失败会回退到 App 私有目录）
+        ImageSaveUtil.saveImage(act, "bilimiao_${System.currentTimeMillis()}.png", bitmap)
+        return true
+    }
+
+    /** 在视图树里找 TextureView（GSY 把渲染器加进 surface_container，外面还套了缩放容器） */
+    private fun findTextureView(root: ViewGroup?): TextureView? {
+        root ?: return null
+        for (i in 0 until root.childCount) {
+            when (val child = root.getChildAt(i)) {
+                is TextureView -> if (child.isAvailable) return child
+                is ViewGroup -> findTextureView(child)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    fun setAudioOnly(enabled: Boolean) {
+        if (isAudioOnly == enabled) return
+        isAudioOnly = enabled
+        setViewShowState(mAudioOnlyOverlay, if (enabled) VISIBLE else GONE)
+        mAudioOnlySwitchIV.setImageResource(
+            if (enabled) R.drawable.ic_player_audio_only_on
+            else R.drawable.ic_player_audio_only_off
+        )
+        mAudioOnlySwitchTV.text = if (enabled) "听视频中" else "听视频"
+        // 画面都藏起来了，双指旋转/缩放必须一起关掉：
+        // 否则黑屏上还会转画面、还会冒出"还原屏幕"按钮（用户明确要求关掉）
+        if (enabled) {
+            if (::pinchToZoom.isInitialized) {
+                pinchToZoom.resetImmediate()
+                pinchToZoom.enabled = false
+            }
+            setViewShowState(mRestoreScaleBtn, GONE)
+            // 控件（暂停/快进快退/进度条/听视频按钮）必须立刻可见，
+            // 否则用户进音频模式后连"取消听音频"都点不到
+            showAllWidget()
+            } else {
+            updatePinchState()
+            }
+    }
+
+    /** AI 翻译可选语言（playurl 的 language.items；空 = 该视频没有 AI 翻译） */
+    var translateLanguages = emptyList<TranslateLanguageInfo>()
+        set(value) {
+            field = value
+            updateAiTranslateSwitch()
+        }
+
+    /** 当前 AI 翻译语言（null = 未翻译，播原声） */
+    var currentTranslateLang: String? = null
+        set(value) {
+            field = value
+            updateAiTranslateSwitch()
+        }
+
+    /** 用户在字幕菜单里选了翻译语言（null = 关闭翻译）：由 PlayerDelegate2 重新取播放地址 */
+    var onTranslateSelected: ((String?) -> Unit)? = null
+
+    /** B 站 AI 翻译语言（playurl 响应里的 language.items，lang 形如 ai-zh） */
+    data class TranslateLanguageInfo(
+        val lang: String,
+        val title: String?,
+    )
+
+    /** 字幕菜单里的一个选项：字幕轨 / AI 翻译语言（CheckPopupMenu 需要一个统一类型来打勾） */
+    private sealed interface SubtitleMenuValue {
+        data class Track(val source: SubtitleSourceInfo) : SubtitleMenuValue
+        data class Translate(val lang: String) : SubtitleMenuValue
+        data object SubtitleOff : SubtitleMenuValue
+        data object TranslateOff : SubtitleMenuValue
+    }
 
     // 当前模式
     var mode = PlayerMode.SMALL_TOP
@@ -359,22 +638,66 @@ initDanmakuTouchListener()
             clickStartIcon()
         }
         mSubtitleSwitch.setOnClickListener {
-            val menus = mutableListOf<CheckPopupMenu.MenuItemInfo<SubtitleSourceInfo?>>()
-            menus.addAll(subtitleSourceList.map {
-                CheckPopupMenu.MenuItemInfo(it.lan_doc, it)
-            })
-            menus.add(CheckPopupMenu.MenuItemInfo("关闭字幕", null))
+            val menus = mutableListOf<CheckPopupMenu.MenuItemInfo<SubtitleMenuValue>>()
+            subtitleSourceList.forEach {
+                menus.add(
+                    CheckPopupMenu.MenuItemInfo(it.lan_doc, SubtitleMenuValue.Track(it))
+                )
+            }
+            menus.add(CheckPopupMenu.MenuItemInfo("关闭字幕", SubtitleMenuValue.SubtitleOff))
+            // AI 原声翻译（B 站 playurl 的 cur_language）：和字幕共用这个菜单入口
+            val langs = translateLanguages
+            if (langs.isNotEmpty()) {
+                langs.forEach {
+                    menus.add(
+                        CheckPopupMenu.MenuItemInfo(
+                            "AI 翻译：${it.title ?: it.lang}",
+                            SubtitleMenuValue.Translate(it.lang),
+                        )
+                    )
+                }
+                menus.add(
+                    CheckPopupMenu.MenuItemInfo("关闭 AI 翻译", SubtitleMenuValue.TranslateOff)
+                )
+            }
+            val current = when {
+                !currentTranslateLang.isNullOrEmpty() ->
+                    SubtitleMenuValue.Translate(currentTranslateLang!!)
+                currentSubtitleSource != null ->
+                    SubtitleMenuValue.Track(currentSubtitleSource!!)
+                else -> SubtitleMenuValue.SubtitleOff
+            }
             val pm = CheckPopupMenu(
                 context = context,
                 anchor = it,
                 menus = menus,
-                value = currentSubtitleSource,
+                value = current,
                 themeColor = mThemeColor,
             )
-            pm.onMenuItemClick = {
-                currentSubtitleSource = it.value
+            pm.onMenuItemClick = { item ->
+                when (val v = item.value) {
+                    is SubtitleMenuValue.Track -> currentSubtitleSource = v.source
+                    SubtitleMenuValue.SubtitleOff -> currentSubtitleSource = null
+                    is SubtitleMenuValue.Translate -> onTranslateSelected?.invoke(v.lang)
+                    SubtitleMenuValue.TranslateOff -> onTranslateSelected?.invoke(null)
+                }
             }
             pm.show()
+        }
+        // AI 原声翻译：点一下开/关（开的时候用第一条语言；想挑具体语言去上面的字幕菜单）
+        mAiTranslateSwitch.setOnClickListener {
+            val langs = translateLanguages
+            if (langs.isEmpty()) return@setOnClickListener
+            val target = if (currentTranslateLang == null) langs.first().lang else null
+            onTranslateSelected?.invoke(target)
+        }
+        // 听视频：只黑掉画面，音频继续（播放器/surface 都不动）
+        mAudioOnlySwitch.setOnClickListener {
+            setAudioOnly(!isAudioOnly)
+        }
+        // 截图：抓当前帧存相册
+        mScreenshotSwitch.setOnClickListener {
+            takeScreenshot()
         }
         chapterManager.initChapterButton()
         mCastBtnLayout.setOnClickListener {
@@ -427,7 +750,8 @@ initDanmakuTouchListener()
         if (!::pinchToZoom.isInitialized) return
         // isLandscapeLayout 由外部（PlayerController）基于 ScaffoldView.orientation 设置，
         // 适配 bilimiao 自身的横屏布局（非设备物理旋转）
-        val shouldDisable = isLock || (isLandscapeLayout && mode != PlayerMode.FULL)
+        // 音频模式（听视频）下不允许双指缩放/旋转
+        val shouldDisable = isLock || isAudioOnly || (isLandscapeLayout && mode != PlayerMode.FULL)
         pinchToZoom.enabled = !shouldDisable
         if (shouldDisable) {
             pinchToZoom.resetImmediate()
@@ -481,6 +805,28 @@ initDanmakuTouchListener()
         }
     }
 
+    /**
+     * AI 原声翻译开关（底栏）：
+     * 只有"这个视频确实有 AI 翻译语言 + 外部接好了回调"时才显示；
+     * 点一下开/关（多语言时开启用第一条，具体选哪条去字幕菜单里挑）。
+     */
+    private fun updateAiTranslateSwitch() {
+        if (translateLanguages.isEmpty() || onTranslateSelected == null) {
+            setViewShowState(mAiTranslateSwitch, GONE)
+            return
+        }
+        setViewShowState(mAiTranslateSwitch, VISIBLE)
+        val lang = currentTranslateLang
+        if (lang == null) {
+            mAiTranslateSwitchIV.setImageResource(R.drawable.ic_player_ai_translate_off)
+            mAiTranslateSwitchTV.text = "AI翻译"
+        } else {
+            mAiTranslateSwitchIV.setImageResource(R.drawable.ic_player_ai_translate_on)
+            mAiTranslateSwitchTV.text = translateLanguages
+                .find { it.lang == lang }?.title ?: "AI翻译开"
+        }
+    }
+
     private var touchSurfaceDownTime = Long.MAX_VALUE
     private var isSpeedPlaying = false
     private var lastSpeed = 0f  // init an invalid value
@@ -522,7 +868,8 @@ initDanmakuTouchListener()
     private fun startLongClickSpeedPlay() {
         isSpeedPlaying = true
         lastSpeed = speed
-        speed *= 3
+        // 倍率由设置页下发（默认 3×）；下限兜底，别让异常值把播放速度乘成 0（画面卡死）
+        speed *= longPressSpeedMultiplier.coerceAtLeast(1.1f)
         // speed_tips 已由用户设置为隐藏，不再显示"倍速播放中"提示
         mTouchingProgressBar = false
         // 震动反馈
@@ -967,6 +1314,51 @@ initDanmakuTouchListener()
         super.touchSurfaceUp()
     }
 
+    /** 双击快进/快退的步长（默认 10 秒，设置页可改） */
+    var doubleTapSeekMs = 10_000L
+
+    /**
+     * 双击：左 1/3 快退、右 1/3 快进，中间保持 GSY 默认行为（播放/暂停）。
+     *
+     * GSY 的默认实现是 `touchDoubleUp() { clickStartIcon() }` —— 双击 = 播放/暂停，
+     * 这和 B 站用户的肌肉记忆正相反（左右两侧双击应该快进/快退）。
+     * 不弹任何提示（用户要求：快进就快进、快退就快退，提示挡画面）。
+     */
+    override fun touchDoubleUp(e: MotionEvent?) {
+        if (e == null || !mHadPlay) {
+            super.touchDoubleUp(e)
+            return
+        }
+        // 手势锁 / 小窗拖拽模式下不处理，交回 GSY
+        if (mHideKey && mShowVKey) {
+            super.touchDoubleUp(e)
+            return
+        }
+        val w = if (touchViewWidth > 0) touchViewWidth else width
+        val total = duration
+        if (w <= 0 || total <= 0L) {
+            super.touchDoubleUp(e)
+            return
+        }
+        val pos = currentPosition
+        val target: Long
+        when {
+            e.x < w / 3f -> target = (pos - doubleTapSeekMs).coerceAtLeast(0L)
+            e.x > w * 2f / 3f -> target = (pos + doubleTapSeekMs).coerceAtMost(total)
+            else -> {
+                super.touchDoubleUp(e)
+                return
+            }
+        }
+        try {
+            // 只跳转，不弹任何提示（提示挡画面，用户明确不要）
+            seekTo(target)
+        } catch (ex: Exception) {
+            // 播放器刚 release / Activity 正在销毁：丢掉这次手势，别让它崩
+            miaoLogger() error "touchDoubleUp seek failed: ${ex.message}"
+        }
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // 父容器（小窗拖拽）抢走触摸时框架只发 CANCEL，而 GSY 自己不处理 CANCEL。
         // 原先这里用 id == surface_container 判定，但本 View 的 id 是 video_player，
@@ -1174,6 +1566,9 @@ initDanmakuTouchListener()
     }
     override fun onAutoCompletion() {
         super.onAutoCompletion()
+        // 自然播完：续播点已经没有意义了（重播/连播都该从 0 开始），
+        // 而计时器刚才还在把"当前位置"往投递槽里塞（≈ 片尾）→ 不清就会 seek 到末尾立刻又结束
+        resetRestartGuard()
         videoPlayerCallBack?.onAutoCompletion()
         releaseDanmaku()
     }
@@ -1181,48 +1576,86 @@ initDanmakuTouchListener()
 
     override fun onVideoPause() {
         super.onVideoPause()
+        // 账本：GSY 的 onVideoPause() 只在底层 isPlaying() 为真时才写 mCurrentPosition
+        // （源码 v13.0.0:518-531），暂停中/缓冲中调用它等于什么都没记 —— 所以这里自己记一笔
+        userPaused = true
+        noteResumePosition(currentPositionWhenPlaying)
         danmakuOnPause()
-        if (!isSilentReconnecting) {
-            videoPlayerCallBack?.onVideoPause()
-        }
+        videoPlayerCallBack?.onVideoPause()
     }
 
     override fun onVideoResume(isResume: Boolean) {
+        userPaused = false
         super.onVideoResume(isResume)
         danmakuOnResume()
-        if (!isSilentReconnecting) {
-            videoPlayerCallBack?.onVideoResume(isResume)
-        }
+        videoPlayerCallBack?.onVideoResume(isResume)
     }
 
     override fun onVideoResume() {
         onVideoResume(true)
     }
 
-    /** 静默重连 Surface，不触发暂停/播放 UI 闪变 */
-    private var isSilentReconnecting = false
+    /**
+     * 拖动进度条 / 通知栏拖进度 / 弹幕空降：GSY 的 `seekTo()` 只把位置转发给底层（源码 :1142），
+     * 两个槽都不知道 —— 不记这一笔账的话，之后任何一次 re-prepare 都会跳回旧位置。
+     * 顺手把两个槽也同步成新位置（暂停态 seek 不响不闪）：用户刚定的位置就是新意图。
+     */
+    override fun seekTo(position: Long) {
+        super.seekTo(position)
+        if (position >= 0L) {
+            lastGoodPositionMs = position
+            lastGoodUpdateAt = System.currentTimeMillis()
+            mSeekOnStart = position
+            mCurrentPosition = position
+            // 用户/我们自己刚定的位置就是新意图：显式落点作废，之前挂的兜底检查也撤掉
+            pendingSeekMs = 0L
+            removeCallbacks(restartGuardRunnable)
+        }
+    }
 
+    /**
+     * 回前台：**不再调 `onVideoResume()`**。
+     *
+     * 旧实现叫"静默重连 Surface"，但按 GSY 源码它做不到这件事：
+     *  - `onVideoResume()` 只在 `CURRENT_STATE_PAUSE` 时才干活（:551），播放中回前台是纯空转
+     *    （补画面的 `addTextureView()` 只在 prepare 时被调用，:852）；
+     *  - 暂停态回前台调它，会**真的 start() 再被我们按回去** —— 那就是"回来闪一下/响一声"；
+     *  - 而且它读完就把 `mCurrentPosition` 清零（:562），偏偏这之后 GSY 很可能因为 surface
+     *    重建而重新 prepare，槽空了就只能从 0 开始播。
+     *
+     * 现在只做两件安全的事：把空槽补上账本位置 + 位置真的塌了才 seek（暂停态 seek 不响不闪）。
+     */
     fun reconnectSurfaceQuietly() {
-        val savedState = mCurrentState
-        try {
-            isSilentReconnecting = true
-            onVideoResume()
-            if (savedState == CURRENT_STATE_PAUSE) {
-                // GSY 的 onVideoResume() 对暂停中的播放器会真的 start() 并
-                // setStateAndUi(PLAYING)（反编译确认），只把 mCurrentState 改回 PAUSE
-                // 会让 UI/通知栏显示"播放中"而实际是暂停 → 用 setStateAndUi 一起同步
-                setStateAndUi(CURRENT_STATE_PAUSE)
-                gsyVideoManager.pause()
+        val state = mCurrentState
+        val pos = resumePosition
+        if (pos > 0L) {
+            armResumeSlot()
+            // 播放器活着但位置掉到 0 附近（说明被重建过）→ 直接拽回去，不用等 prepare
+            if ((state == CURRENT_STATE_PLAYING || state == CURRENT_STATE_PAUSE)
+                && currentPosition < 3_000L
+            ) {
+                try { seekTo(pos) } catch (_: Exception) {}
             }
-        } catch (_: Exception) {
-        } finally {
-            isSilentReconnecting = false
+            scheduleRestartGuard()
         }
     }
 
     override fun clickStartIcon() {
+        val posBefore = resumePosition
+        // 点播放走的是 GSY 的 clickStartIcon()：它的 PAUSE 分支**既不 seek 也不调 onVideoResume()**，
+        // 只是让底层 start() —— 底层播放器若已被重建，位置就是 0，只有 mSeekOnStart 能在
+        // 随后那次 prepare 里救回来，所以先把槽补好。
+        if (mCurrentState == CURRENT_STATE_PAUSE) {
+            armResumeSlot()
+            // 用显式落点：点播放后若内部重新 prepare，位置必须落到点播放前那一帧
+            if (posBefore > 0L) armSeekOnPrepare(posBefore)
+        }
         super.clickStartIcon()
         if (mCurrentState == CURRENT_STATE_PLAYING) {
+            // 用户明确要播：清掉"暂停意图"，否则下次 re-prepare 会被按回暂停
+            userPaused = false
+            // 点播放后 GSY 可能已经偷偷从 0 重新 prepare（见 restartGuardRunnable 注释）
+            if (posBefore > 0L) scheduleRestartGuard()
             // PlaybackService 状态已在 onVideoResume / setStateAndUi 中同步
             danmakuOnResume()
         } else if (mCurrentState == CURRENT_STATE_PAUSE) {
@@ -1232,6 +1665,17 @@ initDanmakuTouchListener()
     }
     override fun onCompletion() {
         super.onCompletion()
+        // ★ 这里**绝对不能**复位续播账本！
+        //
+        // GSY 的 `startPrepare()`（GSYVideoView:346-348）在**每一次 prepare 之前**都会调
+        // `listener().onCompletion()` —— 也就是"旧媒体要被换掉了"，而不是"播完了"。
+        // 同一个播放器换清晰度/换语言/重试、以及 surface 重建后的内部 re-prepare 全都会走这里。
+        // r 轮我们在这里加了 `resetRestartGuard()`（当时还给 resetRestartGuard 加了清 mSeekOnStart），
+        // 结果就是：投递好的续播落点在 prepare 之前被自己抹掉 → **换清晰度从头播**、
+        // GSY 内部 re-prepare 也从 0 播（这正是最早那个"从 0 开始"的真凶）。
+        //
+        // 真正的"播完了"是 `onAutoCompletion()`（那里才复位）；真正的"换视频"由
+        // `PlayerDelegate2.loadPlayerSource()` 里的 `lastLoadedSourceId` 判定后显式复位。
         releaseDanmaku()
     }
 
@@ -1288,7 +1732,23 @@ initDanmakuTouchListener()
     private fun initDanmakuContext() {
         // 【已移除】V2引擎初始化 — V2引擎已废弃
         mDanmakuView.setCallback(object : DrawHandler.Callback {
-            override fun updateTimer(timer: DanmakuTimer) {}
+            override fun updateTimer(timer: DanmakuTimer) {
+                // 约 1 秒记一次"正常播放到的位置"（这个回调很频繁，别每次都查播放器）
+                val now = System.currentTimeMillis()
+                if (now - lastGoodUpdateAt < 1000L) return
+                lastGoodUpdateAt = now
+                if (mCurrentState == CURRENT_STATE_PLAYING) {
+                    val p = try { currentPosition } catch (_: Exception) { 0L }
+                    if (p > lastGoodPositionMs) lastGoodPositionMs = p
+                    // 投递槽跟着播放位置走：任何时刻被重建都能接着"当前位置"播。
+                    // 两个例外：① prepare 进行中（槽正被 GSY 消费，插进来会把落点写成 0）；
+                    //          ② 有显式落点（换清晰度/换语言/重试投递的），盖掉就是"换清晰度从头播"
+                    if (p > 0L && !isPreparing) {
+                        mCurrentPosition = p
+                        if (pendingSeekMs <= 0L) mSeekOnStart = p
+                    }
+                }
+            }
             override fun drawingFinished() {}
             override fun danmakuShown(danmaku: BaseDanmaku) {}
             override fun prepared() {

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 听视频（仅音频）开关：耳机图标 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 头梁 -->
+    <path
+        android:pathData="M4.5,13.5 V11 a7.5,7.5 0 0 1 15,0 v2.5"
+        android:strokeColor="#B3FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+    <!-- 左耳罩 -->
+    <path
+        android:fillColor="#B3FFFFFF"
+        android:pathData="M2.8,13.6 h2.2 a1.6,1.6 0 0 1 1.6,1.6 v3.4 a1.6,1.6 0 0 1 -1.6,1.6 h-0.6 a1.6,1.6 0 0 1 -1.6,-1.6 z" />
+    <!-- 右耳罩 -->
+    <path
+        android:fillColor="#B3FFFFFF"
+        android:pathData="M17.4,15.2 a1.6,1.6 0 0 1 1.6,-1.6 h2.2 v5 a1.6,1.6 0 0 1 -1.6,1.6 h-0.6 a1.6,1.6 0 0 1 -1.6,-1.6 z" />
+</vector>

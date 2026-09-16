@@ -58,7 +58,12 @@ class LocalPlayerSource(
         }
     }
 
-    override suspend fun getPlayerUrl(quality: Int, fnval: Int): PlayerSourceInfo {
+    // 本地文件没有 AI 翻译（language 参数忽略）
+    override suspend fun getPlayerUrl(
+        quality: Int,
+        fnval: Int,
+        language: String?,
+    ): PlayerSourceInfo {
         val duration = entry.total_time_milli
         val acceptList = listOf(
             PlayerSourceInfo.AcceptInfo(0, "本地")

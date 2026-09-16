@@ -248,6 +248,12 @@ class PlayerDelegate2(
 
     var playerSourceInfo: PlayerSourceInfo? = null
 
+    /** AI 原声翻译：本次播放选中的语言（null = 原声）。换视频时复位 */
+    private var playerLanguage: String? = null
+
+    /** AI 原声翻译可选语言（HTTP playurl 的 language.items；gRPC 取流拿不到，需单独补一次） */
+    private var availableLanguages: List<PlayerSourceInfo.LanguageInfo> = emptyList()
+
     // 未登陆：48[480P 清晰]及以下
     // 已登陆无大会员：80[1080P 高清]及以下
     // 大会员：无限制
@@ -263,6 +269,47 @@ class PlayerDelegate2(
     private var playerClosed = false
 
     private var lastReportProgress = 0L // 最后记录的播放位置
+
+    /**
+     * 上一次真正装进播放器的视频 id（cid）。
+     * 用途：区分"换视频"和"同一个视频重载（换清晰度/换语言/网络重试）"——
+     * 前者要把播放器里的续播账本清掉，后者必须留着，否则重载是从 0 开始。
+     */
+    private var lastLoadedSourceId: String? = null
+
+    /**
+     * 这次打开视频，**云端来源**的续播位置（0 = 不弹提示）。
+     *
+     * 用户规则：只有"位置是云端给的"才弹 `自动恢复:xx:xx / 重新开始`；
+     * 本机来源的一律不弹 —— 包括 PlaybackService 会话内存、`dl_aid_cid` 持久化记录
+     * （"返回桌面再进软件"就属于这一类）。
+     * 云端来源目前就是**预设**（历史页的云端进度 / 番剧的"继续观看"进度）和
+     * `loadPlayerSource` 里 playurl 返回的 `last_play_time`。
+     */
+    private var pendingCloudResumeMs = 0L
+
+    /** 快进/快退步长（毫秒）：通知栏按钮、蓝牙线控、章节退化跳转都用它；由 PlayerController 从设置下发 */
+    var seekStepMs = 10_000L
+
+    override fun releasePlayback() {
+        try {
+            savePlaybackPosition()
+            playerClosed = true
+            playerCoroutineScope.onDestroy()
+            views.videoPlayer?.releaseDanmaku()
+            views.videoPlayer?.hideExpandButton()
+            // 真正停掉声音：GSY 的 release 会 stop 掉底层播放器
+            views.videoPlayer?.release()
+            MainUi.clearKeepPlayerView()
+            releaseMediaControllerFuture()
+        } catch (e: Exception) {
+            miaoLogger() error "releasePlayback failed: ${e.message}"
+        }
+    }
+
+    override fun savePlaybackPositionNow() {
+        savePlaybackPosition()
+    }
     private var lastBackPressedTime = 0L
 
     var playerSource: BasePlayerSource? = null
@@ -388,7 +435,7 @@ class PlayerDelegate2(
         themeDelegate.observeTheme(activity, themeObserver!!)
     }
 
-    /** 保存当前播放位置到 PlaybackService，供 Activity 重建/断点续播使用 */
+    /** 保存当前播放位置：内存（PlaybackService）+ 持久化（进程被杀也不丢），供续播使用 */
     private fun savePlaybackPosition() {
         val p = views.videoPlayer
         val pos = p?.let { it.gsyVideoManager?.currentPosition } ?: 0L
@@ -397,7 +444,40 @@ class PlayerDelegate2(
             val url = playerSourceInfo?.url ?: ""
             val header = playerSourceInfo?.header ?: emptyMap()
             PlaybackService.instance?.savePlaybackState(pos, sid, url, header)
+            persistLocalPlayedPosition(pos)
         }
+    }
+
+    /**
+     * 把播放位置写进持久化记录（秒），键和下载续播共用 `dl_aid_cid`。
+     *
+     * PlaybackService 里的位置只是内存态：退后台一段时间后进程被系统杀掉就没了，
+     * 下次进来"检测不到上次播到哪"就只能从 0 开始 —— 这是续播失效的主因。
+     */
+    private fun persistLocalPlayedPosition(posMs: Long) {
+        val ids = playerSource?.getSourceIds() ?: return
+        if (ids.aid.isBlank() || ids.cid.isBlank()) return
+        try {
+            activity.getPreferences(android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putLong("dl_${ids.aid}_${ids.cid}", posMs / 1000)
+                .apply()
+        } catch (e: Exception) {
+            miaoLogger() error "persist play position failed: ${e.message}"
+        }
+    }
+
+    /** 读持久化的上次播放位置（秒 → 毫秒），没有则返回 null */
+    private fun readLocalPlayedPosition(source: BasePlayerSource): Long? {
+        val ids = source.getSourceIds()
+        if (ids.aid.isBlank() || ids.cid.isBlank()) return null
+        val seconds = try {
+            activity.getPreferences(android.content.Context.MODE_PRIVATE)
+                .getLong("dl_${ids.aid}_${ids.cid}", 0L)
+        } catch (e: Exception) {
+            0L
+        }
+        return (seconds * 1000L).takeIf { it > 0L }
     }
 
     private fun startPlaybackService() {
@@ -443,10 +523,14 @@ class PlayerDelegate2(
                 picInPicHelper?.updatePictureInPictureActions(player.currentState)
             }
         }
-        // 后台播放回到前台后，音频还在走但 Surface 可能没有恢复渲染。
-        // 静默重连 Surface：不触发暂停/播放 UI 闪变，不 seek，只恢复视频画面输出。
-        if (controller.isBackgroundPlay
-            && views.videoPlayer?.isInPlayingState == true) {
+        // 回到前台的"补槽 + 防掉零"。
+        //
+        // 以前这里调的是 GSY 的 onVideoResume()（注释写的是"重连 Surface"），但按源码它做不到：
+        //  - 播放中回前台它是空转（onVideoResume 只在 PAUSE 态才干活，GSYVideoView:551）；
+        //  - 暂停回前台它会真的 start() 再被按回去（"回来闪一下/响一声"），
+        //    而且读完就把 mCurrentPosition 清零（:562）→ 之后 surface 重建重新 prepare 就只能从 0 播。
+        // 现在只补空槽（交给之后的 prepare/续播去消费）+ 位置真塌了才 seek，不再动播放状态。
+        if (views.videoPlayer?.isInPlayingState == true) {
             views.videoPlayer?.reconnectSurfaceQuietly()
         }
     }
@@ -455,6 +539,12 @@ class PlayerDelegate2(
     }
 
     override fun onStart() {
+        // 回前台第一件事：把 GSY 的空槽补上账本位置。
+        // 两个槽都是一次性的（mCurrentPosition 被 onVideoResume 读后清零、
+        // mSeekOnStart 被 startAfterPrepared 消费后清零），而且暂停中/缓冲中退出时
+        // GSY 自己根本没写（它的 onVideoPause 只在底层 isPlaying() 为真时才写）。
+        // 补槽只填空，不动播放状态；下面要续播时 onVideoResume() 才有东西可读。
+        views.videoPlayer?.armResumeSlot()
         // 不在后台播放模式时恢复播放（和原版哔哩猫一致）
         // GSY 内部 onVideoResume 会自动 seek 到 onVideoPause 时保存的 mCurrentPosition
         // 只在"切后台前确实在播放（被 onStop 自动暂停）"时才续播：
@@ -468,6 +558,13 @@ class PlayerDelegate2(
     override fun onStop() {
         // 保存播放位置
         savePlaybackPosition()
+        // 退出前把"当前真实位置"记进播放器账本并补上空槽。
+        // 必须在这里做：GSY 的 onVideoPause() 只在底层 isPlaying() 时才写槽，
+        // 暂停中/缓冲中切后台它什么都不写 —— 之后 surface 重建重新 prepare 就只能从 0 播。
+        views.videoPlayer?.let { p ->
+            p.noteResumePosition(p.currentPositionWhenPlaying)
+            p.armResumeSlot()
+        }
         // 不在后台播放模式时暂停播放（GSY 内部 onVideoPause 保存 mCurrentPosition）
         if (!controller.isBackgroundPlay
             && views.videoPlayer?.isInPlayingState == true) {
@@ -726,17 +823,11 @@ class PlayerDelegate2(
         }
         lastReportProgress = currentPosition
         val progressSec = currentPosition / 1000
-        // 存到 PlaybackService（Activity重建后可恢复，无需等B站API同步）
+        // 存内存 + 持久化（Activity 重建、进程被杀都能恢复）
         savePlaybackPosition()
         activity.lifecycleScope.launch(Dispatchers.IO) {
+            // 上报云端进度（下次进来 playurl 的 last_play_time 就是它）
             playerSource?.historyReport(progressSec)
-            // 同步写入本地缓存，方便本地下载视频续播读取
-            val source = playerSource ?: return@launch
-            val ids = source.getSourceIds()
-            if (ids.aid.isNotBlank() && ids.cid.isNotBlank()) {
-                activity.getPreferences(android.content.Context.MODE_PRIVATE)
-                    .edit().putLong("dl_${ids.aid}_${ids.cid}", progressSec).apply()
-            }
         }
     }
 
@@ -785,21 +876,95 @@ class PlayerDelegate2(
 
     private val loadMutex = Mutex()
 
+    /**
+     * AI 原声翻译：切换翻译语言（null = 关闭翻译、播原声）。
+     * 换语言 = 用同一清晰度重新取一次流（HTTP playurl 的 cur_language），所以复用换清晰度那条重载路径，
+     * 只是不要弹"已切换至【清晰度】"。
+     */
+    fun changeLanguage(language: String?) {
+        if (playerLanguage == language) return
+        val previous = playerLanguage
+        playerLanguage = language
+        lastPosition = player?.currentPositionWhenPlaying ?: lastPosition
+        playerCoroutineScope.launch(Dispatchers.Main) {
+            try {
+                loadPlayerSource(isChangedQuality = true, announceQuality = false)
+                PopTip.show(
+                    if (language.isNullOrBlank()) "已关闭 AI 翻译" else "已切换 AI 翻译音轨"
+                ).showTop()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                playerLanguage = previous  // 失败回退，别让菜单和实际音轨不一致
+                PopTip.show("AI 翻译切换失败").showTop()
+            }
+        }
+    }
+
+    /**
+     * 只为拿 AI 翻译语言列表：正常播放走 gRPC（PlayViewReq 没有语言字段），
+     * 所以这里在后台补一次 HTTP playurl，把字幕菜单里的"翻译"项填出来。
+     * 未登录 / 设置里关了翻译 / 视频本身不支持 → 菜单不出现翻译项。
+     */
+    private fun fetchTranslateLanguages(source: BasePlayerSource) {
+        if (BilimiaoCommApp.commApp.loginInfo == null) return
+        playerCoroutineScope.launch {
+            try {
+                val languages = withContext(Dispatchers.IO) {
+                    source.getTranslateLanguages(quality, fnval)
+                }
+                if (languages.isNotEmpty()) {
+                    availableLanguages = languages
+                    player?.translateLanguages = languages.map {
+                        DanmakuVideoPlayer.TranslateLanguageInfo(it.lang, it.title)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 拉不到就当这个视频没有 AI 翻译
+            }
+        }
+    }
+
     suspend fun loadPlayerSource(
-        isChangedQuality: Boolean = false
+        isChangedQuality: Boolean = false,
+        /** 是否提示"已切换至【清晰度】"（AI 翻译换语言也会重载，但不需要报清晰度） */
+        announceQuality: Boolean = isChangedQuality,
+        /**
+         * 同一次会话里的重载（网络失败重试 / 回前台重连）：接上上次位置就好，
+         * 不要再弹"自动恢复:xx"提示 —— 用户正看着这个视频，弹提示纯打扰。
+         * 只有"新打开一个看过的视频"（首次加载）才提示。
+         */
+        isReload: Boolean = false,
     ) {
         loadMutex.withLock {
         // 新视频开始播放，重置退出标志
         controller.explicitExitSmallWindow = false
         val source = playerSource ?: return
+        // 云端提示位置只取一次（本机来源这里会是 0 → 不弹）
+        val cloudTipMs = pendingCloudResumeMs
+        pendingCloudResumeMs = 0L
         try {
+            // ───── 账本兜底：播放器里记的"最后真实位置" ─────
+            // 只在**同一个视频**（换清晰度/换语言/网络重试/回前台重连）时才能用：
+            // 换视频时账本里还是上一段的位置，拿来用就会"新视频从中间开始播"。
+            // 必须放在快速重连判断之前，否则账本有位置也会被当成"没位置"走全量重载。
+            val sameVideo = lastLoadedSourceId != null && lastLoadedSourceId == source.id
+            if (!isChangedQuality && sameVideo && lastPosition <= 0L) {
+                val ledger = views.videoPlayer?.resumePosition ?: 0L
+                if (ledger > 0L) {
+                    lastPosition = ledger
+                }
+            }
             // ───── 快速重连：PlaybackService 有同一视频的缓存 URL → 跳过网络请求 ─────
             val quickUrl = PlaybackService.instance?.getSavedUrl(source.id) ?: ""
             if (!isChangedQuality && quickUrl.isNotEmpty() && lastPosition > 0L) {
                 loadingBoxController.println("断点续播（缓存命中）")
                 // 跳过 setUp()：ExoPlayer 仍在后台存活，MediaSource/Surface 未释放
                 // 直接 seek + resume，解码器/渲染器/Manifest 全部复用，真正秒播
-                player?.seekOnStart = lastPosition
+                // （seekTo 内部会同时把 GSY 的槽和续播账本一起更新，不用再单独写 seekOnStart）
+                showResumeTipIfNeeded(cloudTipMs, isReload, isChangedQuality)
                 player?.seekTo(lastPosition)
                 lastPosition = 0L
                 lastReportProgress = 0L
@@ -819,15 +984,33 @@ class PlayerDelegate2(
             loadingBoxController.println("成功")
             loadingBoxController.print("获取视频信息...")
             val sourceInfo = withContext(Dispatchers.IO) {
-                source.getPlayerUrl(quality, fnval)
+                source.getPlayerUrl(quality, fnval, playerLanguage)
             }
             if (playerClosed) return
             quality = sourceInfo.quality
             playerSourceInfo = sourceInfo
             keptSourceInfo = sourceInfo
+            // AI 原声翻译：把语言列表和当前语言同步给播放器的字幕菜单
+            if (sourceInfo.languages.isNotEmpty()) {
+                availableLanguages = sourceInfo.languages
+            }
+            // 顺序要紧：先接回调再灌语言列表 —— 语言列表的 setter 会顺带刷新底栏 AI 按钮的可见性
+            player?.onTranslateSelected = { lang -> changeLanguage(lang) }
+            player?.translateLanguages = availableLanguages.map {
+                DanmakuVideoPlayer.TranslateLanguageInfo(it.lang, it.title)
+            }
+            player?.currentTranslateLang = sourceInfo.currentLanguage
             loadingBoxController.print("成功")
             player?.releaseDanmaku()
             player?.danmakuParser = danmukuParser
+            // 换视频 → 清掉播放器的续播账本（否则新视频会被拽到上一段的位置）；
+            // 同一个视频重载（换清晰度/换语言/网络重试）→ 账本留着，prepare 后才能接着播
+            if (lastLoadedSourceId != source.id) {
+                player?.resetRestartGuard()
+                lastLoadedSourceId = source.id
+            } else {
+                player?.resetRestartGuardKeepPosition()
+            }
             player?.setUp(
                 sourceInfo.url,
                 false,
@@ -842,7 +1025,10 @@ class PlayerDelegate2(
                 lastPosition = 0L
             }
             if (lastPosition > 0L) {
-                player?.seekOnStart = lastPosition
+                // 显式投递落点（防被计时器/补槽覆盖）—— 换清晰度/换语言/重试/续播都靠它
+                player?.armSeekOnPrepare(lastPosition)
+                // 只有云端来源（预设）才弹；本机会话内存/持久化记录不弹（用户要求）
+                showResumeTipIfNeeded(cloudTipMs, isReload, isChangedQuality)
                 lastPosition = 0L
             } else if (
                 sourceInfo.lastPlayCid == source.id
@@ -850,28 +1036,22 @@ class PlayerDelegate2(
                 && sourceInfo.lastPlayTime > 0L
                 && (sourceInfo.duration <= 0L || sourceInfo.lastPlayTime < sourceInfo.duration - 10000)
             ) {
-                player?.seekOnStart = sourceInfo.lastPlayTime
+                player?.armSeekOnPrepare(sourceInfo.lastPlayTime)
                 lastPosition = 0L
-                val lastTimeStr = NumberUtil.converDuration(sourceInfo.lastPlayTime / 1000)
-                controller.postPrepared(sourceInfo.lastPlayCid) {
-                    PopTip.show("自动恢复:$lastTimeStr", "重新开始")
-                        .showTop()
-                        .showLong()
-                        .setButton { dialog, v ->
-                            player?.startPlayLogic()
-                            false
-                        }
-                }
+                // 这条提示只在"新打开一个看过的视频、本地又没位置"时出现（用户认可，保留）；
+                // 同一次会话里的重载（网络重试/回前台重连）走 isReload 分支，不弹提示直接接着播
+                showResumeTipIfNeeded(sourceInfo.lastPlayTime, isReload, isChangedQuality)
             } else if (sourceInfo.lastPlayCid == source.id) {
                 // 从进度0开始记录播放历史
                 historyReport(0L)
+            } else {
             }
             lastReportProgress = 0L
             player?.setLooping(source.isLoop)
             player?.startPlayLogic()
             player?.requestLayout()
 
-            if (isChangedQuality) {
+            if (announceQuality) {
                 if (sourceInfo.quality == quality) {
                     PopTip.show("已切换至【${sourceInfo.description}】").showTop()
                 } else {
@@ -888,6 +1068,10 @@ class PlayerDelegate2(
                             ai_status = it.ai_status,
                         )
                     }
+                }
+                // 正常播放走 gRPC，拿不到 language 列表 → 后台补一次 HTTP 只为填"翻译"菜单
+                if (!isChangedQuality) {
+                    fetchTranslateLanguages(source)
                 }
             }
         } catch (e: DabianException) {
@@ -939,16 +1123,61 @@ class PlayerDelegate2(
 
 
     /**
+     * 自动续播提示：`自动恢复:xx:xx` + 按钮 `重新开始`。
+     *
+     * 规则（用户定）：**只有云端给的位置才弹**（预设里的云端历史/番剧进度、playurl 的 last_play_time）；
+     * 本机来源一律不弹（PlaybackService 会话内存、`dl_aid_cid` 持久化记录 —— "返回桌面再进软件"属于这类）；
+     * 同一次会话里的重载（换清晰度/换语言/重试/回前台重连）也不弹。
+     *
+     * 播放器已经 prepared（快速重连那类，不会再走 onPrepared）→ 立刻弹；
+     * 否则挂到下一次 onPrepared 之后弹。
+     * 按钮 `重新开始` = 从 0 播：seekTo(0) 会连带把续播账本/槽位一起归零，
+     * 避免随后任何一次 re-prepare 又把画面拽回原来的进度。
+     */
+    private fun showResumeTipIfNeeded(
+        posMs: Long,
+        isReload: Boolean,
+        isChangedQuality: Boolean = false,
+    ) {
+        // 同会话里的重载（换清晰度/换语言/网络重试/回前台重连）不弹：用户正看着这个视频，弹提示是打扰
+        if (isReload || isChangedQuality || posMs <= 0L) return
+        val cid = playerSource?.id ?: return
+        val lastTimeStr = NumberUtil.converDuration(posMs / 1000)
+        val showAction = Runnable {
+            PopTip.show("自动恢复:$lastTimeStr", "重新开始")
+                .showTop()
+                .showLong()
+                .setButton { dialog, _ ->
+                    player?.seekTo(0L)
+                    // 暂停态时顺带开播（播放态下 onVideoResume 是空转）
+                    player?.onVideoResume()
+                    false
+                }
+        }
+        if (player?.isInPlayingState == true) {
+            player?.post(showAction)
+        } else {
+            controller.postPrepared(cid, showAction)
+        }
+    }
+
+    /**
      * 记录播放位置
      */
     fun reloadPlayer() {
-        lastPosition = player?.currentPositionWhenPlaying ?: 0L
+        // 重播/重试都是"我要看"的明确意图：清掉暂停意图，否则 prepare 完 GSY 会把画面按回暂停
+        views.videoPlayer?.clearPausedIntent()
+        // 位置兜底顺序：播放器当前位置 → 最后一次上报过的位置 → 上一次的 lastPosition。
+        // 网络失败时播放器往往已经死了，currentPositionWhenPlaying 会返回 0，
+        // 只认它就会出现"点重试 = 从头播"。
+        lastPosition = player?.currentPositionWhenPlaying?.takeIf { it > 0L }
+            ?: lastReportProgress.takeIf { it > 0L }
+            ?: lastPosition
         playerCoroutineScope.launch(Dispatchers.Main) {
-            playerSource?.defaultPlayerSource?.let {
-                it.lastPlayCid = ""
-                it.lastPlayTime = 0L
-            }
-            loadPlayerSource()
+            // 不要清 lastPlayCid/lastPlayTime：这两个是 playurl 每次响应都带回来的"云端进度"，
+            // 留着它们，loadPlayerSource 里的"自动恢复"分支才能在本地位置也丢了的时候接着云端播
+            // （清掉就只能从 0 开始，这正是"重试后从头播"的根因）
+            loadPlayerSource(isReload = true)
         }
     }
 
@@ -962,19 +1191,33 @@ class PlayerDelegate2(
         completionBoxController.hide()
         errorMessageBoxController.hide()
         areaLimitBoxController.hide()
-        lastPosition = PlaybackService.instance?.getSavedPosition(source.id) ?: 0L
-        // ★ 防御3：自动连播到同一视频时，从头开始，避免 PlaybackService 返回的末尾位置
-        // 导致 seek 到末尾 → STATE_ENDED → 死循环。
-        // 循环模式或预设跳转位置（空降/恢复播放）时，也从0开始。
-        val isReopeningSameVideo = playerSource != null && playerSource!!.id == source.id
-        if (source.isLoop || source.defaultPlayerSource.lastPlayTime > 0L || isReopeningSameVideo) {
-            lastPosition = 0L
+        // 恢复上次位置。优先级：循环播放 → 0；详情页预设的进度（云端历史 / 消息页跳转 / 评论空降）
+        // → 用它；否则用本地记录（服务内存 → 持久化，进程被杀也不丢）。
+        //
+        // 老逻辑是"只要有预设就把 lastPosition 清 0"，而视频源在接口不返回 last_play_time 时
+        // 又会把预设抹成 0 → 两边记录都在却从头播。这里改成"预设直接当续播位置用"。
+        // （防"seek 到末尾 → STATE_ENDED 死循环"由下面 loadPlayerSource 里的近末尾守卫负责）
+        val presetPosition = source.defaultPlayerSource.lastPlayTime
+        lastPosition = when {
+            source.isLoop -> 0L
+            presetPosition > 0L -> presetPosition
+            else -> PlaybackService.instance?.getSavedPosition(source.id)?.takeIf { it > 0L }
+                ?: readLocalPlayedPosition(source)
+                ?: 0L
         }
+        // 只有"预设"（历史页云端进度 / 番剧继续观看）算云端来源 → 才弹"自动恢复"提示；
+        // PlaybackService 会话内存和 dl_aid_cid 持久化记录都是本机来源 → 不弹
+        pendingCloudResumeMs = if (!source.isLoop && presetPosition > 0L) presetPosition else 0L
         // 不同视频 → 释放旧播放器；同一视频 → 保留走快速重连
         if (playerSource != null && playerSource!!.id != source.id) {
             views.videoPlayer?.release()
             playerCoroutineScope.onDestroy()
             playerSource = null
+            // 换视频（或换集）复位 AI 翻译：语言列表是每个视频单独给的
+            playerLanguage = null
+            availableLanguages = emptyList()
+            views.videoPlayer?.translateLanguages = emptyList()
+            views.videoPlayer?.currentTranslateLang = null
         }
         playerCoroutineScope.onCreate()
         playerSource = source
@@ -1246,6 +1489,8 @@ class PlayerDelegate2(
         }
         // 用 onVideoResume(false) 防止 GSY seek 回 onVideoPause 时保存的 mCurrentPosition，
         // 否则暂停期间通知栏拖动进度条后再点播放会回到暂停位置而非拖动位置
+        // （注：它在成功后会清零 mCurrentPosition —— 我们的 seekTo/计时器会把账本槽重新填上）
+        views.videoPlayer?.armResumeSlot()
         views.videoPlayer?.onVideoResume(false)
     }
 
@@ -1262,7 +1507,7 @@ class PlayerDelegate2(
 
     override fun mediaSeekBack() {
         val p = views.videoPlayer ?: return
-        val target = (p.currentPositionWhenPlaying - 10000).coerceAtLeast(0)
+        val target = (p.currentPositionWhenPlaying - seekStepMs).coerceAtLeast(0)
         p.seekTo(target)
     }
 
@@ -1271,7 +1516,7 @@ class PlayerDelegate2(
         val dur = p.duration
         // 时长未知时不要 seek，避免错误地跳回 0
         if (dur <= 0L) return
-        val target = (p.currentPositionWhenPlaying + 10000).coerceAtMost(dur)
+        val target = (p.currentPositionWhenPlaying + seekStepMs).coerceAtMost(dur)
         p.seekTo(target)
     }
 
@@ -1313,8 +1558,8 @@ class PlayerDelegate2(
             return true
         }
         // 2. 没有上一章节，但还可以后退 10 秒 → 后退 10 秒
-        if (pos >= 10000L) {
-            p.seekTo(pos - 10000L)
+        if (pos >= seekStepMs) {
+            p.seekTo(pos - seekStepMs)
             return true
         }
         // 3. 不足 10 秒，有上一集 → 上一集
@@ -1339,8 +1584,8 @@ class PlayerDelegate2(
             return true
         }
         // 2. 没有下一章节，但剩余时间还够前进 10 秒 → 前进 10 秒
-        if (duration > 0L && duration - pos >= 10000L) {
-            p.seekTo((pos + 10000L).coerceAtMost(duration))
+        if (duration > 0L && duration - pos >= seekStepMs) {
+            p.seekTo((pos + seekStepMs).coerceAtMost(duration))
             return true
         }
         // 3. 剩余不足 10 秒，有下一集 → 下一集

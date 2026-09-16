@@ -343,6 +343,35 @@ private fun VideoSettingPageContent(
                     it.size < 10
                 }
             )
+            listPreference(
+                key = SettingPreferences.PlayerLongPressSpeed.name,
+                title = {
+                    Text("长按倍速倍率")
+                },
+                summary = {
+                    Text("长按屏幕时临时加快的倍率（当前 ${longPressSpeedText(it)}）")
+                },
+                defaultValue = 300,
+                values = listOf(150, 200, 300, 400),
+                valueToText = { value ->
+                    AnnotatedString(longPressSpeedText(value))
+                }
+            )
+            listPreference(
+                key = SettingPreferences.PlayerDoubleTapSeek.name,
+                title = {
+                    Text("快进/快退步长")
+                },
+                summary = {
+                    Text("双击屏幕左/右侧的跳转秒数；通知栏和蓝牙的 ± 按钮也用这个步长")
+                },
+                defaultValue = 10,
+                // media3 只自带 5/10/15/30 的数字图标，通知栏按钮图标跟着这个值走
+                values = listOf(5, 10, 15, 30),
+                valueToText = { value ->
+                    AnnotatedString("$value 秒")
+                }
+            )
             preference(
                 key = "auto_stop_duration",
                 title = {
@@ -476,4 +505,10 @@ private fun VideoSettingPageContent(
             }
         }
     }
+}
+
+/** 长按倍速倍率（存 ×100 的整数）→ 显示文案：150 → "1.5×"，300 → "3×" */
+private fun longPressSpeedText(scale: Int): String {
+    val value = scale / 100f
+    return if (value == value.toInt().toFloat()) "${value.toInt()}×" else "$value×"
 }
