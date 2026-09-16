@@ -106,6 +106,13 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var showNotification = true
 
+    /**
+     * "后台播放"开关的同步缓存。
+     * onTaskRemoved() 是同步回调，不能在里面挂起读 DataStore，所以像 showNotification 一样
+     * 用一条 Flow 先把值缓存下来（详见 observeBackgroundPlay()）。
+     */
+    @Volatile private var backgroundPlayEnabled = false
+
     // 自定义 SessionCommand — 通知栏按钮走 onCustomCommand 路由
     private val seekBackCmd = SessionCommand("bilimiao.seek_back", Bundle.EMPTY)
     private val seekForwardCmd = SessionCommand("bilimiao.seek_forward", Bundle.EMPTY)
@@ -321,6 +328,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         createNotificationChannel()
         initializeSession()
         serviceScope.launch { initPlayerSetting() }
+        serviceScope.launch { observeBackgroundPlay() }
         observePlayMode()
     }
 
@@ -538,10 +546,12 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val shouldStop = exoPlayer?.let { p ->
-            !p.playWhenReady || p.mediaItemCount == 0 || p.playbackState == Player.STATE_ENDED
-        } ?: true  // exoPlayer 为 null = 播放器已关闭 → 停止 Service
-        if (shouldStop) {
+        // 注意：exoPlayer 恒为 null（setPlayer() 全仓无调用者），会话挂的又是没有媒体项的
+        // 空壳播放器 —— 都不能用来判断"还在不在播"，必须问真播放器（delegate）。
+        // 语义（用户确认）：设置里开了"后台播放"且确实在播 → 保留 Service（通知栏跟着留）；
+        // 否则划掉最近任务就收掉通知栏并停止 Service，避免"声音还在响、通知栏却没了"。
+        val keepPlaying = backgroundPlayEnabled && playerDelegate?.isPlaying() == true
+        if (!keepPlaying) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
@@ -568,11 +578,30 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         dataStore.data.map { it[PlayerNotification] ?: true }.collect {
             showNotification = it
             if (!init) {
+                // DataStore 任意设置变化都会重发同一个值，先判断是否真的发生了切换，
+                // 否则每次改别的设置都会重建（并泄漏）一个 ExoPlayer
                 if (it) {
-                    exoPlayer?.let { p -> mediaSession?.player = MyForwardingPlayer(p) }
+                    mediaSession?.let { session ->
+                        if (session.player !is MyForwardingPlayer) {
+                            // 重新打开：exoPlayer 恒为 null（setPlayer() 全仓无调用者），
+                            // 旧写法这里是空操作 → 开关"关→开"后通知栏/线控永久失效。
+                            // 与 initializeSession() 一致：重建一个转发给 delegate 的空壳播放器
+                            val old = session.player
+                            session.player = MyForwardingPlayer(ExoPlayer.Builder(this@PlaybackService).build())
+                            // MediaSession 不负责释放旧 player，旧的空 ExoPlayer 要自己释放
+                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
+                        }
+                    }
                 } else {
+                    mediaSession?.let { session ->
+                        if (session.player is MyForwardingPlayer) {
+                            val old = session.player
+                            session.player = ExoPlayer.Builder(this@PlaybackService).build()
+                            // 转发壳只是包装，release 它会连带释放底层的空壳 ExoPlayer
+                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
+                        }
+                    }
                     stopForeground(STOP_FOREGROUND_REMOVE)
-                    mediaSession?.player = ExoPlayer.Builder(this@PlaybackService).build()
                 }
             }
             init = false
@@ -594,6 +623,16 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 playerDelegate?.syncPlayMode(order, random)
             }
         }
+    }
+
+    /**
+     * 缓存"后台播放"开关（SettingPreferences.PlayerBackground）。
+     * 划掉最近任务时 onTaskRemoved() 要同步判断"该不该继续留在后台"，不能在里面挂起读 DataStore。
+     */
+    private suspend fun observeBackgroundPlay() {
+        dataStore.data
+            .map { it[SettingPreferences.PlayerBackground] ?: false }
+            .collect { backgroundPlayEnabled = it }
     }
 
     @OptIn(UnstableApi::class)
