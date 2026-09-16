@@ -882,10 +882,20 @@ class PlayerDelegate2(
      * 只是不要弹"已切换至【清晰度】"。
      */
     fun changeLanguage(language: String?) {
+        // AI 原声翻译暂时整体关闭（见 DanmakuVideoPlayer.AI_TRANSLATE_ENABLED）
+        if (!DanmakuVideoPlayer.AI_TRANSLATE_ENABLED) return
         if (playerLanguage == language) return
         val previous = playerLanguage
         playerLanguage = language
         lastPosition = player?.currentPositionWhenPlaying ?: lastPosition
+        // B 站的 AI 原声翻译音轨只以 DASH 形式给（实机日志：请求 mp4 也返回 dash.duration=174 →
+        // duration=174000，而原声 mp4 是 173100）。如果用户设置的是 mp4，这次切换就变成
+        // "播放中把 MP4 流换成 DASH 流" → 播放器直接进 ERROR（转圈后黑屏，state=7）。
+        // 所以只要用过 AI 翻译，本视频会话就统一走 DASH（下次 openPlayer 会重新读设置）。
+        // 番剧源在 openPlayer 里被强制 MP4（durl 多段会 OOM），这里不动它。
+        if (playerSource !is BangumiPlayerSource) {
+            fnval = SettingConstants.PLAYER_FNVAL_DASH
+        }
         playerCoroutineScope.launch(Dispatchers.Main) {
             try {
                 loadPlayerSource(isChangedQuality = true, announceQuality = false)
@@ -907,6 +917,9 @@ class PlayerDelegate2(
      * 未登录 / 设置里关了翻译 / 视频本身不支持 → 菜单不出现翻译项。
      */
     private fun fetchTranslateLanguages(source: BasePlayerSource) {
+        // AI 原声翻译暂时整体关闭（见 DanmakuVideoPlayer.AI_TRANSLATE_ENABLED）：
+        // 连"后台补一次 HTTP 拿语言列表"都不做了，省一次请求
+        if (!DanmakuVideoPlayer.AI_TRANSLATE_ENABLED) return
         if (BilimiaoCommApp.commApp.loginInfo == null) return
         playerCoroutineScope.launch {
             try {

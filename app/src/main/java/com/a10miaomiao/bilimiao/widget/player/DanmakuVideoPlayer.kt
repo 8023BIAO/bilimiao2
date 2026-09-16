@@ -474,6 +474,16 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             }
     }
 
+    companion object {
+        /**
+         * AI 原声翻译总开关。**暂时关闭**（2026-09-17）：
+         * B 站的 AI 配音流只以 DASH 形式给，实机切换后播放器会进 ERROR（转圈→黑屏），
+         * 用户决定先不折腾这个功能。想看回来时把这里改成 true 即可（其余代码都留着，
+         * 包括下面的按钮/弹窗、PlayerDelegate2.changeLanguage、playurl 的 cur_language）。
+         */
+        const val AI_TRANSLATE_ENABLED = false
+    }
+
     /** AI 翻译可选语言（playurl 的 language.items；空 = 该视频没有 AI 翻译） */
     var translateLanguages = emptyList<TranslateLanguageInfo>()
         set(value) {
@@ -645,26 +655,9 @@ initDanmakuTouchListener()
                 )
             }
             menus.add(CheckPopupMenu.MenuItemInfo("关闭字幕", SubtitleMenuValue.SubtitleOff))
-            // AI 原声翻译（B 站 playurl 的 cur_language）：和字幕共用这个菜单入口
-            val langs = translateLanguages
-            if (langs.isNotEmpty()) {
-                langs.forEach {
-                    menus.add(
-                        CheckPopupMenu.MenuItemInfo(
-                            "AI 翻译：${it.title ?: it.lang}",
-                            SubtitleMenuValue.Translate(it.lang),
-                        )
-                    )
-                }
-                menus.add(
-                    CheckPopupMenu.MenuItemInfo("关闭 AI 翻译", SubtitleMenuValue.TranslateOff)
-                )
-            }
+            // AI 原声翻译已经不在这里了：它有自己的弹窗（见 mAiTranslateSwitch 的点击）
             val current = when {
-                !currentTranslateLang.isNullOrEmpty() ->
-                    SubtitleMenuValue.Translate(currentTranslateLang!!)
-                currentSubtitleSource != null ->
-                    SubtitleMenuValue.Track(currentSubtitleSource!!)
+                currentSubtitleSource != null -> SubtitleMenuValue.Track(currentSubtitleSource!!)
                 else -> SubtitleMenuValue.SubtitleOff
             }
             val pm = CheckPopupMenu(
@@ -685,11 +678,42 @@ initDanmakuTouchListener()
             pm.show()
         }
         // AI 原声翻译：点一下开/关（开的时候用第一条语言；想挑具体语言去上面的字幕菜单）
-        mAiTranslateSwitch.setOnClickListener {
+        // AI 原声翻译：点开独立弹窗（语言列表 + 关闭），不和字幕菜单混在一起
+        mAiTranslateSwitch.setOnClickListener { anchor ->
+            if (!AI_TRANSLATE_ENABLED) return@setOnClickListener
             val langs = translateLanguages
             if (langs.isEmpty()) return@setOnClickListener
-            val target = if (currentTranslateLang == null) langs.first().lang else null
-            onTranslateSelected?.invoke(target)
+            val menus = mutableListOf<CheckPopupMenu.MenuItemInfo<SubtitleMenuValue>>()
+            langs.forEach {
+                menus.add(
+                    CheckPopupMenu.MenuItemInfo(
+                        "AI 翻译：${it.title ?: it.lang}",
+                        SubtitleMenuValue.Translate(it.lang),
+                    )
+                )
+            }
+            menus.add(CheckPopupMenu.MenuItemInfo("关闭 AI 翻译", SubtitleMenuValue.TranslateOff))
+            val current = if (!currentTranslateLang.isNullOrEmpty()) {
+                SubtitleMenuValue.Translate(currentTranslateLang!!)
+            } else {
+                SubtitleMenuValue.TranslateOff
+            }
+            val pm = CheckPopupMenu(
+                context = context,
+                anchor = anchor,
+                menus = menus,
+                value = current,
+                themeColor = mThemeColor,
+                checkable = true,
+            )
+            pm.onMenuItemClick = { item ->
+                when (val value = item.value) {
+                    is SubtitleMenuValue.Translate -> onTranslateSelected?.invoke(value.lang)
+                    SubtitleMenuValue.TranslateOff -> onTranslateSelected?.invoke(null)
+                    else -> {}
+                }
+            }
+            pm.show()
         }
         // 听视频：只黑掉画面，音频继续（播放器/surface 都不动）
         mAudioOnlySwitch.setOnClickListener {
@@ -811,7 +835,7 @@ initDanmakuTouchListener()
      * 点一下开/关（多语言时开启用第一条，具体选哪条去字幕菜单里挑）。
      */
     private fun updateAiTranslateSwitch() {
-        if (translateLanguages.isEmpty() || onTranslateSelected == null) {
+        if (!AI_TRANSLATE_ENABLED || translateLanguages.isEmpty() || onTranslateSelected == null) {
             setViewShowState(mAiTranslateSwitch, GONE)
             return
         }
