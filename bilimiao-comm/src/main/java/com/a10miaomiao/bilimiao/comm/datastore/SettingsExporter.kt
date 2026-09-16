@@ -160,12 +160,30 @@ object SettingsExporter {
         )
         val looksLikeAuthExport = rootObj != null &&
                 listOf("cookie", "access_token", "refresh_token", "buvid").any { rootObj.containsKey(it) }
-        if (rootObj == null || looksLikeAuthExport || rootObj.keys.none { it in signatureKeys }) {
+        // 一个从没改过任何设置的用户，导出的文件就是 {}（encodeDefaults 默认 false）——
+        // 那也是合法导出，只是没有内容可导
+        val isEmptyExport = rootObj != null && rootObj.isEmpty()
+        // "version" 这种通用键太容易误命中（任何 JSON 都可能带），
+        // 所以要么命中一个设置专有键，要么至少命中两个签名键
+        val specificKeys = signatureKeys - "version"
+        val signatureHits = rootObj?.keys?.count { it in signatureKeys } ?: 0
+        val looksLikeSettingsExport = rootObj != null &&
+                (rootObj.keys.any { it in specificKeys } || signatureHits >= 2)
+        if (rootObj == null || looksLikeAuthExport || (!isEmptyExport && !looksLikeSettingsExport)) {
             ErrorLogCollector.logError(
                 error = "设置导入被拒绝: 不是设置导出文件",
                 stackTrace = cleanJson.take(200)
             )
             throw Exception("这不是设置导出文件，请选择用「导出设置」生成的文件")
+        }
+        if (isEmptyExport) {
+            // 空文件直接早退：放行到下面会走 version>=2 的破坏性分支，
+            // 把屏蔽词/UP主/标签库全部 deleteAll 之后又没内容可插 → 用户数据永久丢失
+            ErrorLogCollector.logError(
+                error = "设置导入: 空导出文件",
+                stackTrace = cleanJson.take(200)
+            )
+            return 0
         }
         val export = try {
             json.decodeFromString<SettingsExport>(cleanJson)

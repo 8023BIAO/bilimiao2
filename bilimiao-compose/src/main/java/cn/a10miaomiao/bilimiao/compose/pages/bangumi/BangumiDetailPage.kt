@@ -749,6 +749,9 @@ private fun BangumiDetailPageContent(
     // 换季/换章节后必须重置"评论跟随的剧集"：否则标题和剧集都换成新一季了，
     // 评论 tab 还挂在上一季那一集的 oid 上（连带评论时间戳空降也点不动）
     LaunchedEffect(seasonId.value, sectionId) {
+        // 下拉刷新时 loadEpisodeList() 会先把 sectionId 置空再填首个 section，
+        // 这里若跟着重置，正在看第 N 集也会被拉回第一集（评论区跟着跳）
+        if (sectionId.isBlank()) return@LaunchedEffect
         selectedEpisodeAid = ""
     }
 

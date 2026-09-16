@@ -13,9 +13,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,6 +76,15 @@ private fun AutoStopTimerPageContent(
     // 不要用 autoStopDuration 当 remember 的 key：播放中它每秒递减，
     // 会让滑块在拖动过程中被重建覆盖，根本拖不到想要的值（进页面时的初值取一次即可）
     var sliderValue by remember { mutableFloatStateOf(autoStopDuration.toFloat()) }
+    var sliderDragging by remember { mutableStateOf(false) }
+    // 但快捷按钮（关闭/15/30/45/60 分钟）改的就是 autoStopDuration，
+    // 这时滑块要跟着走，否则大字显示 30 分钟、滑块还停在原来的位置；
+    // 拖动过程中则不能被每秒回写打断
+    LaunchedEffect(autoStopDuration, sliderDragging) {
+        if (!sliderDragging) {
+            sliderValue = autoStopDuration.toFloat()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -109,8 +120,12 @@ private fun AutoStopTimerPageContent(
         // 滑块
         Slider(
             value = sliderValue,
-            onValueChange = { sliderValue = it },
+            onValueChange = {
+                sliderDragging = true
+                sliderValue = it
+            },
             onValueChangeFinished = {
+                sliderDragging = false
                 viewModel.setAutoStopDuration(sliderValue.toInt())
             },
             valueRange = 0f..3600f,

@@ -15,6 +15,9 @@ interface BasePlayerDelegate: BaseDelegate {
     fun isPlaying(): Boolean
     fun isPause(): Boolean
     fun isPreparing(): Boolean
+
+    /** 是否已播放到结尾（通知栏据此报 STATE_ENDED，否则播完还显示"播放中"、进度继续空转） */
+    fun isCompleted(): Boolean = false
     fun setWindowInsets(left: Int, top: Int, right: Int, bottom: Int, displayCutout: DisplayCutout?)
     fun onConfigurationChanged(newConfig: Configuration)
     fun getSourceIds(): PlayerSourceIds

@@ -1182,6 +1182,10 @@ initDanmakuTouchListener()
     override fun onVideoPause() {
         super.onVideoPause()
         danmakuOnPause()
+        // 不管是用户点的还是后台自动暂停，都要推一次给通知栏/锁屏。
+        // 注意：静默重连（isSilentReconnecting）会抑制下面的回调，但状态推送不能省，
+        // 否则通知栏会一直停在旧的播放/暂停按钮上（从桌面回到 App 续播时最明显）
+        PlaybackService.instance?.refreshPlaybackState()
         if (!isSilentReconnecting) {
             videoPlayerCallBack?.onVideoPause()
         }
@@ -1190,6 +1194,7 @@ initDanmakuTouchListener()
     override fun onVideoResume(isResume: Boolean) {
         super.onVideoResume(isResume)
         danmakuOnResume()
+        PlaybackService.instance?.refreshPlaybackState()
         if (!isSilentReconnecting) {
             videoPlayerCallBack?.onVideoResume(isResume)
         }
@@ -1217,6 +1222,10 @@ initDanmakuTouchListener()
         } catch (_: Exception) {
         } finally {
             isSilentReconnecting = false
+            // 重连结束后真播放器的状态可能已经变了（暂停中重连会被重新 start 再 pause），
+            // 而上面两次 onVideoPause/onVideoResume 的回调被 isSilentReconnecting 压掉了，
+            // 这里补一次状态推送，通知栏才不会停在旧的按钮状态
+            PlaybackService.instance?.refreshPlaybackState()
         }
     }
 
@@ -1253,10 +1262,14 @@ initDanmakuTouchListener()
 
     fun detachView() {
         // 不释放弹幕 — 重连时复用
-        // 后台播放模式下不能在这里 pause：Activity 重建后没有任何路径恢复播放，
+        // 后台播放模式下不能在这里暂停：Activity 重建后没有任何路径恢复播放，
         // 界面会定格、通知栏却认为还在播（keepPlayingOnDetach 由 PlayerDelegate2 设置）
         if (!keepPlayingOnDetach) {
-            gsyVideoManager?.player?.pause()
+            // 必须走 onVideoPause() 而不是直调 manager.pause()：
+            // 后者绕过 GSY 状态机，mCurrentState 仍是 PLAYING(2) —— 之后任何一次
+            // 状态推送都会把"播放中"报给通知栏（画面停着、通知栏在播、进度空转），
+            // isPause() 判定也会跟着错（回前台误续播）
+            onVideoPause()
         }
         keepPlayingOnDetach = false
         // Activity 销毁时必须清掉手势 HUD：三个 Dialog 绑在旧 Activity 的 window

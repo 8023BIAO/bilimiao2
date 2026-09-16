@@ -122,7 +122,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
 
     var downloadList = mutableListOf<BiliDownloadEntryAndPathInfo>()
     var downloadListVersion = MutableStateFlow(0)
-    var waitDownloadQueue = mutableListOf<BiliDownloadEntryAndPathInfo>()
+    // 线程安全：本 Service 的协程跑在 Dispatchers.IO，而 add/nextDownload 会从主线程调进来，
+    // 普通 ArrayList 在 removeAll/removeAt 交叉时会抛 ConcurrentModificationException
+    //（被 exceptionHandler 接住后表现成"下载出错"）
+    var waitDownloadQueue = java.util.concurrent.CopyOnWriteArrayList<BiliDownloadEntryAndPathInfo>()
     val curDownload = MutableStateFlow<CurrentDownloadInfo?>(null)
     private val curBiliDownloadEntryAndPathInfo: BiliDownloadEntryAndPathInfo?
         get() = curDownload.value?.let { cur ->

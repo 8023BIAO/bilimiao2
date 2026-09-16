@@ -148,11 +148,14 @@ class VideoDownloadDialogState(
             service,
             videoPages.map { it.cid }.toSet()
         )
+        // 换一个视频再打开时必须清掉上一次的勾选：否则按钮显示"开始下载(N)"，
+        // 点下去却按新视频的分P cid 去找，一条也建不出来。
+        // 注意只在"换了视频"时清：同一个视频误触遮罩关掉再打开，勾选要保留
+        if (videoBvid != bvid) {
+            _checkedMap.clear()
+        }
         videoBvid = bvid
         _tabIndex.value = 0
-        // 换一个视频再打开时必须清掉上一次的勾选：否则按钮显示"开始下载(N)"，
-        // 点下去却按新视频的分P cid 去找，一条也建不出来
-        _checkedMap.clear()
         _seasonId = seasonId
         _seasonTitle = seasonTitle
         if (ugcSeasonEpisodes != null) {

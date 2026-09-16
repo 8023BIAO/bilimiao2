@@ -247,9 +247,18 @@ private class ChatViewModel(
 
     fun loadMore() {
         if (list.finished.value || isRefreshing.value) return
-        // seqno<=0 的是本地乐观消息，不能拿来当分页游标（否则会请求 beginSeqno=-1）
-        val minSeqno = list.data.value.minOfOrNull { it.msg_seqno } ?: return
-        if (minSeqno <= 1L) return
+        // seqno<=0 的是本地乐观消息，不能拿来当分页游标（否则会请求 beginSeqno=-1）。
+        // 注意是"排除掉本地消息后再取最小值"，不是拿全局最小值去判断 ——
+        // 后者只要列表里存在一条乐观消息（msg_seqno=0）就会整体 return，
+        // 表现为发消息期间上滑永远拉不到更早的记录
+        val minSeqno = list.data.value
+            .filter { it.msg_seqno > 0L }
+            .minOfOrNull { it.msg_seqno } ?: return
+        if (minSeqno <= 1L) {
+            // 已经到最早一条了：标记到底，底部才会显示"下面没有了"而不是一直转
+            list.finished.value = true
+            return
+        }
         loadMsgs(beginSeqno = minSeqno - 1)
     }
 
@@ -388,7 +397,11 @@ private fun ChatPageContent(
     // 首次贴底完成前不要触发补历史，否则刚进页面就会连着拉好几页
     var loadMoreArmed by remember { mutableStateOf(false) }
     LaunchedEffect(latestMsgKey) {
-        if (latestMsgKey != null) listState.animateScrollToItem(list.lastIndex)
+        // 注意：首帧列表还是空的（latestMsgKey == null）时不能放行 ——
+        // 否则首屏到达后 effect 重启，snapshotFlow 立刻发出 index=0（贴底动画还没完成），
+        // 进聊天页就会连着拉好几页历史
+        if (latestMsgKey == null) return@LaunchedEffect
+        listState.animateScrollToItem(list.lastIndex)
         loadMoreArmed = true
     }
 

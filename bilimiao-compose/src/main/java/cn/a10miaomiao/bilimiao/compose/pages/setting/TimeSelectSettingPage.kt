@@ -224,6 +224,14 @@ private fun LazyListScope.weightSliderItem(
     item(key = keyPrefix, contentType = "WeightSlider") {
         val weights = TimeSelectUtil.parseWeights(weightsStr)
         var sliderValue by remember { mutableIntStateOf(weights[weightKey] ?: defaultValue) }
+        // 权重是异步从 DataStore 读出来的：首帧只有内置默认值 75/15/5/5，
+        // 数据到达后必须同步给滑块，否则滑块永远停在默认位置、和上面"当前公式"显示的值对不上
+        val savedWeight = weights[weightKey]
+        LaunchedEffect(savedWeight) {
+            if (savedWeight != null) {
+                sliderValue = savedWeight
+            }
+        }
 
         me.zhanghai.compose.preference.SliderPreference(
             value = sliderValue.toFloat(),

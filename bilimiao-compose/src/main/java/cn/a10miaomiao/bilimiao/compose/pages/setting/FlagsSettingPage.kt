@@ -34,6 +34,7 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.preference.glidePreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
+import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.utils.CdnHosts
@@ -722,7 +723,18 @@ private fun FlagsSettingPageContent(
                                     .commit()
                                 // 用 recreate() 重新应用配置即可：原来直接 System.exit(0) 会把
                                 // 正在播放的视频、正在下载的任务（前台服务）一起杀掉
-                                (context as? android.app.Activity)?.recreate()
+                                // context 不一定是 Activity（可能被 ContextWrapper 包着），
+                                // 拿不到就明确提示，别让"设置存了却不生效"变成静默失败
+                                var ctx: android.content.Context? = context
+                                while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) {
+                                    ctx = ctx.baseContext
+                                }
+                                val hostActivity = ctx as? android.app.Activity
+                                if (hostActivity != null) {
+                                    hostActivity.recreate()
+                                } else {
+                                    toast("设置已保存，请手动重启应用后生效")
+                                }
                             } catch (e: NumberFormatException) {
                                 Toast.makeText(context, "请输入数字", Toast.LENGTH_SHORT).show()
                             }

@@ -82,11 +82,13 @@ fun ListStateBox(
         }
     }
     LaunchedEffect(Unit) {
-        // 这个尾部项被组合出来 = 用户已经翻到底 → 自动加载下一页（无限滚动就靠它）。
-        // 注意 fail 的默认值是空串而不是 null，所以判断必须用 isNullOrBlank()：
-        // 之前写成 !isNullOrBlank()，正常情况下恒为 false，导致所有列表都不再自动翻页，
-        // 用户得每页手点"加载更多"。失败时不自动重试（那会变成死循环），交给上面的重试按钮。
-        if (!loading && !finished && fail.isNullOrBlank() && listData?.size != 0) {
+        // 尾部项被组合出来 = 用户翻到底 → 自动加载下一页（无限滚动靠它）。
+        //
+        // ⚠️ 这里**不要**用 fail 当开关（曾经改成 fail.isNullOrBlank()，是负优化）：
+        // FlowPaginationInfo.fail 是非空 String、默认 ""，很多页面的 fail 只在 refresh() 里清，
+        // 一旦某次翻页失败就会永久卡死自动翻页 —— 用户必须下拉刷新才能继续。
+        // 是否该加载只看"在途/是否已到底/有没有列表"，失败重试交给下面那个错误按钮。
+        if (!loading && !finished && listData?.size != 0) {
             loadMore()
         }
     }

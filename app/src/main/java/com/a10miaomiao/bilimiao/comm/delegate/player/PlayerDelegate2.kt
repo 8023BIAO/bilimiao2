@@ -449,6 +449,9 @@ class PlayerDelegate2(
             && views.videoPlayer?.isInPlayingState == true) {
             views.videoPlayer?.reconnectSurfaceQuietly()
         }
+        // 回到前台这一路（续播/静默重连）不一定走 onVideoResume 回调，
+        // 这里兜底推一次，避免通知栏停在旧的播放/暂停按钮
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun onPause() {
@@ -463,6 +466,9 @@ class PlayerDelegate2(
             views.videoPlayer?.onVideoResume()
         }
         pausedByBackground = false
+        // 续播判断有可能不成立（比如此刻状态是 PREPARING/BUFFERING 而不是 PAUSE），
+        // 无论走没走 onVideoResume，都同步一次通知栏状态
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun onStop() {
@@ -497,6 +503,10 @@ class PlayerDelegate2(
             )
         }
         playerClosed = true
+        // MediaController 持有 Activity context 并且会一直保持与服务连接，
+        // 不释放就会：① 泄漏 Activity ② 让 Service 因仍有绑定而不被销毁
+        //（"暂停态下从最近任务划掉 App"后通知栏再也不更新就是这么来的）
+        releaseMediaControllerFuture()
         playerCoroutineScope.onDestroy()
         try {
             activity.unregisterReceiver(broadcastReceiver)
@@ -866,6 +876,9 @@ class PlayerDelegate2(
             player?.setLooping(source.isLoop)
             player?.startPlayLogic()
             player?.requestLayout()
+            // 新源/新清晰度开始播放：标题、封面、时长、播放状态全变了，
+            // 推一次让通知栏立刻跟上（换视频/换清晰度/自动连播都走这里）
+            PlaybackService.instance?.refreshPlaybackState()
 
             if (isChangedQuality) {
                 if (sourceInfo.quality == quality) {
@@ -1066,6 +1079,11 @@ class PlayerDelegate2(
     override fun isPreparing(): Boolean {
         val p = views.videoPlayer ?: return false
         return p.currentState == GSYVideoPlayer.CURRENT_STATE_PREPAREING
+    }
+
+    override fun isCompleted(): Boolean {
+        val p = views.videoPlayer ?: return false
+        return p.currentState == GSYVideoPlayer.CURRENT_STATE_AUTO_COMPLETE
     }
 
     override fun isOpened(): Boolean {
@@ -1303,6 +1321,16 @@ class PlayerDelegate2(
         )
     }
 
+    /**
+     * 通知栏/锁屏触发的定位：seek 之后必须主动推一次状态。
+     * GSY 的 seekTo 只改播放器位置、不给 MediaSession 发事件，
+     * 暂停状态下通知栏的进度条会一直停在旧位置
+     */
+    private fun seekAndSyncToNotification(position: Long) {
+        views.videoPlayer?.seekTo(position)
+        PlaybackService.instance?.refreshPlaybackState()
+    }
+
     override fun mediaSeekToPreviousChapter(): Boolean {
         val p = views.videoPlayer ?: return false
         val chapters = controller.currentChapters
@@ -1311,12 +1339,12 @@ class PlayerDelegate2(
         // 1. 有上一章节 → 直接跳到上一章节起点（不用时间窗口）
         val chapterStart = ChapterNavigator.previousStart(chapters, pos)
         if (chapterStart != null) {
-            p.seekTo(chapterStart)
+            seekAndSyncToNotification(chapterStart)
             return true
         }
         // 2. 没有上一章节，但还可以后退 10 秒 → 后退 10 秒
         if (pos >= 10000L) {
-            p.seekTo(pos - 10000L)
+            seekAndSyncToNotification(pos - 10000L)
             return true
         }
         // 3. 不足 10 秒，有上一集 → 上一集
@@ -1324,7 +1352,7 @@ class PlayerDelegate2(
             return true
         }
         // 4. 没有上一集 → 回到 0 秒
-        p.seekTo(0L)
+        seekAndSyncToNotification(0L)
         return true
     }
 
@@ -1337,12 +1365,12 @@ class PlayerDelegate2(
         // 1. 有下一章节 → 直接跳到下一章节起点（不用时间窗口）
         val chapterStart = ChapterNavigator.nextStart(chapters, pos)
         if (chapterStart != null) {
-            p.seekTo(chapterStart)
+            seekAndSyncToNotification(chapterStart)
             return true
         }
         // 2. 没有下一章节，但剩余时间还够前进 10 秒 → 前进 10 秒
         if (duration > 0L && duration - pos >= 10000L) {
-            p.seekTo((pos + 10000L).coerceAtMost(duration))
+            seekAndSyncToNotification((pos + 10000L).coerceAtMost(duration))
             return true
         }
         // 3. 剩余不足 10 秒，有下一集 → 下一集
@@ -1362,7 +1390,12 @@ class PlayerDelegate2(
     }
 
     override fun mediaGetCoverUrl(): String? {
-        return playerSource?.coverUrl
+        val cover = playerSource?.coverUrl
+        if (cover.isNullOrBlank()) return null
+        // 通知栏/锁屏大图标用。coverUrl 常见是 "//i0.hdslb.com/..." 这种协议相对地址，
+        // 直接丢给图片库会因为没有 scheme 而失败 → 这里和画中画一样补成 https，
+        // 并取 300x300 缩略图（原图好几 MB，通知栏根本用不上）
+        return UrlUtil.autoHttps(cover) + "@300w_300h_1c_"
     }
 
     override fun mediaPlayNext(): Boolean {

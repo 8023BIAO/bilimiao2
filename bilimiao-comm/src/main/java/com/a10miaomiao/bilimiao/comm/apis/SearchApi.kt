@@ -14,7 +14,7 @@ class SearchApi {
     fun suggestList(keyword: String) = MiaoHttp.request {
         // 直接拼接 term 时，搜索词里的 & # + 会被当成 URL 结构（如 "C#" 会在 # 处截断），必须转义
         // 调用方传入的是原始搜索词，这里只编码一次
-        url = "https://s.search.bilibili.com/main/suggest?suggest_type=accurate&sub_type=tag&main_ver=v1&term=${URLEncoder.encode(keyword, "UTF-8")}"
+        url = "https://s.search.bilibili.com/main/suggest?suggest_type=accurate&sub_type=tag&main_ver=v1&term=${URLEncoder.encode(keyword, "UTF-8").replace("+", "%20")}"
     }
 
     /**

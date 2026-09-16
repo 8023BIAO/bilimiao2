@@ -20,7 +20,11 @@ class RegionAPI {
     }
 
     /**
-     * 分区视频列表（newlist_rank，已废弃，B站返回-10）
+     * 分区视频列表（newlist_rank）
+     *
+     * 时光机分区详情用的就是它，带 time_from/time_to 才能按时间段检索。
+     * 注意：**不要**用未登录的 curl 去测它（会返回 -10），真机带 cookie 是正常的；
+     * 曾因为误判"接口已废弃"把它换成 ranking/v2，导致时光机所有时间线都查不出东西。
      */
     fun regionVideoList(
         rid: Int,

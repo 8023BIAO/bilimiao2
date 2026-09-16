@@ -100,7 +100,10 @@ private class WebPageViewModel(
     fun skipSelfIfHandedOff(): Boolean {
         if (!inAppNavigated.value) return false
         val route = pageNavigation.hostController.currentBackStackEntry?.destination?.route ?: return false
-        if (!route.startsWith("WebPage/")) return false
+        // 注意：ComposePage 是 @Serializable 且没有 @SerialName，navigation 2.9.8 直接拿
+        // serialName 当 path → 真实 route 是"全限定类名/WebPage/{url}"，
+        // 用 startsWith("WebPage/") 判断会恒假（这段"跳过中间页"就成了死代码）
+        if (!route.substringAfterLast('.').startsWith("WebPage/")) return false
         pageNavigation.popBackStack()
         return true
     }
@@ -151,7 +154,12 @@ private class WebPageViewModel(
             // 只接管主框架导航：iframe/广告等子框架不该决定整页跳转
             if (!request.isForMainFrame) return false
             val url = request.url.toString()
-            val isAppDeepLink = url.startsWith("bilibili://") || url.startsWith("bilimiao://")
+            // 内嵌浏览器里页面自身的"APP 打开"等 bilibili:// 唤起链接不再接管：
+            // 直接忽略（停在当前网页），避免把用户拽出网页、还留下一个空白中间页。
+            // 外部来源的深链（通知/分享/短链）不走这里，不受影响
+            if (url.startsWith("bilibili://") || url.startsWith("bilimiao://")) {
+                return true
+            }
             val re = BilibiliNavigation.navigationTo(pageNavigation, url)
             if (re) {
                 // ★ 交棒给 App 内页面：本页从此只是"跳转中间页"
@@ -175,7 +183,8 @@ private class WebPageViewModel(
                         nav.previousBackStackEntry,
                     )
                     val stillInStack = entries.any {
-                        (it.destination.route ?: "").startsWith("WebPage/")
+                        // 同上：route 是全限定类名 + "/WebPage/{url}"，必须按最后一段判断
+                        (it.destination.route ?: "").substringAfterLast('.').startsWith("WebPage/")
                     }
                     if (stillInStack) {
                         if (pageNavigation.popBackStack(WebPage(startUrl), inclusive = true)) {
@@ -183,10 +192,6 @@ private class WebPageViewModel(
                         }
                     }
                 }
-                return true
-            }
-            if (isAppDeepLink) {
-                // 页面里无法路由的 App 唤起链接：静默忽略（停在当前网页）
                 return true
             }
             return false

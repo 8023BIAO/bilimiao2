@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
+import cn.a10miaomiao.bilimiao.compose.common.navigation.BilibiliNavigation
 import cn.a10miaomiao.bilimiao.compose.pages.bangumi.SeasonCheckPage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -38,6 +39,7 @@ import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.kodein.di.DI
@@ -62,9 +64,11 @@ private class RankListContentViewModel(
     }
 
 
+    // 显式写返回类型 Job：body 里会递归调用 loadData（整页被屏蔽时续拉下一页），
+    // 不写的话 Kotlin 推断返回类型时会撞上 "recursive problem"
     fun loadData(
         pageNum: Int = list.pageNum
-    ) = viewModelScope.launch(Dispatchers.IO) {
+    ): Job = viewModelScope.launch(Dispatchers.IO) {
         try {
             // 之前从不置 loading，界面上永远看不到"加载中"
             list.loading.value = true
@@ -100,6 +104,12 @@ private class RankListContentViewModel(
             list.pageNum = pageNum
             // 之前从不写 finished，底部永远停在"加载更多"
             list.finished.value = result.items.size < list.pageSize
+            // 整页都被屏蔽规则滤掉时列表会是空的，而 ListStateBox 不会给空列表自动翻页
+            // （底部只显示"空空如也"、没有"加载更多"按钮）→ 主动接着取下一页，
+            // 否则屏蔽词多的用户会看到排行榜永久空白
+            if (items.isEmpty() && result.items.isNotEmpty() && !list.finished.value) {
+                loadData(pageNum + 1)
+            }
 //            if (list.data.size < 10 && totalCount != result.size) {
 //                _loadData(pageNum + 1)
 //            }
@@ -131,9 +141,15 @@ private class RankListContentViewModel(
 
     fun toVideoDetail(item: bilibili.app.show.v1.Item) {
         // 榜单里番剧/国创/影视分区的条目 goto=bangumi，原来一律按投稿 avid 打开 →
-        // 加载失败或者串到别的视频；首页是正确分流的，这里对齐
+        // 加载失败或者串到别的视频。
+        // 注意：rank 接口里 param 的语义并不可靠（proto 注释写的是"稿件avid"），
+        // 官方跳转地址在 uri 里（形如 .../bangumi/play/ss123 / ep123 / bilibili://bangumi/...）
+        // → 先用 uri 走统一路由（能吃下 ss/ep/md 与网页地址），失败再按 season_id 兜底
         if (item.goto == "bangumi") {
-            pageNavigation.navigate(SeasonCheckPage(epId = item.param))
+            if (item.uri.isNotBlank() && BilibiliNavigation.navigationTo(pageNavigation, item.uri)) {
+                return
+            }
+            pageNavigation.navigate(SeasonCheckPage(id = item.param))
         } else {
             pageNavigation.navigateToVideoInfo(item.param)
         }

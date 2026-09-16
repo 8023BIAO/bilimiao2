@@ -219,16 +219,22 @@ class MainActivity
             setWindowInsetsAndroidL()
         }
 
-        initNavController()
+        initNavController(handleDeepLink = savedInstanceState == null)
         initAppBar()
         initViewFocusable()
     }
 
-    private fun initNavController() {
+    /**
+     * @param handleDeepLink 只在"全新创建"时处理 getIntent() 里的深链。
+     *   旋屏/切主题/改 DPI/进程恢复都会重新 onCreate，此时返回栈已经恢复好了，
+     *   再按 intent.data 导航一次就会在恢复出来的栈上多压一层（用户被莫名拽回那条深链）
+     */
+    private fun initNavController(handleDeepLink: Boolean) {
         navHostFragment = supportFragmentManager
             .findFragmentById(R.id.nav_host_fragment) as ComposeFragment
         navHostFragment.pageConfig.setConfig = this::notifyConfigChanged
 
+        if (!handleDeepLink) return
         intent.data?.let { uri ->
             when (uri.scheme) {
                 "bilibili", "bilimiao" -> navHostFragment.navigateByUri(uri)
@@ -282,9 +288,9 @@ class MainActivity
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // 消费掉这条 intent：否则 Activity 重建时 getIntent() 还是它，
-        // 会在恢复出来的返回栈之上又压一个页面（用户被莫名拽回最初那条深链）
-        setIntent(intent)
+        // 注意：这里**不能** setIntent(intent) —— setIntent 是"替换"而不是"消费"，
+        // 替换后 Activity 重建时 getIntent().data 还是这条深链，会被重放（多压一层页面）。
+        // 深链重放的问题在 initNavController(handleDeepLink=false) 那侧挡住了
         // 冷启动窗口内导航还没初始化，解引用 lateinit 会崩（onConfigurationChanged/onBackPressed 都有守卫，这里漏了）
         if (!::navHostFragment.isInitialized) return
         intent.data?.let { uri ->

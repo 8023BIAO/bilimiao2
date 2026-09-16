@@ -84,8 +84,9 @@ class TimeSettingViewMode(
                 timeFrom.set(start)
                 timeTo.set(end)
             } else if (start != null) {
-                // 只选了开始（或选了超过 30 天的禁用格）：标记成"未选完整"，
-                // 否则 TimeInfo() 的默认值 2009-01-01 会被当成真实区间存下去
+                // 只选了开始（通常是第二个日期点在了 30 天以外的禁用格上）：
+                // 标记成"未选完整"，否则 TimeInfo() 的默认值 2009-01-01 会被当成真实区间存下去
+                toast("时间间隔不能大于 30 天，请重新选择")
                 timeFrom.year = -1
             } else {
                 timeFrom.year = -1

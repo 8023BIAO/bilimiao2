@@ -37,6 +37,7 @@ import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.launch
@@ -73,10 +74,11 @@ private class SearchFollowPageViewModel(
     init {
         viewModelScope.launch {
             // 防抖：原来每敲一个字就发一次请求，结果区还会整块闪成"加载中"
-            searchText.debounce(300).collect {
-                if (!list.loading.value) {
-                    loadData(it)
-                }
+            // collectLatest：新关键词到达时取消上一次的等待/请求。
+            // 原来用 collect + `if (!loading)` 判断，请求在途时敲的新词会被静默丢掉
+            //（输入框显示新词、列表还是旧词的结果）
+            searchText.debounce(300).collectLatest {
+                loadData(it)
             }
         }
     }

@@ -8,7 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -127,12 +127,13 @@ private class SearchByTypeContentViewModel(
             list.finished.value = itemList.isEmpty() || _next.isBlank()
             // 服务端会返回重复条目（综合 tab 就专门做过去重），而这里 key 用的是 param，
             // 重复 key 会让 LazyGrid 直接抛 "Key was already used" 崩溃
-            if (next.isBlank()) {
-                list.data.value = itemList.distinctBy { it.param }
-            } else {
-                val seen = list.data.value.mapTo(mutableSetOf()) { it.param }
-                list.data.value = list.data.value + itemList.filter { seen.add(it.param) }
+            // param 为空的条目不能参与去重：空串会互相顶掉（只剩一条），
+            // 也会和"已见过的空 param"冲突而被静默丢弃
+            val seen = list.data.value.mapNotNullTo(mutableSetOf()) {
+                it.param.ifEmpty { null }
             }
+            val fresh = itemList.filter { it.param.isEmpty() || seen.add(it.param) }
+            list.data.value = if (next.isBlank()) fresh else list.data.value + fresh
         } catch (e: Exception) {
             e.printStackTrace()
             list.fail.value = e.message ?: e.toString()
@@ -330,7 +331,13 @@ internal fun SearchByTypeContent(
                 top = 0.dp,
             )
         ) {
-            items(list, key = { it.param }) {
+            // key 不能用 param 单值：上面特意保留 param 为空的条目（空串会互相顶掉），
+            // 而 LazyGrid 的 key 重复会直接抛 "Key was already used" 崩溃 →
+            // 空 param 用下标兜底（列表只追加，下标稳定；刷新时整体替换，不影响正确性）
+            itemsIndexed(
+                items = list,
+                key = { index, item -> item.param.ifEmpty { "i$index" } },
+            ) { _, it ->
                 val cardItem = it.cardItem
                 if (cardItem != null) {
                     SearchItemCard(

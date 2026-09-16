@@ -938,7 +938,11 @@ class PlayerController(
         } else {
             activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
-        // 播放状态变化（Media3 自动同步通知栏，无需手动 setPlaying）
+        // GSY 的所有播放状态变化都会汇到这里（点播放/暂停、缓冲、准备完成、静默重连、
+        // 换源/换清晰度、自动连播、播放完成…），而真播放器不会给 MediaSession 发事件，
+        // 统一在这里把最新状态推给通知栏/锁屏/蓝牙 —— 只靠 onVideoPause/onVideoResume
+        // 会漏掉一多半路径（最典型：播放器里点"播放"，GSY 根本不回调 onVideoResume）
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun onVideoClose() {

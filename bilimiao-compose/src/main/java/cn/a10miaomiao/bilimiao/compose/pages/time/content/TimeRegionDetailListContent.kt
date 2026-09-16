@@ -27,7 +27,7 @@ import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
 import cn.a10miaomiao.bilimiao.compose.components.video.VideoItemBox
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.entity.region.RegionVideoInfo
-import com.a10miaomiao.bilimiao.comm.entity.region.RankingV2Response
+import com.a10miaomiao.bilimiao.comm.entity.region.RegionVideosRankInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
@@ -37,6 +37,7 @@ import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.comm.toast
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.kodein.di.DI
@@ -61,6 +62,8 @@ private class TimeRegionDetailListContentViewModel(
     val isRefreshing = MutableStateFlow(false)
     val list = FlowPaginationInfo<RegionVideoInfo>()
 
+    private var tryAgainTimes = 0
+
     init {
         val timeSettingState = timeSettingStore.state
         timeFrom = timeSettingState.timeFrom
@@ -74,41 +77,58 @@ private class TimeRegionDetailListContentViewModel(
     ) = viewModelScope.launch(Dispatchers.IO){
         try {
             list.loading.value = true
-            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
-            // newlist_rank 已下线（B站返回 -10），改用 ranking/v2 拉这个分区的排行榜
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示（接口/请求逻辑保持原样）
             val res = BiliApiService.regionAPI
-                .regionVideoRanking(rid = rid)
+                .regionVideoList(
+                    rid = rid,
+                    rankOrder = rankOrder,
+                    pageNum = pageNum,
+                    pageSize = list.pageSize,
+                    timeFrom = timeFrom.getValue(),
+                    timeTo = timeTo.getValue(),
+                )
                 .awaitCall()
-                .json<ResultInfo<RankingV2Response>>()
+                .json<ResultInfo<RegionVideosRankInfo>>()
             if (res.code == 0) {
-                val result = res.data?.list ?: emptyList()
-                val timeFromLong = timeFrom.getValue().toLongOrNull() ?: 20090901L
-                val timeToLong = timeTo.getValue().toLongOrNull() ?: 99999999L
-                val timeFiltered = result.filter {
-                    pubdateToDateInt(it.pubdate) in timeFromLong..timeToLong
+                val data = res.data
+                if (data == null) {
+                    toast("获取不到列表数据")
+                    list.fail.value = "加载失败"
+                    return@launch
                 }
-                // ranking/v2 不支持 order 参数，排序按排行依据在本地做
-                val sorted = when (rankOrder) {
-                    "click" -> timeFiltered.sortedByDescending { it.stat.view }
-                    "scores" -> timeFiltered.sortedByDescending { it.stat.reply }   // 设置页把 scores 显示为"评论数"
-                    "stow" -> timeFiltered.sortedByDescending { it.stat.favorite }
-                    "coin" -> timeFiltered.sortedByDescending { it.stat.coin }
-                    "dm" -> timeFiltered.sortedByDescending { it.stat.danmaku }
-                    else -> timeFiltered
-                }
-                list.data.value = sorted
-                    .map { it.toRegionVideoInfo() }
-                    .filter {
-                        filterStore.filterWord(it.title)
-                                && filterStore.filterUpper(it.mid)
+                val result = data.result
+                if (result == null) {
+                    // result为null重新请求
+                    tryAgainTimes++
+                    // 只重试5次
+                    if (tryAgainTimes > 5) {
+                        toast("获取不到列表数据")
+                        throw Exception(res.message)
                     }
-                // ranking/v2 一次性返回整个榜单，没有分页
-                list.pageNum = 1
-                // 时光姬只能检索"该分区当前排行榜"里的视频，所以较早的时间线必然为空：
-                // 直接说"没有找到符合条件的视频"会让用户以为 App 坏了
-                list.fail.value = if (list.data.value.isEmpty())
-                    "当前时间线内没有数据，试试把时间线调近一点" else ""
-                list.finished.value = list.data.value.isNotEmpty()
+                    delay(2000L)
+                    tryAgainLoadData(pageNum)
+                    return@launch
+                }
+                tryAgainTimes = 0
+                if (result.size < list.pageSize) {
+                    list.finished.value = true
+                }
+                val listData = result.filter {
+                    filterStore.filterWord(it.title)
+                            && filterStore.filterUpper(it.mid.toLong())
+                }
+                if (pageNum == 1) {
+                    list.data.value = listData
+                } else {
+                    list.data.value = list.data.value
+                        .toMutableList()
+                        .also { it.addAll(listData) }
+                }
+                list.pageNum = pageNum
+                if (list.data.value.size < 10 && listData.size != result.size) {
+                    // 列表数据少于10个 且 屏蔽前数量与屏蔽后数量不等
+                    tryAgainLoadData(pageNum + 1)
+                }
             } else {
                 toast(res.message)
                 throw Exception(res.message)
@@ -116,19 +136,11 @@ private class TimeRegionDetailListContentViewModel(
         } catch (e: Exception) {
             e.printStackTrace()
             list.fail.value = e.message ?: e.toString()
+            tryAgainTimes = 0
         } finally {
             list.loading.value = false
             isRefreshing.value = false
         }
-    }
-
-    /** Unix 时间戳秒 → YYYYMMDD */
-    private fun pubdateToDateInt(timestamp: Long): Long {
-        val cal = java.util.Calendar.getInstance()
-        cal.timeInMillis = timestamp * 1000
-        return cal.get(java.util.Calendar.YEAR) * 10000L +
-                (cal.get(java.util.Calendar.MONTH) + 1) * 100L +
-                cal.get(java.util.Calendar.DAY_OF_MONTH)
     }
 
     fun tryAgainLoadData(pageNum: Int = list.pageNum) {
