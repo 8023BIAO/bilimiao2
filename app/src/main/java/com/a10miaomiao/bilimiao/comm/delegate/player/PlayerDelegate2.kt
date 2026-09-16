@@ -248,11 +248,12 @@ class PlayerDelegate2(
 
     var playerSourceInfo: PlayerSourceInfo? = null
 
-    /** AI 原声翻译：本次播放选中的语言（null = 原声）。换视频时复位 */
-    private var playerLanguage: String? = null
-
-    /** AI 原声翻译可选语言（HTTP playurl 的 language.items；gRPC 取流拿不到，需单独补一次） */
-    private var availableLanguages: List<PlayerSourceInfo.LanguageInfo> = emptyList()
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//     /** AI 原声翻译：本次播放选中的语言（null = 原声）。换视频时复位 */
+//     private var playerLanguage: String? = null
+//
+//     /** AI 原声翻译可选语言（HTTP playurl 的 language.items；gRPC 取流拿不到，需单独补一次） */
+//     private var availableLanguages: List<PlayerSourceInfo.LanguageInfo> = emptyList()
 
     // 未登陆：48[480P 清晰]及以下
     // 已登陆无大会员：80[1080P 高清]及以下
@@ -876,69 +877,71 @@ class PlayerDelegate2(
 
     private val loadMutex = Mutex()
 
-    /**
-     * AI 原声翻译：切换翻译语言（null = 关闭翻译、播原声）。
-     * 换语言 = 用同一清晰度重新取一次流（HTTP playurl 的 cur_language），所以复用换清晰度那条重载路径，
-     * 只是不要弹"已切换至【清晰度】"。
-     */
-    fun changeLanguage(language: String?) {
-        // AI 原声翻译暂时整体关闭（见 DanmakuVideoPlayer.AI_TRANSLATE_ENABLED）
-        if (!DanmakuVideoPlayer.AI_TRANSLATE_ENABLED) return
-        if (playerLanguage == language) return
-        val previous = playerLanguage
-        playerLanguage = language
-        lastPosition = player?.currentPositionWhenPlaying ?: lastPosition
-        // B 站的 AI 原声翻译音轨只以 DASH 形式给（实机日志：请求 mp4 也返回 dash.duration=174 →
-        // duration=174000，而原声 mp4 是 173100）。如果用户设置的是 mp4，这次切换就变成
-        // "播放中把 MP4 流换成 DASH 流" → 播放器直接进 ERROR（转圈后黑屏，state=7）。
-        // 所以只要用过 AI 翻译，本视频会话就统一走 DASH（下次 openPlayer 会重新读设置）。
-        // 番剧源在 openPlayer 里被强制 MP4（durl 多段会 OOM），这里不动它。
-        if (playerSource !is BangumiPlayerSource) {
-            fnval = SettingConstants.PLAYER_FNVAL_DASH
-        }
-        playerCoroutineScope.launch(Dispatchers.Main) {
-            try {
-                loadPlayerSource(isChangedQuality = true, announceQuality = false)
-                PopTip.show(
-                    if (language.isNullOrBlank()) "已关闭 AI 翻译" else "已切换 AI 翻译音轨"
-                ).showTop()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                playerLanguage = previous  // 失败回退，别让菜单和实际音轨不一致
-                PopTip.show("AI 翻译切换失败").showTop()
-            }
-        }
-    }
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//     /**
+//      * AI 原声翻译：切换翻译语言（null = 关闭翻译、播原声）。
+//      * 换语言 = 用同一清晰度重新取一次流（HTTP playurl 的 cur_language），所以复用换清晰度那条重载路径，
+//      * 只是不要弹"已切换至【清晰度】"。
+//      */
+//     fun changeLanguage(language: String?) {
+//         // AI 原声翻译暂时整体关闭（见 DanmakuVideoPlayer.AI_TRANSLATE_ENABLED）
+//         if (!DanmakuVideoPlayer.AI_TRANSLATE_ENABLED) return
+//         if (playerLanguage == language) return
+//         val previous = playerLanguage
+//         playerLanguage = language
+//         lastPosition = player?.currentPositionWhenPlaying ?: lastPosition
+//         // B 站的 AI 原声翻译音轨只以 DASH 形式给（实机日志：请求 mp4 也返回 dash.duration=174 →
+//         // duration=174000，而原声 mp4 是 173100）。如果用户设置的是 mp4，这次切换就变成
+//         // "播放中把 MP4 流换成 DASH 流" → 播放器直接进 ERROR（转圈后黑屏，state=7）。
+//         // 所以只要用过 AI 翻译，本视频会话就统一走 DASH（下次 openPlayer 会重新读设置）。
+//         // 番剧源在 openPlayer 里被强制 MP4（durl 多段会 OOM），这里不动它。
+//         if (playerSource !is BangumiPlayerSource) {
+//             fnval = SettingConstants.PLAYER_FNVAL_DASH
+//         }
+//         playerCoroutineScope.launch(Dispatchers.Main) {
+//             try {
+//                 loadPlayerSource(isChangedQuality = true, announceQuality = false)
+//                 PopTip.show(
+//                     if (language.isNullOrBlank()) "已关闭 AI 翻译" else "已切换 AI 翻译音轨"
+//                 ).showTop()
+//             } catch (e: CancellationException) {
+//                 throw e
+//             } catch (e: Exception) {
+//                 playerLanguage = previous  // 失败回退，别让菜单和实际音轨不一致
+//                 PopTip.show("AI 翻译切换失败").showTop()
+//             }
+//         }
+//     }
 
-    /**
-     * 只为拿 AI 翻译语言列表：正常播放走 gRPC（PlayViewReq 没有语言字段），
-     * 所以这里在后台补一次 HTTP playurl，把字幕菜单里的"翻译"项填出来。
-     * 未登录 / 设置里关了翻译 / 视频本身不支持 → 菜单不出现翻译项。
-     */
-    private fun fetchTranslateLanguages(source: BasePlayerSource) {
-        // AI 原声翻译暂时整体关闭（见 DanmakuVideoPlayer.AI_TRANSLATE_ENABLED）：
-        // 连"后台补一次 HTTP 拿语言列表"都不做了，省一次请求
-        if (!DanmakuVideoPlayer.AI_TRANSLATE_ENABLED) return
-        if (BilimiaoCommApp.commApp.loginInfo == null) return
-        playerCoroutineScope.launch {
-            try {
-                val languages = withContext(Dispatchers.IO) {
-                    source.getTranslateLanguages(quality, fnval)
-                }
-                if (languages.isNotEmpty()) {
-                    availableLanguages = languages
-                    player?.translateLanguages = languages.map {
-                        DanmakuVideoPlayer.TranslateLanguageInfo(it.lang, it.title)
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // 拉不到就当这个视频没有 AI 翻译
-            }
-        }
-    }
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//     /**
+//      * 只为拿 AI 翻译语言列表：正常播放走 gRPC（PlayViewReq 没有语言字段），
+//      * 所以这里在后台补一次 HTTP playurl，把字幕菜单里的"翻译"项填出来。
+//      * 未登录 / 设置里关了翻译 / 视频本身不支持 → 菜单不出现翻译项。
+//      */
+//     private fun fetchTranslateLanguages(source: BasePlayerSource) {
+//         // AI 原声翻译暂时整体关闭（见 DanmakuVideoPlayer.AI_TRANSLATE_ENABLED）：
+//         // 连"后台补一次 HTTP 拿语言列表"都不做了，省一次请求
+//         if (!DanmakuVideoPlayer.AI_TRANSLATE_ENABLED) return
+//         if (BilimiaoCommApp.commApp.loginInfo == null) return
+//         playerCoroutineScope.launch {
+//             try {
+//                 val languages = withContext(Dispatchers.IO) {
+//                     source.getTranslateLanguages(quality, fnval)
+//                 }
+//                 if (languages.isNotEmpty()) {
+//                     availableLanguages = languages
+//                     player?.translateLanguages = languages.map {
+//                         DanmakuVideoPlayer.TranslateLanguageInfo(it.lang, it.title)
+//                     }
+//                 }
+//             } catch (e: CancellationException) {
+//                 throw e
+//             } catch (e: Exception) {
+//                 // 拉不到就当这个视频没有 AI 翻译
+//             }
+//         }
+//     }
 
     suspend fun loadPlayerSource(
         isChangedQuality: Boolean = false,
@@ -997,22 +1000,24 @@ class PlayerDelegate2(
             loadingBoxController.println("成功")
             loadingBoxController.print("获取视频信息...")
             val sourceInfo = withContext(Dispatchers.IO) {
-                source.getPlayerUrl(quality, fnval, playerLanguage)
+                // TODO AI 原声翻译：暂时关闭（原来是 getPlayerUrl(quality, fnval, playerLanguage)）
+                source.getPlayerUrl(quality, fnval)
             }
             if (playerClosed) return
             quality = sourceInfo.quality
             playerSourceInfo = sourceInfo
             keptSourceInfo = sourceInfo
-            // AI 原声翻译：把语言列表和当前语言同步给播放器的字幕菜单
-            if (sourceInfo.languages.isNotEmpty()) {
-                availableLanguages = sourceInfo.languages
-            }
-            // 顺序要紧：先接回调再灌语言列表 —— 语言列表的 setter 会顺带刷新底栏 AI 按钮的可见性
-            player?.onTranslateSelected = { lang -> changeLanguage(lang) }
-            player?.translateLanguages = availableLanguages.map {
-                DanmakuVideoPlayer.TranslateLanguageInfo(it.lang, it.title)
-            }
-            player?.currentTranslateLang = sourceInfo.currentLanguage
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//             // AI 原声翻译：把语言列表和当前语言同步给播放器的字幕菜单
+//             if (sourceInfo.languages.isNotEmpty()) {
+//                 availableLanguages = sourceInfo.languages
+//             }
+//             // 顺序要紧：先接回调再灌语言列表 —— 语言列表的 setter 会顺带刷新底栏 AI 按钮的可见性
+//             player?.onTranslateSelected = { lang -> changeLanguage(lang) }
+//             player?.translateLanguages = availableLanguages.map {
+//                 DanmakuVideoPlayer.TranslateLanguageInfo(it.lang, it.title)
+//             }
+//             player?.currentTranslateLang = sourceInfo.currentLanguage
             loadingBoxController.print("成功")
             player?.releaseDanmaku()
             player?.danmakuParser = danmukuParser
@@ -1082,10 +1087,11 @@ class PlayerDelegate2(
                         )
                     }
                 }
-                // 正常播放走 gRPC，拿不到 language 列表 → 后台补一次 HTTP 只为填"翻译"菜单
-                if (!isChangedQuality) {
-                    fetchTranslateLanguages(source)
-                }
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//                 // 正常播放走 gRPC，拿不到 language 列表 → 后台补一次 HTTP 只为填"翻译"菜单
+//                 if (!isChangedQuality) {
+//                     fetchTranslateLanguages(source)
+//                 }
             }
         } catch (e: DabianException) {
             errorMessageBoxController.show("少儿不宜，禁止观看", canRetry = false)
@@ -1226,11 +1232,12 @@ class PlayerDelegate2(
             views.videoPlayer?.release()
             playerCoroutineScope.onDestroy()
             playerSource = null
-            // 换视频（或换集）复位 AI 翻译：语言列表是每个视频单独给的
-            playerLanguage = null
-            availableLanguages = emptyList()
-            views.videoPlayer?.translateLanguages = emptyList()
-            views.videoPlayer?.currentTranslateLang = null
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//             // 换视频（或换集）复位 AI 翻译：语言列表是每个视频单独给的
+//             playerLanguage = null
+//             availableLanguages = emptyList()
+//             views.videoPlayer?.translateLanguages = emptyList()
+//             views.videoPlayer?.currentTranslateLang = null
         }
         playerCoroutineScope.onCreate()
         playerSource = source

@@ -136,9 +136,9 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     private val mSubtitleSwitchTV: TextView by lazy { findViewById(R.id.subtitle_switch_text) }
 
     // AI 原声翻译开关（底栏，只有视频支持 AI 翻译时才显示）
-    private val mAiTranslateSwitch: ViewGroup by lazy { findViewById(R.id.ai_translate_switch) }
-    private val mAiTranslateSwitchIV: ImageView by lazy { findViewById(R.id.ai_translate_switch_icon) }
-    private val mAiTranslateSwitchTV: TextView by lazy { findViewById(R.id.ai_translate_switch_text) }
+//     private val mAiTranslateSwitch: ViewGroup by lazy { findViewById(R.id.ai_translate_switch) }
+//     private val mAiTranslateSwitchIV: ImageView by lazy { findViewById(R.id.ai_translate_switch_icon) }
+//     private val mAiTranslateSwitchTV: TextView by lazy { findViewById(R.id.ai_translate_switch_text) }
 
     // 听视频（仅音频）开关 + 黑屏遮罩
     private val mAudioOnlySwitch: ViewGroup by lazy { findViewById(R.id.audio_only_switch) }
@@ -474,45 +474,41 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             }
     }
 
-    companion object {
-        /**
-         * AI 原声翻译总开关。**暂时关闭**（2026-09-17）：
-         * B 站的 AI 配音流只以 DASH 形式给，实机切换后播放器会进 ERROR（转圈→黑屏），
-         * 用户决定先不折腾这个功能。想看回来时把这里改成 true 即可（其余代码都留着，
-         * 包括下面的按钮/弹窗、PlayerDelegate2.changeLanguage、playurl 的 cur_language）。
-         */
-        const val AI_TRANSLATE_ENABLED = false
-    }
+    // TODO AI 原声翻译：暂时整体关闭（2026-09-17）。
+    //  原因：B 站的 AI 配音流只以 DASH 形式返回，实机切过去后播放器 state=7(CURRENT_STATE_ERROR) → 转圈黑屏。
+    //  恢复时把本文件与 PlayerDelegate2 里带 "TODO AI 原声翻译" 的注释块全部放开即可，
+    //  底层 plumbing（PlayerAPI 的 cur_language、PlayerSourceInfo.language、getTranslateLanguages）都还在。
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//     /** AI 翻译可选语言（playurl 的 language.items；空 = 该视频没有 AI 翻译） */
+//     var translateLanguages = emptyList<TranslateLanguageInfo>()
+//         set(value) {
+//             field = value
+//             updateAiTranslateSwitch()
+//         }
+//
+//     /** 当前 AI 翻译语言（null = 未翻译，播原声） */
+//     var currentTranslateLang: String? = null
+//         set(value) {
+//             field = value
+//             updateAiTranslateSwitch()
+//         }
+//
+//     /** 用户在字幕菜单里选了翻译语言（null = 关闭翻译）：由 PlayerDelegate2 重新取播放地址 */
+//     var onTranslateSelected: ((String?) -> Unit)? = null
 
-    /** AI 翻译可选语言（playurl 的 language.items；空 = 该视频没有 AI 翻译） */
-    var translateLanguages = emptyList<TranslateLanguageInfo>()
-        set(value) {
-            field = value
-            updateAiTranslateSwitch()
-        }
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//     /** B 站 AI 翻译语言（playurl 响应里的 language.items，lang 形如 ai-zh） */
+//     data class TranslateLanguageInfo(
+//         val lang: String,
+//         val title: String?,
+//     )
 
-    /** 当前 AI 翻译语言（null = 未翻译，播原声） */
-    var currentTranslateLang: String? = null
-        set(value) {
-            field = value
-            updateAiTranslateSwitch()
-        }
-
-    /** 用户在字幕菜单里选了翻译语言（null = 关闭翻译）：由 PlayerDelegate2 重新取播放地址 */
-    var onTranslateSelected: ((String?) -> Unit)? = null
-
-    /** B 站 AI 翻译语言（playurl 响应里的 language.items，lang 形如 ai-zh） */
-    data class TranslateLanguageInfo(
-        val lang: String,
-        val title: String?,
-    )
-
-    /** 字幕菜单里的一个选项：字幕轨 / AI 翻译语言（CheckPopupMenu 需要一个统一类型来打勾） */
+    /** 字幕菜单里的一个选项（CheckPopupMenu 需要一个统一类型来打勾）；AI 翻译项已暂时注释掉 */
     private sealed interface SubtitleMenuValue {
         data class Track(val source: SubtitleSourceInfo) : SubtitleMenuValue
-        data class Translate(val lang: String) : SubtitleMenuValue
+//         data class Translate(val lang: String) : SubtitleMenuValue
         data object SubtitleOff : SubtitleMenuValue
-        data object TranslateOff : SubtitleMenuValue
+//         data object TranslateOff : SubtitleMenuValue
     }
 
     // 当前模式
@@ -655,7 +651,7 @@ initDanmakuTouchListener()
                 )
             }
             menus.add(CheckPopupMenu.MenuItemInfo("关闭字幕", SubtitleMenuValue.SubtitleOff))
-            // AI 原声翻译已经不在这里了：它有自己的弹窗（见 mAiTranslateSwitch 的点击）
+            // TODO AI 原声翻译：暂时关闭（原本这里是 AI 翻译语言入口）
             val current = when {
                 currentSubtitleSource != null -> SubtitleMenuValue.Track(currentSubtitleSource!!)
                 else -> SubtitleMenuValue.SubtitleOff
@@ -671,50 +667,51 @@ initDanmakuTouchListener()
                 when (val v = item.value) {
                     is SubtitleMenuValue.Track -> currentSubtitleSource = v.source
                     SubtitleMenuValue.SubtitleOff -> currentSubtitleSource = null
-                    is SubtitleMenuValue.Translate -> onTranslateSelected?.invoke(v.lang)
-                    SubtitleMenuValue.TranslateOff -> onTranslateSelected?.invoke(null)
+//                     is SubtitleMenuValue.Translate -> onTranslateSelected?.invoke(v.lang)
+//                     SubtitleMenuValue.TranslateOff -> onTranslateSelected?.invoke(null)
                 }
             }
             pm.show()
         }
         // AI 原声翻译：点一下开/关（开的时候用第一条语言；想挑具体语言去上面的字幕菜单）
-        // AI 原声翻译：点开独立弹窗（语言列表 + 关闭），不和字幕菜单混在一起
-        mAiTranslateSwitch.setOnClickListener { anchor ->
-            if (!AI_TRANSLATE_ENABLED) return@setOnClickListener
-            val langs = translateLanguages
-            if (langs.isEmpty()) return@setOnClickListener
-            val menus = mutableListOf<CheckPopupMenu.MenuItemInfo<SubtitleMenuValue>>()
-            langs.forEach {
-                menus.add(
-                    CheckPopupMenu.MenuItemInfo(
-                        "AI 翻译：${it.title ?: it.lang}",
-                        SubtitleMenuValue.Translate(it.lang),
-                    )
-                )
-            }
-            menus.add(CheckPopupMenu.MenuItemInfo("关闭 AI 翻译", SubtitleMenuValue.TranslateOff))
-            val current = if (!currentTranslateLang.isNullOrEmpty()) {
-                SubtitleMenuValue.Translate(currentTranslateLang!!)
-            } else {
-                SubtitleMenuValue.TranslateOff
-            }
-            val pm = CheckPopupMenu(
-                context = context,
-                anchor = anchor,
-                menus = menus,
-                value = current,
-                themeColor = mThemeColor,
-                checkable = true,
-            )
-            pm.onMenuItemClick = { item ->
-                when (val value = item.value) {
-                    is SubtitleMenuValue.Translate -> onTranslateSelected?.invoke(value.lang)
-                    SubtitleMenuValue.TranslateOff -> onTranslateSelected?.invoke(null)
-                    else -> {}
-                }
-            }
-            pm.show()
-        }
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//         // AI 原声翻译：点开独立弹窗（语言列表 + 关闭），不和字幕菜单混在一起
+//         mAiTranslateSwitch.setOnClickListener { anchor ->
+//             if (!AI_TRANSLATE_ENABLED) return@setOnClickListener
+//             val langs = translateLanguages
+//             if (langs.isEmpty()) return@setOnClickListener
+//             val menus = mutableListOf<CheckPopupMenu.MenuItemInfo<SubtitleMenuValue>>()
+//             langs.forEach {
+//                 menus.add(
+//                     CheckPopupMenu.MenuItemInfo(
+//                         "AI 翻译：${it.title ?: it.lang}",
+//                         SubtitleMenuValue.Translate(it.lang),
+//                     )
+//                 )
+//             }
+//             menus.add(CheckPopupMenu.MenuItemInfo("关闭 AI 翻译", SubtitleMenuValue.TranslateOff))
+//             val current = if (!currentTranslateLang.isNullOrEmpty()) {
+//                 SubtitleMenuValue.Translate(currentTranslateLang!!)
+//             } else {
+//                 SubtitleMenuValue.TranslateOff
+//             }
+//             val pm = CheckPopupMenu(
+//                 context = context,
+//                 anchor = anchor,
+//                 menus = menus,
+//                 value = current,
+//                 themeColor = mThemeColor,
+//                 checkable = true,
+//             )
+//             pm.onMenuItemClick = { item ->
+//                 when (val value = item.value) {
+//                     is SubtitleMenuValue.Translate -> onTranslateSelected?.invoke(value.lang)
+//                     SubtitleMenuValue.TranslateOff -> onTranslateSelected?.invoke(null)
+//                     else -> {}
+//                 }
+//             }
+//             pm.show()
+//         }
         // 听视频：只黑掉画面，音频继续（播放器/surface 都不动）
         mAudioOnlySwitch.setOnClickListener {
             setAudioOnly(!isAudioOnly)
@@ -829,27 +826,28 @@ initDanmakuTouchListener()
         }
     }
 
-    /**
-     * AI 原声翻译开关（底栏）：
-     * 只有"这个视频确实有 AI 翻译语言 + 外部接好了回调"时才显示；
-     * 点一下开/关（多语言时开启用第一条，具体选哪条去字幕菜单里挑）。
-     */
-    private fun updateAiTranslateSwitch() {
-        if (!AI_TRANSLATE_ENABLED || translateLanguages.isEmpty() || onTranslateSelected == null) {
-            setViewShowState(mAiTranslateSwitch, GONE)
-            return
-        }
-        setViewShowState(mAiTranslateSwitch, VISIBLE)
-        val lang = currentTranslateLang
-        if (lang == null) {
-            mAiTranslateSwitchIV.setImageResource(R.drawable.ic_player_ai_translate_off)
-            mAiTranslateSwitchTV.text = "AI翻译"
-        } else {
-            mAiTranslateSwitchIV.setImageResource(R.drawable.ic_player_ai_translate_on)
-            mAiTranslateSwitchTV.text = translateLanguages
-                .find { it.lang == lang }?.title ?: "AI翻译开"
-        }
-    }
+// TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
+//     /**
+//      * AI 原声翻译开关（底栏）：
+//      * 只有"这个视频确实有 AI 翻译语言 + 外部接好了回调"时才显示；
+//      * 点一下开/关（多语言时开启用第一条，具体选哪条去字幕菜单里挑）。
+//      */
+//     private fun updateAiTranslateSwitch() {
+//         if (!AI_TRANSLATE_ENABLED || translateLanguages.isEmpty() || onTranslateSelected == null) {
+//             setViewShowState(mAiTranslateSwitch, GONE)
+//             return
+//         }
+//         setViewShowState(mAiTranslateSwitch, VISIBLE)
+//         val lang = currentTranslateLang
+//         if (lang == null) {
+//             mAiTranslateSwitchIV.setImageResource(R.drawable.ic_player_ai_translate_off)
+//             mAiTranslateSwitchTV.text = "AI翻译"
+//         } else {
+//             mAiTranslateSwitchIV.setImageResource(R.drawable.ic_player_ai_translate_on)
+//             mAiTranslateSwitchTV.text = translateLanguages
+//                 .find { it.lang == lang }?.title ?: "AI翻译开"
+//         }
+//     }
 
     private var touchSurfaceDownTime = Long.MAX_VALUE
     private var isSpeedPlaying = false
