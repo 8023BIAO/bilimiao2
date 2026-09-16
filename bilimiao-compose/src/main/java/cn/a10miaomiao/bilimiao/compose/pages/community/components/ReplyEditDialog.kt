@@ -138,6 +138,8 @@ class ReplyEditDialogState(
     fun dismiss() {
         replyParams = null
         _visible.value = false
+        // 取消后要把输入清掉：否则下次（哪怕改成回复别人）还带着上次的残留文字
+        _input.value = TextFieldValue("")
     }
 
     fun inputChange(value: TextFieldValue) {
@@ -171,6 +173,12 @@ class ReplyEditDialogState(
                 return
             }
             val message = input.text
+            if (message.isBlank()) {
+                // 空内容不该发出去：楼中楼回复会拼上"回复 @某人 :"前缀，
+                // 空输入也会变成一条垃圾评论
+                snackbar.showSnackbar("请输入评论内容")
+                return
+            }
             val params = replyParams
             if (params == null) {
                 snackbar.showSnackbar("参数错误")

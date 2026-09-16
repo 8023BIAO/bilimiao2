@@ -30,6 +30,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -149,6 +150,9 @@ class VideoDownloadDialogState(
         )
         videoBvid = bvid
         _tabIndex.value = 0
+        // 换一个视频再打开时必须清掉上一次的勾选：否则按钮显示"开始下载(N)"，
+        // 点下去却按新视频的分P cid 去找，一条也建不出来
+        _checkedMap.clear()
         _seasonId = seasonId
         _seasonTitle = seasonTitle
         if (ugcSeasonEpisodes != null) {
@@ -604,6 +608,10 @@ fun VideoDownloadDialog(
         val tabs = if (hasPages && hasSeason) listOf("分P", "合集") else if (hasSeason) listOf("合集") else listOf("分P")
         val pagerState = rememberPagerState(pageCount = { tabs.size })
         val coroutineScope = rememberCoroutineScope()
+        // 手势滑动切页签时也要同步，否则"开始下载"读到的还是旧页签（按钮计数用的是 pagerState）
+        LaunchedEffect(pagerState.currentPage) {
+            state.setTabIndex(pagerState.currentPage)
+        }
 
 
         AutoSheetDialog(

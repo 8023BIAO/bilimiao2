@@ -175,7 +175,9 @@ internal class DownloadDetailPageViewModel(
             basePlayerDelegate.openPlayer(LocalPlayerSource(
                 activity = fragment.requireActivity(),
                 entryDirPath = item.dir_path,
-                id = item.id.toString(),
+                // LocalPlayerSource 的 id 是 cid（弹幕 oid / 历史记录 cid / 本地进度键 dl_${avid}_${id}），
+                // 原来传 item.id（avid / season_id）→ 发弹幕必失败、云同步进度对不上、多P进度互相串
+                id = item.cid.toString(),
                 title = item.title,
                 coverUrl = item.cover,
             ))

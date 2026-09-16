@@ -1248,9 +1248,17 @@ initDanmakuTouchListener()
      * Activity 销毁时调用，播放器留在 GSYVideoManager 单例中继续存活。
      * 下次新建 DanmakuVideoPlayer 并 startPrepare() 时自动重连。
      */
+    /** detachView 时是否保持播放（后台播放模式），用完自动复位 */
+    var keepPlayingOnDetach = false
+
     fun detachView() {
         // 不释放弹幕 — 重连时复用
-        gsyVideoManager?.player?.pause()
+        // 后台播放模式下不能在这里 pause：Activity 重建后没有任何路径恢复播放，
+        // 界面会定格、通知栏却认为还在播（keepPlayingOnDetach 由 PlayerDelegate2 设置）
+        if (!keepPlayingOnDetach) {
+            gsyVideoManager?.player?.pause()
+        }
+        keepPlayingOnDetach = false
         // Activity 销毁时必须清掉手势 HUD：三个 Dialog 绑在旧 Activity 的 window
         // token 上，留着会 WindowLeaked，复用后还可能 show 到错误的 Activity
         dismissCachedDialogs()
@@ -1323,8 +1331,8 @@ initDanmakuTouchListener()
      */
     private fun resolveDanmakuShow() {
         post {
-            mDanmakuView.show()
-                // 【已移除】V2显示控制 — V2引擎已废弃
+            // 这里不要无条件 mDanmakuView.show()：弹幕处于"关"的状态时会先亮一帧再隐藏，
+            // 还会把已经停掉的绘制任务重新拉起来
             if (isShowDanmaku) {
                 if (!mDanmakuView.isShown) {
                     mDanmakuView.show()
@@ -1714,11 +1722,18 @@ initDanmakuTouchListener()
             isHoldUp=true
         } else {
             isHoldUp=false
-            setViewShowState(mBottomLayout, VISIBLE)
-            setViewShowState(mDanmakuView, VISIBLE)
-            setViewShowState(mTopContainer, VISIBLE)
-            setViewShowState(mStartButton, VISIBLE)
-            mDanmakuView.resume()
+            // 按当前播放状态恢复控件，而不是无条件全部显示
+            // （挂起/恢复只是拖到屏幕边缘的交互，不该把暂停中的控件强行亮出来）
+            showAllWidget()
+            if (isShowDanmaku) {
+                mDanmakuView.show()
+                // 暂停/结束时不要把弹幕绘制任务重新拉起来
+                if (mCurrentState == CURRENT_STATE_PLAYING) {
+                    mDanmakuView.resume()
+                }
+            } else {
+                mDanmakuView.hide()
+            }
         }
 
     }

@@ -64,7 +64,7 @@ fun DoubleColumnAutofitLayout(
             }
         } else {
             val density = LocalDensity.current
-            val leftMaxHeightPx = remember(density) {
+            val leftMaxHeightPx = remember(density, leftMaxHeight, chainScrollableLayoutState.minScrollPosition) {
                 density.run {
                     leftMaxHeight.roundToPx().toFloat() - chainScrollableLayoutState.minScrollPosition.roundToPx()
                 }
@@ -74,7 +74,13 @@ fun DoubleColumnAutofitLayout(
                 modifier = modifier,
                 state = chainScrollableLayoutState,
             ) { state ->
-                val alpha = (leftMaxHeightPx + state.getOffsetYValue()) / leftMaxHeightPx
+                // 分母可能为 0（番剧详情页左栏高度给的是 0.dp）→ 0/0=NaN，
+                // .alpha(NaN) 会导致整块内容不绘制；这里兜底并夹到 0..1
+                val alpha = if (leftMaxHeightPx > 0f) {
+                    ((leftMaxHeightPx + state.getOffsetYValue()) / leftMaxHeightPx).coerceIn(0f, 1f)
+                } else {
+                    1f
+                }
                 val offsetY by animateIntAsState(
                     targetValue = state.getOffsetYValue().roundToInt(), label = "",
                 )

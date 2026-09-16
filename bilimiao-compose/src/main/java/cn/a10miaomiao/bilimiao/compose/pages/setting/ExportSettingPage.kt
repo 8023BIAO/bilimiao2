@@ -33,7 +33,6 @@ import com.a10miaomiao.bilimiao.comm.datastore.SettingsExporter
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.kodein.di.compose.rememberInstance
@@ -70,15 +69,23 @@ private fun ExportSettingPageContent() {
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
-            try {
-                val json = runBlocking { SettingsExporter.exportToJson(context) }
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(json.toByteArray(Charsets.UTF_8))
-                    out.flush()
+            // 导出要读全部设置 + 错误日志（可能很大）再写文件，原先在主线程 runBlocking 做，
+            // 日志多时会卡住 UI 甚至 ANR；改成和导入一致的 IO 协程
+            scope.launch {
+                try {
+                    val json = withContext(Dispatchers.IO) {
+                        SettingsExporter.exportToJson(context)
+                    }
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            out.write(json.toByteArray(Charsets.UTF_8))
+                            out.flush()
+                        }
+                    }
+                    exportStatus = ExportStatus.Success("导出成功")
+                } catch (e: Exception) {
+                    exportStatus = ExportStatus.Error("导出失败: ${e.message}")
                 }
-                exportStatus = ExportStatus.Success("导出成功")
-            } catch (e: Exception) {
-                exportStatus = ExportStatus.Error("导出失败: ${e.message}")
             }
         }
     }
@@ -198,7 +205,10 @@ private fun ExportSettingPageContent() {
                         showImportConfirm = false
                         scope.launch {
                             try {
-                                val count = SettingsExporter.importFromJson(context, pendingJson!!)
+                                // 导入要写 SQLite + DataStore，别在主线程做
+                                val count = withContext(Dispatchers.IO) {
+                                    SettingsExporter.importFromJson(context, pendingJson!!)
+                                }
                                 exportStatus = ExportStatus.Success("已导入 $count 项设置，请重启应用")
                                 withContext(Dispatchers.Main) {
                                     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)

@@ -47,7 +47,8 @@ fun VideoPlayListBox(
 ) {
     val playerStore by rememberInstance<PlayerStore>()
     val playerState by playerStore.stateFlow.collectAsState()
-    val position by remember {
+    val position by remember(playListState, arc.aid) {
+        // 不把 playListState 当 key 的话，换一个播单实例后这里仍读旧状态 → "在列表中 X/N" 不刷新
         derivedStateOf {
             playListState.indexOfAid(arc.aid.toString())
         }

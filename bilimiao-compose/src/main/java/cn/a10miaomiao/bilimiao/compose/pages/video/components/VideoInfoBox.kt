@@ -73,19 +73,22 @@ private fun String.toLinkUrl(): LinkAnnotation.Url {
     )
 }
 
+/** 视频简介里的链接识别正则：提到文件级，避免每次重组都重新编译 */
+private val INFO_TEXT_REGEX = Regex(
+    """(?i)""" +  // 忽略大小写
+            """(\b(https?://|www\.)[\w-]+(\.[\w-]+)+([/\S]*)*\b)|""" +  // URL（优先匹配）
+            """(\b(av\d{1,15})\b)|""" +     // B站av号（1-15位数字）
+            """(\b(BV[\dA-Za-z]{10})\b)|""" + // B站BV号（固定10位）
+            """(\b(ac\d{1,10})\b)|""" +     // A站ac号（1-10位数字）
+            """(\b(sm\d{1,10})\b)|""" +     // Niconico sm号（1-10位数字）
+            """(\b(cv\d{1,8})\b)"""         // B站专栏cv号（1-8位数字）
+)
+
 @Composable
 private fun parseText(
     text: String
 ): AnnotatedString {
-    val regex = Regex(
-        """(?i)""" +  // 忽略大小写
-                """(\b(https?://|www\.)[\w-]+(\.[\w-]+)+([/\S]*)*\b)|""" +  // URL（优先匹配）
-                """(\b(av\d{1,15})\b)|""" +     // B站av号（1-15位数字）
-                """(\b(BV[\dA-Za-z]{10})\b)|""" + // B站BV号（固定10位）
-                """(\b(ac\d{1,10})\b)|""" +     // A站ac号（1-10位数字）
-                """(\b(sm\d{1,10})\b)|""" +     // Niconico sm号（1-10位数字）
-                """(\b(cv\d{1,8})\b)"""         // B站专栏cv号（1-8位数字）
-    )
+    val regex = INFO_TEXT_REGEX
     return buildAnnotatedString {
         append(text) // 添加原始文本
         // 为每个匹配的URL添加样式

@@ -75,4 +75,27 @@ class ChapterNavigatorTest {
         assertNull(ChapterNavigator.nextStart(one, 0L))
         assertTrue(ChapterNavigator.hasChapters(chapters))
     }
+
+    @Test
+    fun `position before first chapter still has a next chapter`() {
+        // 章节不从 0 开始（第一节在 10s）时，5s 处的"下一章"就是第一章，
+        // hasNext 必须和 nextStart 一致，否则通知栏会错判成"没有下一章"
+        val late = listOf(chapter(10_000L), chapter(30_000L), chapter(60_000L))
+        assertEquals(10_000L, ChapterNavigator.nextStart(late, 5_000L))
+        assertTrue(ChapterNavigator.hasNext(late, 5_000L))
+        assertFalse(ChapterNavigator.hasPrevious(late, 5_000L))
+        assertNull(ChapterNavigator.previousStart(late, 5_000L))
+    }
+
+    @Test
+    fun `hasNext agrees with nextStart on every position`() {
+        val late = listOf(chapter(10_000L), chapter(30_000L), chapter(60_000L))
+        for (pos in listOf(0L, 5_000L, 10_000L, 20_000L, 30_000L, 59_999L, 60_000L, 90_000L)) {
+            assertEquals(
+                "position=$pos",
+                ChapterNavigator.nextStart(late, pos) != null,
+                ChapterNavigator.hasNext(late, pos),
+            )
+        }
+    }
 }

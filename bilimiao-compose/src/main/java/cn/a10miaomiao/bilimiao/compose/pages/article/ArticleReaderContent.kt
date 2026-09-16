@@ -70,6 +70,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** 专栏头部日期格式：提到文件级，避免每次重组都 new 一个（只用主线程，无并发问题） */
+private val ARTICLE_DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun ArticleReaderContent(
@@ -229,8 +232,7 @@ fun ArticleReaderContent(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     if (data.publishTime > 0) {
-                                        val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                                            .format(Date(data.publishTime * 1000))
+                                        val dateStr = ARTICLE_DATE_FORMAT.format(Date(data.publishTime * 1000))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(
                                             text = dateStr,

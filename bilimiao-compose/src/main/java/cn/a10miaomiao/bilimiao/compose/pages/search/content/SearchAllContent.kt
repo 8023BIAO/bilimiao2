@@ -53,6 +53,7 @@ import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.mypage.SearchConfigInfo
 import com.a10miaomiao.bilimiao.comm.mypage.myMenu
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
+import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.store.RegionStore
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.store.WindowStore
@@ -122,6 +123,7 @@ private class SearchAllContentViewModel(
             val durationList = moreConditions.durationList
                 .joinToString(",")
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val req = bilibili.polymer.app.search.v1.SearchAllRequest(
                 keyword = keyword,
                 order = order,
@@ -191,6 +193,9 @@ private class SearchAllContentViewModel(
 
     fun refresh() {
         list.reset()
+        // 不清空去重集合的话，刷新/切排序/改筛选后同一批 URI 全被判为"已看过"，
+        // 列表直接变空并显示"下面没有了"
+        seenUris.clear()
         isRefreshing.value = true
         loadData("")
     }
@@ -220,9 +225,16 @@ private class SearchAllContentViewModel(
     }
 
     fun toDetailPage(item: SearchItem) {
-        pageNavigation.navigateByUri(
-            Uri.parse(item.uri)
-        )
+        // 路由不上时以前静默失败，用户点了完全没反应（搜索结果里还有很多卡片类型没被渲染）
+        val ok = try {
+            pageNavigation.navigateByUri(Uri.parse(item.uri))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+        if (!ok) {
+            toast("打不开这个内容：${item.uri.take(60)}")
+        }
     }
 
 }

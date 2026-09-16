@@ -3,6 +3,8 @@ package cn.a10miaomiao.bilimiao.download
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import cn.a10miaomiao.bilimiao.download.entry.BiliDownloadEntryAndPathInfo
 import cn.a10miaomiao.bilimiao.download.entry.BiliDownloadEntryInfo
@@ -35,15 +37,38 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             }
         }
         private var _instance: DownloadService? = null
+        private val instanceLock = Any()
+
+        /** 服务正在启动时共享的等待对象：并发调用必须复用同一个，
+         *  否则 Channel 只发一条消息，第二个 receive() 会永远挂住（点下载一直转圈）。 */
+        private var waitingInstance: CompletableDeferred<DownloadService>? = null
 
         val instance get() = _instance
 
         suspend fun getService(context: Context): DownloadService{
             _instance?.let { return it }
-            startService(context)
-            return channel.receive().also {
-                _instance = it
+            var isStarter = false
+            val deferred = synchronized(instanceLock) {
+                _instance?.let { return it }
+                waitingInstance ?: CompletableDeferred<DownloadService>().also {
+                    waitingInstance = it
+                    isStarter = true
+                }
             }
+            if (isStarter) {
+                try {
+                    startService(context)
+                    val service = channel.receive()
+                    _instance = service
+                    synchronized(instanceLock) { waitingInstance = null }
+                    deferred.complete(service)
+                } catch (e: Exception) {
+                    synchronized(instanceLock) { waitingInstance = null }
+                    deferred.completeExceptionally(e)
+                    throw e
+                }
+            }
+            return deferred.await()
         }
 
         fun startService(context: Context) {
@@ -52,9 +77,22 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
     }
 
-    private var job: Job = Job()
+    private var job: Job = SupervisorJob()
+
+    /** 服务作用域里的未捕获 IO 异常兜底：只记日志 + 走失败流程，绝不让异常冒泡成进程崩溃 */
+    private val exceptionHandler = CoroutineExceptionHandler { _, e ->
+        logToFile("UNCAUGHT coroutine exception: ${e.message}")
+        android.util.Log.e(TAG, "uncaught coroutine exception", e)
+        try {
+            // 复用统一的失败处理：标记失败 + 错误通知 + 结束当前任务让队列继续
+            curDownload.value?.let { onTaskError(it, e) }
+        } catch (e2: Exception) {
+            logToFile("exceptionHandler FAILED: ${e2.message}")
+        }
+    }
+
     override val coroutineContext: CoroutineContext
-        get() = Dispatchers.IO + job
+        get() = Dispatchers.IO + job + exceptionHandler
     private val downloadNotify by lazy { DownloadNotify(this) }
     private var downloadManager: DownloadManager? = null
     private var audioDownloadManager: DownloadManager? = null
@@ -94,6 +132,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     private var curMediaFileInfo: BiliDownloadMediaFileInfo? = null
     /** Type1 多分片待下载队列（按 order 升序），全部完成后合并为单文件 */
     private var pendingSegments = mutableListOf<BiliDownloadMediaFileInfo.Type1Segment>()
+    /** Type1 已完成分片的字节累计：entry.json 的分母是全部还是分片之和，不是单个分片 */
+    private var completedSegmentBytes = 0L
     /** 公共目录回退私有目录的提示只弹一次，避免每次下载都打扰 */
     private var warnedPrivateFallback = false
 
@@ -101,7 +141,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     override fun onCreate() {
         super.onCreate()
         logToFile("SERVICE onCreate")
-        job = Job()
+        // SupervisorJob：单个下载任务失败不要连带取消整个服务作用域（否则之后所有下载都静默失效）
+        job = SupervisorJob()
         launch {
             readDownloadList()
             logToFile("SERVICE readDownloadList done, items=${downloadList.size}")
@@ -126,6 +167,46 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         super.onDestroy()
         job.cancel()
         _instance = null
+    }
+
+    /**
+     * 提升为前台服务。必须在“真正开始下载”时调用（不能放 onCreate，
+     * 否则只是启动服务什么都没干也会常驻一条通知），否则退到后台会被系统回收，
+     * 下载半截且通知永久卡住。任何异常（后台启动限制、缺权限等）只记日志，绝不崩。
+     */
+    private fun startForegroundCompat() {
+        try {
+            val notification = downloadNotify.buildForegroundNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14 (API 34)
+                startForeground(
+                    downloadNotify.notificationID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(downloadNotify.notificationID, notification)
+            }
+            logToFile("startForeground OK")
+        } catch (e: Exception) {
+            logToFile("startForeground FAILED: ${e.message}")
+            android.util.Log.e(TAG, "startForeground failed", e)
+        }
+    }
+
+    /**
+     * 退出前台状态并撤下常驻通知：任务完成/失败时若不撤，“正在下载”会永久挂在通知栏
+     */
+    private fun stopForegroundCompat() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) { // API 24+
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (e: Exception) {
+            logToFile("stopForeground FAILED: ${e.message}")
+        }
     }
 
     private fun readDownloadList() {
@@ -199,7 +280,13 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         downloadListVersion.value++
         val curDl = curDownload.value
         logToFile("createDownload: curDownload=${curDl?.status} curDl.id=${curDl?.id} waitQueue=${waitDownloadQueue.size}")
-        if (curDl == null) {
+        // 失败态（status < 0）只是 stopDownload 刻意保留给 UI 看的残留，调度上必须当成空闲，
+        // 否则一次失败之后新任务永远躺在 waitDownloadQueue 里（nextDownload 只在 stop/complete 末尾调用，
+        // 此时队列为空，再没有任何触发点）。失败提示仍有错误通知，不会丢。
+        if (curDl != null && curDl.status < 0) {
+            curDownload.value = null
+        }
+        if (curDownload.value == null) {
             logToFile("createDownload: STARTING immediately")
             startDownload(biliDownInfo)
         } else {
@@ -226,6 +313,11 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
      */
     fun startDownload(biliDownInfo: BiliDownloadEntryAndPathInfo) = launch {
         logToFile("startDownload: entry.name=${biliDownInfo.entry.name} entryDirPath=${biliDownInfo.entryDirPath}")
+        // 真正开跑就从等待队列里摘掉：否则暂停/失败后 nextDownload() 又会把它从队列里取出来重启
+        //（用户看到"已暂停"，过一会儿它自己又跑起来；失败项也会被悄悄重跑一次）
+        waitDownloadQueue.removeAll { it.entry.key == biliDownInfo.entry.key }
+        // 真正有任务要跑了才提升前台服务
+        startForegroundCompat()
         // 取消当前任务
         downloadManager?.cancel()
         audioDownloadManager?.cancel()
@@ -276,6 +368,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                     status = CurrentDownloadInfo.STATUS_FAIL_DANMAKU,
                 )
                 e.printStackTrace()
+                // 失败要让用户看到：以前只写日志 + 状态被清掉，界面只剩"暂停中"
+                try { downloadNotify.showErrorStatusNotify(currentDownloadInfo) } catch (e2: Exception) { logToFile("notify FAIL_DANMAKU failed: ${e2.message}") }
                 stopDownload()
                 return@launch
             }
@@ -323,6 +417,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                     val segments = mediaFileInfo.segment_list
                     if (segments.isEmpty()) throw Exception("segment_list为空")
                     pendingSegments = segments.sortedBy { it.order }.toMutableList()
+                    completedSegmentBytes = 0L // 新一轮多分片下载，整体进度从 0 累计
                     startNextSegment(currentDownloadInfo, mediaFileInfo, videoDir, httpHeader)
                 }
                 is BiliDownloadMediaFileInfo.Type2 -> {
@@ -380,6 +475,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 status = CurrentDownloadInfo.STATUS_FAIL_PLAYURL,
             )
             e.printStackTrace()
+            try { downloadNotify.showErrorStatusNotify(currentDownloadInfo) } catch (e2: Exception) { logToFile("notify FAIL_PLAYURL failed: ${e2.message}") }
             stopDownload()
         }
     }
@@ -453,8 +549,16 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 cur.id == it.entry.key
             }
             if (entryAndPathInfo != null) {
-                entryAndPathInfo.entry.total_bytes = cur.size
-                entryAndPathInfo.entry.downloaded_bytes = cur.progress
+                val type1MediaInfo = curMediaFileInfo as? BiliDownloadMediaFileInfo.Type1
+                if (type1MediaInfo != null) {
+                    // Type1 多分片：整体进度 = 已完成分片累计 + 当前分片进度，
+                    // 直接写 cur.size/cur.progress 只是单个分片的量，比例会错乱
+                    entryAndPathInfo.entry.total_bytes = type1MediaInfo.segment_list.sumOf { it.bytes }
+                    entryAndPathInfo.entry.downloaded_bytes = completedSegmentBytes + cur.progress
+                } else {
+                    entryAndPathInfo.entry.total_bytes = cur.size
+                    entryAndPathInfo.entry.downloaded_bytes = cur.progress
+                }
                 updateBiliDownloadEntryJson(
                     entryAndPathInfo.entryDirPath,
                     entryAndPathInfo.entry,
@@ -535,6 +639,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 return
             }
         }
+        // 队列已空（当前任务已完成/失败/暂停）：退出前台状态，否则常驻通知会一直显示“正在下载”
+        stopForegroundCompat()
     }
 
     override fun onBind(p0: Intent?): IBinder? {
@@ -554,7 +660,15 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 info.id == it.entry.key
             }
             if (entryAndPathInfo != null) {
-                entryAndPathInfo.entry.total_bytes = info.size
+                val type1MediaInfo = curMediaFileInfo as? BiliDownloadMediaFileInfo.Type1
+                if (type1MediaInfo != null) {
+                    // Type1 多分片：分母写全部分片之和、分子写已完成分片累计，
+                    // 只写当前分片的 size 会让 entry.json 里的进度比例错乱
+                    entryAndPathInfo.entry.total_bytes = type1MediaInfo.segment_list.sumOf { it.bytes }
+                    entryAndPathInfo.entry.downloaded_bytes = completedSegmentBytes
+                } else {
+                    entryAndPathInfo.entry.total_bytes = info.size
+                }
                 updateBiliDownloadEntryJson(
                     entryAndPathInfo.entryDirPath,
                     entryAndPathInfo.entry,
@@ -569,6 +683,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         // 当 Content-Length 未知时 info.size = -1 (chunked encoding)
         // size > 0 且 progress < size 才是真的未完成
         if (info.size > 0 && info.progress < info.size) {
+            // 原来这里直接 return，任务再没有任何回调 → 永远停在“正在下载”的静默死状态。
+            // 按失败处理：发错误通知并结束当前任务，让等待队列继续。
+            logToFile("onTaskComplete: progress=${info.progress} < size=${info.size}, treat as FAILED")
+            onTaskError(info, IOException("下载未完成：${info.progress}/${info.size}"))
             return
         }
         // Type1 多分片：还有分片未下载则继续，全部完成则合并为单文件
@@ -576,6 +694,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             val entryInfo = curBiliDownloadEntryAndPathInfo
             if (entryInfo != null && pendingSegments.isNotEmpty()) {
                 val mediaInfo = curMediaFileInfo as BiliDownloadMediaFileInfo.Type1
+                completedSegmentBytes += info.progress // 本分片已完成，累计进整体进度
                 startNextSegment(
                     info,
                     mediaInfo,

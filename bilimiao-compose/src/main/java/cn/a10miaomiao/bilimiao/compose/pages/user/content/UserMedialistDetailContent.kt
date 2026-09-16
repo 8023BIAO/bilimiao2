@@ -199,14 +199,16 @@ private class UserMedialistDetailViewMode(
     fun openVideo(item: MediaListV2Info) {
         if (isAutoPlay) {
             addPlayList()
-            if (playerStore.state.cid != item.id) {
+            // pages 为空的条目（失效/仅音频）不能起播：原来直接 pages[0] 会越界崩溃
+            val firstPage = item.pages.firstOrNull()
+            if (firstPage != null && playerStore.state.cid != item.id) {
                 playerDelegate.openPlayer(
                     VideoPlayerSource(
                         mainTitle = item.title,
                         title = item.title,
                         coverUrl = item.cover,
                         aid = item.id,
-                        id = item.pages[0].id,
+                        id = firstPage.id,
                         ownerId = item.upper.mid,
                         ownerName = item.upper.name,
                     )

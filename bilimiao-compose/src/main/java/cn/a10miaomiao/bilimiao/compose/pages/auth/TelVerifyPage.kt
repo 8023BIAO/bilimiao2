@@ -248,7 +248,8 @@ private class TelVerifyPageViewModel(
         }
         if (res.isSuccess) {
             startCountdown(60)
-            captchaKey = res.requireData().captcha_key!!
+            // captcha_key 可能为 null（接口没下发时），!! 会直接崩；兜底成空串
+            captchaKey = res.requireData().captcha_key ?: ""
             toast("已发送短信验证码")
             return true
         } else {
@@ -274,7 +275,8 @@ private class TelVerifyPageViewModel(
         }
         if (res.isSuccess) {
             startCountdown(60)
-            captchaKey = res.requireData().captcha_key!!
+            // captcha_key 可能为 null（接口没下发时），!! 会直接崩；兜底成空串
+            captchaKey = res.requireData().captcha_key ?: ""
             toast("已发送邮箱验证码")
             return true
         } else {
@@ -300,10 +302,18 @@ private class TelVerifyPageViewModel(
     }
 
     override suspend fun getGTApiJson(): JSONObject? {
-        val res = withContext(Dispatchers.IO) {
-            BiliApiService.authApi.captchaPre()
-                .awaitCall()
-                .json<ResponseData<CaptchaPreInfo>>()
+        val res = try {
+            withContext(Dispatchers.IO) {
+                BiliApiService.authApi.captchaPre()
+                    .awaitCall()
+                    .json<ResponseData<CaptchaPreInfo>>()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 断网时 captchaPre 抛 IOException，原先会冒泡到调用方的 launch → 崩进程
+            toast("获取验证信息失败：${e.message}")
+            return null
         }
         if (res.isSuccess) {
             val resData = res.requireData()

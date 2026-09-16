@@ -36,6 +36,7 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.pages.user.content.UserSearchArchiveContent
 import cn.a10miaomiao.bilimiao.compose.pages.user.content.UserSearchDynamicContent
+import com.a10miaomiao.bilimiao.comm.mypage.MenuActions
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.mypage.SearchConfigInfo
 import com.a10miaomiao.bilimiao.comm.mypage.myMenu
@@ -110,6 +111,16 @@ private class UserSpaceSearchPageViewModel(
         rankOrder.value = value
     }
 
+    /**
+     * 菜单里的「继续搜索」：用新关键字再开一个搜索结果页。
+     * 原先 PageListener 传的是 null → 输入关键字后什么都不发生（搜索死路）；
+     * 这里与 UserSpacePage 的搜索入口保持一致。
+     */
+    fun searchAgain(mid: Long, keyword: String) {
+        if (keyword.isBlank()) return
+        pageNavigation.navigate(UserSpaceSearchPage(id = mid.toString(), keyword = keyword))
+    }
+
 }
 
 
@@ -160,6 +171,9 @@ private fun UserSpaceSearchPageContent(
             }
             myItem {
                 key = MenuKeys.search
+                // 少了这行 action，AppBar 不会走"打开搜索输入框"的分支，
+                // 页面自己的 when(item.key) 又没有 MenuKeys.search → 点了完全没反应
+                action = MenuActions.search
                 title = "继续搜索"
                 iconFileName = "ic_search_gray"
             }
@@ -176,7 +190,8 @@ private fun UserSpaceSearchPageContent(
                 in 1..3 -> viewModel.changeRankOrder(item.action ?: "")
             }
         },
-        onSearchSelfPage = null
+        // 「继续搜索」：用新关键字重开搜索结果页（原先为 null → 搜索无反应）
+        onSearchSelfPage = { kw -> viewModel.searchAgain(mid, kw) }
     )
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsState().value

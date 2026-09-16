@@ -101,6 +101,7 @@ class MainReplyViewModel(
     private fun loadData() = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val req = MainListReq(
                 oid = oid.toLong(),
                 type = type.toLong(),
@@ -186,7 +187,9 @@ class MainReplyViewModel(
             val isLike = item.replyControl?.action == 1L
             val newAction = if (isLike) 0 else 1
             val res = BiliApiService.commentApi
-                .action(1, item.oid.toString(), item.id.toString(), newAction)
+                // 这里原来写死 1（视频评论区类型），动态(17)/专栏等页面点赞必然失败；
+                // 本 ViewModel 的 type 就是当前评论区类型
+                .action(type, item.oid.toString(), item.id.toString(), newAction)
                 .awaitCall()
                 .json<MessageInfo>()
             if (res.isSuccess) {
@@ -226,7 +229,9 @@ class MainReplyViewModel(
             val isLike = item.replyControl?.action == 1L
             val newAction = if (isLike) 0 else 1
             val res = BiliApiService.commentApi
-                .action(1, item.oid.toString(), item.id.toString(), newAction)
+                // 这里原来写死 1（视频评论区类型），动态(17)/专栏等页面点赞必然失败；
+                // 本 ViewModel 的 type 就是当前评论区类型
+                .action(type, item.oid.toString(), item.id.toString(), newAction)
                 .awaitCall()
                 .json<MessageInfo>()
             if (res.isSuccess) {

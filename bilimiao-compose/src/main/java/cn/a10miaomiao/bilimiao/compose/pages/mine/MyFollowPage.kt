@@ -41,6 +41,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -389,11 +391,9 @@ private fun MyFollowPageContent() {
     }
     if (tagEditDialogState != null) {
         var tagText by remember(tagEditDialogState) {
-            if (tagEditDialogState is TagEditDialogState.Update) {
-                mutableStateOf(tagEditDialogState.name)
-            } else {
-                mutableStateOf("")
-            }
+            // 光标放末尾：String 重载会让编辑分组名时光标停在开头
+            val initText = if (tagEditDialogState is TagEditDialogState.Update) tagEditDialogState.name else ""
+            mutableStateOf(TextFieldValue(initText, TextRange(initText.length)))
         }
         var loading by remember {
             mutableStateOf(false)
@@ -404,11 +404,11 @@ private fun MyFollowPageContent() {
                 loading = true
                 when (val state = tagEditDialogState) {
                     is TagEditDialogState.Add -> {
-                        viewModel.addTag(tagText)
+                        viewModel.addTag(tagText.text)
                     }
 
                     is TagEditDialogState.Update -> {
-                        viewModel.updateTag(state.id, tagText)
+                        viewModel.updateTag(state.id, tagText.text)
                     }
 
                     null -> Unit

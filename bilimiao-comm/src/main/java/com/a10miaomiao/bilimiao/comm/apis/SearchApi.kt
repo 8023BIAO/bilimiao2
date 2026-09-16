@@ -3,6 +3,7 @@ package com.a10miaomiao.bilimiao.comm.apis
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
+import java.net.URLEncoder
 
 class SearchApi {
 
@@ -11,7 +12,9 @@ class SearchApi {
      * 关键字列表
      */
     fun suggestList(keyword: String) = MiaoHttp.request {
-        url = "https://s.search.bilibili.com/main/suggest?suggest_type=accurate&sub_type=tag&main_ver=v1&term=$keyword"
+        // 直接拼接 term 时，搜索词里的 & # + 会被当成 URL 结构（如 "C#" 会在 # 处截断），必须转义
+        // 调用方传入的是原始搜索词，这里只编码一次
+        url = "https://s.search.bilibili.com/main/suggest?suggest_type=accurate&sub_type=tag&main_ver=v1&term=${URLEncoder.encode(keyword, "UTF-8")}"
     }
 
     /**

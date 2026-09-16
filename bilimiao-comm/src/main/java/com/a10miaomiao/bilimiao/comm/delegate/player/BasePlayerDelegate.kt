@@ -21,6 +21,12 @@ interface BasePlayerDelegate: BaseDelegate {
     fun currentPosition(): Long
     fun sendDanmaku(type: Int, danmakuText: String, danmakuTextSize: Float, danmakuTextColor: Int, danmakuPosition: Long)
 
+    /** 打开弹幕编辑框：记住之前是否在播放，并按需暂停（默认空实现，子类覆盖） */
+    fun openDanmakuEditor() {}
+
+    /** 关闭弹幕编辑框：只有"打开前本来在播放"才恢复播放，用户自己暂停过的不要自动播 */
+    fun closeDanmakuEditor() {}
+
     fun setProxy(proxyServer: ProxyServerInfo, uposHost: String)
 
     // 通知栏控制器委托方法（默认空实现，子类按需覆盖）

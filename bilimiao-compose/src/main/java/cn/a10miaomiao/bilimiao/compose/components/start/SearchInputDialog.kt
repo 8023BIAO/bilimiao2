@@ -45,7 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
@@ -68,7 +70,11 @@ fun SearchInputDialog(
     val pageNavigation: PageNavigation by rememberInstance()
     val activity: Activity by rememberInstance()
 
-    var text by remember { mutableStateOf(initKeyword) }
+    var textValue by remember {
+        // 同 SearchInputInline：String 重载会让光标停在开头，这里显式把 selection 放到末尾
+        mutableStateOf(TextFieldValue(initKeyword, TextRange(initKeyword.length)))
+    }
+    val text = textValue.text
     var mode by remember { mutableStateOf(initMode) }
     val focusRequester = remember { FocusRequester() }
 
@@ -197,8 +203,8 @@ fun SearchInputDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .focusRequester(focusRequester),
-                            value = text,
-                            onValueChange = { text = it },
+                            value = textValue,
+                            onValueChange = { textValue = it },
                             singleLine = true,
                             placeholder = { Text("输入ID或关键字") },
                             leadingIcon = { Icon(
@@ -206,8 +212,8 @@ fun SearchInputDialog(
                                 contentDescription = null
                             ) },
                             trailingIcon = {
-                                if (text.isNotEmpty()) {
-                                    IconButton(onClick = { text = "" }) {
+                                if (textValue.text.isNotEmpty()) {
+                                    IconButton(onClick = { textValue = TextFieldValue("") }) {
                                         Icon(Icons.Default.Close, contentDescription = "清空")
                                     }
                                 }

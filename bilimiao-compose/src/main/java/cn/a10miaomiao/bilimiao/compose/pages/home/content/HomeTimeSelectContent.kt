@@ -141,6 +141,7 @@ private class HomeTimeSelectContentViewModel(
                 val region = regions[pendingRegionIndex]
                 pendingRegionIndex++
                 list.loading.value = true
+                list.fail.value = ""   // 开始加载就清掉上一次的失败提示
 
                 try {
                     val res = BiliApiService.regionAPI

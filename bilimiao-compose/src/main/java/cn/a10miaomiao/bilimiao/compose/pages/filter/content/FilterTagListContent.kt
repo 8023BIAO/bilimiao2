@@ -37,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -98,8 +100,10 @@ internal fun FilterTagListContent() {
     var inputMode by remember {
         mutableIntStateOf(-2)
     }
+    // 用 TextFieldValue：String 重载的初始 selection 是 0，
+    // 点编辑已有条目时光标会停在最前面
     var inputText by remember {
-        mutableStateOf("")
+        mutableStateOf(TextFieldValue(""))
     }
 
     Column(
@@ -173,7 +177,7 @@ internal fun FilterTagListContent() {
                             .fillMaxWidth()
                             .clickable {
                                 inputMode = index
-                                inputText = tag
+                                inputText = TextFieldValue(tag, TextRange(tag.length))
                             }
                     ) {
                         Checkbox(
@@ -227,20 +231,20 @@ internal fun FilterTagListContent() {
     }
     fun handleDismiss() {
         inputMode = -2
-        inputText = ""
+        inputText = TextFieldValue("")
         errorText = ""
     }
 
     fun handleConfirm() {
-        if (inputText.isBlank()) {
+        if (inputText.text.isBlank()) {
             errorText = "请输入标签"
             return
         }
         if (inputMode < 0) {
-            viewModel.addTag(inputText)
+            viewModel.addTag(inputText.text)
         } else {
             val oldWord = filterTagList[inputMode]
-            viewModel.setTag(oldWord, inputText)
+            viewModel.setTag(oldWord, inputText.text)
         }
         handleDismiss()
     }

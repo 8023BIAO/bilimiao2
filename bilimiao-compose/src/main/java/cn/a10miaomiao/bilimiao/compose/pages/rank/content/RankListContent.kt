@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
+import cn.a10miaomiao.bilimiao.compose.pages.bangumi.SeasonCheckPage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import bilibili.app.show.v1.RankAllResultReq
@@ -50,6 +51,7 @@ private class RankListContentViewModel(
 ) : ViewModel(), DIAware {
 
     private val pageNavigation by instance<PageNavigation>()
+    private val filterStore by instance<com.a10miaomiao.bilimiao.comm.store.FilterStore>()
 
     val count = MutableStateFlow(1)
     val isRefreshing = MutableStateFlow(false)
@@ -64,6 +66,9 @@ private class RankListContentViewModel(
         pageNum: Int = list.pageNum
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
+            // 之前从不置 loading，界面上永远看不到"加载中"
+            list.loading.value = true
+            list.fail.value = ""
             val result = BiliGRPCHttp.request {
                 if (regionId == 0) {
                     val req = RankAllResultReq(
@@ -81,23 +86,20 @@ private class RankListContentViewModel(
                     RankGRPC.rankRegion(req)
                 }
             }.awaitCall()
-//            var totalCount = 0 // 屏蔽前数量
-//            if (result.size < list.pageSize) {
-//                ui.setState { list.finished = true }
-//            }
-//            totalCount = result.size
-//            result = result.filter {
-//                filterStore.filterWord(it.title)
-//                        && filterStore.filterUpper(it.mid.toLong())
-//            }
+            // 排行榜以前不吃屏蔽规则，首页/时光姬却吃 → 同一个屏蔽设置在不同列表表现不一致
+            val items = result.items.filter {
+                filterStore.filterWord(it.title) && filterStore.filterUpper(it.mid.toString())
+            }
             if (pageNum == 1) {
-                list.data.value = result.items
+                list.data.value = items
             } else {
                 list.data.value = list.data.value
                     .toMutableList()
-                    .also { it.addAll(result.items) }
+                    .also { it.addAll(items) }
             }
             list.pageNum = pageNum
+            // 之前从不写 finished，底部永远停在"加载更多"
+            list.finished.value = result.items.size < list.pageSize
 //            if (list.data.size < 10 && totalCount != result.size) {
 //                _loadData(pageNum + 1)
 //            }
@@ -112,7 +114,9 @@ private class RankListContentViewModel(
 
     fun loadMore() {
         if (!list.finished.value && !list.loading.value) {
-            loadData(list.pageNum + 1)
+            // 首屏失败时点重试走的也是这里：列表为空必须重拉第 1 页，
+            // 否则会请求 pn=2 并塞进空列表 → 排行榜把第 21-40 名显示成第 1-20 名
+            loadData(if (list.data.value.isEmpty()) 1 else list.pageNum + 1)
         }
     }
 
@@ -126,7 +130,13 @@ private class RankListContentViewModel(
     }
 
     fun toVideoDetail(item: bilibili.app.show.v1.Item) {
-        pageNavigation.navigateToVideoInfo(item.param)
+        // 榜单里番剧/国创/影视分区的条目 goto=bangumi，原来一律按投稿 avid 打开 →
+        // 加载失败或者串到别的视频；首页是正确分流的，这里对齐
+        if (item.goto == "bangumi") {
+            pageNavigation.navigate(SeasonCheckPage(epId = item.param))
+        } else {
+            pageNavigation.navigateToVideoInfo(item.param)
+        }
     }
 }
 

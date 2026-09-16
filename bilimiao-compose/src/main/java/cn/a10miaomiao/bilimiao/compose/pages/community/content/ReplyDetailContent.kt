@@ -140,6 +140,7 @@ private class ReplyDetailContentViewModel(
     private fun loadData() = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val req = DetailListReq(
                 oid = currentReply.oid,
                 type = currentReply.type,

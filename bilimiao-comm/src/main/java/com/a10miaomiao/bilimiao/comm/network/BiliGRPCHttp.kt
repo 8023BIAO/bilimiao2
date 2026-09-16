@@ -16,7 +16,7 @@ import java.util.zip.GZIPInputStream
 import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 class BiliGRPCHttp<ReqT : Message, RespT : Message>(
     val method: GRPCMethod<ReqT, RespT>
@@ -167,9 +167,12 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
             "name" to method.name,
             "reqMessage" to method.reqMessage
         )
-        return suspendCoroutine { continuation ->
+        return suspendCancellableCoroutine { continuation ->
             val req = buildRequest()
-            client.newCall(req).enqueue(object : Callback {
+            val call = client.newCall(req)
+            // 协程取消时把底层请求也取消：否则退出页面/切视频后 gRPC 仍会把整个响应体读完
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     continuation.resumeWithException(e)
                 }

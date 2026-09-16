@@ -82,8 +82,14 @@ private class MyImagePreviewerController(
                 }
             }
 
+                override fun onLoadFailed(errorDrawable: Drawable?) {
+                    // Glide 加载失败走的是 onLoadFailed，不是 onLoadCleared：
+                    // 以前这里没人实现，断网/404 时"正在下载图片"会永远转圈
+                    toast("原图下载失败")
+                    isDownloading.value = false
+                }
+
             override fun onLoadCleared(placeholder: Drawable?) {
-                toast("原图下载失败")
                 isDownloading.value = false
             }
         }
@@ -115,8 +121,14 @@ private class MyImagePreviewerController(
                 }
             }
 
+                override fun onLoadFailed(errorDrawable: Drawable?) {
+                    // Glide 加载失败走的是 onLoadFailed，不是 onLoadCleared：
+                    // 以前这里没人实现，断网/404 时"正在下载图片"会永远转圈
+                    toast("原图下载失败")
+                    isDownloading.value = false
+                }
+
             override fun onLoadCleared(placeholder: Drawable?) {
-                toast("原图下载失败")
                 isDownloading.value = false
             }
         }

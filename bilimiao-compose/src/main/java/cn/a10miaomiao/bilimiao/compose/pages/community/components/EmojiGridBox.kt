@@ -39,7 +39,9 @@ import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
@@ -67,10 +69,13 @@ fun EmojiGridBox(
     LaunchedEffect(Unit) {
         try {
             loading.value = true
-            val res = BiliApiService.commentApi
-                .emoteList()
-                .awaitCall()
-                .json<ResponseData<UserEmotePanelInfo>>()
+            // awaitCall 只等到响应头，body.string() 是阻塞读：放 IO 线程，避免主线程卡住表情面板
+            val res = withContext(Dispatchers.IO) {
+                BiliApiService.commentApi
+                    .emoteList()
+                    .awaitCall()
+                    .json<ResponseData<UserEmotePanelInfo>>()
+            }
             if (res.isSuccess) {
                 val result = res.requireData()
                 packageList.clear()
@@ -163,10 +168,13 @@ private fun EmojiGrid(
     LaunchedEffect(emoteId) {
         try {
             loading.value = true
-            val res = BiliApiService.commentApi
-                .emoteList(emoteId.toString())
-                .awaitCall()
-                .json<ResponseData<UserEmotePackagesInfo>>()
+            // 同上：请求 + JSON 解析整体放 IO 线程，写状态仍留在主线程
+            val res = withContext(Dispatchers.IO) {
+                BiliApiService.commentApi
+                    .emoteList(emoteId.toString())
+                    .awaitCall()
+                    .json<ResponseData<UserEmotePackagesInfo>>()
+            }
             if (res.isSuccess) {
                 val result = res.requireData()
                 val emoteList = result.packages

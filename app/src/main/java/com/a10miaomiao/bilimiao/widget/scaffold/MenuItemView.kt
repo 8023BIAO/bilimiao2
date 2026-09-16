@@ -55,6 +55,8 @@ open class MenuItemView @JvmOverloads constructor(
         if (prop.title == null) {
             ui.title.visibility = View.GONE
         } else {
+            // 之前只设文本没恢复可见性：先进过 title 为空的页面后，菜单文字就再也不显示了
+            ui.title.visibility = View.VISIBLE
             ui.title.text = prop.title
         }
         val subTitle = prop.subTitle

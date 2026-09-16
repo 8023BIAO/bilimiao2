@@ -75,8 +75,12 @@ class ImageSaveUtil(
                     )
                 }
 
-                override fun onLoadCleared(placeholder: Drawable?) {
+                override fun onLoadFailed(errorDrawable: Drawable?) {
+                    // 失败走 onLoadFailed（onLoadCleared 是"被清理"）→ 以前点了保存图片失败时完全没反应
                     toast("原图下载失败")
+                }
+
+                override fun onLoadCleared(placeholder: Drawable?) {
                 }
             })
     }
@@ -92,10 +96,11 @@ class ImageSaveUtil(
             fileName: String,
             bitmap: Bitmap
         ) {
-            try {
-                saveImageToAlbum(activity, fileName, bitmap)
+            // saveImageToAlbum 内部把异常吞掉了，外层 catch 永远不会触发，
+            // 只能靠返回值判断是否真的写入相册，否则失败也会提示"已保存"且私有目录回退是死代码
+            if (saveImageToAlbum(activity, fileName, bitmap)) {
                 toast("已保存至系统相册，文件名:${fileName}")
-            } catch (e: Exception) {
+            } else {
                 saveToPrivateDir(activity, fileName, bitmap)
             }
         }
@@ -105,10 +110,10 @@ class ImageSaveUtil(
             fileName: String,
             inputFile: File
         ) {
-            try {
-                saveImageToAlbum(activity, fileName, inputFile)
+            // 同上：按返回值判断是否回退，避免失败也报"已保存至系统相册"
+            if (saveImageToAlbum(activity, fileName, inputFile)) {
                 toast("已保存至系统相册，文件名:${fileName}")
-            } catch (e: Exception) {
+            } else {
                 saveToPrivateDir(activity, fileName, inputFile)
             }
         }
@@ -170,12 +175,13 @@ class ImageSaveUtil(
 
         /**
          * 将文件保存到公共的媒体文件夹
+         * @return 是否真正写入成功（插入 uri 失败、拿不到输出流、写异常都算失败）
          */
         private fun saveImageToAlbum(
             context: Context,
             fileName: String,
             bitmap: Bitmap
-        ) {
+        ): Boolean {
             try {
                 val imageFormat = getImageFormat(fileName)
                 //设置保存参数到ContentValues中
@@ -194,28 +200,31 @@ class ImageSaveUtil(
                 val contentResolver = context.contentResolver
 
                 val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                if (uri != null) {
-                    //若生成了uri，则表示该文件添加成功
-                    //使用流将内容写入该uri中即可
-                    val outputStream = contentResolver.openOutputStream(uri)
-                    outputStream?.use {
-                        bitmap.compress(imageFormat.first, 90, it)
-                        it.flush()
-                    }
+                    ?: return false
+                //若生成了uri，则表示该文件添加成功
+                //使用流将内容写入该uri中即可
+                val outputStream = contentResolver.openOutputStream(uri)
+                    ?: return false
+                outputStream.use {
+                    bitmap.compress(imageFormat.first, 90, it)
+                    it.flush()
                 }
+                return true
             } catch (e: Exception) {
                 e.printStackTrace()
+                return false
             }
         }
 
         /**
          * 将文件保存到公共的媒体文件夹
+         * @return 是否真正写入成功（插入 uri 失败、拿不到输出流、写异常都算失败）
          */
         private fun saveImageToAlbum(
             context: Context,
             fileName: String,
             inputFile: File
-        ) {
+        ): Boolean {
             try {
                 val imageFormat = getImageFormat(fileName)
                 val contentValues = ContentValues()
@@ -224,17 +233,19 @@ class ImageSaveUtil(
                 contentValues.put(MediaStore.Images.Media.MIME_TYPE, imageFormat.second)
                 val contentResolver = context.contentResolver
                 val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                if (uri != null) {
-                    val outputStream = contentResolver.openOutputStream(uri)
-                    outputStream?.use { output ->
-                        inputFile.inputStream().use { input ->
-                            input.copyTo(output)
-                        }
-                        outputStream.flush()
+                    ?: return false
+                val outputStream = contentResolver.openOutputStream(uri)
+                    ?: return false
+                outputStream.use { output ->
+                    inputFile.inputStream().use { input ->
+                        input.copyTo(output)
                     }
+                    outputStream.flush()
                 }
+                return true
             } catch (e: Exception) {
                 e.printStackTrace()
+                return false
             }
         }
 

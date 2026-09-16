@@ -54,6 +54,31 @@ import com.bumptech.glide.integration.compose.placeholder
 import kotlin.math.max
 import kotlin.math.min
 
+/** 评论正文解析用的时间戳/分隔符正则：提成文件级常量，避免每个节点都重新编译 */
+private val TIMESTAMP_REGEX = Regex("\\d{1,3}[:：]\\d{1,2}(?:[:：]\\d{1,2})?")
+private val TIME_SEP_REGEX = Regex("[:：]")
+
+/** 评论正文里需要识别的固定模式（URL/av/BV/ac/sm/cv/时间戳/表情） */
+private val REPLY_TEXT_REGEX_BASE = """(?i)""" +
+        """(\b(https?://|www\.)[\w-]+(\.[\w-]+)+([/\S]*)*\b)|""" +  // URL（优先匹配）
+        """(\b(av\d{1,15})\b)|""" +     // B站av号（1-15位数字）
+        """(\b(BV[\dA-Za-z]{10})\b)|""" + // B站BV号（固定10位）
+        """(\b(ac\d{1,10})\b)|""" +     // A站ac号（1-10位数字）
+        """(\b(sm\d{1,10})\b)|""" +     // Niconico sm号（1-10位数字）
+        """(\b(cv\d{1,8})\b)|""" +      // B站专栏cv号（1-8位数字）
+        """(\d{1,3}[:：]\d{1,2}(?:[:：]\d{1,2})?)|""" + // 时间戳
+        """(\[[^\[\]\s]{1,30}])"""     // 匹配emote表情
+
+/**
+ * 拼接完整正则：@用户名 这一支只有在真的有名字时才追加。
+ * 原实现结尾固定留一个 `|`，@列表为空时会匹配空串，导致 find 出的节点数暴增。
+ */
+private fun buildReplyTextRegex(atNames: Set<String>): Regex {
+    if (atNames.isEmpty()) return Regex(REPLY_TEXT_REGEX_BASE)
+    val atPart = atNames.joinToString("|") { Regex.escape(it) }
+    return Regex("$REPLY_TEXT_REGEX_BASE|@(?:$atPart)")
+}
+
 @Stable
 class ReplyItemBoxPictureInfo(
     val src: String,
@@ -84,18 +109,10 @@ class ReplyItemBoxContentInfo(
 
     @Composable
     fun toAnnotatedTextNode(): List<AnnotatedTextNode> {
-        val regex = Regex(
-            """(?i)""" +  // 忽略大小写
-                    """(\b(https?://|www\.)[\w-]+(\.[\w-]+)+([/\S]*)*\b)|""" +  // URL（优先匹配）
-                    """(\b(av\d{1,15})\b)|""" +     // B站av号（1-15位数字）
-                    """(\b(BV[\dA-Za-z]{10})\b)|""" + // B站BV号（固定10位）
-                    """(\b(ac\d{1,10})\b)|""" +     // A站ac号（1-10位数字）
-                    """(\b(sm\d{1,10})\b)|""" +     // Niconico sm号（1-10位数字）
-                    """(\b(cv\d{1,8})\b)|""" +         // B站专栏cv号（1-8位数字）
-                    """(\d{1,3}[:：]\d{1,2}(?:[:：]\d{1,2})?)|""" + // 时间戳 0:00 / 00:00 / 0:00:00 / 00:00:00
-                    """(\[[^\[\]\s]{1,30}])|""" + // 匹配emote表情
-                    """@(?:${atNameToMid.keys.joinToString("|") { Regex.escape(it) }})""" // 匹配@用户名
-        )
+        // 以前每次重组都重新编译这条正则（还把全部 @用户名 拼在里面，可能几百个），
+        // 是评论列表滑动卡顿的大头；现在只按 atNameToMid 缓存一次。
+        // 另外原来结尾固定带一个 `|`，@列表为空时会退化成"匹配空串"，节点数会爆炸，这里一并修掉。
+        val regex = remember(atNameToMid) { buildReplyTextRegex(atNameToMid.keys) }
         val nodes = mutableListOf<AnnotatedTextNode>()
         var lastEnd = 0
         regex.findAll(message).forEach {
@@ -127,8 +144,8 @@ class ReplyItemBoxContentInfo(
                 } else {
                     nodes.add(AnnotatedTextNode.Text(nodeText))
                 }
-            } else if (nodeText.matches(Regex("\\d{1,3}[:：]\\d{1,2}(?:[:：]\\d{1,2})?"))) {
-                val seconds = nodeText.split(Regex("[:：]")).map { it.toInt() }.let { parts ->
+            } else if (nodeText.matches(TIMESTAMP_REGEX)) {
+                val seconds = nodeText.split(TIME_SEP_REGEX).map { it.toInt() }.let { parts ->
                     when (parts.size) {
                         2 -> parts[0] * 60 + parts[1]
                         3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]

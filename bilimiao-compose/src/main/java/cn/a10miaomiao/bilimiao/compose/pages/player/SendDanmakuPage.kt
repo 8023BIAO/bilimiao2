@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
@@ -36,6 +37,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavBackStackEntry
+import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
@@ -65,6 +67,11 @@ class SendDanmakuPage : ComposePage() {
     @Composable
     override fun Content() {
         val viewModel: SendDanmakuViewModel = diViewModel()
+        // 编辑框不管是发送成功关闭、返回键关闭还是点空白关闭，都要按"打开前是否在播放"决定恢复播放。
+        // 发送成功那条路径里 sendDanmaku() 已经恢复过了，closeDanmakuEditor() 里 isPause() 判断保证不会重复恢复。
+        DisposableEffect(Unit) {
+            onDispose { viewModel.onEditorClosed() }
+        }
         SendDanmakuPageContent(viewModel)
     }
 }
@@ -81,6 +88,9 @@ internal class SendDanmakuViewModel(
     private val pageNavigation by instance<PageNavigation>()
     private val playerDelegate by instance<BasePlayerDelegate>()
     private val userStore by instance<UserStore>()
+    // 本页由 PlayerController 通过 activity.openBottomSheet(SendDanmakuPage()) 打开，
+    // 不在 nav 返回栈里，只能靠 BottomSheetState 关（见 ComposeFragment 的 DI 绑定）
+    private val bottomSheetState by instance<BottomSheetState>()
 
     val focusRequester = FocusRequester()
 
@@ -179,8 +189,15 @@ internal class SendDanmakuViewModel(
                             color,
                             currentPosition
                         )
-                        // 发送成功后关闭弹幕编辑界面
-                        pageNavigation.popBackStack()
+                        // 发送成功后关闭弹幕编辑界面。
+                        // 本页是 bottom sheet，不在 nav 返回栈里：原来调 popBackStack()
+                        // 弹掉的是下面的真实页面（播放页），弹幕弹窗反而不关
+                        if (bottomSheetState.page.value is SendDanmakuPage) {
+                            bottomSheetState.close()
+                        } else {
+                            // 兜底：若将来改成 nav 路由打开，仍走返回栈
+                            pageNavigation.popBackStack()
+                        }
                     } else {
                         // 发送失败，保留编辑界面，提示错误信息
                         toast(if (res.message.isNotEmpty()) res.message else "发送失败")
@@ -193,6 +210,11 @@ internal class SendDanmakuViewModel(
                 }
             }
         }
+    }
+
+    /** 编辑框关闭（任何方式）时调用：让播放器按需恢复播放 */
+    fun onEditorClosed() {
+        playerDelegate.closeDanmakuEditor()
     }
 
     fun requestFocus() {

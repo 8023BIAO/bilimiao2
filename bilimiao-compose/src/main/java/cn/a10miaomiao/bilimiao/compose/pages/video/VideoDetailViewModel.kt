@@ -78,7 +78,7 @@ import java.security.MessageDigest
 class VideoDetailViewModel(
     override val di: DI,
     id: String,
-    private val seekPosition: Long? = null,
+    seekPosition: Long? = null,
     private val highlightDanmakuText: String? = null,
 ) : ViewModel(), DIAware {
     private val activity by instance<Activity>()
@@ -112,6 +112,12 @@ class VideoDetailViewModel(
 
     // 此ViewModel启动播放的视频Aid
     private var videoAidToPlay = ""
+
+    /**
+     * 消息页导航带来的 seek 位置：只能消费一次。
+     * 否则切分P/切集重新播放时会一直带着进入页面时那个旧弹幕时间点起播。
+     */
+    private var pendingSeekPosition: Long? = seekPosition
 
     val coinDialogState = VideoCoinDialogState(
         scope = viewModelScope,
@@ -317,10 +323,11 @@ class VideoDetailViewModel(
                         lastPlayCid = history.cid.toString()
                         lastPlayTime = history.progress * 1000L
                     }
-                    // 如果消息页导航携带了 seek 位置，覆盖历史进度
-                    if (seekPosition != null) {
-                        lastPlayTime = seekPosition
+                    // 如果消息页导航携带了 seek 位置，覆盖历史进度（一次性：用掉后置空）
+                    pendingSeekPosition?.let { seek ->
+                        lastPlayTime = seek
                         lastPlayCid = cid.toString()
+                        pendingSeekPosition = null
                     }
                     // 评论空降跳转覆盖，优先级最高
                     if (seekOverride != null) {
@@ -466,7 +473,8 @@ class VideoDetailViewModel(
             )
         )
         reqUser = reqUser?.copy(
-            coin = state,
+            // 这里存的是"我在这个视频上累计投了几枚"，原来直接写成本次数量
+            coin = (reqUser?.coin ?: 0) + state,
         )
         updateArcAndReqUser(videoArc, reqUser)
     }
@@ -620,15 +628,15 @@ class VideoDetailViewModel(
                         }
                     }
                     val uri = activity.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                    uri?.let {
-                        activity.contentResolver.openOutputStream(it)?.use { os ->
-                            os.write(bytes)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            values.clear()
-                            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                            activity.contentResolver.update(it, values, null, null)
-                        }
+                        // insert/开流失败（存储满、无权限）以前也照样提示"封面已保存到相册"
+                        ?: throw Exception("无法写入相册")
+                    activity.contentResolver.openOutputStream(uri)?.use { os ->
+                        os.write(bytes)
+                    } ?: throw Exception("无法写入相册")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        activity.contentResolver.update(uri, values, null, null)
                     }
                 }
                 withContext(Dispatchers.Main) { toast("封面已保存到相册") }
@@ -674,7 +682,13 @@ class VideoDetailViewModel(
             toast("请先登录")
             return
         }
-        coinDialogState.show(aid, copyright)
+        val maxTotal = if (copyright == 2) 1 else 2
+        val coinGiven = detailData.value?.getReqUserData()?.coin ?: 0
+        if (coinGiven >= maxTotal) {
+            toast("这个视频已经投满币了")
+            return
+        }
+        coinDialogState.show(aid, copyright, coinGiven)
     }
 
     fun openAddFavoriteDialog(aid: String) {

@@ -20,6 +20,8 @@ class TimeSettingViewMode(
 
     private val timeSettingStore by instance<TimeSettingStore>()
     private val pageNavigation by instance<PageNavigation>()
+    // 本页是 bottomSheetState.open(TimeSettingPage()) 打开的，不在 nav 返回栈里
+    private val bottomSheetState by instance<cn.a10miaomiao.bilimiao.compose.base.BottomSheetState>()
 
 //    private val calendar = Calendar.getInstance()
 
@@ -60,6 +62,11 @@ class TimeSettingViewMode(
     })
 
     fun setMonthTime(year: Int, month: Int) {
+        // 未来月份选得进去、也能存下来，结果是一条永远查不到内容的时间线
+        if (year > maxDate.year || (year == maxDate.year && month > maxDate.month)) {
+            toast("不能选择未来的月份")
+            return
+        }
         monthTime.value = TimeInfo().apply {
             val dateModel = DateModel()
             dateModel.year = year
@@ -77,7 +84,9 @@ class TimeSettingViewMode(
                 timeFrom.set(start)
                 timeTo.set(end)
             } else if (start != null) {
-                toast("时间间隔不能大于30天")
+                // 只选了开始（或选了超过 30 天的禁用格）：标记成"未选完整"，
+                // 否则 TimeInfo() 的默认值 2009-01-01 会被当成真实区间存下去
+                timeFrom.year = -1
             } else {
                 timeFrom.year = -1
             }
@@ -103,8 +112,9 @@ class TimeSettingViewMode(
             TimeSettingStore.TIME_TYPE_CUSTOM -> customTime.value
             else -> currentTime.value
         })
-        if (timeInfo.timeFrom.year == -1) {
-            toast("请选择时间范围")
+        if (timeInfo.timeFrom.year == -1 || timeInfo.timeTo.year == -1) {
+            // 两端都选了才允许保存：以前只点一个日期就"确定"会静默保存上一次的旧区间
+            toast("请选择完整的时间范围")
             return
         }
         timeSettingStore.setTime(
@@ -113,7 +123,13 @@ class TimeSettingViewMode(
             timeInfo.timeTo.copy(),
         )
         timeSettingStore.save()
-        pageNavigation.popBackStack()
+        // 点"确定"原来调 popBackStack()：弹窗不在返回栈里，被弹掉的是弹窗下面那一页
+        //（分区详情/首页），设置弹窗反而留在屏幕上。首页入口因为下面没页面可弹才"看起来正常"。
+        if (bottomSheetState.page.value is TimeSettingPage) {
+            bottomSheetState.close()
+        } else {
+            pageNavigation.popBackStack()
+        }
     }
 
     class TimeInfo(

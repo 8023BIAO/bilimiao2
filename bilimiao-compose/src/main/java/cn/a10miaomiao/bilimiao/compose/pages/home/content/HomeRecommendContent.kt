@@ -139,6 +139,7 @@ private class HomeRecommendContentViewModel(
         val epoch = loadEpoch.incrementAndGet()
         // 同步置位（调用线程），堵住 loadMore 双发窗口（同 idx 重复请求/重复 key 崩溃）
         list.loading.value = true
+        list.fail.value = ""   // 开始加载就清掉上一次的失败提示
         // 取消上一个在途请求（含慢的标签 gRPC 批次），避免旧结果覆盖新列表
         loadJob?.cancel()
         loadJob = viewModelScope.launch(Dispatchers.IO) {

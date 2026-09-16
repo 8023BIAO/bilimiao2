@@ -20,7 +20,13 @@ data class ErrorLogEntry(
 object ErrorLogCollector {
 
     private val json = Json { prettyPrint = false; ignoreUnknownKeys = true }
+    // SimpleDateFormat 不是线程安全的：崩溃可能发生在任意线程（含未捕获异常处理器），
+    // 并发 format 会输出错乱的时间甚至抛异常 → 统一加锁
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+
+    private fun nowString(): String = synchronized(dateFormat) {
+        dateFormat.format(Date())
+    }
 
     private var logFile: File? = null
     private var originalHandler: Thread.UncaughtExceptionHandler? = null
@@ -56,12 +62,16 @@ object ErrorLogCollector {
             val entry = ErrorLogEntry(
                 error = error,
                 stackTrace = stackTrace,
-                time = dateFormat.format(Date()),
+                // 走加锁的 nowString()，崩溃线程并发格式化时 SimpleDateFormat 会输出错乱时间
+                time = nowString(),
                 deviceInfo = deviceInfo,
                 appInfo = appInfo
             )
             val line = json.encodeToString(entry) + "\n"
-            logFile?.appendText(line)
+            // 崩溃线程与业务线程可能同时写，加锁避免同一行被互相截断
+            synchronized(this) {
+                logFile?.appendText(line)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }

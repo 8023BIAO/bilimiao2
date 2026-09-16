@@ -92,6 +92,7 @@ class DynamicAllListContenttViewModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val type = if (offset.isBlank()) {
                 bilibili.app.dynamic.v2.Refresh.NEW
             } else {
@@ -168,7 +169,11 @@ class DynamicAllListContenttViewModel(
     }
 
     fun toDetailPage(item: DynamicItem) {
-        val extend = item.extend ?: return
+        val extend = item.extend ?: run {
+            // 部分动态类型没有 extend：以前直接 return，用户点了完全没反应
+            toast("这条动态暂时打不开")
+            return
+        }
         val toUrl = extend.cardUrl
         try {
             pageNavigation.navigateByUri(Uri.parse(toUrl))

@@ -568,11 +568,32 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         dataStore.data.map { it[PlayerNotification] ?: true }.collect {
             showNotification = it
             if (!init) {
+                // DataStore 任意设置变化都会重发同一个值，先判断是否真的发生了切换，
+                // 否则每次改别的设置都会重建（并泄漏）一个 ExoPlayer
                 if (it) {
-                    exoPlayer?.let { p -> mediaSession?.player = MyForwardingPlayer(p) }
+                    mediaSession?.let { session ->
+                        if (session.player !is MyForwardingPlayer) {
+                            // 重新打开：exoPlayer 恒为 null（setPlayer() 全仓无调用者），
+                            // 旧代码这里什么都不做 → 开关"关→开"后通知栏/线控永久失效。
+                            // 与 initializeSession() 一致，重建转发到 delegate 的 player
+                            val old = session.player
+                            session.player = MyForwardingPlayer(
+                                ExoPlayer.Builder(this@PlaybackService).build()
+                            )
+                            // MediaSession 不负责释放 player，旧的空 ExoPlayer 要自己释放
+                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
+                        }
+                    }
                 } else {
+                    mediaSession?.let { session ->
+                        if (session.player is MyForwardingPlayer) {
+                            val old = session.player
+                            session.player = ExoPlayer.Builder(this@PlaybackService).build()
+                            // 转发 player 只是包装，释放它即释放底层 ExoPlayer
+                            try { old.release() } catch (e: Exception) { miaoLogger() error "release old session player failed: ${e.message}" }
+                        }
+                    }
                     stopForeground(STOP_FOREGROUND_REMOVE)
-                    mediaSession?.player = ExoPlayer.Builder(this@PlaybackService).build()
                 }
             }
             init = false
@@ -600,6 +621,11 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     inner class MyForwardingPlayer(player: Player) : ForwardingPlayer(player) {
         override fun getAvailableCommands(): Player.Commands {
             return super.getAvailableCommands().buildUpon()
+                // 空壳 ExoPlayer 的命令集里没有这些，通知栏就不会渲染播放/暂停按钮与元数据
+                .add(Player.COMMAND_PLAY_PAUSE)
+                .add(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)
+                .add(Player.COMMAND_GET_TIMELINE)
+                .add(Player.COMMAND_GET_METADATA)
                 .add(Player.COMMAND_SEEK_BACK)
                 .add(Player.COMMAND_SEEK_FORWARD)
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
@@ -607,6 +633,25 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 .remove(Player.COMMAND_SEEK_TO_NEXT)
                 .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .build()
+        }
+
+        // ── 状态/元数据转发 ──
+        // 会话实际绑的是 dummy(空壳 ExoPlayer)，只有命令被转发到真播放器是不够的：
+        // 状态与元数据不转发的话，通知栏/锁屏/蓝牙永远显示"播放"图标、没有标题封面、
+        // 暂停键按下去也不会变成暂停（真播放器仍在播）。
+        override fun getPlaybackState(): Int = Player.STATE_READY
+        override fun getPlayWhenReady(): Boolean = playerDelegate?.isPlaying() == true
+        override fun isPlaying(): Boolean = playerDelegate?.isPlaying() == true
+        override fun getCurrentPosition(): Long = playerDelegate?.currentPosition() ?: 0L
+        override fun getDuration(): Long = playerDelegate?.mediaGetDuration() ?: 0L
+        override fun getMediaMetadata(): androidx.media3.common.MediaMetadata {
+            val builder = androidx.media3.common.MediaMetadata.Builder()
+            playerDelegate?.mediaGetTitle()?.let { builder.setTitle(it) }
+            playerDelegate?.mediaGetSubtitle()?.let { builder.setArtist(it) }
+            playerDelegate?.mediaGetCoverUrl()?.let {
+                runCatching { builder.setArtworkUri(android.net.Uri.parse(it)) }
+            }
+            return builder.build()
         }
 
         override fun play() { playerDelegate?.mediaPlay() }

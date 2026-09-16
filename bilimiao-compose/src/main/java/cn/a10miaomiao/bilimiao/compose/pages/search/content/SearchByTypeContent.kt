@@ -80,8 +80,8 @@ private class SearchByTypeContentViewModel(
     val userTypeList = listOf(
         SearchByTypeRequest.UserType.ALL to "全部",
         SearchByTypeRequest.UserType.UP to "UP主",
-        SearchByTypeRequest.UserType.NORMAL_USER to "认证用户",
-        SearchByTypeRequest.UserType.AUTHENTICATED_USER to "普通用户",
+        SearchByTypeRequest.UserType.NORMAL_USER to "普通用户",
+        SearchByTypeRequest.UserType.AUTHENTICATED_USER to "认证用户",
     )
     val userType = mutableStateOf(userTypeList[0])
 
@@ -103,6 +103,7 @@ private class SearchByTypeContentViewModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val req = SearchByTypeRequest(
                 keyword = keyword,
                 type = type,
@@ -124,12 +125,13 @@ private class SearchByTypeContentViewModel(
             val itemList = result.items
             _next = result.pagination?.next ?: ""
             list.finished.value = itemList.isEmpty() || _next.isBlank()
+            // 服务端会返回重复条目（综合 tab 就专门做过去重），而这里 key 用的是 param，
+            // 重复 key 会让 LazyGrid 直接抛 "Key was already used" 崩溃
             if (next.isBlank()) {
-                list.data.value = itemList
+                list.data.value = itemList.distinctBy { it.param }
             } else {
-                list.data.value = list.data.value
-                    .toMutableList()
-                    .apply { addAll(itemList) }
+                val seen = list.data.value.mapTo(mutableSetOf()) { it.param }
+                list.data.value = list.data.value + itemList.filter { seen.add(it.param) }
             }
         } catch (e: Exception) {
             e.printStackTrace()

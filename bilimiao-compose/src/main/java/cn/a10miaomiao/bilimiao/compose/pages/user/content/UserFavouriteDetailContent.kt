@@ -729,8 +729,12 @@ internal fun UserFavouriteDetailContent(
                     Checkbox(
                         checked = selectedIds.size == filteredList.size && filteredList.isNotEmpty(),
                         onCheckedChange = { checked ->
-                            if (checked) filteredList.forEach { selectedIds.add(it.id) }
-                            else selectedIds.clear()
+                            if (checked) {
+                                // 先 clear 再全选：SnapshotStateList 允许重复元素，
+                                // 直接 forEach add 会把已选项重复加一遍，导致"已选 N 项"计数偏大
+                                selectedIds.clear()
+                                filteredList.forEach { selectedIds.add(it.id) }
+                            } else selectedIds.clear()
                         }
                     )
                     Text(
@@ -780,7 +784,13 @@ internal fun UserFavouriteDetailContent(
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { }),
+            // 键盘搜索键以前是空的：页面上的输入框只能过滤"已加载的那 20 条"，
+            // 用户会以为收藏夹里没有这个视频。这里接上服务端搜索（带 keyword 重新拉列表）。
+            keyboardActions = KeyboardActions(onSearch = {
+                if (searchQuery.isNotBlank()) {
+                    viewModel.searchSelfPage(searchQuery)
+                }
+            }),
             shape = RoundedCornerShape(8.dp),
         )
         SwipeToRefresh(
@@ -825,8 +835,13 @@ internal fun UserFavouriteDetailContent(
                         if (isEditMode) {
                             Checkbox(
                                 checked = vid in selectedIds,
-                                onCheckedChange = {
-                                    selectedIds.remove(vid)
+                                onCheckedChange = { checked ->
+                                    // 必须按勾选态分支：只调 remove 的话未选中项永远勾不上
+                                    if (checked) {
+                                        if (vid !in selectedIds) selectedIds.add(vid)
+                                    } else {
+                                        selectedIds.remove(vid)
+                                    }
                                 },
                                 modifier = Modifier.align(Alignment.TopStart).padding(4.dp)
                             )
@@ -871,8 +886,8 @@ internal fun UserFavouriteDetailContent(
                         loading = true
                         viewModel.editFolder(
                             cover = info.cover,
-                            title = formState.title,
-                            intro = formState.intro,
+                            title = formState.title.text,
+                            intro = formState.intro.text,
                             privacy = formState.privacy,
                         )
                     }.onSuccess {
@@ -1013,10 +1028,13 @@ private fun MoveToFolderDialog(
             return@LaunchedEffect
         }
         try {
-            val res = BiliApiService.userApi
-                .favCreatedList(mid, pageNum = 1, pageSize = 100)
-                .awaitCall()
-                .json<ResponseData<ListAndCountInfo<MediaListInfo>>>()
+            // awaitCall 只等到响应头，body.string() 是阻塞读：放 IO 线程，避免主线程读响应体卡住对话框
+            val res = withContext(Dispatchers.IO) {
+                BiliApiService.userApi
+                    .favCreatedList(mid, pageNum = 1, pageSize = 100)
+                    .awaitCall()
+                    .json<ResponseData<ListAndCountInfo<MediaListInfo>>>()
+            }
             if (res.isSuccess) {
                 folderList = res.requireData().list.filter { it.id != excludeMediaId }
             } else {

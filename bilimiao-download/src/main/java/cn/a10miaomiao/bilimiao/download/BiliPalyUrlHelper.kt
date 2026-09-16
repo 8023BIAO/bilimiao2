@@ -374,6 +374,8 @@ object BiliPalyUrlHelper {
                     duration = videoInfo.timelength / 1000,
                     video = listOf(videoFile),
                     audio = audioFileList,
+                    referer = DEFAULT_REFERER,
+                    user_agent = DEFAULT_USER_AGENT,
                 )
             }
             is PlayurlV1Stream.Content.SegmentVideo -> {
@@ -505,6 +507,8 @@ object BiliPalyUrlHelper {
                     duration = videoInfo.timelength / 1000,
                     video = listOf(videoFile),
                     audio = audioFileList,
+                    referer = DEFAULT_REFERER,
+                    user_agent = DEFAULT_USER_AGENT,
                 )
             }
             is PlayerV2Stream.Content.SegmentVideo -> {

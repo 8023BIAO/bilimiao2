@@ -96,7 +96,8 @@ fun ImagesScroll(
     val previewerState = rememberPreviewerState(
         verticalDragType = VerticalDragType.Down,
         pageCount = { count },
-        getKey = { imageModels[it].originalUrl },
+        // 列表可能在预览状态创建后被换掉/变短 → 越界保护（ImagesGrid 同处已修过）
+        getKey = { imageModels.getOrNull(it)?.originalUrl ?: "" },
     )
     var pagerState = rememberPagerState { count }
     HorizontalPager(

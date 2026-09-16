@@ -49,7 +49,13 @@ fun parseArticleParagraphs(jsonArray: JSONArray?): List<ArticleParagraph> {
         when (paraType) {
             1 -> {
                 val format = item.optJSONObject("format")
-                val align = format?.optString("align") ?: "left"
+                // format.align 是数字（1=居中 2=右对齐）：optString 会得到 "1"/"2"，
+                // 而渲染端只认 "center"/"right" → 居中的标题/说明段落之前全被当左对齐
+                val align = when (format?.optInt("align", 0) ?: 0) {
+                    1 -> "center"
+                    2 -> "right"
+                    else -> "left"
+                }
                 if (align == "center" && i > 0) {
                     val prev = jsonArray.optJSONObject(i - 1)
                     if (prev?.optInt("para_type") == 2) {

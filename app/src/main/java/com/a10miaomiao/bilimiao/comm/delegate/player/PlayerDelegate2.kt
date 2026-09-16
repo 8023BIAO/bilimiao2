@@ -82,11 +82,13 @@ import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
 import com.a10miaomiao.bilimiao.widget.player.media3.ExoMediaSourceInterceptListener
 import com.a10miaomiao.bilimiao.widget.player.media3.ExoSourceManager
 import com.a10miaomiao.bilimiao.widget.scaffold.getScaffoldView
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.a10miaomiao.bilimiao.comm.toast
 import com.kongzue.dialogx.dialogs.PopTip
 import com.shuyu.gsyvideoplayer.utils.GSYVideoType
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoPlayer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -108,11 +110,16 @@ class PlayerDelegate2(
     companion object {
         private fun getCacheMaxSize(context: Context): Long {
             return try {
-                kotlinx.coroutines.runBlocking {
-                    SettingPreferences.mapData(context) { prefs ->
-                        (prefs[SettingPreferences.PlayerDiskCacheSize] ?: 512).coerceIn(100, 10240)
+                val sizeMb = kotlinx.coroutines.runBlocking {
+                    // 这条链路会被主线程的 ExoSourceManager.getMediaSource 调到：
+                    // DataStore 首读异常时会无限阻塞主线程，加 500ms 超时兜底（与 ThemeDelegate 一致）
+                    kotlinx.coroutines.withTimeoutOrNull(500L) {
+                        SettingPreferences.mapData(context) { prefs ->
+                            (prefs[SettingPreferences.PlayerDiskCacheSize] ?: 512).coerceIn(100, 10240)
+                        }
                     }
-                } * 1024L * 1024L
+                } ?: 512 // 超时/异常 → 用默认值 512MB
+                sizeMb * 1024L * 1024L
             } catch (e: Exception) {
                 1024L * 1024 * 1024 // fallback
             }
@@ -136,6 +143,16 @@ class PlayerDelegate2(
 
         @Volatile
         private var keptSourceInfo: PlayerSourceInfo? = null
+
+        /**
+         * 切后台前是否"正在播放"（即被 onStop 自动暂停）。
+         * onStart 时 GSY 状态一律是 PAUSE（不管是自动暂停还是用户手动暂停），
+         * 只能靠这里记录区分；GSY 的 isInPlayingState() 对 PAUSE(5) 也返回 true，
+         * 直接用它判断会让"手动暂停"的视频回到前台后被 onVideoResume() 续播。
+         * 静态保存的原因同 keepPlayerView：Activity 重建后新 delegate 也要能续播。
+         */
+        @Volatile
+        private var pausedByBackground = false
 
         private fun getCache(context: Context): SimpleCache {
             // 用 applicationContext：StandaloneDatabaseProvider 会被静态 videoCache 持有，
@@ -225,6 +242,9 @@ class PlayerDelegate2(
 
     private var themeObserver: Observer<Int>? = null
     private var isBroadcastReceiverRegistered = false
+
+    /** 与服务之间的 MediaController 连接（持有 Activity context，需显式释放） */
+    private var mediaControllerFuture: ListenableFuture<MediaController>? = null
 
     var playerSourceInfo: PlayerSourceInfo? = null
 
@@ -393,10 +413,26 @@ class PlayerDelegate2(
             activity,
             ComponentName(activity, PlaybackService::class.java)
         )
+        // MediaController 持有 Activity context 且会一直保持与服务连接，
+        // 不持有引用就没法释放 → 每次"服务不在时开新视频"都泄漏一个连接
+        releaseMediaControllerFuture()
         val controllerFuture = MediaController.Builder(activity, sessionToken).buildAsync()
+        mediaControllerFuture = controllerFuture
         controllerFuture.addListener({
             PlaybackService.instance?.setPlayerDelegate(this@PlayerDelegate2)
         }, MoreExecutors.directExecutor())
+    }
+
+    /** 释放与服务之间的 MediaController 连接（关播放器/重建前调用） */
+    private fun releaseMediaControllerFuture() {
+        mediaControllerFuture?.let { future ->
+            try {
+                MediaController.releaseFuture(future)
+            } catch (e: Exception) {
+                miaoLogger() error "release media controller failed: ${e.message}"
+            }
+        }
+        mediaControllerFuture = null
     }
 
     override fun onResume() {
@@ -421,10 +457,12 @@ class PlayerDelegate2(
     override fun onStart() {
         // 不在后台播放模式时恢复播放（和原版哔哩猫一致）
         // GSY 内部 onVideoResume 会自动 seek 到 onVideoPause 时保存的 mCurrentPosition
-        if (!controller.isBackgroundPlay
-            && views.videoPlayer?.isInPlayingState == true) {
+        // 只在"切后台前确实在播放（被 onStop 自动暂停）"时才续播：
+        // 用户手动暂停的视频回前台必须保持暂停（isInPlayingState() 对 PAUSE 也返回 true，不能用）
+        if (!controller.isBackgroundPlay && pausedByBackground && isPause()) {
             views.videoPlayer?.onVideoResume()
         }
+        pausedByBackground = false
     }
 
     override fun onStop() {
@@ -433,7 +471,11 @@ class PlayerDelegate2(
         // 不在后台播放模式时暂停播放（GSY 内部 onVideoPause 保存 mCurrentPosition）
         if (!controller.isBackgroundPlay
             && views.videoPlayer?.isInPlayingState == true) {
+            // 必须在 onVideoPause() 之前判断：暂停后状态就变 PAUSE 了
+            pausedByBackground = isPlaying()
             views.videoPlayer?.onVideoPause()
+        } else {
+            pausedByBackground = false
         }
         // 尝试进入 PiP
         if (controller.isPipOnBackground && isOpened()) {
@@ -442,6 +484,8 @@ class PlayerDelegate2(
     }
 
     override fun onDestroy() {
+        // 画中画广播接收器兜底注销（进入画中画后直接销毁 Activity 时不会走退出回调 → leaked receiver）
+        picInPicHelper?.unregisterReceiverSafe()
         // 最后保存一次位置 + 源信息（供 Activity 重建后恢复）
         savePlaybackPosition()
         val sid = playerSource?.id ?: ""
@@ -462,12 +506,18 @@ class PlayerDelegate2(
         }
         // 只 detach View，不清除 playerSource / playerSourceInfo
         // GSYVideoManager 单例中的 ExoPlayer 保持存活
-        views.videoPlayer?.detachView()
+        views.videoPlayer?.let {
+            // 后台播放模式：重建后要继续播，不能让它 detach 时 pause
+            it.keepPlayingOnDetach = controller.isBackgroundPlay
+            it.detachView()
+        }
     }
 
     override fun onBackPressed(): Boolean {
         val p = views.videoPlayer ?: return false
         if (p.isLock) {
+            // 原来是直接吞掉返回键，用户完全不知道发生了什么
+            toast("已锁定，请先解锁")
             return true
         }
         if (scaffoldApp.fullScreenPlayer) {
@@ -521,6 +571,8 @@ class PlayerDelegate2(
 
         // ★ 清理通知栏和媒体会话：释放 ExoPlayer → 停止前台 → 回收音频焦点
         PlaybackService.instance?.notifyPlaybackComplete()
+        // 服务已停，顺手释放 MediaController 连接，避免它一直攥着 Activity
+        releaseMediaControllerFuture()
 
         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
@@ -717,6 +769,8 @@ class PlayerDelegate2(
                     SettingPreferences.edit(activity) {
                         it[PlayerQuality] = newQuality
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     quality = previousQuality  // 切换失败回退
                     PopTip.show("清晰度切换失败").showTop()
@@ -840,6 +894,9 @@ class PlayerDelegate2(
             } ?: errorMessageBoxController.show("抱歉你所在的地区不可观看！")
         } catch (e: UnknownHostException) {
             errorMessageBoxController.show("网络请求失败")
+        } catch (e: CancellationException) {
+            // 退出播放器/切清晰度会取消协程：取消不是错误，别在已销毁的界面上弹"播放失败"
+            throw e
         } catch (e: Exception) {
             e.printStackTrace()
             errorMessageBoxController.show(e.message ?: e.toString())
@@ -893,6 +950,9 @@ class PlayerDelegate2(
 
     override fun openPlayer(source: BasePlayerSource) {
         playerClosed = false
+        // 换视频要复位锁定：否则锁定状态下自动连播下一集，新视频开局就是锁死的
+        // （控件全隐藏、返回键还会被静默吞掉）
+        views.videoPlayer?.isLock = false
         loadingBoxController.showLoading(source.title, source.coverUrl)
         loadingBoxController.print("初始化播放器...")
         completionBoxController.hide()
@@ -934,6 +994,9 @@ class PlayerDelegate2(
                     }
                     quality = it[PlayerQuality] ?: 64
                     speed = it[PlayerSpeed] ?: 1f
+                    // 占用音频焦点：这个开关以前是死的（:308 写死 isReleaseWhenLossAudio = false），
+                    // 打开后应该"别的 App 出声就暂停自己"，关掉则允许同时出声
+                    views.videoPlayer?.isReleaseWhenLossAudio = it[SettingPreferences.PlayerAudioFocus] ?: false
                     showNotification = it[PlayerNotification] ?: true
                     // ───── CDN 设置（合并读取，减少 DataStore IO） ─────
                     source.cdnRaceEnabled = it[SettingPreferences.CdnRaceEnabled] ?: true
@@ -1071,6 +1134,28 @@ class PlayerDelegate2(
         return player?.currentPosition ?: 0L
     }
 
+    /**
+     * 打开弹幕编辑框前是否在播放。
+     * 只有本来在播放的，关掉编辑框后才自动恢复；用户自己暂停过再点发送的，应该保持暂停。
+     */
+    private var wasPlayingBeforeDanmakuEdit = false
+
+    override fun openDanmakuEditor() {
+        wasPlayingBeforeDanmakuEdit = isPlaying()
+        if (wasPlayingBeforeDanmakuEdit) {
+            player?.onVideoPause()
+            player?.hideController()
+        }
+    }
+
+    override fun closeDanmakuEditor() {
+        // 编辑框以任何方式关闭（发送成功/返回/点空白）都要走这里，否则取消发送后视频会一直停着
+        if (wasPlayingBeforeDanmakuEdit && isPause()) {
+            player?.onVideoResume()
+        }
+        wasPlayingBeforeDanmakuEdit = false
+    }
+
     override fun sendDanmaku(
         type: Int,
         danmakuText: String,
@@ -1079,11 +1164,11 @@ class PlayerDelegate2(
         danmakuPosition: Long,
     ) {
         val dispDensity = activity.resources.displayMetrics.density
-        // 先恢复播放，确保 danmaku view 处于活跃状态再添加弹幕。
-        // 否则 addDanmaku 发出的 NOTIFY_RENDERING 会被后面的
-        // start(position) 中 handler.removeCallbacksAndMessages(null) 清除，
-        // 导致弹幕即使已在 danmakuList 中也无法立即渲染。
-        if (!isPlaying()) {
+        // 只有"打开编辑框前本来在播放"才在这里恢复播放，确保 danmaku view 处于活跃状态再添加弹幕：
+        // 否则 addDanmaku 发出的 NOTIFY_RENDERING 会被后面的 start(position) 中
+        // handler.removeCallbacksAndMessages(null) 清除，弹幕即使已在 danmakuList 中也无法立即渲染。
+        // 用户自己暂停过的（或本来就没播）保持暂停，弹幕照样会加到列表里，恢复播放时按时间渲染。
+        if (wasPlayingBeforeDanmakuEdit && isPause()) {
             player?.onVideoResume()
         }
         // 使用实时的 currentPosition（恢复播放后已更新），而非调用方在 API 请求前捕获的过期值
@@ -1126,7 +1211,8 @@ class PlayerDelegate2(
         if (controller.isPipOnBackground && isOpened()) {
             val height = playerSourceInfo?.height
             val width = playerSourceInfo?.width
-            val aspectRatio = if (height == null || width == null) {
+            val aspectRatio = if (height == null || width == null || height <= 0 || width <= 0) {
+                // 宽高缺失或接口返回 0 时兜底：Rational 分母为 0 会抛 IllegalArgumentException
                 Rational(16, 9)
             } else {
                 Rational(width, height)
@@ -1160,6 +1246,9 @@ class PlayerDelegate2(
     }
 
     override fun mediaPause() {
+        // 用户在后台（通知栏/蓝牙）主动暂停：清掉"后台自动暂停"标记，
+        // 否则回到前台会被 onStart 当成自动暂停而自动续播
+        pausedByBackground = false
         views.videoPlayer?.onVideoPause()
     }
 
@@ -1298,6 +1387,14 @@ class PlayerDelegate2(
 
     override fun mediaPlayPrevious(): Boolean {
         val current = playerSource ?: return false
+        // 先走源链上一项（上一P/上一集），与 mediaPlayNext 对称：
+        // 否则多P视频的通知栏/蓝牙"上一集"会跳过同一视频的其它分P
+        val directPrevious = current.previous()
+        if (directPrevious != null) {
+            openPlayer(directPrevious)
+            return true
+        }
+        // 播单上一项
         val currentAid = (current as? VideoPlayerSource)?.aid
             ?: (current as? BangumiPlayerSource)?.aid ?: return false
         val state = playListStore.stateFlow.value
@@ -1323,6 +1420,9 @@ class PlayerDelegate2(
 
     override fun hasPreviousEpisode(): Boolean {
         val current = playerSource ?: return false
+        // 直接源链检查（上一P/上一集），与 hasNextEpisode 对称
+        if (current.previous() != null) return true
+        // 播单检查
         val currentAid = (current as? VideoPlayerSource)?.aid
             ?: (current as? BangumiPlayerSource)?.aid ?: return false
         val idx = playListStore.stateFlow.value.items.indexOfFirst { it.aid == currentAid }

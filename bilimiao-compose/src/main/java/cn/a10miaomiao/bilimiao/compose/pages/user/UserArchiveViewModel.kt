@@ -140,6 +140,9 @@ class UserArchiveViewModel(
         stimeDisplayCount = 0
         list.finished.value = false
         list.fail.value = ""
+        // 之前只置了刷新标志却没真正重新拉取，下拉刷新会一直转圈并且列表不更新
+        lastAid = ""
+        loadData("")
     }
 
     fun changeRankOrder(value: String) {

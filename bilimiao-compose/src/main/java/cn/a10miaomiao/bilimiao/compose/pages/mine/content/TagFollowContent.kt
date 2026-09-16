@@ -210,7 +210,8 @@ private class TagFollowContentModel(
 
     fun loadMore() {
         if (!list.finished.value && !list.loading.value) {
-            loadData(list.pageNum + 1)
+            // 首屏失败点重试时列表为空：必须重拉第 1 页
+            loadData(if (list.data.value.isEmpty()) 1 else list.pageNum + 1)
         }
     }
 

@@ -81,6 +81,7 @@ class DynamicVideoListContentViewModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val type = if (offset.isBlank()) {
                 bilibili.app.dynamic.v2.Refresh.NEW
             } else {

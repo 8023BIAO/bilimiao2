@@ -128,6 +128,17 @@ class FilterStore(override val di: DI) :
         queryFilterUpperName()
     }
 
+    /**
+     * 编译 `/正则/` 形式的屏蔽词。
+     * 语法错误时返回 null（调用方降级成纯文本匹配）——坏词是落库的，
+     * 直接 toRegex() 抛 PatternSyntaxException 会让之后每次冷启动都在 rebuild 时崩。
+     */
+    private fun compileFilterRegex(pattern: String): Regex? = try {
+        pattern.toRegex()
+    } catch (_: Exception) {
+        null
+    }
+
     // ---- 重建所有编译缓存 ----
 
     private fun rebuildFilterWordCache() {
@@ -135,8 +146,9 @@ class FilterStore(override val di: DI) :
         val regexList = mutableListOf<Regex>()
         for (word in state.filterWordList) {
             if (word.length > 2 && word.startsWith('/') && word.endsWith('/')) {
-                // 正则类型：去首尾 / 编译一次，缓存
-                regexList.add(word.substring(1, word.length - 1).toRegex())
+                // 正则类型：去首尾 / 编译一次，缓存；编译失败降级为纯文本
+                val regex = compileFilterRegex(word.substring(1, word.length - 1))
+                if (regex != null) regexList.add(regex) else plainWords.add(word)
             } else if (word.isNotEmpty()) {
                 plainWords.add(word)
             }
@@ -150,8 +162,9 @@ class FilterStore(override val di: DI) :
         val regexList = mutableListOf<Regex>()
         for (word in state.filterTagList) {
             if (word.length > 2 && word.startsWith('/') && word.endsWith('/')) {
-                // 正则类型：去首尾 / 编译一次，缓存
-                regexList.add(word.substring(1, word.length - 1).toRegex())
+                // 正则类型：去首尾 / 编译一次，缓存；编译失败降级为纯文本
+                val regex = compileFilterRegex(word.substring(1, word.length - 1))
+                if (regex != null) regexList.add(regex) else plainWords.add(word)
             } else if (word.isNotEmpty()) {
                 plainWords.add(word)
             }
@@ -169,7 +182,8 @@ class FilterStore(override val di: DI) :
         val regexList = mutableListOf<Regex>()
         for (word in state.filterUpperNameList) {
             if (word.length > 2 && word.startsWith('/') && word.endsWith('/')) {
-                regexList.add(word.substring(1, word.length - 1).toRegex())
+                val regex = compileFilterRegex(word.substring(1, word.length - 1))
+                if (regex != null) regexList.add(regex) else plainWords.add(word)
             } else if (word.isNotEmpty()) {
                 plainWords.add(word)
             }
@@ -183,7 +197,9 @@ class FilterStore(override val di: DI) :
     fun queryFilterWord() {
         val list = filterWordDB.queryAll()
         setState {
-            filterWordList = list
+            // 关键词本身被当作列表 LazyColumn 的 key，重复 key 会让 Compose 直接抛
+            // "Key was already used" 崩溃；历史库里可能存在重复项，这里统一去重
+            filterWordList = list.distinct().toMutableList()
         }
         rebuildFilterWordCache()
     }
@@ -199,7 +215,9 @@ class FilterStore(override val di: DI) :
     fun queryFilterTag() {
         val list = filterTagDB.queryAll()
         setState {
-            filterTagList = list
+            // 与屏蔽关键词同理：标签文本被当作列表 key，重复项会让 Compose 抛
+            // "Key was already used" 崩溃，这里统一去重
+            filterTagList = list.distinct().toMutableList()
         }
         rebuildTagCache()
         // 标签列表变了，清空 gRPC 缓存（旧缓存可能不包含新过滤规则）
@@ -231,12 +249,21 @@ class FilterStore(override val di: DI) :
     // ---- CRUD: 关键词 ----
 
     fun addWord(keyword: String) {
+        if (state.filterWordList.contains(keyword)) {
+            toast("该关键字已存在")
+            return
+        }
         filterWordDB.insert(keyword)
         queryFilterWord()
         toast("添加成功")
     }
 
     fun setWord(oldWord: String, newWord: String) {
+        // 改名撞上已有关键词会产生重复项（列表 key 冲突），直接拦掉
+        if (newWord != oldWord && state.filterWordList.contains(newWord)) {
+            toast("该关键字已存在")
+            return
+        }
         filterWordDB.updateKeyword(oldWord, newWord)
         queryFilterWord()
     }
@@ -280,7 +307,11 @@ class FilterStore(override val di: DI) :
 
     // ---- filterUpper: HashSet O(1) ----
 
-    fun filterUpper(mid: String) = filterUpper(mid.toLong())
+    fun filterUpper(mid: String): Boolean {
+        // mid 可能来自路由/接口（空串、BV 号等非数字）→ 别让 toLong 抛 NumberFormatException
+        val id = mid.toLongOrNull() ?: return true
+        return filterUpper(id)
+    }
     fun filterUpper(mid: Long): Boolean {
         return mid !in filterUpperMidSet
     }
@@ -392,12 +423,21 @@ class FilterStore(override val di: DI) :
     }
 
     fun addTag(name: String) {
+        if (state.filterTagList.contains(name)) {
+            toast("该标签已存在")
+            return
+        }
         filterTagDB.insert(name)
         queryFilterTag()
         toast("添加成功")
     }
 
     fun setTag(old: String, new: String) {
+        // 改名撞上已有标签会产生重复项（列表 key 冲突），直接拦掉
+        if (new != old && state.filterTagList.contains(new)) {
+            toast("该标签已存在")
+            return
+        }
         filterTagDB.updateTagName(old, new)
         queryFilterTag()
     }

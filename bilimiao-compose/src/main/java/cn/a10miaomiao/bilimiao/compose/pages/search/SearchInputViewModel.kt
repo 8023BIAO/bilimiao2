@@ -24,6 +24,11 @@ class SearchInputViewModel(
     val historyListFlow = MutableStateFlow(listOf<SuggestInfo>())
     val historyList get() = historyListFlow
     val suggestListFlow = MutableStateFlow(listOf<SuggestInfo>())
+
+    /** 清空联想列表（打开搜索框时调用，避免闪出上一次关键字的推荐词） */
+    fun clearSuggest() {
+        suggestListFlow.value = emptyList()
+    }
     val suggestList get() = suggestListFlow.value
 
     var config: SearchConfigInfo? = null
@@ -66,11 +71,15 @@ class SearchInputViewModel(
         }
     }
 
+    /** 最近一次请求的联想关键字：用来丢弃"旧请求的响应盖掉新关键字联想"的竞态 */
+    private var latestSuggestKeyword: String = ""
+
     fun loadSuggestData(keyword: String, currentText: String) =
         viewModelScope.launch(Dispatchers.IO) {
             if (keyword.isEmpty()) {
                 return@launch
             }
+            latestSuggestKeyword = keyword
             suggestListFlow.value = getInitSuggestData(keyword)
             try {
                 val res = BiliApiService.searchApi.suggestList(keyword).awaitCall()
@@ -79,7 +88,9 @@ class SearchInputViewModel(
                 val jsonArray =
                     (jsonParser.nextValue() as JSONObject).getJSONObject("result")
                         .getJSONArray("tag")
-                if (keyword == currentText) {
+                // 之前判断的是 keyword == currentText，而调用方两个参数传同一个值 → 恒真，
+                // 陈旧响应照样会覆盖新关键字的联想。改成与"最近一次请求的关键字"比较
+                if (keyword == latestSuggestKeyword) {
                     suggestListFlow.value = getInitSuggestData(keyword).apply {
                         for (i in 0 until jsonArray.length()) {
                             val value = jsonArray.getJSONObject(i).getString("value")

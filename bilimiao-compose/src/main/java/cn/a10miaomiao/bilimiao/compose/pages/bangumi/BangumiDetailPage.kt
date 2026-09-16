@@ -746,6 +746,12 @@ private fun BangumiDetailPageContent(
         mutableStateOf(epid)
     }
 
+    // 换季/换章节后必须重置"评论跟随的剧集"：否则标题和剧集都换成新一季了，
+    // 评论 tab 还挂在上一季那一集的 oid 上（连带评论时间戳空降也点不动）
+    LaunchedEffect(seasonId.value, sectionId) {
+        selectedEpisodeAid = ""
+    }
+
     LaunchedEffect(seasonId.value) {
         viewModel.seasonId = seasonId.value
     }
@@ -884,12 +890,15 @@ private fun BangumiDetailPageContent(
             innerPadding = windowInsets.toPaddingValues(),
             chainScrollableLayoutState = chainScrollableLayoutState,
             leftMaxWidth = 9999.dp,
-            leftMaxHeight = 0.dp,
+            // 竖屏时左栏高度就是 loading 的高度：原来固定 0.dp，BiliLoadingBox 被压成 0 高，
+            // 首屏进来看不到任何加载提示（番剧/影视详情页）。加载中给个真实高度，加载完再收回 0。
+            leftMaxHeight = if (loading) 240.dp else 0.dp,
             leftContent = { _, innerPadding ->
                 if (loading) {
                     BiliLoadingBox(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .fillMaxWidth()
+                            .height(240.dp)
                             .padding(innerPadding),
                     )
                 }

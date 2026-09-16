@@ -16,6 +16,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserFavouriteViewModel
 import org.kodein.di.compose.rememberInstance
@@ -42,19 +44,21 @@ internal class FavouriteEditFormState(
     initialIntro: String,
     initialPrivacy: Int,
 ) {
-    var title by mutableStateOf(initialTitle)
+    // 编辑已有收藏夹时初始文字非空：String 重载会让光标停在开头（同搜索框那个毛病），
+    // 用 TextFieldValue 把 selection 放到末尾
+    var title by mutableStateOf(TextFieldValue(initialTitle, TextRange(initialTitle.length)))
         private set
-    var intro by mutableStateOf(initialIntro)
+    var intro by mutableStateOf(TextFieldValue(initialIntro, TextRange(initialIntro.length)))
         private set
 
     var privacy by mutableIntStateOf(initialPrivacy)
         private set
 
-    fun changeTitle(str: String) {
+    fun changeTitle(str: TextFieldValue) {
         title = str
     }
 
-    fun changeIntro(str: String) {
+    fun changeIntro(str: TextFieldValue) {
         intro = str
     }
 

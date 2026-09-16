@@ -70,6 +70,7 @@ internal class UserFavouriteViewModel(
         val (list, isRefreshing) = getListAndIsRefreshingFlow(type)
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val hasMore: Boolean
             val effectiveMid = mid.ifBlank { userStore.stateFlow.value.info?.mid?.toString() ?: mid }
             val resultList = if (type == UserFavouriteFolderType.Created) {
@@ -136,7 +137,8 @@ internal class UserFavouriteViewModel(
     fun loadMore(type: UserFavouriteFolderType) {
         val (list, _) = getListAndIsRefreshingFlow(type)
         if (!list.finished.value && !list.loading.value) {
-            loadData(type, list.pageNum + 1)
+            // 首屏失败点重试时列表是空的：重拉第 1 页
+            loadData(type, if (list.data.value.isEmpty()) 1 else list.pageNum + 1)
         }
     }
 

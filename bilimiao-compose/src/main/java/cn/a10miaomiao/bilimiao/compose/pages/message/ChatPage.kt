@@ -14,14 +14,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -53,6 +59,7 @@ import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.UserStore
+import com.a10miaomiao.bilimiao.comm.store.MessageStore
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
@@ -61,6 +68,7 @@ import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.request.RequestOptions
 import com.a10miaomiao.bilimiao.comm.toast
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.kodein.di.DI
@@ -142,10 +150,12 @@ private class ChatViewModel(
 
     private val userStore: UserStore by instance()
     private val pageNavigation: PageNavigation by instance()
+    private val messageStore: MessageStore by instance()
     val isRefreshing = mutableStateOf(false)
     val isSending = mutableStateOf(false)
     val list = FlowPaginationInfo<ChatMsgInfo>()
-    val inputText = mutableStateOf("")
+    // 用 TextFieldValue 而不是 String：String 拿不到光标位置，插表情只能永远追加到末尾
+    val inputText = mutableStateOf(TextFieldValue(""))
     val showSendDialog = mutableStateOf(false)
 
     val myUid: Long get() = userStore.state.info?.mid ?: 0L
@@ -213,6 +223,8 @@ private class ChatViewModel(
                 }
                 existing.sortBy { it.timestamp }
                 list.data.value = existing
+                // 读完就把私信未读清掉（否则首页角标永远有红点）
+                try { messageStore.clearChatUnread() } catch (e: Exception) { }
                 list.finished.value = res.data?.has_more != 1
             } else if (list.data.value.isEmpty()) {
                 list.fail.value = res.message.ifBlank { "加载消息失败" }
@@ -235,16 +247,23 @@ private class ChatViewModel(
 
     fun loadMore() {
         if (list.finished.value || isRefreshing.value) return
+        // seqno<=0 的是本地乐观消息，不能拿来当分页游标（否则会请求 beginSeqno=-1）
         val minSeqno = list.data.value.minOfOrNull { it.msg_seqno } ?: return
+        if (minSeqno <= 1L) return
         loadMsgs(beginSeqno = minSeqno - 1)
     }
 
     fun sendMsg() = viewModelScope.launch(Dispatchers.IO) {
-        val text = inputText.value.trim()
+        val text = inputText.value.text.trim()
         if (text.isEmpty()) return@launch
+        // 提到 try 外：异常时也要能撤销这条本地乐观消息
+        val fakeMsgKey = System.currentTimeMillis()
         try {
             isSending.value = true
-            val contentJson = "{\"content\":\"${text.replace("\\", "\\\\").replace("\"", "\\\"")}\"}"
+            // 别手拼 JSON：多行文本（输入框允许换行）会拼出非法 JSON，服务端直接拒收
+            val contentJson = kotlinx.serialization.json.buildJsonObject {
+                put("content", kotlinx.serialization.json.JsonPrimitive(text))
+            }.toString()
             val ts = System.currentTimeMillis() / 1000
             val csrf = BilimiaoCommApp.commApp.loginInfo?.cookie_info?.cookies
                 ?.find { it.name == "bili_jct" }?.value
@@ -255,7 +274,6 @@ private class ChatViewModel(
             }
 
             // 乐观更新：本地先塞一条消息
-            val fakeMsgKey = System.currentTimeMillis()
             val localMsg = ChatMsgInfo(
                 msg_key = fakeMsgKey,
                 msg_type = 1,
@@ -287,7 +305,7 @@ private class ChatViewModel(
                 )
             }.awaitCall().json<ResultInfo<Unit>>()
             if (res.isSuccess) {
-                inputText.value = ""
+                inputText.value = TextFieldValue("")
                 showSendDialog.value = false
                 // 先从API刷新获取真实数据，再移除本地假消息（避免竞态窗口）
                 loadMsgsInternal()
@@ -307,7 +325,12 @@ private class ChatViewModel(
                 }
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
+            // 异常时也要撤掉乐观更新的本地消息，否则它会永远留在列表里
+            val cur = list.data.value.toMutableList()
+            cur.removeAll { it.msg_key == fakeMsgKey }
+            list.data.value = cur
             launch(Dispatchers.Main) { toast("发送失败: ${e.message}") }
         } finally {
             isSending.value = false
@@ -360,7 +383,23 @@ private fun ChatPageContent(
         }
     }
 
-    LaunchedEffect(list.size) { if (list.isNotEmpty()) listState.animateScrollToItem(list.lastIndex) }
+    // 只在“最新一条消息”变化时滚到底部：往上加载历史消息时不要打断用户
+    val latestMsgKey = list.lastOrNull()?.msg_key
+    // 首次贴底完成前不要触发补历史，否则刚进页面就会连着拉好几页
+    var loadMoreArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(latestMsgKey) {
+        if (latestMsgKey != null) listState.animateScrollToItem(list.lastIndex)
+        loadMoreArmed = true
+    }
+
+    // 滚到顶部附近时继续加载更早的消息（历史消息在列表上方）
+    LaunchedEffect(list.size) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { index ->
+                if (loadMoreArmed && index <= 1) viewModel.loadMore()
+            }
+    }
 
     val sendDialogVisible = viewModel.showSendDialog
 
@@ -485,7 +524,7 @@ private fun ChatSendPanel(vm: ChatViewModel) {
             Spacer(Modifier.weight(1f))
             FilledTonalButton(
                 onClick = { vm.sendMsg() },
-                enabled = vm.inputText.value.isNotBlank() && !vm.isSending.value,
+                enabled = vm.inputText.value.text.isNotBlank() && !vm.isSending.value,
                 shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -508,9 +547,15 @@ private fun ChatSendPanel(vm: ChatViewModel) {
             EmojiGridBox(
                 modifier = Modifier.height(260.dp).padding(top = 8.dp),
                 onInputEmoji = { emoji ->
-                    val sel = vm.inputText.value.length
-                    vm.inputText.value = vm.inputText.value.substring(0, sel) +
-                        emoji.text + vm.inputText.value.substring(sel)
+                    // 之前用 value.length 当插入点 → 光标在中间时表情也会被追加到末尾
+                    val cur = vm.inputText.value
+                    val text = cur.text
+                    val start = cur.selection.min.coerceIn(0, text.length)
+                    val end = cur.selection.max.coerceIn(0, text.length)
+                    vm.inputText.value = TextFieldValue(
+                        text.substring(0, start) + emoji.text + text.substring(end),
+                        TextRange(start + emoji.text.length),
+                    )
                 }
             )
         }
@@ -549,18 +594,25 @@ private fun ChatBubble(
                             else MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.widthIn(max = 280.dp),
                 ) {
-                    val parts = parseLinks(msgText)
+                    val parts = remember(msgText) { parseLinks(msgText) }
                     SelectionContainer {
                         Text(
                             text = buildAnnotatedString {
                                 parts.forEach { (text, isLink) ->
                                     if (isLink) {
-                                        pushStyle(SpanStyle(
-                                            color = MaterialTheme.colorScheme.primary,
-                                            textDecoration = TextDecoration.Underline,
-                                        ))
-                                        append(text)
-                                        pop()
+                                        // 之前只把链接染成链接样式，点了没反应；这里挂上真正的跳转
+                                        // （默认走 LocalUriHandler → 站内链接进原生页，站外进浏览器）
+                                        withLink(
+                                            LinkAnnotation.Url(
+                                                text,
+                                                TextLinkStyles(
+                                                    style = SpanStyle(
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        textDecoration = TextDecoration.Underline,
+                                                    )
+                                                )
+                                            )
+                                        ) { append(text) }
                                     } else append(text)
                                 }
                             },

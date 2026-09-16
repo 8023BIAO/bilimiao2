@@ -80,6 +80,7 @@ private class ReplyMessageContentModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val res = BiliApiService.messageApi
                 .reply(id, time)
                 .awaitCall()
@@ -92,6 +93,8 @@ private class ReplyMessageContentModel(
                 }
                 messageStore.clearReplyUnread()
                 _cursor = d.cursor
+                // 成功时必须清掉上一次的失败提示，否则"加载失败"会一直挂在列表底部
+                list.fail.value = ""
                 if (id == 0L) {
                     list.data.value = d.items
                 } else {

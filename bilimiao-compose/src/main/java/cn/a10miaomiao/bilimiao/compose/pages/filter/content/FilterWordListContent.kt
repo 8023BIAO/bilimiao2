@@ -37,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -98,8 +100,10 @@ internal fun FilterWordListContent() {
     var inputMode by remember {
         mutableIntStateOf(-2)
     }
+    // 用 TextFieldValue：String 重载的初始 selection 是 0，
+    // 点编辑已有条目时光标会停在最前面
     var inputText by remember {
-        mutableStateOf("")
+        mutableStateOf(TextFieldValue(""))
     }
 
     Box(
@@ -171,7 +175,7 @@ internal fun FilterWordListContent() {
                             .fillMaxWidth()
                             .clickable {
                                 inputMode = index
-                                inputText = word
+                                inputText = TextFieldValue(word, TextRange(word.length))
                             }
                     ) {
                         Checkbox(
@@ -228,20 +232,20 @@ internal fun FilterWordListContent() {
     }
     fun handleDismiss() {
         inputMode = -2
-        inputText = ""
+        inputText = TextFieldValue("")
         errorText = ""
     }
 
     fun handleConfirm() {
-        if (inputText.isBlank()) {
+        if (inputText.text.isBlank()) {
             errorText = "请输入关键字"
             return
         }
         if (inputMode < 0) {
-            viewModel.addWord(inputText)
+            viewModel.addWord(inputText.text)
         } else {
             val oldWord = filterWordList[inputMode]
-            viewModel.setWord(oldWord, inputText)
+            viewModel.setWord(oldWord, inputText.text)
         }
         handleDismiss()
     }

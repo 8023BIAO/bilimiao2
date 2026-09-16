@@ -146,7 +146,8 @@ private class UserFollowPageViewModel(
 
     fun loadMore() {
         if (!list.finished.value && !list.loading.value) {
-            loadData(list.pageNum + 1)
+            // 首屏失败点重试时列表为空：必须重拉第 1 页（否则静默跳过前 20 个关注）
+            loadData(if (list.data.value.isEmpty()) 1 else list.pageNum + 1)
         }
     }
 
@@ -158,7 +159,7 @@ private class UserFollowPageViewModel(
     }
 
     fun attention(
-        index: Int,
+        mid: String,
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             if (!userStore.isLogin()) {
@@ -167,7 +168,8 @@ private class UserFollowPageViewModel(
                 }
                 return@launch
             }
-            val item = list.data.value[index]
+            // 用 mid 定位而不是下标：列表刷新/重排后下标会指到别人身上（误取关）
+            val item = list.data.value.firstOrNull { it.mid == mid } ?: return@launch
             val mode = if (item.isFollowing) {
                 2
             } else {
@@ -316,7 +318,7 @@ private fun UserFollowPageContent(
                         }
                     }
                     TextButton(
-                        onClick = { viewModel.attention(index) },
+                        onClick = { viewModel.attention(follow.mid) },
                         enabled = isLogin,
                         colors = ButtonDefaults.textButtonColors(
                             containerColor = if (follow.isFollowing)

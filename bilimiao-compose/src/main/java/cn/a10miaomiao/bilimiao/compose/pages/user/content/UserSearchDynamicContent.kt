@@ -82,6 +82,9 @@ private class UserSearchDynamicContentViewModel(
                     .toMutableList()
                     .apply { addAll(archivesList) }
             }
+            // 必须回写页码，否则 loadMore 会一直重复请求第 2 页
+            list.pageNum = pageNum
+            list.fail.value = ""
             list.finished.value = archivesList.size < list.pageSize
         } catch (e: Exception) {
             e.printStackTrace()

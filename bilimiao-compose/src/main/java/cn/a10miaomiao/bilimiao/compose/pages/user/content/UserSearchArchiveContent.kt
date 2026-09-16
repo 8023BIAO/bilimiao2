@@ -29,6 +29,7 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.video.VideoItemBox
+import cn.a10miaomiao.bilimiao.compose.pages.user.UserSearchSort
 import com.a10miaomiao.bilimiao.comm.entity.comm.PaginationInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
@@ -64,6 +65,7 @@ private class UserSearchArchiveContentViewModel(
     ) = viewModelScope.launch(Dispatchers.IO){
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val req = SearchArchiveReq(
                 keyword = keyword,
                 mid = mid,
@@ -83,12 +85,10 @@ private class UserSearchArchiveContentViewModel(
                     .toMutableList()
                     .apply { addAll(archivesList) }
             }
-            // 客户端排序
-            list.data.value = when (rankOrder.value) {
-                "stime" -> list.data.value.sortedBy { it.aid }.toMutableList()
-                "click" -> list.data.value.sortedByDescending { it.stat?.view ?: 0 }.toMutableList()
-                else -> list.data.value // pubdate = API默认(最新)
-            }
+            // 客户端排序（接口 SearchArchiveReq 没有排序字段）
+            list.data.value = UserSearchSort.sort(list.data.value, rankOrder.value).toMutableList()
+            // 必须回写页码：否则 loadMore 永远请求第 2 页 → 同一页反复追加 + LazyColumn key 重复崩溃
+            list.pageNum = pageNum
             list.finished.value = archivesList.size < list.pageSize
         } catch (e: Exception) {
             e.printStackTrace()
@@ -100,6 +100,14 @@ private class UserSearchArchiveContentViewModel(
     }
 
     fun tryAgainLoadData() = loadData()
+
+    /**
+     * 切换排序菜单时调用：就地重排已有数据。
+     * 之前只更新了 rankOrder 状态，没有任何地方消费它 → 排序菜单点了没反应。
+     */
+    fun applySort() {
+        list.data.value = UserSearchSort.sort(list.data.value, rankOrder.value).toMutableList()
+    }
 
     fun refresh() {
         isRefreshing.value = true
@@ -132,14 +140,21 @@ fun UserSearchArchiveContent(
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val _rankOrder = remember { MutableStateFlow(rankOrder) }
-    LaunchedEffect(rankOrder) {
-        _rankOrder.value = rankOrder
-    }
 
     val viewModel = diViewModel(
         key = "${PageTabIds.UserSearchArchive}:$mid:$keyword"
     ) {
         UserSearchArchiveContentViewModel(it, mid, keyword, _rankOrder)
+    }
+
+    // 排序菜单（最新发布/最多播放/最旧发布）切换 → 本地重排列表。
+    // 之前这里只更新 _rankOrder，没有触发任何刷新，所以三个排序项看着像没反应。
+    // 首次组合时两者相等，跳过（loadData 已经按当前排序排好）。
+    LaunchedEffect(rankOrder) {
+        if (_rankOrder.value != rankOrder) {
+            _rankOrder.value = rankOrder
+            viewModel.applySort()
+        }
     }
 
     val listFlow = viewModel.list

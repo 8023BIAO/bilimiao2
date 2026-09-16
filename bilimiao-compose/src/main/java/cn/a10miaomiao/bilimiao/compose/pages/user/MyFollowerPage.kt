@@ -127,7 +127,8 @@ private class MyFollowerViewModel(
 
     fun loadMore() {
         if (!list.finished.value && !list.loading.value) {
-            loadData(list.pageNum + 1)
+            // 首屏失败点重试时列表还是空的：必须重拉第 1 页
+            loadData(if (list.data.value.isEmpty()) 1 else list.pageNum + 1)
         }
     }
 
@@ -194,7 +195,9 @@ private fun MyFollowerContent(viewModel: MyFollowerViewModel) {
     val finished by viewModel.list.finished.collectAsState()
     val fail by viewModel.list.fail.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
-    var showRemoveDialog by rememberSaveable { mutableStateOf<FollowerUserInfo?>(null) }
+    // FollowerUserInfo 既不是 Parcelable 也不是 java.io.Serializable，
+    // 用 rememberSaveable 会在旋屏/进程重建保存状态时抛 IllegalStateException
+    var showRemoveDialog by remember { mutableStateOf<FollowerUserInfo?>(null) }
 
     if (fail.isNotEmpty() && listData.isEmpty()) {
         BiliFailBox(

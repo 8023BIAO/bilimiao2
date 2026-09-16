@@ -89,12 +89,17 @@ internal class DownloadBangumiCreatePageViewModel(
     fun loadEpisodeList(
         id: String
     ) = viewModelScope.launch(Dispatchers.IO) {
+        // 换一季时清掉上一季的勾选，否则按钮显示"开始下载(N)"但一条也建不出来
+        if (_sid != id) {
+            checkedSet.value = emptySet()
+        }
         _sid = id
         val downloadService = DownloadService.getService(fragment.requireContext())
         getDowbloadedList(downloadService, id)
         loadBangumiDetail(id)
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val res = BiliApiService.bangumiAPI.seasonSection(id)
                 .awaitCall()
                 .json<ResponseResult<SeasonSectionInfo>>()
@@ -147,23 +152,21 @@ internal class DownloadBangumiCreatePageViewModel(
         val qualityMode = SettingPreferences.mapData(context) {
             it[SettingPreferences.DownloadQualityMode] ?: 0
         }
+        // 空列表上 maxBy/minBy 会抛 NoSuchElementException，被上层 catch 吞掉后
+        // quality 会永远停在 0（"请选择清晰度"）→ 这里统一用 OrNull + 兜底
+        val highest = qualityList.maxByOrNull { it.first }?.first ?: 0
+        val lowest = qualityList.minByOrNull { it.first }?.first ?: 0
         return when (qualityMode) {
-            1 -> { // 最高画质
-                qualityList.maxBy { it.first }.first
-            }
-            2 -> { // 最低画质
-                qualityList.minBy { it.first }.first
-            }
+            1 -> highest // 最高画质
+            2 -> lowest  // 最低画质
             3 -> { // 固定画质
                 val fixedQuality = SettingPreferences.mapData(context) {
                     it[SettingPreferences.DownloadFixedQuality] ?: -1
                 }
                 if (fixedQuality > 0 && qualityList.any { it.first == fixedQuality }) fixedQuality
-                else qualityList.maxBy { it.first }.first // fallback 最高画质
+                else highest // fallback 最高画质
             }
-            else -> { // 0 = 手动，默认用获取的最高可用画质
-                qualityList.maxBy { it.first }.first
-            }
+            else -> highest // 0 = 手动，默认用获取的最高可用画质
         }
     }
 
@@ -256,7 +259,12 @@ internal class DownloadBangumiCreatePageViewModel(
             return
         }
         if (acceptQuality.value.quality == 0) {
-            toast("请选择清晰度")
+            // 清晰度列表本身拿不到时（接口失败），原来的"请选择清晰度"是个死循环：
+            // 选择器里根本没有选项可选
+            toast(
+                if (acceptQuality.value.acceptQuality.isEmpty()) "获取清晰度失败，请检查网络后重试"
+                else "请选择清晰度"
+            )
             return
         }
         viewModelScope.launch {

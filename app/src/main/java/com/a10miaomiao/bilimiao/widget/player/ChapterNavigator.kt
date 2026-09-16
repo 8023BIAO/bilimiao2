@@ -31,7 +31,10 @@ object ChapterNavigator {
         val starts = sortedStarts(chapters)
         if (starts.size <= 1) return false
         val index = currentIndex(starts, positionMs)
-        return index in 0 until starts.lastIndex
+        // 当前位置在第一章之前时 index == -1，此时"下一章"就是第一章，
+        // 必须和 nextStart() 保持一致（用 index in 0 until lastIndex 会漏掉这种情况，
+        // 通知栏会把"下一章"按钮误判成不可用）
+        return index < starts.lastIndex
     }
 
     fun previousStart(chapters: List<ChapterInfo>, positionMs: Long): Long? {

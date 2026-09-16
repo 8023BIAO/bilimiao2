@@ -114,6 +114,8 @@ private class UserBangumiPageViewModel(
                         *items.toTypedArray(),
                     )
                 }
+                // 必须回写页码，否则 loadMore() 永远重复请求第 2 页（列表出现重复条目且翻不动）
+                list.pageNum = pageNum
                 list.finished.value = list.data.value.size >= res.requireData().count
             } else {
                 toast(res.message)
@@ -134,7 +136,8 @@ private class UserBangumiPageViewModel(
 
     fun loadMore() {
         if (!list.finished.value && !list.loading.value) {
-            loadData(list.pageNum + 1)
+            // 列表为空说明第一页都没成功（失败态点重试走的也是这里），必须重拉第 1 页
+            loadData(if (list.data.value.isEmpty()) 1 else list.pageNum + 1)
         }
     }
 

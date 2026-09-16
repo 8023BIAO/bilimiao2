@@ -21,6 +21,9 @@ abstract class BasePlayerSource() {
 
     open fun next(): BasePlayerSource? = null
 
+    /** 上一个播放单元（上一P/上一集），与 next() 对称；无可回退项返回 null */
+    open fun previous(): BasePlayerSource? = null
+
     var defaultPlayerSource = PlayerSourceInfo()
     var proxyServer: ProxyServerInfo? = null
     var uposHost: String = ""

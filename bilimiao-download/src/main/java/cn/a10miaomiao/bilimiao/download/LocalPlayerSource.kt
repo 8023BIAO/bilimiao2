@@ -87,12 +87,19 @@ class LocalPlayerSource(
             return emptyPlayerSourceInfo
         }
         val videoIndexJson = videoIndexJsonFile.readText()
-        if (entry.media_type == 1) {
-            val mediaInfo = MiaoJson.fromJson<BiliDownloadMediaFileInfo.Type1>(videoIndexJson)
-            val videoFile = File(
-                videoDir, "0" + "." + mediaInfo.format
-            )
-            if (videoFile.exists()) {
+        // 不能用 entry.media_type 判定：所有创建点都写 media_type = 2，
+        // Type1(durl 多分片) 会被当成 Type2 解析出空 video 列表，随后 video[0] 越界崩溃。
+        // 改为按 index.json 内容判定（Type1 一定带 segment_list）；旧数据 media_type = 1 也认。
+        val type1MediaInfo = try {
+            MiaoJson.fromJson<BiliDownloadMediaFileInfo.Type1>(videoIndexJson)
+        } catch (e: Exception) {
+            null
+        }
+        if (type1MediaInfo != null && (type1MediaInfo.segment_list.isNotEmpty() || entry.media_type == 1)) {
+            // 优先合并后的 0.<format>；format 对不上时退回目录里实际存在的 0.* 文件
+            val videoFile = File(videoDir, "0." + type1MediaInfo.format).takeIf { it.exists() }
+                ?: videoDir.listFiles()?.firstOrNull { it.isFile && it.name.startsWith("0.") }
+            if (videoFile != null && videoFile.exists()) {
                 val url = Uri.fromFile(videoFile).toString()
                 return PlayerSourceInfo().also {
                     it.url = url
@@ -107,6 +114,8 @@ class LocalPlayerSource(
             }
         } else {
             val mediaInfo = parseType2(videoIndexJson)
+            // 空 video 列表（index.json 损坏/类型识别失败）时返回空源，避免下面的 video[0] 越界崩溃
+            val videoStream = mediaInfo.video.firstOrNull() ?: return emptyPlayerSourceInfo
             val videoFile = File(videoDir, "video.m4s")
             val audioFile = File(videoDir, "audio.m4s")
             val url = Uri.fromFile(videoFile).toString()
@@ -114,8 +123,8 @@ class LocalPlayerSource(
                 val audioUrl = Uri.fromFile(audioFile).toString()
                 val mergingUrl = "[local-merging]\n$url\n$audioUrl"
                 return PlayerSourceInfo().also {
-                    it.height = mediaInfo.video[0].height
-                    it.width = mediaInfo.video[0].width
+                    it.height = videoStream.height
+                    it.width = videoStream.width
                     it.url = mergingUrl
                     it.quality = 0
                     it.acceptList = acceptList
@@ -125,8 +134,8 @@ class LocalPlayerSource(
                 }
             } else {
                 return PlayerSourceInfo().also {
-                    it.height = mediaInfo.video[0].height
-                    it.width = mediaInfo.video[0].width
+                    it.height = videoStream.height
+                    it.width = videoStream.width
                     it.url = url
                     it.quality = 0
                     it.acceptList = acceptList

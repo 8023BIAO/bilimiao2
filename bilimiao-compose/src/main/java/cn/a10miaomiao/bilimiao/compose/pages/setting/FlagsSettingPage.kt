@@ -16,7 +16,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
@@ -42,7 +46,6 @@ import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -155,8 +158,15 @@ private fun FlagsSettingPageContent(
     var showGuestConfirmDialog by remember { mutableStateOf(false) }
     val currentDpi = context.resources.configuration.densityDpi
     val currentFontScale = context.resources.configuration.fontScale
-    var dpiText by remember { mutableStateOf(currentDpi.toString()) }
-    var fontScaleText by remember { mutableStateOf(currentFontScale.toString()) }
+    // 光标放末尾：String 重载会让 DPI/字缩输入框的光标停在开头
+    var dpiText by remember {
+        val t = currentDpi.toString()
+        mutableStateOf(TextFieldValue(t, TextRange(t.length)))
+    }
+    var fontScaleText by remember {
+        val t = currentFontScale.toString()
+        mutableStateOf(TextFieldValue(t, TextRange(t.length)))
+    }
     var showCdnDialog by remember { mutableStateOf(false) }
     var currentCdnKey by remember { mutableStateOf("default") }
     LaunchedEffect(Unit) {
@@ -180,8 +190,10 @@ private fun FlagsSettingPageContent(
                     put("buvid", JsonPrimitive(BilimiaoCommApp.commApp.getBilibiliBuvid()))
                     val wbiCache = WbiSigner.getWbiCache()
                     put("wbi", buildJsonObject {
-                        wbiCache["mix_key"]?.let { put("mix_key", JsonPrimitive(it.toString())) }
-                        wbiCache["last_fetch_day"]?.let { put("last_fetch_day", JsonPrimitive(it as Int)) }
+                        // 键名必须和 WbiSigner.getWbiCache() 一致（mixKey/lastFetchDay），
+                        // 之前写成 mix_key 导致导出的 wbi 永远是空对象
+                        (wbiCache["mixKey"] as? String)?.let { put("mixKey", JsonPrimitive(it)) }
+                        (wbiCache["lastFetchDay"] as? Int)?.let { put("lastFetchDay", JsonPrimitive(it)) }
                     })
                     if (tokenInfo != null) {
                         put("access_token", JsonPrimitive(tokenInfo.access_token))
@@ -223,11 +235,11 @@ private fun FlagsSettingPageContent(
                     val mid = midStr.toLongOrNull() ?: throw Exception("mid格式错误")
                     val buvid = jsonObj["buvid"]?.jsonPrimitive?.content ?: ""
 
-                    // 恢复 WBI 缓存
+                    // 恢复 WBI 缓存（兼容旧版本导出的 mix_key/last_fetch_day 键名）
                     jsonObj["wbi"]?.jsonObject?.let { wbiObj ->
                         WbiSigner.restoreWbiCache(mapOf(
-                            "mix_key" to (wbiObj["mix_key"]?.jsonPrimitive?.contentOrNull),
-                            "last_fetch_day" to (wbiObj["last_fetch_day"]?.jsonPrimitive?.intOrNull),
+                            "mixKey" to (wbiObj["mixKey"] ?: wbiObj["mix_key"])?.jsonPrimitive?.contentOrNull,
+                            "lastFetchDay" to (wbiObj["lastFetchDay"] ?: wbiObj["last_fetch_day"])?.jsonPrimitive?.intOrNull,
                         ))
                     }
 
@@ -281,15 +293,20 @@ private fun FlagsSettingPageContent(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
-            try {
-                val json = runBlocking { SettingsExporter.exportToJson(context) }
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(json.toByteArray(Charsets.UTF_8))
-                    out.flush()
+            scope.launch {
+                try {
+                    // 导出要读 DataStore 再写文件，放到 IO 线程，避免主线程 runBlocking 卡住界面
+                    withContext(Dispatchers.IO) {
+                        val json = SettingsExporter.exportToJson(context)
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            out.write(json.toByteArray(Charsets.UTF_8))
+                            out.flush()
+                        }
+                    }
+                    Toast.makeText(context, "设置已导出", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "导出失败：${e.message}", Toast.LENGTH_LONG).show()
                 }
-                Toast.makeText(context, "设置已导出", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "导出失败：${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -306,7 +323,10 @@ private fun FlagsSettingPageContent(
                             BufferedReader(InputStreamReader(input, Charsets.UTF_8)).readText()
                         } ?: throw Exception("无法读取文件")
                     }
-                    val count = SettingsExporter.importFromJson(context, jsonString)
+                    // 导入要写 SQLite + DataStore，别在主线程做
+                    val count = withContext(Dispatchers.IO) {
+                        SettingsExporter.importFromJson(context, jsonString)
+                    }
                     Toast.makeText(context, "已导入 $count 项设置，正在重启...", Toast.LENGTH_SHORT).show()
                     val restartIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
                     if (restartIntent != null) {
@@ -325,11 +345,13 @@ private fun FlagsSettingPageContent(
     ) {
         // 游客模式状态（必须在 Composable 作用域内）
         val loginInfoState by userStore.stateFlow.collectAsState()
-        var hasBackup by remember {
-            mutableStateOf(
+        // 组合期直接读 SharedPreferences 会在主线程做首次磁盘加载（进页面就掉帧）→ 异步读
+        var hasBackup by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            hasBackup = withContext(Dispatchers.IO) {
                 context.getSharedPreferences("bilimiao_guest_backup", Context.MODE_PRIVATE)
                     .getString("login_info_backup", null) != null
-            )
+            }
         }
         LazyColumn(
             modifier = Modifier
@@ -451,7 +473,9 @@ private fun FlagsSettingPageContent(
             )
             switchPreference(
                 key = SettingPreferences.CdnRaceEnabled.name,
-                defaultValue = false,
+                // 必须和播放器读取时的默认值一致（PlayerDelegate2 里是 ?: true）：
+                // 否则没动过开关的用户看到"关"，实际每次播放都在竞速
+                defaultValue = true,
                 title = { Text("CDN 竞速") },
                 summary = { Text("播放前并发测试各 CDN 节点延迟，自动选最快的") },
             )
@@ -496,8 +520,10 @@ private fun FlagsSettingPageContent(
                     Text("当屏幕过大或过小时，可以尝试调整一下")
                 },
                 onClick = {
-                    dpiText = context.resources.configuration.densityDpi.toString()
-                    fontScaleText = context.resources.configuration.fontScale.toString()
+                    val d = context.resources.configuration.densityDpi.toString()
+                    val f = context.resources.configuration.fontScale.toString()
+                    dpiText = TextFieldValue(d, TextRange(d.length))
+                    fontScaleText = TextFieldValue(f, TextRange(f.length))
                     showDpiDialog = true
                 },
             )
@@ -599,7 +625,7 @@ private fun FlagsSettingPageContent(
             AlertDialog(
                 onDismissRequest = { showResetDialog = false },
                 title = { Text("确认重置") },
-                text = { Text("将清除所有偏好设置、屏蔽数据、缓存，此操作不可撤销。确定继续？") },
+                text = { Text("将把所有设置恢复为默认值，并清除屏蔽数据\n（不会退出登录，也不会清理图片/播放缓存）\n此操作不可撤销。确定继续？") },
                 confirmButton = {
                     TextButton(
                         onClick = {
@@ -661,6 +687,7 @@ private fun FlagsSettingPageContent(
                             onValueChange = { dpiText = it },
                             label = { Text("DPI (80~640)") },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(Modifier.height(8.dp))
@@ -669,6 +696,7 @@ private fun FlagsSettingPageContent(
                             onValueChange = { fontScaleText = it },
                             label = { Text("字体缩放 (0.5~3.0)") },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -677,8 +705,8 @@ private fun FlagsSettingPageContent(
                     TextButton(
                         onClick = {
                             try {
-                                val dpi = dpiText.toInt()
-                                val fontScale = fontScaleText.toFloat()
+                                val dpi = dpiText.text.toInt()
+                                val fontScale = fontScaleText.text.toFloat()
                                 if (dpi < 80 || dpi > 640) {
                                     Toast.makeText(context, "DPI 需在 80~640 之间", Toast.LENGTH_SHORT).show()
                                     return@TextButton
@@ -692,11 +720,9 @@ private fun FlagsSettingPageContent(
                                     .putInt("app_dpi", dpi)
                                     .putFloat("app_font_scale", fontScale)
                                     .commit()
-                                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                                if (intent != null) {
-                                    context.startActivity(android.content.Intent.makeRestartActivityTask(intent.component))
-                                }
-                                java.lang.System.exit(0)
+                                // 用 recreate() 重新应用配置即可：原来直接 System.exit(0) 会把
+                                // 正在播放的视频、正在下载的任务（前台服务）一起杀掉
+                                (context as? android.app.Activity)?.recreate()
                             } catch (e: NumberFormatException) {
                                 Toast.makeText(context, "请输入数字", Toast.LENGTH_SHORT).show()
                             }

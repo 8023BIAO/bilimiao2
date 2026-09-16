@@ -217,7 +217,14 @@ private class SMSLoginPageViewModel(
             return
         }
         viewModelScope.launch {
-            sendSms()
+            try {
+                sendSms()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 断网/超时时 awaitCall 抛 IOException，不兜住会直接崩进程
+                messageDialog.alert("发送失败：${e.message}")
+            }
         }
     }
 

@@ -14,6 +14,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import me.zhanghai.compose.preference.Preference
 import me.zhanghai.compose.preference.rememberPreferenceState
@@ -58,7 +60,9 @@ fun TextIntPreference(
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var value by state
-    var tempValue by remember { mutableStateOf(value.toString()) }
+    // 用 TextFieldValue 而不是 String：String 重载的初始 selection 是 0，
+    // 编辑已有数值模板时光标会停在最前面（反习惯）
+    var tempValue by remember { mutableStateOf(TextFieldValue("")) }
 
     Preference(
         modifier = modifier,
@@ -67,7 +71,8 @@ fun TextIntPreference(
         icon = icon,
         summary = summary ?: { Text(value.toString() + label) },
         onClick = {
-            tempValue = if (value == 0) "" else value.toString()
+            val initText = if (value == 0) "" else value.toString()
+            tempValue = TextFieldValue(initText, TextRange(initText.length))
             showDialog = true
         },
     )
@@ -79,7 +84,12 @@ fun TextIntPreference(
             text = {
                 TextField(
                     value = tempValue,
-                    onValueChange = { tempValue = it.filter { c -> c.isDigit() } },
+                    onValueChange = { newVal ->
+                        val digits = newVal.text.filter { c -> c.isDigit() }
+                        // 没被过滤掉时保留用户自己的光标位置
+                        tempValue = if (digits == newVal.text) newVal
+                        else TextFieldValue(digits, TextRange(digits.length))
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     label = { Text(label) }
@@ -88,7 +98,7 @@ fun TextIntPreference(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val newValue = tempValue.toIntOrNull() ?: 0
+                        val newValue = tempValue.text.toIntOrNull() ?: 0
                         value = newValue
                         showDialog = false
                     }

@@ -1,6 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose.common.foundation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -81,7 +82,8 @@ internal fun parseHtmlText(
 fun htmlText(
     contentText: String,
 ) : AnnotatedString {
-    val elementList = parseHtmlText(contentText)
+    // 标题列表每次重组都全量解析 HTML 很费（滚动掉帧）→ 按内容缓存
+    val elementList = remember(contentText) { parseHtmlText(contentText) }
     return buildAnnotatedString {
         elementList.forEach {
             when (it.tag) {

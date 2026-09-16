@@ -14,6 +14,7 @@ import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.toast
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeToSequence
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -67,6 +68,15 @@ class BiliJsBridge(
 
     @JavascriptInterface
     fun postMessage(eventString: String) {
+        // @JavascriptInterface 回调运行在 JavaBridge 线程，而 WebView.getUrl()/reload()/loadUrl()
+        // 必须在 UI 线程调用（WebView.checkThread() 会抛 RuntimeException 直接崩进程）
+        // → 整个处理 post 到 UI 线程执行
+        webView.post {
+            handlePostMessage(eventString)
+        }
+    }
+
+    private fun handlePostMessage(eventString: String) {
         // 来源校验：仅白名单域名页面可调用桥（内嵌浏览器可能被重定向到任意页面）
         val pageHost = Uri.parse(webView.url ?: "").host ?: ""
         if (!BilibiliNavigation.isAllowedWebHost(pageHost)) {
@@ -74,7 +84,13 @@ class BiliJsBridge(
             return
         }
         miaoLogger().d("postMessage" to eventString)
-        val event = MiaoJson.fromJson<MessageEventInfo>(eventString)
+        val event = try {
+            MiaoJson.fromJson<MessageEventInfo>(eventString)
+        } catch (e: Exception) {
+            // 页面可能传入非法 JSON 或缺字段：@JavascriptInterface 里抛异常会直接崩进程
+            miaoLogger().d("postMessage parse failed: ${e.message}")
+            return
+        }
         var result = ""
         when (event.method) {
             "ui.setStatusBarMode" -> {
@@ -103,7 +119,7 @@ class BiliJsBridge(
                 }
             }
             "share.showShareMpcWindow" -> {
-                val defaultData = event.data.jsonObject["default"]?.jsonObject ?: return
+                val defaultData = event.safeData["default"] as? JsonObject ?: return
                 val title = defaultData["title"]?.jsonPrimitive?.content ?: ""
                 val text = defaultData["text"]?.jsonPrimitive?.content ?: ""
                 val url = defaultData["url"]?.jsonPrimitive?.content ?: ""
@@ -115,7 +131,7 @@ class BiliJsBridge(
                 }
             }
             "ability.openScheme" -> {
-                val url = event.data.jsonObject["url"]?.jsonPrimitive?.content ?: return
+                val url = event.safeData["url"]?.jsonPrimitive?.content ?: return
                 val uri = Uri.parse(url)
                 val scheme = uri.scheme?.lowercase()
                 // 拒绝危险 scheme，防止桥被滥用执行脚本/访问文件
@@ -146,7 +162,7 @@ class BiliJsBridge(
                 val loginInfo = BilimiaoCommApp.commApp.loginInfo
                 if (loginInfo != null) {
                     // TODO: 刷新登录cookie
-                    val onLoginCallbackId = event.data.jsonObject["onLoginCallbackId"]?.jsonPrimitive?.content
+                    val onLoginCallbackId = event.safeData["onLoginCallbackId"]?.jsonPrimitive?.content
                     if (onLoginCallbackId != null) {
                         biliCallbackReceived(onLoginCallbackId, "{ state: 1 }")
                     }
@@ -161,7 +177,7 @@ class BiliJsBridge(
     fun MessageEventInfo.callback(
         result: String
     ) {
-        val callbackId = data.jsonObject["callbackId"]?.jsonPrimitive?.content
+        val callbackId = safeData["callbackId"]?.jsonPrimitive?.content
         callbackId?.let {
             biliCallbackReceived(it, result)
         }
@@ -185,4 +201,11 @@ class BiliJsBridge(
         val method: String,
         val data: JsonElement
     )
+
+    /**
+     * 页面传来的 data 不保证是 JSON 对象（可能是字符串/数字/数组）。
+     * 直接 .jsonObject 会抛 IllegalArgumentException，而这里在 @JavascriptInterface 中 → 崩进程。
+     */
+    private val MessageEventInfo.safeData: JsonObject
+        get() = data as? JsonObject ?: JsonObject(emptyMap())
 }

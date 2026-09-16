@@ -329,6 +329,26 @@ class VideoPlayerSource(
         return null
     }
 
+    override fun previous(): BasePlayerSource? {
+        val index = pages.indexOfFirst { it.cid == id }
+        val prevIndex = index - 1
+        if (prevIndex in pages.indices) {
+            val prevPage = pages[prevIndex]
+            val prevPlayerSource = VideoPlayerSource(
+                mainTitle = mainTitle,
+                title = prevPage.title,
+                coverUrl = coverUrl,
+                aid = aid,
+                id = prevPage.cid,
+                ownerId = ownerId,
+                ownerName = ownerName,
+            )
+            prevPlayerSource.pages = pages
+            return prevPlayerSource
+        }
+        return null
+    }
+
     data class PageInfo(
         val cid: String,
         val title: String,

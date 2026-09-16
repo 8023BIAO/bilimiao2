@@ -37,6 +37,8 @@ import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.kodein.di.DI
@@ -54,6 +56,7 @@ class SearchFollowPage : ComposePage() {
     }
 }
 
+@OptIn(FlowPreview::class)
 private class SearchFollowPageViewModel(
     override val di: DI,
 ) : ViewModel(), DIAware {
@@ -64,15 +67,23 @@ private class SearchFollowPageViewModel(
 
     val searchText = MutableStateFlow("")
     val isRefreshing = MutableStateFlow(false)
-    val list = FlowPaginationInfo<FollowingItemInfo>()
+    // 接口默认一页 50（老代码用全局默认 20，搜索结果被硬截断）
+    val list = FlowPaginationInfo<FollowingItemInfo>(pageSize = 50)
 
     init {
         viewModelScope.launch {
-            searchText.collect {
+            // 防抖：原来每敲一个字就发一次请求，结果区还会整块闪成"加载中"
+            searchText.debounce(300).collect {
                 if (!list.loading.value) {
                     loadData(it)
                 }
             }
+        }
+    }
+
+    fun loadMore() {
+        if (!list.finished.value && !list.loading.value) {
+            loadData(searchText.value, list.pageNum + 1)
         }
     }
 
@@ -83,6 +94,7 @@ private class SearchFollowPageViewModel(
         try {
             val mid = userStore.state.info?.mid ?: return@launch
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val res = BiliApiService.userRelationApi
                 .search(
                     mid = mid.toString(),
@@ -171,9 +183,9 @@ private fun SearchFollowPageContent(
         Box(
             modifier = Modifier.weight(1f)
         ) {
-            if (listLoading) {
+            if (listLoading && list.isEmpty()) {
                 ListStateBox(loading = true)
-            } else if (listFail.isNotBlank()) {
+            } else if (listFail.isNotBlank() && list.isEmpty()) {
                 ListStateBox(
                     fail = listFail,
                     loadMore = viewModel::tryAgainLoadData
@@ -207,6 +219,16 @@ private fun SearchFollowPageContent(
                             GridItemSpan(maxLineSpan)
                         }
                     ) {
+                        // 补上"加载更多/下面没有了"：原来结果被硬截断在一页，
+                        // 用户会以为关注列表里根本没有这个人
+                        ListStateBox(
+                            loading = listLoading,
+                            finished = listFinished,
+                            fail = listFail,
+                            listData = list,
+                        ) {
+                            viewModel.loadMore()
+                        }
                         Spacer(modifier = Modifier.height(windowInsets.bottomDp.dp))
                     }
                 }

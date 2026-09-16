@@ -422,6 +422,27 @@ class BangumiPlayerSource(
         return null
     }
 
+    override fun previous(): BasePlayerSource? {
+        val index = episodes.indexOfFirst { it.cid == id }
+        val prevIndex = index - 1
+        if (prevIndex in episodes.indices) {
+            val prevEpisode = episodes[prevIndex]
+            val prevPlayerSource = BangumiPlayerSource(
+                sid = sid,
+                epid = prevEpisode.epid,
+                aid = prevEpisode.aid,
+                id = prevEpisode.cid,
+                title = prevEpisode.index_title.ifBlank { prevEpisode.index },
+                coverUrl = prevEpisode.cover,
+                ownerId = ownerId,
+                ownerName = ownerName,
+            )
+            prevPlayerSource.episodes = episodes
+            return prevPlayerSource
+        }
+        return null
+    }
+
     data class EpisodeInfo(
         val epid: String,
         val aid: String,

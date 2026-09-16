@@ -257,13 +257,18 @@ class PlayerBehavior : CoordinatorLayout.Behavior<View> {
     /**
      * 显示播放器动画
      */
+    /** 当前播放器显示/隐藏动画；同一时刻只允许一个，避免两个动画互相覆盖 alpha/scale */
+    private var playerVisibilityAnimator: ValueAnimator? = null
+
+    /** 每次启动新动画自增：onEnd 里比对 token，避免被取消/被打断的旧动画去改布局 */
+    private var playerVisibilityToken = 0
+
     private fun startShowAnimation(child: View) {
-        ValueAnimator.ofFloat(0f, 1f).apply {
+        playerVisibilityAnimator?.cancel()
+        playerVisibilityToken++
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 200
             interpolator = AccelerateInterpolator()
-            val contentView = parentRef?.takeIf {
-                it.orientation == ScaffoldView.VERTICAL
-            }?.content
             child.pivotY = 0f
             child.pivotX = child.width / 2f
             addUpdateListener { animation ->
@@ -272,14 +277,19 @@ class PlayerBehavior : CoordinatorLayout.Behavior<View> {
                 child.scaleX = value
                 child.scaleY = value
             }
-        }.start()
+        }
+        playerVisibilityAnimator = animator
+        animator.start()
     }
 
     /**
      * 隐藏播放器动画
      */
     private fun startHideAnimation(child: View) {
-        ValueAnimator.ofFloat(1f, 0f).apply {
+        playerVisibilityAnimator?.cancel()
+        playerVisibilityToken++
+        val token = playerVisibilityToken
+        val animator = ValueAnimator.ofFloat(1f, 0f).apply {
             duration = 200
             interpolator = AccelerateInterpolator()
             child.pivotY = 0f
@@ -292,10 +302,16 @@ class PlayerBehavior : CoordinatorLayout.Behavior<View> {
             }
             addListener(
                 onEnd = {
-                    child.layout(0, 0, 0, 0)
+                    // 只有本次隐藏没被打断时才塌缩布局：
+                    // 旧写法里 cancel() 也会走 onEnd，会把刚显示出来的播放器压成 0×0
+                    if (token == playerVisibilityToken) {
+                        child.layout(0, 0, 0, 0)
+                    }
                 }
             )
-        }.start()
+        }
+        playerVisibilityAnimator = animator
+        animator.start()
     }
 }
 

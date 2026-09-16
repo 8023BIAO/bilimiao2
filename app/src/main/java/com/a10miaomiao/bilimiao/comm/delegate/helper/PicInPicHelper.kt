@@ -59,15 +59,20 @@ class PicInPicHelper(
             when (intent.getIntExtra(EXTRA_CONTROL_TYPE, 0)) {
                 CONTROL_TYPE_PLAY -> {
                     player.onVideoResume()
+                    // 不刷新的话画中画里的图标一直停在旧状态，点一次后就"失灵"
+                    updatePictureInPictureActions(player.currentState)
                 }
                 CONTROL_TYPE_PAUSE -> {
                     player.onVideoPause()
+                    updatePictureInPictureActions(player.currentState)
                 }
                 CONTROL_TYPE_SKIP_BACK -> {
                     player.seekTo(player.currentPosition - 10000)
+                    updatePictureInPictureActions(player.currentState)
                 }
                 CONTROL_TYPE_SKIP_FORWARD -> {
                     player.seekTo(player.currentPosition + 10000)
+                    updatePictureInPictureActions(player.currentState)
                 }
             }
         }
@@ -176,9 +181,19 @@ class PicInPicHelper(
                 ContextCompat.RECEIVER_EXPORTED
             )
         } else {
-            try {
-                activity.unregisterReceiver(broadcastReceiver)
-            } catch (_: IllegalArgumentException) { }
+            unregisterReceiverSafe()
+        }
+    }
+
+    /**
+     * 注销画中画广播接收器（幂等）。
+     * 只在 onPictureInPictureModeChanged(false) 里注销不够：进画中画后直接销毁 Activity
+     * 不保证回调 false → LogCat "Activity has leaked IntentReceiver"，接收器还持有播放器与 Activity。
+     */
+    fun unregisterReceiverSafe() {
+        try {
+            activity.unregisterReceiver(broadcastReceiver)
+        } catch (_: IllegalArgumentException) {
         }
     }
 

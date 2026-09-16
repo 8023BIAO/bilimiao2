@@ -59,11 +59,16 @@ class AppCrashHandler private constructor(
      */
     override fun uncaughtException(t: Thread, e: Throwable) {
         handleException(e)
-        try {
-            Thread.sleep(2000)
-        } catch (e: Exception) {
+        // 只有主线程崩溃才必须结束进程：那时主线程已经死了，刚拉起的错误日志页根本渲染不出来。
+        // 后台线程崩溃时主线程仍然健康，日志页可以正常显示——之前无条件 sleep(2000)+exitProcess(2)
+        // 会在日志页刚起来时把进程杀掉，用户只能看到一闪而过。
+        if (t === Looper.getMainLooper().thread) {
+            try {
+                Thread.sleep(1000)
+            } catch (_: Exception) {
+            }
+            exitProcess(2)
         }
-        exitProcess(2)
     }
 
     /**

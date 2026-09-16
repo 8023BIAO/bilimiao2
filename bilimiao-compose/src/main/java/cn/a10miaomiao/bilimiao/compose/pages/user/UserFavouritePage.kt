@@ -297,8 +297,8 @@ private fun UserFavouritePageContent(
                 runCatching {
                     viewModel.addFolder(
                         cover = "",
-                        title = formState.title,
-                        intro = formState.intro,
+                        title = formState.title.text,
+                        intro = formState.intro.text,
                         privacy = formState.privacy,
                     )
                 }.onSuccess {

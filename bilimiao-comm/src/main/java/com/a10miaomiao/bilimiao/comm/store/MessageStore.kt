@@ -73,6 +73,15 @@ class MessageStore(override val di: DI) :
         }
     }
 
+    /** 读完私信后清私信未读：原来只有 reply/like/at 三个，私信红点永远消不掉 */
+    fun clearChatUnread() {
+        setState {
+            unread = unread?.copy(
+                chat = 0
+            )
+        }
+    }
+
     fun clearLikeUnread() {
         setState {
             unread = unread?.copy(

@@ -74,6 +74,7 @@ import cn.a10miaomiao.bilimiao.compose.components.dyanmic.DynamicItemCard
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
+import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -109,6 +110,7 @@ class DynamicUpperContentViewModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val req = bilibili.app.dynamic.v2.DynAllPersonalReq(
                 hostUid = upper.uid,
                 localTime = 8,
@@ -157,7 +159,11 @@ class DynamicUpperContentViewModel(
     }
 
     fun toDetailPage(item: DynamicItem) {
-        val extend = item.extend ?: return
+        val extend = item.extend ?: run {
+            // 部分动态类型没有 extend：以前直接 return，用户点了完全没反应
+            toast("这条动态暂时打不开")
+            return
+        }
         val toUrl = extend.cardUrl
         try {
             pageNavigation.navigateByUri(Uri.parse(toUrl))

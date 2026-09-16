@@ -34,7 +34,6 @@ import com.a10miaomiao.bilimiao.comm.utils.TimeSelectUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import me.zhanghai.compose.preference.preference
@@ -66,20 +65,20 @@ private fun TimeSelectSettingPageContent() {
     val regionStore by rememberInstance<RegionStore>()
 
     // 选中的分区（从 DataStore 读）
-    var selectedRegionIds by remember {
-        mutableStateOf<Set<Int>>(
-            runBlocking {
-                SettingPreferences.mapData(context) { prefs ->
-                    prefs[SettingPreferences.TimeSelectSelectedRegions]
-                        ?.mapNotNull { it.toIntOrNull() }
-                        ?.toSet()
-                        ?: emptySet()
-                }
+    var selectedRegionIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
+
+    // 排序权重：整页共用一份状态，避免每个滑块各存一份快照互相覆盖
+    var weightsStr by remember { mutableStateOf(SettingConstants.TIME_SELECT_DEFAULT_WEIGHTS) }
+    val updateWeights: (String) -> Unit = { newWeights ->
+        weightsStr = newWeights
+        scope.launch {
+            SettingPreferences.edit(context) { prefs ->
+                prefs[SettingPreferences.TimeSelectWeights] = newWeights
             }
-        )
+        }
     }
 
-    // 监听 bottom sheet 关闭事件，刷新已选分区数量
+    // 监听 bottom sheet 关闭事件，刷新已选分区数量（首次进入时 bottomSheetPage 为 null 也会执行）
     val bottomSheetPage by bottomSheetState.page.collectAsState()
     LaunchedEffect(bottomSheetPage) {
         if (bottomSheetPage == null) {
@@ -89,6 +88,14 @@ private fun TimeSelectSettingPageContent() {
                     ?.toSet()
                     ?: emptySet()
             }
+        }
+    }
+
+    // 权重与分区都改成异步读取，避免在组合阶段 runBlocking 阻塞主线程
+    LaunchedEffect(Unit) {
+        weightsStr = SettingPreferences.mapData(context) { prefs ->
+            prefs[SettingPreferences.TimeSelectWeights]
+                ?: SettingConstants.TIME_SELECT_DEFAULT_WEIGHTS
         }
     }
 
@@ -130,14 +137,6 @@ private fun TimeSelectSettingPageContent() {
                 title = { Text("排序权重") }
             )
             item(key = "weight_desc") {
-                val weightsStr = runBlocking {
-                    SettingPreferences.run {
-                        SettingPreferences.mapData(context) { prefs ->
-                            prefs[SettingPreferences.TimeSelectWeights]
-                                ?: SettingConstants.TIME_SELECT_DEFAULT_WEIGHTS
-                        }
-                    }
-                }
                 val weights = TimeSelectUtil.parseWeights(weightsStr)
                 Text(
                     text = "当前公式：${TimeSelectUtil.weightsToDisplayString(weights)}",
@@ -146,10 +145,10 @@ private fun TimeSelectSettingPageContent() {
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
-            weightSliderItem("weight_favorite", "favorite", "收藏", 75, context)
-            weightSliderItem("weight_click", "click", "播放", 15, context)
-            weightSliderItem("weight_danmaku", "danmaku", "弹幕", 5, context)
-            weightSliderItem("weight_reply", "reply", "评论", 5, context)
+            weightSliderItem("weight_favorite", "favorite", "收藏", 75, weightsStr, updateWeights)
+            weightSliderItem("weight_click", "click", "播放", 15, weightsStr, updateWeights)
+            weightSliderItem("weight_danmaku", "danmaku", "弹幕", 5, weightsStr, updateWeights)
+            weightSliderItem("weight_reply", "reply", "评论", 5, weightsStr, updateWeights)
 
             // ========== 分区选择 ==========
             preferenceCategory(
@@ -219,22 +218,10 @@ private fun LazyListScope.weightSliderItem(
     weightKey: String,
     label: String,
     defaultValue: Int,
-    context: android.content.Context,
+    weightsStr: String,
+    onWeightsChange: (String) -> Unit,
 ) {
     item(key = keyPrefix, contentType = "WeightSlider") {
-        val scope = rememberCoroutineScope()
-        var weightsStr by remember {
-            mutableStateOf(
-                runBlocking {
-                    SettingPreferences.run {
-                        SettingPreferences.mapData(context) { prefs ->
-                            prefs[SettingPreferences.TimeSelectWeights]
-                                ?: SettingConstants.TIME_SELECT_DEFAULT_WEIGHTS
-                        }
-                    }
-                }
-            )
-        }
         val weights = TimeSelectUtil.parseWeights(weightsStr)
         var sliderValue by remember { mutableIntStateOf(weights[weightKey] ?: defaultValue) }
 
@@ -242,17 +229,10 @@ private fun LazyListScope.weightSliderItem(
             value = sliderValue.toFloat(),
             onValueChange = { newValue ->
                 sliderValue = newValue.toInt()
+                // 以整页共享的最新权重为基底，避免把其它滑块的改动覆盖回旧值
                 val currentWeights = TimeSelectUtil.parseWeights(weightsStr).toMutableMap()
                 currentWeights[weightKey] = newValue.toInt()
-                val newWeightsStr = TimeSelectUtil.formatWeights(currentWeights)
-                weightsStr = newWeightsStr
-                scope.launch {
-                    SettingPreferences.run {
-                        SettingPreferences.edit(context) { prefs ->
-                            prefs[SettingPreferences.TimeSelectWeights] = newWeightsStr
-                        }
-                    }
-                }
+                onWeightsChange(TimeSelectUtil.formatWeights(currentWeights))
             },
             sliderValue = sliderValue.toFloat(),
             onSliderValueChange = { sliderValue = it.toInt() },

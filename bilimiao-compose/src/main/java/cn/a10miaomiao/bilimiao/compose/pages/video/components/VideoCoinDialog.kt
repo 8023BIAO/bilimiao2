@@ -110,9 +110,12 @@ class VideoCoinDialogState(
         _coinNum.value = num
     }
 
-    fun show(videoAid: String, copyright: Int) {
+    fun show(videoAid: String, copyright: Int, coinGiven: Int = 0) {
         aid = videoAid
-        _maxCoinNum.value = if (copyright == 2) 1 else 2
+        // 上限要减去已经投过的数量：B 站同一个视频最多 2 枚（自制 1 枚），
+        // 投过 1 枚再点开弹窗不应该还默认选 2 枚
+        val maxTotal = if (copyright == 2) 1 else 2
+        _maxCoinNum.value = (maxTotal - coinGiven).coerceAtLeast(0)
         _coinNum.value = maxCoinNum
         _visible.value = true
     }

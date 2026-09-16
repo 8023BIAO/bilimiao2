@@ -31,7 +31,7 @@ class UserStore(override val di: DI) :
     data class State (
         var info: UserInfo? = null
     ) {
-        fun isSelf(mid: String) = info?.mid == mid.toLong()
+        fun isSelf(mid: String) = info?.mid != null && info?.mid == mid.toLongOrNull()
 
         fun isSelf(mid: Long) = info?.mid == mid
 
@@ -69,6 +69,8 @@ class UserStore(override val di: DI) :
     fun logout () {
         BilimiaoCommApp.commApp.deleteAuth()
         setUserInfo(null)
+        // 未读角标要一起清掉：那是上一个账号的，登出后还挂在首页
+        try { messageStore.clearUnread() } catch (e: Exception) { }
     }
 
     private fun seveUserInfo(userInfo: UserInfo?) {
@@ -133,7 +135,7 @@ class UserStore(override val di: DI) :
         }
     }
 
-    fun isSelf(mid: String) = state.info?.mid == mid.toLong()
+    fun isSelf(mid: String) = state.info?.mid != null && state.info?.mid == mid.toLongOrNull()
 
     fun isLogin() = state.info != null
 

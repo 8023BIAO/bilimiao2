@@ -32,6 +32,7 @@ import com.a10miaomiao.bilimiao.comm.utils.ErrorLogCollector
 import com.a10miaomiao.bilimiao.comm.utils.ErrorLogEntry
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.kodein.di.compose.rememberInstance
@@ -77,6 +78,7 @@ class ErrorLogPage : ComposePage() {
         val windowInsets = windowState.getContentInsets(localContainerView())
 
         val context = LocalContext.current
+        val scope = rememberCoroutineScope()
         var logs by remember { mutableStateOf<List<ErrorLogEntry>>(emptyList()) }
         var expandedIndices by remember { mutableStateOf(setOf<Int>()) }
         var showClearDialog by remember { mutableStateOf(false) }
@@ -140,11 +142,17 @@ class ErrorLogPage : ComposePage() {
                             onClick = {
                                 if (selectedIndices.isNotEmpty()) {
                                     val count = selectedIndices.size
-                                    ErrorLogCollector.deleteLogs(selectedIndices)
-                                    logs = ErrorLogCollector.getLogs()
+                                    val sel = selectedIndices
                                     selectedIndices = emptySet()
                                     selectionMode = false
-                                    Toast.makeText(context, "已删除 $count 条", Toast.LENGTH_SHORT).show()
+                                    // 日志多时这里是全量读文件+JSON+写文件，必须离开主线程
+                                    scope.launch {
+                                        logs = withContext(Dispatchers.IO) {
+                                            ErrorLogCollector.deleteLogs(sel)
+                                            ErrorLogCollector.getLogs()
+                                        }
+                                        Toast.makeText(context, "已删除 $count 条", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             },
                             enabled = selectedIndices.isNotEmpty()

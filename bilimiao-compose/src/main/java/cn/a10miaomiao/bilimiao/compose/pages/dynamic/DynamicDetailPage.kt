@@ -221,7 +221,8 @@ private fun DynamicDetailPageDetailContent(
     windowInsets: Insets,
     detailData: DynamicItem,
 ) {
-    val oid = detailData.extend!!.dynIdStr
+    // extend 可能为 null（部分动态类型），之前 !! 会直接崩溃；拿不到就退回空串
+    val oid = detailData.extend?.dynIdStr ?: ""
     val replyViewModel = diViewModel(
         key = "dynamic.reply.${oid}"
     ) {

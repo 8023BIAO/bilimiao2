@@ -282,6 +282,11 @@ class MainActivity
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // 消费掉这条 intent：否则 Activity 重建时 getIntent() 还是它，
+        // 会在恢复出来的返回栈之上又压一个页面（用户被莫名拽回最初那条深链）
+        setIntent(intent)
+        // 冷启动窗口内导航还没初始化，解引用 lateinit 会崩（onConfigurationChanged/onBackPressed 都有守卫，这里漏了）
+        if (!::navHostFragment.isInitialized) return
         intent.data?.let { uri ->
             when (uri.scheme) {
                 "bilibili", "bilimiao" -> navHostFragment.navigateByUri(uri)
@@ -650,6 +655,8 @@ class MainActivity
         // AppCompatDelegate.setDefaultNightMode 已处理主题资源切换，不再使用已废弃的 resources.updateConfiguration
 
         basePlayerDelegate.onConfigurationChanged(newConfig)
+        // mainUi 要等主题流首次发射才创建，这个窗口内旋转/切配置不能再访问 ui（否则 IllegalStateException 崩溃）
+        if (mainUi == null) return
         ui.root.orientation = newConfig.orientation
         statusBarHelper.isLightStatusBar =
             !ui.root.showPlayer || (ui.root.orientation == ScaffoldView.HORIZONTAL && !ui.root.fullScreenPlayer)
@@ -674,6 +681,11 @@ class MainActivity
     }
 
     override fun onBackPressed() {
+        // 同上：主界面还没建好时按返回键直接交给父类处理，别抛 IllegalStateException
+        if (mainUi == null) {
+            super.onBackPressed()
+            return
+        }
         if (ui.root.isDrawerOpen()) {
             if (startViewWrapper.showSearchDialog) {
                 startViewWrapper.closeSearchDialog()

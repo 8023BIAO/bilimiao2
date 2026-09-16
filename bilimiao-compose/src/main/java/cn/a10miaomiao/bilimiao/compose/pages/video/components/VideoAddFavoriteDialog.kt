@@ -152,7 +152,12 @@ class VideoAddFavoriteDialogState(
                 .json<MessageInfo>()
             withContext(Dispatchers.Main) {
                 if (res.isSuccess) {
-                    if (favIds.size - delIds.size + addIds.size == 0) {
+                    // 三个集合都空 = 用户什么都没改（例如没收藏过的视频直接点"完成"）。
+                    // 原来这种情况会走 onChanged(0)，把详情页的收藏数减 1。
+                    val changed = delIds.isNotEmpty() || addIds.isNotEmpty()
+                    if (!changed) {
+                        // 无变化：不通知，保持原状态
+                    } else if (favIds.size - delIds.size + addIds.size == 0) {
                         onChanged(0)
                     } else if (favIds.isEmpty()) {
                         onChanged(1)
@@ -394,9 +399,9 @@ fun VideoAddFavoriteDialog(
                     try {
                         val res = BiliApiService.userApi
                             .favAddFolder(
-                                title = formState.title,
+                                title = formState.title.text,
                                 cover = "",
-                                intro = formState.intro,
+                                intro = formState.intro.text,
                                 privacy = formState.privacy,
                             )
                             .awaitCall()
@@ -439,7 +444,7 @@ fun VideoAddFavoriteDialog(
                 },
                 confirmButton = {
                     TextButton(
-                        enabled = !addLoading && formState.title.isNotBlank(),
+                        enabled = !addLoading && formState.title.text.isNotBlank(),
                         onClick = ::handleCreateFolder,
                     ) {
                         Text(text = "添加")

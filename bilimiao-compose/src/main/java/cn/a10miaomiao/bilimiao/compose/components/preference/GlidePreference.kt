@@ -6,13 +6,18 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.a10miaomiao.bilimiao.comm.utils.GlideCacheUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.a10miaomiao.bilimiao.comm.toast
 import me.zhanghai.compose.preference.Preference
 
@@ -30,9 +35,11 @@ fun GlidePreference(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    var cacheSize by remember {
-        val cache = GlideCacheUtil.getCacheSize(context)
-        mutableStateOf(cache)
+    val scope = rememberCoroutineScope()
+    // 组合期就递归遍历整个 Glide 缓存目录算大小，会让设置页明显掉帧 → 进页面后异步算
+    var cacheSize by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        cacheSize = withContext(Dispatchers.IO) { GlideCacheUtil.getCacheSize(context) }
     }
     var showDialog by remember {
         mutableStateOf(false)
@@ -66,9 +73,12 @@ fun GlidePreference(
                 TextButton(
                     onClick = {
                         showDialog = false
-                        GlideCacheUtil.clearImageAllCache(context)
-                        toast("清理完成，已清理$cacheSize")
-                        cacheSize = "0Byte"
+                        scope.launch {
+                            // 删缓存也要走 IO，别在主线程删目录
+                            withContext(Dispatchers.IO) { GlideCacheUtil.clearImageAllCache(context) }
+                            toast("清理完成，已清理$cacheSize")
+                            cacheSize = "0Byte"
+                        }
                     }
                 ) {
                     Text("确认")

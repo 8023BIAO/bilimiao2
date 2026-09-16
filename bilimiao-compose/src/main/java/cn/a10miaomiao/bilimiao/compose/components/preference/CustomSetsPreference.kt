@@ -22,6 +22,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.a10miaomiao.bilimiao.comm.toast
@@ -198,7 +200,12 @@ fun CustomSetsPreference(
             }
         )
     } else if (editDialogStateValue is EditDialogState.Update) {
-        val text = remember { mutableStateOf(editDialogStateValue.value) }
+        // 光标放到末尾：String 重载会让「编辑倍速」的光标停在开头
+        val text = remember {
+            mutableStateOf(
+                TextFieldValue(editDialogStateValue.value, TextRange(editDialogStateValue.value.length))
+            )
+        }
         val errorMessage = remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = {
@@ -207,7 +214,7 @@ fun CustomSetsPreference(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val v = text.value.toDoubleOrNull()
+                        val v = text.value.text.toDoubleOrNull()
                         if (v == null || v <= 0) {
                             errorMessage.value = "请输入有效值"
                         } else if (v > 10) {

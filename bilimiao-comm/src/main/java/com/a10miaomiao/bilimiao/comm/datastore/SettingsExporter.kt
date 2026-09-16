@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 
 // v3: 新增 filterUpperNames（UP主名称屏蔽数据库）
@@ -143,6 +144,29 @@ object SettingsExporter {
     suspend fun importFromJson(context: Context, jsonString: String): Int {
         // 智能截断：追踪括号深度，找到最外层 JSON 真正闭合的位置
         val cleanJson = truncateToValidJson(jsonString)
+        // 先确认这真的是"设置导出"文件再动手：
+        // SettingsExport 每个字段都有默认值 + ignoreUnknownKeys，任何一个 JSON（比如同一个菜单里
+        // 导出的身份信息文件）都能解析成功，随后会无条件清空屏蔽词/UP主/标签库、覆写时光姬与代理配置
+        // → 用户数据被毁，却提示"导入成功"。这里做一次签名校验，不合法就抛错、不动任何数据。
+        val rootObj = try {
+            json.parseToJsonElement(cleanJson).jsonObject
+        } catch (e: Exception) {
+            null
+        }
+        val signatureKeys = setOf(
+            "version", "values", "filterWords", "filterUppers", "filterTags", "filterUpperNames",
+            "spTimeType", "spTimeFrom", "spTimeTo", "spProxyUpos",
+            "spAppDpi", "spAppFontScale", "spPlayerQuality", "proxyServersJson"
+        )
+        val looksLikeAuthExport = rootObj != null &&
+                listOf("cookie", "access_token", "refresh_token", "buvid").any { rootObj.containsKey(it) }
+        if (rootObj == null || looksLikeAuthExport || rootObj.keys.none { it in signatureKeys }) {
+            ErrorLogCollector.logError(
+                error = "设置导入被拒绝: 不是设置导出文件",
+                stackTrace = cleanJson.take(200)
+            )
+            throw Exception("这不是设置导出文件，请选择用「导出设置」生成的文件")
+        }
         val export = try {
             json.decodeFromString<SettingsExport>(cleanJson)
         } catch (e: Exception) {
@@ -280,8 +304,14 @@ object SettingsExporter {
             }
         }
         // 2. SharedPreferences (时光姬等)
-        context.getSharedPreferences(BilimiaoCommApp.APP_NAME, Context.MODE_PRIVATE)
-            .edit().clear().apply()
+        // buvid 是登录信息 AES 密钥的派生来源，清掉它会导致重启后 auth_hd 解不开 → 用户被静默登出。
+        // "恢复默认设置"不该顺带踢人下线，所以先备份再还原。
+        val sp = context.getSharedPreferences(BilimiaoCommApp.APP_NAME, Context.MODE_PRIVATE)
+        val buvidBackup = sp.getString("buvid", null)
+        sp.edit().clear().apply()
+        if (buvidBackup != null) {
+            sp.edit().putString("buvid", buvidBackup).apply()
+        }
         // 3. 默认 SharedPreferences (DPI)
         PreferenceManager.getDefaultSharedPreferences(context)
             .edit().clear().apply()

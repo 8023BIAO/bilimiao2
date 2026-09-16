@@ -143,7 +143,8 @@ class PlayListStore(override val di: DI) :
     }
 
     fun setPlayList(info: UgcSeasonInfo, index: Int) {
-        val sectionInfo = info.sections[index]
+        // index 来自调用方的 indexOfFirst，可能是 -1（当前视频不在任何 section 里）→ 越界崩溃
+        val sectionInfo = info.sections.getOrNull(index) ?: info.sections.firstOrNull() ?: return
         val listFrom = PlayListFrom.Section(
             seasonId = info.id,
             sectionId = sectionInfo.id,
@@ -179,7 +180,8 @@ class PlayListStore(override val di: DI) :
     }
 
     fun setPlayList(season: bilibili.app.view.v1.UgcSeason, index: Int) {
-        val sectionInfo = season.sections[index]
+        // 同上：index 可能为 -1（当前视频不在任何 section 里）
+        val sectionInfo = season.sections.getOrNull(index) ?: season.sections.firstOrNull() ?: return
         val listFrom = PlayListFrom.Section(
             seasonId = season.id.toString(),
             sectionId = sectionInfo.id.toString(),
@@ -374,10 +376,13 @@ class PlayListStore(override val di: DI) :
                     if (res.code == 0) {
                         val mediaList = res.requireData().media_list ?: break
                         lastOid = mediaList.lastOrNull()?.id ?: ""
-                        val newItems = mediaList.map {
+                        val newItems = mediaList.mapNotNull {
+                            // pages 为空的条目（失效稿/仅音频）直接跳过：
+                            // 原来用 it.pages[0] 会抛异常，被外层 catch 吞掉 → 后续分页全部静默丢失
+                            val firstPage = it.pages.firstOrNull() ?: return@mapNotNull null
                             PlayListItemInfo(
                                 aid = it.id,
-                                cid = it.pages[0].id,
+                                cid = firstPage.id,
                                 duration = it.duration.toInt(),
                                 title = it.title,
                                 cover = it.cover,
@@ -505,8 +510,9 @@ class PlayListStore(override val di: DI) :
             title = title,
             cover = pic,
             duration = duration.toInt(),
-            ownerId = author!!.mid.toString(),
-            ownerName = author.name,
+            // UP 主已注销/封禁时 author 可能为 null（同仓 VideoDetailViewModel 里已有 arc.author ?: return 防护）
+            ownerId = author?.mid?.toString().orEmpty(),
+            ownerName = author?.name.orEmpty(),
             from = from,
             videoPages = viewPages.map {
                 PlayListItemInfo.VideoPageInfo(

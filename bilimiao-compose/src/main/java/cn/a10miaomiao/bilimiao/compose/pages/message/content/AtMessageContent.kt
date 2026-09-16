@@ -80,6 +80,7 @@ private class AtMessageContentModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示（否则重试成功后还挂着）
             val res = BiliApiService.messageApi
                 .at(id, time)
                 .awaitCall()

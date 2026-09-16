@@ -133,6 +133,13 @@ open class DraggablePreviewerState(
                         }
                     }
                 },
+                onDragCancel = OnDragCancel@{
+                    // 手势被外层（如 HorizontalPager）抢走时不会回调 onDragEnd：
+                    // 不在这里恢复，allowGestureInput 会永久为 false → 预览里双指缩放失效
+                    startOffset = null
+                    orientationDown = null
+                    zoomableViewState.value?.allowGestureInput = true
+                },
                 onDragEnd = OnDragEnd@{
                     // 如果开始位置为空，就退出
                     if (startOffset == null) return@OnDragEnd

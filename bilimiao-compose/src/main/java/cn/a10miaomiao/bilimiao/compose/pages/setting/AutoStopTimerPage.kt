@@ -71,7 +71,9 @@ private fun AutoStopTimerPageContent(
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val autoStopDuration by viewModel.autoStopDurationFlow.collectAsState()
-    var sliderValue by remember(autoStopDuration) { mutableFloatStateOf(autoStopDuration.toFloat()) }
+    // 不要用 autoStopDuration 当 remember 的 key：播放中它每秒递减，
+    // 会让滑块在拖动过程中被重建覆盖，根本拖不到想要的值（进页面时的初值取一次即可）
+    var sliderValue by remember { mutableFloatStateOf(autoStopDuration.toFloat()) }
 
     Column(
         modifier = Modifier

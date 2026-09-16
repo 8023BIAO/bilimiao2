@@ -7,6 +7,7 @@ import android.view.View
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.navigation.NavController
 import androidx.navigation.Navigation
+import cn.a10miaomiao.bilimiao.compose.pages.article.ArticleReaderPage
 import cn.a10miaomiao.bilimiao.compose.pages.bangumi.BangumiDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.bangumi.SeasonCheckPage
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
@@ -57,6 +58,29 @@ object BilibiliNavigation {
         }
 
         if (scheme == "http" || scheme == "https") {
+            // ── 动态/opus：https 形式直接进专栏页（与 bilibili://opus 深链同一目的地）──
+            // 之前 www.bilibili.com/opus/{id} 匹配不到任何目的地，会一路落到内嵌
+            // 浏览器(WebPage)，用户看到的就是"卡在中间页"；页面里再唤起 bilibili://
+            // 又被忽略，只能手动返回。t.bilibili.com/{id} 是老动态分享页，
+            // 只在 id 是 opus 长 id 时才接管，短 id 仍走原来的网页兜底，避免取错接口。
+            if (host == "www.bilibili.com" || host == "bilibili.com" || host == "m.bilibili.com") {
+                val articleId = Regex("^/opus/(\\d+)").find(path)?.groupValues?.get(1)
+                    ?: Regex("(?i)^/read/cv(\\d+)").find(path)?.groupValues?.get(1)
+                    ?: Regex("^/read/mobile/(\\d+)").find(path)?.groupValues?.get(1)
+                if (articleId != null) {
+                    articleId.toLongOrNull()?.let {
+                        pageNavigation.navigate(ArticleReaderPage(it))
+                        return true
+                    }
+                }
+            } else if (host == "t.bilibili.com") {
+                val dynId = Regex("^/(\\d+)").find(path)?.groupValues?.get(1)
+                val dynIdLong = dynId?.toLongOrNull()
+                if (dynIdLong != null && dynIdLong >= 1_000_000_000_000L) {
+                    pageNavigation.navigate(ArticleReaderPage(dynIdLong))
+                    return true
+                }
+            }
             var compile = Pattern.compile("BV([a-zA-Z0-9]{5,})")
             var matcher = compile.matcher(path)
             if (matcher.find()) {

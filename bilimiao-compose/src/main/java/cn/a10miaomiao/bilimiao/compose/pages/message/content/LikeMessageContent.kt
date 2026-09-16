@@ -79,6 +79,7 @@ private class LikeMessageContentModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示（否则重试成功后还挂着）
             val res = BiliApiService.messageApi
                 .like(id, time)
                 .awaitCall()
@@ -135,7 +136,8 @@ private class LikeMessageContentModel(
     }
 
     fun toUserPage(item: LikeMessageInfo) {
-        val mid = item.users[0].mid
+        // users 可能为空（同文件其它分支已按空列表处理）→ 原来 [0] 会越界崩溃
+        val mid = item.users.firstOrNull()?.mid ?: return
         pageNavigation.navigate(UserSpacePage(mid.toString()))
     }
 
@@ -338,7 +340,8 @@ private fun parseDanmuUri(item: LikeMessageInfo.ItemInfo): Pair<String, Long?> {
     val uri = item.uri
     if (uri.isNotBlank()) {
         val bvId = BiliUrlMatcher.findIDByUrl(uri)
-        val aid = if (bvId[0] == "BV") bvId[1] else item.item_id.toString()
+        // findIDByUrl 返回的是去掉 BV 前缀的 id，这里必须补回来（VideoDetailPage 需要完整 BV 号）
+        val aid = if (bvId[0] == "BV") "BV${bvId[1]}" else item.item_id.toString()
         val dmProgress = Uri.parse(uri).getQueryParameter("dm_progress")
         val seekMs = dmProgress?.toLongOrNull()
         return aid to seekMs

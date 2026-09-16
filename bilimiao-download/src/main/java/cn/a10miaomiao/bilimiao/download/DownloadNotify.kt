@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.download
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -17,11 +18,12 @@ class DownloadNotify(val context: Context) {
     val channelId = "cn.a10miaomiao.bilimiao.download.DownloadNotify.control"
     val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+    /** 下载列表页真实存在的深链（compose 侧 BilimiaoPageRoute 注册的是 bilimiao://download）。
+     *  原来拼的 bilimiao://compose?url=... 全仓没有任何路由处理，点通知没反应。 */
+    private val downloadListUri = Uri.parse("bilimiao://download")
+
     val builder = NotificationBuilder(context, channelId).apply {
-        val pageUrl = "download/list"
-        val uri = Uri.parse("bilimiao://compose?url=${Uri.encode(pageUrl)}")
-        val pendingIntent = getPendingIntent(uri)
-        setContentIntent(pendingIntent)
+        setContentIntent(getPendingIntent(downloadListUri))
         setSmallIcon(android.R.drawable.stat_sys_download)
         priority = NotificationCompat.PRIORITY_DEFAULT
         setOnlyAlertOnce(true)
@@ -33,6 +35,17 @@ class DownloadNotify(val context: Context) {
             val mChannel = NotificationChannel(channelId, "DownloadControl", NotificationManager.IMPORTANCE_DEFAULT)
             manager.createNotificationChannel(mChannel)
         }
+    }
+
+    /**
+     * 构建前台服务常驻通知：与进度通知共用同一个 notificationID，
+     * 这样 notifyData() 刷新的就是同一条通知，不会出现两条。
+     */
+    fun buildForegroundNotification(): Notification {
+        // 前台服务通知必须有内容，模块内没有 strings 资源，标题用应用名
+        builder.setContentTitle(context.applicationInfo.loadLabel(context.packageManager))
+        builder.setContentText("正在下载")
+        return builder.build()
     }
 
     fun notifyData(info: CurrentDownloadInfo) {
@@ -53,10 +66,9 @@ class DownloadNotify(val context: Context) {
         manager.notify(
             notificationID + info.taskId.toInt(),
             NotificationCompat.Builder(context, channelId).apply {
-                val pageUrl = "download/detail?path=${info.parentDirPath}"
-                val uri = Uri.parse("bilimiao://compose?url=${Uri.encode(pageUrl)}")
-                val pendingIntent = getPendingIntent(uri)
-                setContentIntent(pendingIntent)
+                // 下载详情页没有注册 deepLink（只有 DownloadListPage 注册了 bilimiao://download），
+                // 所以完成通知退化到下载列表页，不再用无人处理的 bilimiao://compose
+                setContentIntent(getPendingIntent(downloadListUri))
                 setContentTitle(info.name)
                 setContentText("下载完成")
                 setSmallIcon(R.drawable.ic_baseline_file_download_done_24)
@@ -68,10 +80,8 @@ class DownloadNotify(val context: Context) {
         manager.notify(
             notificationID + info.taskId.toInt(),
             NotificationCompat.Builder(context, channelId).apply {
-                val pageUrl = "download/detail?path=${info.parentDirPath}"
-                val uri = Uri.parse("bilimiao://compose?url=${Uri.encode(pageUrl)}")
-                val pendingIntent = getPendingIntent(uri)
-                setContentIntent(pendingIntent)
+                // 同完成通知：详情页无 deepLink，统一跳下载列表页
+                setContentIntent(getPendingIntent(downloadListUri))
                 setContentTitle(info.name)
                 setContentText("下载出错")
                 setSmallIcon(R.drawable.ic_baseline_error_24)

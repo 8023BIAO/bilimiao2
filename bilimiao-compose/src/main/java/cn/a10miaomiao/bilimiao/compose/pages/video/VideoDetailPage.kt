@@ -74,6 +74,7 @@ import cn.a10miaomiao.bilimiao.compose.components.layout.DataDrivenNavigator
 import cn.a10miaomiao.bilimiao.compose.components.layout.DoubleColumnAutofitLayout
 import cn.a10miaomiao.bilimiao.compose.components.layout.chain_scrollable.rememberChainScrollableLayoutState
 import cn.a10miaomiao.bilimiao.compose.components.status.BiliFailBox
+import cn.a10miaomiao.bilimiao.compose.components.status.BiliLoadingBox
 
 import cn.a10miaomiao.bilimiao.compose.components.video.VideoItemBox
 import cn.a10miaomiao.bilimiao.compose.pages.community.MainReplyViewModel
@@ -260,14 +261,18 @@ private fun VideoDetailPageContent(
                     }
                 }
             } else {
-                VideoDetailContent(
-                    viewModel = viewModel,
-                    innerPadding = innerPadding,
-                    showCover = isShowCover,
-                    detailData = detailData,
-                    arcData = arcData,
-                    isActive = true,
-                )
+                // 双栏（平板/横屏）时左栏在下面那个 CompositionLocalProvider 的作用域之外，
+                // 不在这里补一份的话，AI 总结/分段大纲的时间戳点了没有反应
+                CompositionLocalProvider(LocalOnSeekTime provides seekCallback) {
+                    VideoDetailContent(
+                        viewModel = viewModel,
+                        innerPadding = innerPadding,
+                        showCover = isShowCover,
+                        detailData = detailData,
+                        arcData = arcData,
+                        isActive = true,
+                    )
+                }
             }
         }
     ) { orientation, innerPadding ->
@@ -456,6 +461,13 @@ private fun VideoDetailPageLoading(
     if (fail != null) {
         BiliFailBox(
             e = fail,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        )
+    } else if (loading) {
+        // 以前只判 fail、不判 loading → 首屏加载那几秒是纯白屏，用户以为页面坏了
+        BiliLoadingBox(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)

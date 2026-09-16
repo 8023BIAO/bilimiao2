@@ -62,7 +62,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.window.core.layout.WindowWidthSizeClass
 import cn.a10miaomiao.bilimiao.compose.base.PageSearchMethod
@@ -98,7 +100,12 @@ fun SearchInputInline(
     val pageNavigation: PageNavigation by rememberInstance()
     val activity: Activity by rememberInstance()
 
-    var text by remember { mutableStateOf(initKeyword) }
+    var textValue by remember {
+        // String 重载的初始 selection 是 0（光标在最前面）：带着已有关键字打开搜索框
+        // （例如搜索结果页点「继续搜索」）就会反习惯。用 TextFieldValue 把光标放到末尾。
+        mutableStateOf(TextFieldValue(initKeyword, TextRange(initKeyword.length)))
+    }
+    val text = textValue.text
     var mode by remember { mutableStateOf(initMode) }
     val focusRequester = remember { FocusRequester() }
     var isEditingHistory by remember { mutableStateOf(false) }
@@ -109,12 +116,24 @@ fun SearchInputInline(
         }
     }
 
+    // 打开搜索框时先清掉上一次的联想词：预填关键字（如"继续搜索"）时会先闪出
+    // 上一次搜索的推荐词，而且那批 chip 还能点，点了就跳到无关的搜索
+    LaunchedEffect(Unit) {
+        viewModel.clearSuggest()
+    }
+
     @OptIn(FlowPreview::class)
     LaunchedEffect(Unit) {
-        snapshotFlow { text }
+        // 注意必须读 textValue.text 而不是上面那个 String 局部量：
+        // snapshotFlow 只在启动时求值一次，读死值会导致联想建议永远不刷新
+        // mode 也放进 flow：否则从"页内搜索"切到"全站搜索"时不会重新触发联想
+        //（要再敲一个字才出来）
+        snapshotFlow { textValue.text to mode }
             .debounce(300)
-            .collect { debouncedText ->
-                if (debouncedText.isNotEmpty()) {
+            .collect { (debouncedText, currentMode) ->
+                // mode=1 是"页内搜索"（例如在某 UP 主页里搜他的视频），
+                // 那种场景拉全站联想词没有意义，只会串到全站的推荐上去
+                if (debouncedText.isNotEmpty() && currentMode == 0) {
                     viewModel.loadSuggestData(debouncedText, debouncedText)
                 }
             }
@@ -131,8 +150,10 @@ fun SearchInputInline(
             toast("请输入ID或关键字")
             return
         }
-        viewModel.addSearchHistory(keyword)
+        // 只有全站搜索才记进搜索历史：页内搜索（搜 UP 投稿/历史/收藏夹）的关键词
+        // 混进全站历史里，而页内模式又把历史面板藏了，用户只会觉得历史里冒出莫名其妙的词
         if (mode == 0) {
+            viewModel.addSearchHistory(keyword)
             val videoPage = when {
                 keyword.matches(Regex("^[Bb][Vv]1[A-Za-z0-9]{9}$")) -> VideoDetailPage(keyword)
                 keyword.matches(Regex("^[Aa][Vv][0-9]+$")) -> VideoDetailPage(
@@ -200,11 +221,18 @@ fun SearchInputInline(
             }
             val showSuggestList by remember {
                 derivedStateOf {
-                    when {
-                        text.isEmpty() -> historySuggestList
-                        else -> suggestList
-                    }.let {
-                        if (isCompact) it.asReversed() else it
+                    // mode=1 是页内搜索（搜某个 UP 的视频、搜观看历史等）：
+                    // 全站联想词和全站搜索历史都跟当前页面无关，整块藏掉
+                    if (mode == 1) {
+                        emptyList()
+                    } else {
+                        when {
+                            // 同理：derivedStateOf 的 lambda 会被缓存，必须读 state 本体
+                            textValue.text.isEmpty() -> historySuggestList
+                            else -> suggestList
+                        }.let {
+                            if (isCompact) it.asReversed() else it
+                        }
                     }
                 }
             }
@@ -224,8 +252,8 @@ fun SearchInputInline(
                     modifier = Modifier
                         .fillMaxWidth(),
                     isCompact = false,
-                    text = text,
-                    onTextChange = { text = it },
+                    textValue = textValue,
+                    onTextValueChange = { textValue = it },
                     onSearch = ::startSearch,
                     focusRequester = focusRequester,
                     mode = mode,
@@ -352,8 +380,8 @@ fun SearchInputInline(
                     modifier = Modifier
                         .fillMaxWidth(),
                     isCompact = true,
-                    text = text,
-                    onTextChange = { text = it },
+                    textValue = textValue,
+                    onTextValueChange = { textValue = it },
                     onSearch = ::startSearch,
                     focusRequester = focusRequester,
                     mode = mode,
@@ -389,8 +417,8 @@ fun SearchInputInline(
 private fun SearchTextField(
     modifier: Modifier = Modifier,
     isCompact: Boolean,
-    text: String,
-    onTextChange: (String) -> Unit,
+    textValue: TextFieldValue,
+    onTextValueChange: (TextFieldValue) -> Unit,
     onSearch: (String) -> Unit,
     focusRequester: FocusRequester,
     mode: Int,
@@ -427,18 +455,18 @@ private fun SearchTextField(
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester),
-                    value = text,
-                    onValueChange = onTextChange,
+                    value = textValue,
+                    onValueChange = onTextValueChange,
                     singleLine = true,
                     placeholder = { Text("输入ID或关键字") },
                     trailingIcon = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (text.isNotEmpty()) {
+                            if (textValue.text.isNotEmpty()) {
                                 IconButton(
                                     modifier = Modifier.size(24.dp),
-                                    onClick = { onTextChange("") },
+                                    onClick = { onTextValueChange(TextFieldValue("")) },
                                 ) {
                                     Icon(
                                         Icons.Default.Close,
@@ -449,8 +477,8 @@ private fun SearchTextField(
                                 }
                             }
                             TextButton(
-                                onClick = { onSearch(text) },
-                                enabled = text.isNotEmpty()
+                                onClick = { onSearch(textValue.text) },
+                                enabled = textValue.text.isNotEmpty()
                             ) {
                                 Text("搜索")
                             }
@@ -458,7 +486,7 @@ private fun SearchTextField(
                     },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(
-                        onSearch = { onSearch(text) }
+                        onSearch = { onSearch(textValue.text) }
                     ),
                     shape = MaterialTheme.shapes.large,
                     colors = TextFieldDefaults.colors(

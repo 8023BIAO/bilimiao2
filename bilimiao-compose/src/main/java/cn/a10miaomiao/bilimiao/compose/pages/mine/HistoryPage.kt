@@ -49,6 +49,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -149,7 +150,8 @@ private class HistoryPageViewModel(
     private val pageNavigation by instance<PageNavigation>()
     private val messageDialog by instance<MessageDialogState>()
 
-    var keyword = ""
+    /** 自搜索关键字：是"页面内过滤"而不是新页面，用 state 让标题/返回键即时同步 */
+    var keyword by mutableStateOf("")
 
     val isRefreshing = MutableStateFlow(false)
     val list = FlowPaginationInfo<HistoryItem>()
@@ -187,6 +189,7 @@ private class HistoryPageViewModel(
     ) = viewModelScope.launch(Dispatchers.IO) {
         try {
             list.loading.value = true
+            list.fail.value = ""   // 开始加载就清掉上一次的失败提示
             val keywordText = keyword
             val itemList = if (keywordText.isBlank()) {
                 loadList(maxId)
@@ -457,9 +460,16 @@ private fun HistoryPageContent(
         onSearchSelfPage = viewModel::searchSelfPage
     )
     BackHandler(
-        enabled = enableEditMode.value,
+        enabled = enableEditMode.value || viewModel.keyword.isNotBlank(),
         onBack = {
-            enableEditMode.value = false
+            // 自搜索只是页面内过滤，不是独立页面：返回键先退出搜索状态（恢复完整历史列表），
+            // 再按一次才离开本页。否则用户搜完一按返回就被弹回上级页面，
+            // 看起来就像"返回没回到观看历史界面"。
+            if (enableEditMode.value) {
+                enableEditMode.value = false
+            } else {
+                viewModel.searchSelfPage("")
+            }
         }
     )
 

@@ -131,7 +131,8 @@ class TypeBangumiContentViewModel(
 
     fun loadMore() {
         if (!list.finished.value && !list.loading.value) {
-            loadData(list.pageNum + 1)
+            // 首屏失败时点重试走的也是这里：列表为空就必须重拉第 1 页，不能跳到第 2 页
+            loadData(if (list.data.value.isEmpty()) 1 else list.pageNum + 1)
         }
     }
 
@@ -262,7 +263,7 @@ fun TypeBangumiContent(
                 listOf(0 to "取消${viewModel.typeName}")
             } else {
                 listOf(
-                    Pair(0,"取消$${viewModel.typeName}"),
+                    Pair(0, "取消${viewModel.typeName}"),
                     Pair(1, "标记为『想看』").takeIf {
                         currentStatus != 1
                     },

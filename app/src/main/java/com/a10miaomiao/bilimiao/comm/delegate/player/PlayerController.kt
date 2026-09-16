@@ -658,10 +658,8 @@ class PlayerController(
             toast("请先登录")
             return
         }
-        if (delegate.isPlaying()) {
-            player?.onVideoPause()
-            player?.hideController()
-        }
+        // 暂停与"关掉后要不要恢复播放"都由委托层统一管理（记住打开前是否在播放）
+        delegate.openDanmakuEditor()
         activity.openBottomSheet(SendDanmakuPage())
     }
 
@@ -679,7 +677,8 @@ class PlayerController(
                     val height = playerSourceInfo?.height
                     val width = playerSourceInfo?.width
                     // 设置宽高比例值
-                    var aspectRatio = if (height == null || width == null) {
+                    var aspectRatio = if (height == null || width == null || height <= 0 || width <= 0) {
+                        // 宽高缺失或接口返回 0 时兜底：Rational 分母为 0 会抛 IllegalArgumentException
                         Rational(16, 9)
                     } else {
                         Rational(width, height)
@@ -751,12 +750,17 @@ class PlayerController(
     }
 
     fun onBackClick() {
-        if (!scaffoldApp.fullScreenPlayer || onlyFull) {
-            if (player?.mode == DanmakuVideoPlayer.PlayerMode.SMALL_FLOAT) {
-                explicitExitSmallWindow = true
-            }
-            delegate.closePlayer()
+        // 全屏时按返回一律"先退出全屏、继续播放"，关播放器留给小窗的 ✕。
+        // 原来在自动全屏(onlyFull，比如设置里开了自动转屏全屏)时按返回会直接把播放器关掉，
+        // 和手动全屏的行为不一致
+        if (scaffoldApp.fullScreenPlayer && !onlyFull) {
+            smallScreen()
+            return
         }
+        if (player?.mode == DanmakuVideoPlayer.PlayerMode.SMALL_FLOAT) {
+            explicitExitSmallWindow = true
+        }
+        delegate.closePlayer()
         smallScreen()
     }
 
@@ -900,9 +904,13 @@ class PlayerController(
     }
 
     override fun onVideoPause() {
+        // 暂停不计入"定时关闭"：作废计时基准，恢复播放后重新起算
+        isTimerInitialized = false
     }
 
     override fun onVideoResume(isResume: Boolean) {
+        // 注意：这里不要重置计时基准——后台播放回到前台也会走 onVideoResume，
+        // 重置会把"后台一直在播"的那段时间白送掉。暂停侧已经在 onVideoPause 里作废基准了。
         if (isResume) {
             // 🚫 DLNA_DISABLED
             // dlnaManager.startDiscovery()
@@ -952,28 +960,36 @@ class PlayerController(
 
         //定时关闭 - 使用真实时间代替视频时间（修复倍速<1时计时卡住/失效问题）
         val autoStopDuration = playerStore.autoStopDuration
-        if (autoStopDuration > 0 && delegate.isPlaying()) {
-            if (!isTimerInitialized) {
+        if (autoStopDuration > 0) {
+            if (!delegate.isPlaying()) {
+                // 暂停中不计时（进度回调可能还在跑）：只作废基准，恢复播放后重新起算，
+                // 这样暂停多久都不会被算进"定时关闭"
+                isTimerInitialized = false
+            } else if (!isTimerInitialized) {
                 lastRecordedPosition = System.currentTimeMillis()
                 isTimerInitialized = true
-                return
-            }
-
-            val now = System.currentTimeMillis()
-            val passedTime = (now - lastRecordedPosition) / 1000L
-            if (passedTime in 0L..5L) {
-                var remainTimeNew = autoStopDuration - passedTime.toInt()
-                if (remainTimeNew <= 0) {
-                    // 时间被消耗完，暂停
-                    remainTimeNew = 0
-                    delegate.views.videoPlayer?.onVideoPause()
-                    isTimerInitialized = false
+            } else {
+                val now = System.currentTimeMillis()
+                // 按真实流逝时间扣减：切后台/息屏/主线程卡顿后回来要一次扣够。
+                // 原来只在 passedTime∈0..5 时才扣，超过 5 秒的间隔被整段丢掉
+                // → 倒计时越走越慢（甚至永远不关）
+                val passedTime = ((now - lastRecordedPosition) / 1000L).toInt()
+                if (passedTime > 0) {
+                    var remainTimeNew = autoStopDuration - passedTime
+                    if (remainTimeNew <= 0) {
+                        // 时间被消耗完，暂停
+                        remainTimeNew = 0
+                        delegate.views.videoPlayer?.onVideoPause()
+                        isTimerInitialized = false
+                        // 到点静默暂停、倒计时文字直接消失，用户不知道发生了什么
+                        toast("定时关闭时间到，已暂停")
+                    }
+                    playerStore.setAutoStopDuration(remainTimeNew)
+                    // 同步倒计时到UI
+                    delegate.views.videoPlayer?.updateAutoStopTimer(remainTimeNew)
                 }
-                playerStore.setAutoStopDuration(remainTimeNew)
-                // 同步倒计时到UI
-                delegate.views.videoPlayer?.updateAutoStopTimer(remainTimeNew)
+                lastRecordedPosition = now
             }
-            lastRecordedPosition = now
         } else if (autoStopDuration == 0) {
             // 计时器被重置，隐藏UI
             delegate.views.videoPlayer?.updateAutoStopTimer(0)
