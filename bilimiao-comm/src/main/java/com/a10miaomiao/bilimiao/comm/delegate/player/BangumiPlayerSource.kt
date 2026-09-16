@@ -44,35 +44,30 @@ class BangumiPlayerSource(
 
     var episodes = emptyList<EpisodeInfo>()
 
+    // TODO AI 原声翻译：暂时关闭（原来这里还有个 language: String? 参数）。
     override suspend fun getPlayerUrl(
         quality: Int,
         fnval: Int,
-        language: String?,
     ): PlayerSourceInfo {
         val proxy = proxyServer
         if (proxy != null) {
             return getProxyPlayerUrl(proxy, quality, fnval)
         }
         // grpc (proto可能过期，异常时静默回退到JSON API)
-        // 注意：gRPC 的 PlayViewReq 没有语言字段 → 选了 AI 翻译语言时必须走 HTTP
-        if (language.isNullOrBlank()) {
-            try {
-                getGrpcPlayerUrl(quality, fnval)?.let {
-                    return it
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        // TODO AI 原声翻译：暂时关闭（原来这里判断"带语言时跳过 gRPC 改走 HTTP"）
+        try {
+            getGrpcPlayerUrl(quality, fnval)?.let {
+                return it
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
         // 如果grpc api获取失败则使用旧版api
         val res = BiliApiService.playerAPI.getBangumiUrl(
-            epid, id, quality, fnval, language
+            epid, id, quality, fnval
         )
         return defaultPlayerSource.also {
-            it.languages = res.language?.items.orEmpty().map { item ->
-                PlayerSourceInfo.LanguageInfo(item.lang, item.title)
-            }
-            it.currentLanguage = language
+            // TODO AI 原声翻译：暂时关闭（原来是 languages / currentLanguage 赋值）
             // 保留调用方预设的进度（如空降跳转），不覆盖
             val preLastPlayCid = it.lastPlayCid
             val preLastPlayTime = it.lastPlayTime
@@ -126,20 +121,21 @@ class BangumiPlayerSource(
         }
     }
 
-    /** 只为拿 AI 翻译语言列表（HTTP playurl 的 language.items）——番剧是 AI 翻译的主战场 */
-    override suspend fun getTranslateLanguages(
-        quality: Int,
-        fnval: Int,
-    ): List<PlayerSourceInfo.LanguageInfo> {
-        return try {
-            BiliApiService.playerAPI
-                .getBangumiUrl(epid, id, quality, fnval)
-                .language?.items.orEmpty()
-                .map { PlayerSourceInfo.LanguageInfo(it.lang, it.title) }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
+// TODO AI 原声翻译：暂时关闭。恢复时把这段注释放开。
+//     /** 只为拿 AI 翻译语言列表（HTTP playurl 的 language.items）——番剧是 AI 翻译的主战场 */
+//     override suspend fun getTranslateLanguages(
+//         quality: Int,
+//         fnval: Int,
+//     ): List<PlayerSourceInfo.LanguageInfo> {
+//         return try {
+//             BiliApiService.playerAPI
+//                 .getBangumiUrl(epid, id, quality, fnval)
+//                 .language?.items.orEmpty()
+//                 .map { PlayerSourceInfo.LanguageInfo(it.lang, it.title) }
+//         } catch (e: Exception) {
+//             emptyList()
+//         }
+//     }
 
     private suspend fun getGrpcPlayerUrl(quality: Int, fnval: Int): PlayerSourceInfo? {
         val result = BiliGRPCHttp.request {

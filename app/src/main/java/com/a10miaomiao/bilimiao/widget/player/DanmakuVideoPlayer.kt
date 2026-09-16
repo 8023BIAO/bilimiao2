@@ -1337,7 +1337,8 @@ initDanmakuTouchListener()
     }
 
     /** 双击快进/快退的步长（默认 10 秒，设置页可改） */
-    var doubleTapSeekMs = 10_000L
+    /** 双击快进/快退的步长（毫秒）。**0 = 关闭**（默认，设置里可选 5/10/15/30 秒） */
+    var doubleTapSeekMs = 0L
 
     /**
      * 双击：左 1/3 快退、右 1/3 快进，中间保持 GSY 默认行为（播放/暂停）。
@@ -1359,6 +1360,12 @@ initDanmakuTouchListener()
         val w = if (touchViewWidth > 0) touchViewWidth else width
         val total = duration
         if (w <= 0 || total <= 0L) {
+            super.touchDoubleUp(e)
+            return
+        }
+        // 步长设置成"关闭"（0）时：左右两侧双击什么都不做（中间三分之一的播放/暂停仍交给 GSY）
+        if (doubleTapSeekMs <= 0L) {
+            if (e.x < w / 3f || e.x > w * 2f / 3f) return
             super.touchDoubleUp(e)
             return
         }

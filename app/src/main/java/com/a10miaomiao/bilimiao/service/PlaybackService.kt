@@ -661,7 +661,11 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
 
     /** 监听"快进/快退步长"设置：通知栏 ±秒按钮的文字和图标跟着变 */
     private suspend fun observeSeekStep() {
-        dataStore.data.map { it[SettingPreferences.PlayerDoubleTapSeek] ?: 10 }.collect { sec ->
+        // 步长设置 0 = 关闭双击快进快退 —— 但通知栏 ± 按钮始终有步长，关闭时用默认 10 秒
+        dataStore.data.map {
+            val v = it[SettingPreferences.PlayerDoubleTapSeek] ?: 0
+            if (v > 0) v else 10
+        }.collect { sec ->
             if (seekStepSec != sec) {
                 seekStepSec = sec
                 refreshNotification()

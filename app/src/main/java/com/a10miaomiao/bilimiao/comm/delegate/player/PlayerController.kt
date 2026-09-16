@@ -528,10 +528,11 @@ class PlayerController(
         showAiSubtitle = preferences[SettingPreferences.PlayerAiSubtitleShow] ?: false
         player.longPressSpeedMultiplier =
             (preferences[SettingPreferences.PlayerLongPressSpeed] ?: 300) / 100f
-        val seekStepSec = preferences[SettingPreferences.PlayerDoubleTapSeek] ?: 10
-        player.doubleTapSeekMs = seekStepSec * 1000L
-        // 通知栏 ±秒按钮、蓝牙线控、章节退化跳转用同一个步长（用户要求联动）
-        delegate.seekStepMs = seekStepSec * 1000L
+        // 快进/快退步长：0（或没设置）= 关闭 —— 双击屏幕不做快进/快退（默认就是关闭）
+        val seekStepSec = preferences[SettingPreferences.PlayerDoubleTapSeek] ?: 0
+        player.doubleTapSeekMs = if (seekStepSec > 0) seekStepSec * 1000L else 0L
+        // 通知栏 ±秒按钮、蓝牙线控、章节退化跳转：跟随步长；关闭时用默认 10 秒（用户要求）
+        delegate.seekStepMs = (if (seekStepSec > 0) seekStepSec else 10) * 1000L
         isBackgroundPlay = preferences[SettingPreferences.PlayerBackground] ?: false
         isPipOnBackground = preferences[SettingPreferences.PlayerPipOnBackground] ?: false
     }

@@ -363,13 +363,14 @@ private fun VideoSettingPageContent(
                     Text("快进/快退步长")
                 },
                 summary = {
-                    Text("双击屏幕左/右侧的跳转秒数；通知栏和蓝牙的 ± 按钮也用这个步长")
+                    Text("双击屏幕左/右侧的跳转秒数（可关闭）；通知栏 ± 按钮跟随该步长，关闭时用默认 10 秒")
                 },
-                defaultValue = 10,
-                // media3 只自带 5/10/15/30 的数字图标，通知栏按钮图标跟着这个值走
-                values = listOf(5, 10, 15, 30),
+                // 默认"关闭"：双击屏幕很容易误触（用户要求）
+                defaultValue = 0,
+                // media3 只自带 5/10/15/30 的数字图标；0 = 关闭双击快进快退
+                values = listOf(0, 5, 10, 15, 30),
                 valueToText = { value ->
-                    AnnotatedString("$value 秒")
+                    AnnotatedString(if (value > 0) "$value 秒" else "关闭")
                 }
             )
             preference(
