@@ -1238,11 +1238,13 @@ class PlayerDelegate2(
             views.videoPlayer?.onVideoPause() // 阻止 GSY 因 surface 可见而自动 resume
             completionBoxController.hide()
             reloadPlayer()
+            PlaybackService.instance?.refreshPlaybackState()
             return
         }
         // 用 onVideoResume(false) 防止 GSY seek 回 onVideoPause 时保存的 mCurrentPosition，
         // 否则暂停期间通知栏拖动进度条后再点播放会回到暂停位置而非拖动位置
         views.videoPlayer?.onVideoResume(false)
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaPause() {
@@ -1250,16 +1252,19 @@ class PlayerDelegate2(
         // 否则回到前台会被 onStart 当成自动暂停而自动续播
         pausedByBackground = false
         views.videoPlayer?.onVideoPause()
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaSeekTo(position: Long) {
         views.videoPlayer?.seekTo(position)
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaSeekBack() {
         val p = views.videoPlayer ?: return
         val target = (p.currentPositionWhenPlaying - 10000).coerceAtLeast(0)
         p.seekTo(target)
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaSeekForward() {
@@ -1269,6 +1274,7 @@ class PlayerDelegate2(
         if (dur <= 0L) return
         val target = (p.currentPositionWhenPlaying + 10000).coerceAtMost(dur)
         p.seekTo(target)
+        PlaybackService.instance?.refreshPlaybackState()
     }
 
     override fun mediaGetDuration(): Long {

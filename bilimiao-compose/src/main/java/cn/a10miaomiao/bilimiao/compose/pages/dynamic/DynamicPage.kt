@@ -24,10 +24,12 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -50,6 +52,8 @@ import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.store.WindowStore
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.kodein.di.compose.rememberInstance
@@ -153,6 +157,16 @@ private fun DynamicPageContent(
         BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val isWide = maxWidth >= 600.dp
             val showUpSidebar = pagerState.currentPage == 1  // UP tab
+
+            // 左侧 UP 头像栏的展开/收起会改变 Pager 的可用宽度，而 PagerState 里的滚动偏移
+            // 是按像素记的 → 宽度一变，页面位置就"错位"了一点点：从 UP 切到视频时内容没有
+            // 正好停在视频页，得再手动滑一下才对齐。等侧栏动画和手势都停下来后重新对齐整页。
+            LaunchedEffect(pagerState.currentPage, showUpSidebar, isWide) {
+                delay(350) // AnimatedVisibility 展开/收起动画时长
+                snapshotFlow { pagerState.isScrollInProgress }.first { !it }
+                pagerState.scrollToPage(pagerState.currentPage)
+            }
+
             Row(modifier = Modifier.fillMaxSize()) {
                 // 左侧 UP 面板 - AnimatedVisibility 避免 Row 子元素数量突变
                 AnimatedVisibility(

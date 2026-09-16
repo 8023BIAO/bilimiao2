@@ -25,6 +25,7 @@ import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences.dataStore
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
+import com.bumptech.glide.Glide
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -34,6 +35,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 
 private enum class ControlMode(val label: String) {
     EPISODE("上/下集"),
@@ -55,6 +58,11 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     private var exoPlayer: Player? = null
     private var mediaSession: MediaSession? = null
     private var playerDelegate: BasePlayerDelegate? = null
+
+    // 通知栏大图标（视频封面）：Media3 默认不会自己去下载 artworkUri，
+    // 只能我们自己把封面取回来塞进 MediaMetadata.artworkData
+    @Volatile private var coverBytes: ByteArray? = null
+    @Volatile private var coverKey: String? = null
 
     // 播放位置暂存（Service 存活期 + 进程重启前有效）
     private var savedPosition: Long = 0L
@@ -434,6 +442,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 } else {
                     playerDelegate?.mediaPlay()
                 }
+                refreshPlaybackState()
             }
         }
         return super.onStartCommand(intent, flags, startId)
@@ -492,6 +501,48 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         playerDelegate = delegate
         refreshSessionIntent()
         refreshNotification()
+        refreshPlaybackState()
+    }
+
+    /**
+     * 通知栏/锁屏/蓝牙的状态刷新。
+     *
+     * 会话只在 player 派发事件时才会重新读取播放状态，而这里挂的是"空壳 ExoPlayer"
+     * （MyForwardingPlayer 覆写了状态 getter，空壳自己永远不会发事件）→ 真播放器
+     * 播放/暂停后通知栏一直停在旧状态：图标不翻、进度条按旧状态空转、按钮点了像没反应。
+     * 所以真播放器每次状态变化都要主动调一次这里。
+     */
+    fun refreshPlaybackState() {
+        if (!showNotification) return
+        ensureCoverArtwork()
+        (mediaSession?.player as? MyForwardingPlayer)?.refreshState()
+    }
+
+    /** 封面异步抓取：拿到字节后刷新一次通知栏（失败就保持默认图标） */
+    private fun ensureCoverArtwork() {
+        val url = playerDelegate?.mediaGetCoverUrl() ?: return
+        if (url == coverKey) return
+        coverKey = url
+        coverBytes = null
+        serviceScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bitmap = Glide.with(this@PlaybackService)
+                        .asBitmap()
+                        .load(url)
+                        .submit(512, 512)
+                        .get()
+                    ByteArrayOutputStream().use { out ->
+                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+                        out.toByteArray()
+                    }
+                }.getOrNull()
+            }
+            if (coverKey == url && bytes != null) {
+                coverBytes = bytes
+                refreshPlaybackState()
+            }
+        }
     }
 
     /** 播放完成后释放通知栏 + 停止 Service */
@@ -618,7 +669,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     @OptIn(UnstableApi::class)
-    inner class MyForwardingPlayer(player: Player) : ForwardingPlayer(player) {
+    inner class MyForwardingPlayer(private val dummy: Player) : ForwardingPlayer(dummy) {
         override fun getAvailableCommands(): Player.Commands {
             return super.getAvailableCommands().buildUpon()
                 // 空壳 ExoPlayer 的命令集里没有这些，通知栏就不会渲染播放/暂停按钮与元数据
@@ -626,6 +677,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 .add(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)
                 .add(Player.COMMAND_GET_TIMELINE)
                 .add(Player.COMMAND_GET_METADATA)
+                .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                 .add(Player.COMMAND_SEEK_BACK)
                 .add(Player.COMMAND_SEEK_FORWARD)
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS)
@@ -633,6 +685,23 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
                 .remove(Player.COMMAND_SEEK_TO_NEXT)
                 .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .build()
+        }
+
+        /**
+         * 强制会话重新读取下面这些被覆写的状态。
+         *
+         * 底层是空壳 ExoPlayer：状态 getter 虽然转发到了真播放器，但会话只在 player
+         * 派发事件时才重新读取 —— 空壳自己永远不会发事件，于是通知栏/锁屏一直停在旧状态。
+         * 这里用一次反向 play/pause 拨动制造事件（空壳没有媒体项，不会真的出声）。
+         */
+        fun refreshState() {
+            if (playerDelegate?.isPlaying() == true) {
+                dummy.pause()
+                dummy.play()
+            } else {
+                dummy.play()
+                dummy.pause()
+            }
         }
 
         // ── 状态/元数据转发 ──
@@ -651,6 +720,15 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
             playerDelegate?.mediaGetCoverUrl()?.let {
                 runCatching { builder.setArtworkUri(android.net.Uri.parse(it)) }
             }
+            // 封面必须自己给字节：Media3 不会去下载 artworkUri，只给 uri 的话大图标还是空的
+            coverBytes?.let {
+                runCatching {
+                    builder.setArtworkData(
+                        it,
+                        androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER
+                    )
+                }
+            }
             return builder.build()
         }
 
@@ -661,6 +739,8 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         override fun seekTo(positionMs: Long) {
             playerDelegate?.mediaSeekTo(positionMs)
             super.seekTo(positionMs)
+            // 拖完进度条要立刻把新位置推给系统 UI，否则它会按旧位置继续"空转"
+            refreshState()
         }
         override fun stop() { super.stop(); playerDelegate?.closePlayer() }
     }
