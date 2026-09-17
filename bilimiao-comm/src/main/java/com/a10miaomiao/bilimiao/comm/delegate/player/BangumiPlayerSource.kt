@@ -7,6 +7,7 @@ import bilibili.pgc.gateway.player.v2.PlayURLGRPC
 import bilibili.pgc.gateway.player.v2.PlayViewReq
 import bilibili.pgc.gateway.player.v2.CodeType
 import bilibili.pgc.gateway.player.v2.Stream
+import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.DashSource
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceIds
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceInfo
@@ -398,6 +399,15 @@ class BangumiPlayerSource(
             null
         } else {
             ByteArrayInputStream(CompressionTools.decompressXML(body.bytes()))
+        }
+    }
+
+    override suspend fun getVideoShot(): PlayerAPI.VideoShotData? {
+        return try {
+            // 番剧同样用 aid + cid 取缩略图；部分剧集没有这数据 → 返回 null 走降级
+            BiliApiService.playerAPI.getVideoShot(aid = aid.removePrefix("av"), cid = id)?.toHttps()
+        } catch (e: Exception) {
+            null
         }
     }
 

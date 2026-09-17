@@ -347,6 +347,8 @@ HPLandroidx/compose/material3/DelegatingThemeAwareRippleNode$updateConfiguration
 HPLandroidx/compose/material3/DelegatingThemeAwareRippleNode;-><init>(Landroidx/compose/foundation/interaction/InteractionSource;ZFLandroidx/compose/ui/graphics/ColorProducer;)V
 HPLandroidx/compose/material3/DelegatingThemeAwareRippleNode;->attachNewRipple()V
 HPLandroidx/compose/material3/DelegatingThemeAwareRippleNode;->updateConfiguration()V
+HPLandroidx/compose/material3/ListItemKt;->InteractiveListItem-HXNGIdc(Landroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Landroidx/compose/ui/graphics/Shape;Landroidx/compose/material3/ListItemColors;FFLandroidx/compose/runtime/Composer;II)V
+HPLandroidx/compose/material3/ListItemKt;->ListItem-HXNGIdc(Landroidx/compose/ui/Modifier;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;Landroidx/compose/ui/graphics/Shape;Landroidx/compose/material3/ListItemColors;FFLandroidx/compose/runtime/Composer;II)V
 HPLandroidx/compose/material3/MaterialTheme;->getColorScheme(Landroidx/compose/runtime/Composer;I)Landroidx/compose/material3/ColorScheme;
 HPLandroidx/compose/material3/MaterialTheme;->getShapes(Landroidx/compose/runtime/Composer;I)Landroidx/compose/material3/Shapes;
 HPLandroidx/compose/material3/MaterialTheme;->getTypography(Landroidx/compose/runtime/Composer;I)Landroidx/compose/material3/Typography;
@@ -2194,6 +2196,9 @@ HPLcn/a10miaomiao/bilimiao/compose/components/miao/MiaoCardKt;->MiaoCard(Landroi
 HPLcn/a10miaomiao/bilimiao/compose/components/miao/MiaoCardKt;->MiaoOutlinedCard(Landroidx/compose/ui/Modifier;ZLkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function3;Landroidx/compose/runtime/Composer;II)V
 HPLcn/a10miaomiao/bilimiao/compose/components/start/StartLibraryCardKt$LibraryItemCard$1;->invoke(Landroidx/compose/foundation/layout/ColumnScope;Landroidx/compose/runtime/Composer;I)V
 HPLcn/a10miaomiao/bilimiao/compose/components/start/StartUserCardKt$StartUserCard$6;->invoke(Landroidx/compose/foundation/layout/ColumnScope;Landroidx/compose/runtime/Composer;I)V
+HPLcn/a10miaomiao/bilimiao/compose/components/video/MiniVideoItemBoxKt;->MiniVideoItemBox(Landroidx/compose/ui/Modifier;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZLkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;II)V
+HPLcn/a10miaomiao/bilimiao/compose/components/video/VideoItemBoxKt$VideoItemBox$1;->invoke(Landroidx/compose/runtime/Composer;I)V
+HPLcn/a10miaomiao/bilimiao/compose/components/video/VideoItemBoxKt;->VideoItemBox(Landroidx/compose/ui/Modifier;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;FZLkotlin/jvm/functions/Function0;Landroidx/compose/runtime/Composer;III)V
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/HomePageKt;->HomePageContent(Lcn/a10miaomiao/bilimiao/compose/pages/home/HomePageViewModel;Landroidx/compose/runtime/Composer;I)V
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/components/HomeTimeMachineCardKt$HomeTimeMachineCard$1;->invoke(Landroidx/compose/foundation/layout/ColumnScope;Landroidx/compose/runtime/Composer;I)V
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/components/HomeTimeMachineCardKt$HomeTimeMachineRegionCard$2$1$1$2;->invoke(Landroidx/compose/runtime/Composer;I)V
@@ -2201,6 +2206,8 @@ HPLcn/a10miaomiao/bilimiao/compose/pages/home/components/HomeTimeMachineCardKt$H
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/components/HomeTimeMachineCardKt$HomeTimeMachineTimeCard$1;->invoke(Landroidx/compose/runtime/Composer;I)V
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/components/HomeTimeMachineCardKt;->HomeTimeMachineCard(Ljava/lang/Object;Ljava/lang/String;Lkotlin/jvm/functions/Function0;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;I)V
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/components/HomeTimeMachineCardKt;->HomeTimeMachineRegionCard(Lcom/a10miaomiao/bilimiao/comm/entity/region/RegionInfo;Lkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;I)V
+HPLcn/a10miaomiao/bilimiao/compose/pages/home/content/HomePopularContentKt;->HomePopularContent(Landroidx/compose/runtime/Composer;I)V
+HPLcn/a10miaomiao/bilimiao/compose/pages/home/content/HomeRecommendContentKt;->HomeRecommendContent(Landroidx/compose/runtime/Composer;I)V
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/content/HomeTimeMachineContentKt$HomeTimeMachineContent$lambda$9$lambda$8$$inlined$items$default$4;->invoke(Landroidx/compose/foundation/lazy/staggeredgrid/LazyStaggeredGridItemScope;ILandroidx/compose/runtime/Composer;I)V
 HPLcn/a10miaomiao/bilimiao/compose/pages/home/content/HomeTimeMachineContentKt;->HomeTimeMachineContent(Lcn/a10miaomiao/bilimiao/compose/pages/home/HomePageState;Landroidx/compose/runtime/Composer;I)V
 HPLcom/a10miaomiao/bilimiao/MainActivity;->setWindowInsets(IIIILandroid/view/DisplayCutout;)V

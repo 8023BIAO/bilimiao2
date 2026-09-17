@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.LruCache
 import android.util.Rational
 import android.view.DisplayCutout
 import android.view.View
@@ -1087,6 +1088,8 @@ class PlayerDelegate2(
                         )
                     }
                 }
+                // 拖动进度条预览图：和字幕一样后台补一次（没数据/失败就静默降级，不影响播放）
+                loadVideoShot(source)
 // TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
 //                 // 正常播放走 gRPC，拿不到 language 列表 → 后台补一次 HTTP 只为填"翻译"菜单
 //                 if (!isChangedQuality) {
@@ -1113,10 +1116,36 @@ class PlayerDelegate2(
 
 
     /**
-     * 加载字幕数据
+     * 字幕请求令牌：选轨、关字幕、换视频都 +1。
+     *
+     * 网络回来的结果只有令牌还是最新的才允许写进播放器 —— 否则会出现这两类"不立即生效"：
+     *  ① 关字幕后，关闭前那次请求返回 → subtitleBody 又被填上 → 字幕"关不掉、自己冒回来"；
+     *  ② 从 A 轨切到 B 轨，A 的响应比 B 晚到 → 显示的是 A（串台）。
      */
-    private fun loadSubtitleData(subtitleUrl: String) {
-        if (subtitleUrl.isBlank()) {
+    private var subtitleRequestToken = 0
+
+    /**
+     * 字幕解析结果缓存（key = subtitle_url）。
+     *
+     * B 站字幕是独立 CDN 上的 json，一次往返几百毫秒起步；用户"关掉再打开同一条轨"时
+     * 命中缓存就能立刻显示，不用再等一次网络。url 里带 cid/ai 标识，不会跨视频串。
+     */
+    private val subtitleCache = LruCache<String, List<DanmakuVideoPlayer.SubtitleItemInfo>>(8)
+
+    /**
+     * 加载字幕数据（subtitleUrl = null：当前没有选中字幕，作废在飞的请求）
+     */
+    private fun loadSubtitleData(subtitleUrl: String?) {
+        // 先领令牌：无论走缓存、走网络还是直接关闭，旧请求都会因为令牌过期被丢弃
+        val token = ++subtitleRequestToken
+        if (subtitleUrl.isNullOrBlank()) {
+            player?.subtitleBody = emptyList()
+            return
+        }
+        // 命中缓存 → 立即显示（"关了再打开"不再等网络）
+        val cached = subtitleCache.get(subtitleUrl)
+        if (cached != null) {
+            player?.subtitleBody = cached
             return
         }
         playerCoroutineScope.launch(Dispatchers.IO) {
@@ -1124,18 +1153,56 @@ class PlayerDelegate2(
                 val res = MiaoHttp.request {
                     url = UrlUtil.autoHttps(subtitleUrl)
                 }.awaitCall().json<SubtitleJsonInfo>()
-                player?.subtitleBody = res.body.map {
+                val list = res.body.map {
                     DanmakuVideoPlayer.SubtitleItemInfo(
                         from = (it.from * 1000).toLong(),
                         to = (it.to * 1000).toLong(),
                         content = it.content,
                     )
                 }
+                subtitleCache.put(subtitleUrl, list)
+                withContext(Dispatchers.Main) {
+                    // 过期结果直接丢：期间用户可能已经关了字幕、换了轨道、甚至换了视频
+                    if (token != subtitleRequestToken) return@withContext
+                    if (player?.currentSubtitleSource?.subtitle_url != subtitleUrl) return@withContext
+                    player?.subtitleBody = list
+                }
             } catch (e: Throwable) {
                 e.printStackTrace()
+                // 过期请求的报错不再打扰用户（多半是他自己刚关掉/换轨）
+                if (token != subtitleRequestToken) return@launch
                 withContext(Dispatchers.Main) {
                     PopTip.show(e.message.toString()).showTop()
                 }
+            }
+        }
+    }
+
+    /** 预览图请求令牌：换视频/换清晰度时作废上一次的结果（否则旧视频的图会串到新视频上） */
+    private var videoShotToken = 0
+
+    /**
+     * 拉取「拖动进度条预览图」（B 站 videoshot 缩略图雪碧图）。
+     *
+     * 特性：
+     *  - 后台拉，绝不阻塞起播；
+     *  - 拿不到（视频太短 / 番剧没这数据 / 风控 / 网络失败）就置空 → 播放器退化成"只显示时间气泡"；
+     *  - 设置里关掉预览图时直接不请求，省一次流量。
+     */
+    private fun loadVideoShot(source: BasePlayerSource) {
+        val token = ++videoShotToken
+        // 先清掉上一个视频的图，避免新视频还没拿到数据时拖出旧画面
+        player?.videoShotData = null
+        if (player?.showSeekPreview == false) return
+        playerCoroutineScope.launch(Dispatchers.IO) {
+            val data = try {
+                source.getVideoShot()
+            } catch (e: Exception) {
+                null
+            } ?: return@launch
+            withContext(Dispatchers.Main) {
+                if (token != videoShotToken) return@withContext
+                player?.videoShotData = data
             }
         }
     }

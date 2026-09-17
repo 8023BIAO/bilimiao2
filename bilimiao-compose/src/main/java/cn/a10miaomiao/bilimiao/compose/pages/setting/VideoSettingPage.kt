@@ -30,6 +30,7 @@ import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.preference.customSetsPreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.multiSelectIntPreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.sliderIntPreference
+import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.store.WindowStore
@@ -363,7 +364,7 @@ private fun VideoSettingPageContent(
                     Text("快进/快退步长")
                 },
                 summary = {
-                    Text("双击屏幕左/右侧的跳转秒数（可关闭）；通知栏 ± 按钮跟随该步长，关闭时用默认 10 秒")
+                    Text("双击屏幕左/右侧的跳转秒数；通知栏 ± 按钮跟随该步长。选\"关闭\"则双击任意位置都是播放/暂停（通知栏 ± 仍用默认 10 秒）")
                 },
                 // 默认"关闭"：双击屏幕很容易误触（用户要求）
                 defaultValue = 0,
@@ -382,6 +383,20 @@ private fun VideoSettingPageContent(
                     Text("视频播放的时长，而不是实际经过的时间")
                 },
                 onClick = viewModel::autoStopTimerClick
+            )
+            switchPreference(
+                key = SettingPreferences.PlayerSeekPreviewShow.name,
+                title = {
+                    Text("拖动进度显示预览图")
+                },
+                summary = {
+                    if (it) {
+                        Text("拖动进度时在画面中央显示该时间点的缩略图（对齐 PiliPlus/B 站；视频没有缩略图数据时不显示）")
+                    } else {
+                        Text("已关闭：拖动时只显示时间气泡")
+                    }
+                },
+                defaultValue = true,
             )
 
             preferenceCategory(
@@ -496,6 +511,22 @@ private fun VideoSettingPageContent(
                 },
                 defaultValue = false,
             )
+            // 字幕字号：可手输纯数字（数字键盘），建议 12~30，默认 16
+            textIntPreference(
+                key = SettingPreferences.PlayerSubtitleTextSize.name,
+                defaultValue = DEFAULT_SUBTITLE_TEXT_SIZE,
+                title = {
+                    Text("字幕字号")
+                },
+                label = " sp",
+                summary = { value ->
+                    val v = value.coerceIn(MIN_SUBTITLE_TEXT_SIZE, MAX_SUBTITLE_TEXT_SIZE)
+                    Text(
+                        "当前 ${v}sp（建议 $MIN_SUBTITLE_TEXT_SIZE~$MAX_SUBTITLE_TEXT_SIZE，" +
+                            "默认 $DEFAULT_SUBTITLE_TEXT_SIZE）。超出范围会按边界值生效"
+                    )
+                },
+            )
 
             item("bottom") {
                 Spacer(
@@ -507,6 +538,11 @@ private fun VideoSettingPageContent(
         }
     }
 }
+
+// 字幕字号范围（sp）：16 是布局里原来的写死值，12 已经偏小、30 在手机全屏上接近上限
+internal const val DEFAULT_SUBTITLE_TEXT_SIZE = 16
+internal const val MIN_SUBTITLE_TEXT_SIZE = 12
+internal const val MAX_SUBTITLE_TEXT_SIZE = 30
 
 /** 长按倍速倍率（存 ×100 的整数）→ 显示文案：150 → "1.5×"，300 → "3×" */
 private fun longPressSpeedText(scale: Int): String {

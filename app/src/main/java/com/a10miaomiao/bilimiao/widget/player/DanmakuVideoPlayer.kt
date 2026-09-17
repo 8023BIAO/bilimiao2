@@ -5,6 +5,8 @@ import android.app.Dialog
 import android.app.Service
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.PorterDuff
 import android.graphics.drawable.AnimationDrawable
@@ -34,11 +36,14 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.annotation.RequiresApi
 import com.a10miaomiao.bilimiao.R
+import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
 import com.a10miaomiao.bilimiao.comm.delegate.helper.StatusBarHelper
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerSeekBus
+import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.service.PlaybackService
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.ImageSaveUtil
@@ -62,6 +67,11 @@ import master.flame.danmaku.ui.widget.DanmakuView
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import splitties.dimensions.dip
 import splitties.views.backgroundColor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.min
 
 
@@ -125,6 +135,23 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
 
     // 底部字幕
     private val mBottomSubtitleTV: TextView by lazy { findViewById(R.id.bottom_subtitle) }
+
+    /**
+     * 字幕字号（sp）。默认 16 = 布局里原来的写死值；
+     * 设置页可改（12~30），由 PlayerController 下发。改动立即生效，不用重进播放器。
+     */
+    var subtitleTextSizeSp: Float = 16f
+        set(value) {
+            val v = value.coerceIn(12f, 30f)
+            if (field == v) return
+            field = v
+            applySubtitleTextSize()
+        }
+
+    /** 把字号应用到字幕 TextView（布局里是 16sp，这里覆盖掉） */
+    private fun applySubtitleTextSize() {
+        runCatching { mBottomSubtitleTV.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, subtitleTextSizeSp) }
+    }
 
     // 字幕开关
     private val mSubtitleSwitch: ViewGroup by lazy { findViewById(R.id.subtitle_switch) }
@@ -555,8 +582,8 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     // 播放回调
     var videoPlayerCallBack: VideoPlayerCallBack? = null
 
-    // 加载字幕
-    var subtitleLoader: ((url: String) -> Unit)? = null
+    // 加载字幕（url = null 表示"当前没有选中字幕"，外部据此作废还在飞的请求）
+    var subtitleLoader: ((url: String?) -> Unit)? = null
 
     // 字幕源选择
     var subtitleSourceSelector: ((list: List<SubtitleSourceInfo>) -> SubtitleSourceInfo?)? = null
@@ -640,6 +667,24 @@ initDanmakuTouchListener()
         updatePinchState()
         // 在 surface_container 内加一层子容器用于缩放，等 GSY 加完渲染器后移进去
         initZoomWrapper()
+        // 拖动进度时的中央预览：预览图 + 下方时间条，**整组居中**，加在最上层
+        // （只在拖动时可见，平时 GONE 不参与布局）
+        mSeekPreviewBox.addView(mSeekPreviewView, LinearLayout.LayoutParams(dip(144), dip(81)))
+        mSeekPreviewBox.addView(
+            mSeekPreviewTimeTV,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dip(8) }
+        )
+        addView(
+            mSeekPreviewBox,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+            )
+        )
         mButtomPlay.setOnClickListener {
             clickStartIcon()
         }
@@ -726,6 +771,7 @@ initDanmakuTouchListener()
         }
         mBottomSubtitleTV.setTextColor(Color.parseColor("#FFFFFF"))
         mBottomSubtitleTV.backgroundColor = Color.parseColor("#66000000")
+        applySubtitleTextSize()
 
         val lockClickListener = OnLockClickListener()
         mLock.setOnClickListener(lockClickListener)
@@ -815,15 +861,266 @@ initDanmakuTouchListener()
 
     private fun updateCurrentSubtitleSource() {
         subtitleBody = emptyList()
+        subtitleIndex = 0
         mBottomSubtitleTV.visibility = GONE
+        // ★ 选轨/关闭都要通知外部，关闭时传 null：
+        //   否则"关字幕后，关闭前发出去的那次请求"返回时仍会把 subtitleBody 填回来，
+        //   表现就是"字幕关不掉"（点了关闭，字幕过一会儿又冒出来）。
+        subtitleLoader?.invoke(currentSubtitleSource?.subtitle_url)
         if (currentSubtitleSource == null) {
             mSubtitleSwitchIV.setImageResource(R.drawable.bili_player_subtitle_is_closed)
             mSubtitleSwitchTV.text = "字幕关"
         } else {
             mSubtitleSwitchIV.setImageResource(R.drawable.bili_player_subtitle_is_open)
             mSubtitleSwitchTV.text = currentSubtitleSource?.lan_doc ?: "字幕开"
-            subtitleLoader?.invoke(currentSubtitleSource?.subtitle_url ?: "")
         }
+    }
+
+    // ───────────────────────── 拖动进度条预览图 ─────────────────────────
+    // 数据源：B 站 videoshot 接口给的"缩略图雪碧图"（大图 + 每格起始秒数）。
+    // 参考 PiliPlus：pl_player/controller.dart 的 updatePreviewIndex/_clearPreview、
+    //              pl_player/view/widgets.dart 的 buildSeekPreviewWidget/VideoShotImage。
+
+    /** 拖动时是否显示预览图（PlayerController 下发；设置页可关） */
+    var showSeekPreview = true
+
+    /** 本视频的缩略图数据；null = 这个视频没有预览图（拖动只显示时间气泡） */
+    var videoShotData: PlayerAPI.VideoShotData? = null
+        set(value) {
+            field = value
+            // 换视频/换清晰度：作废上一次的图和还在飞的下载
+            previewLoadToken++
+            previewSheets.clear()
+            hideSeekPreview()
+        }
+
+    private val mSeekPreviewView: VideoShotPreviewView by lazy { VideoShotPreviewView(context) }
+
+    /**
+     * 预览容器：预览图 + 下方时间条，**整组居中**。
+     *
+     * 以前只有一张图、还上移 48dp 给"居中时间盒子"让位，看着又小又偏上；
+     * 现在有预览图时不再弹 GSY 那个 152dp 的居中盒子（它会压住大预览），
+     * 时间自己画在图下面 —— 于是图可以放到接近半屏且真正居中。
+     */
+    private val mSeekPreviewBox: LinearLayout by lazy {
+        LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = GONE
+        }
+    }
+
+    /** 预览图下方的时间条（`当前 / 总长`） */
+    private val mSeekPreviewTimeTV: TextView by lazy {
+        TextView(context).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(dip(10), dip(4), dip(10), dip(4))
+            background = GradientDrawable().apply {
+                cornerRadius = 12f * resources.displayMetrics.density
+                setColor(Color.parseColor("#CC000000"))
+            }
+        }
+    }
+
+    /** 已解码的雪碧图缓存（key = 图片 URL）。一张 ~1600×900 的 RGB_565 约 2.9MB，留 3 张够跨页拖。 */
+    private val previewSheets = LinkedHashMap<String, Bitmap>()
+
+    /** 下载令牌：换视频/换清晰度后，旧的下图结果直接丢弃（避免串台到新视频） */
+    private var previewLoadToken = 0
+
+    /** 预览图相关的协程（只在 View 层用，播放器 View 跨 Activity 保活，所以不随生命周期取消） */
+    private val previewScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    /** 当前是否正在拖动进度（只有拖动中才允许预览图出现） */
+    private var seekPreviewActive = false
+
+    /**
+     * 显示某个时间点的预览图（由进度 HUD 的显示回调驱动）。
+     *
+     * 全程不阻塞：图没下好就先不显示（宁可没有，也不要卡住拖动）。
+     */
+    private fun updateSeekPreview(timeMs: Long) {
+        val data = videoShotData
+        if (!showSeekPreview || data == null) return
+        val total = data.totalPerImage
+        if (total <= 0 || data.index.isEmpty() || data.image.isEmpty()) return
+        seekPreviewActive = true
+
+        val cell = previewCellIndex(data, (timeMs / 1000L).toInt())
+        val page = (cell / total).coerceIn(0, data.image.size - 1)
+        val align = cell % total
+        val url = data.image[page]
+        val sheet = previewSheets[url]
+        // 容器先亮出来：图还没下好时至少能看到时间条（不再干等）
+        mSeekPreviewBox.visibility = VISIBLE
+        if (sheet == null || sheet.isRecycled) {
+            // 这张雪碧图还没下好：先不显示，下好了如果还在拖动就直接补上
+            mSeekPreviewView.clear()
+            downloadPreviewSheet(url)
+            return
+        }
+        showPreviewCell(sheet, data, align)
+    }
+
+    /**
+     * 时间(秒) → 小格序号。
+     *
+     * 用 PiliPlus 的经验公式 `count(index <= t) - 2`（`controller.dart:1617` 的 updatePreviewIndex）：
+     * B 站 index 数组存的是每格的**结束时刻**，且开头有占位项，减 2 才对得上画面。
+     * 个数用二分求（拖动一次可能跳几分钟，逐条数会白跑几百上千次）。
+     */
+    private fun previewCellIndex(data: PlayerAPI.VideoShotData, seconds: Int): Int {
+        val index = data.index
+        // 二分找"最后一个 <= seconds 的位置"，个数 = 位置 + 1（index 是升序的）
+        var lo = 0
+        var hi = index.size - 1
+        var found = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            if (index[mid] <= seconds) {
+                found = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return (found + 1 - 2).coerceAtLeast(0)
+    }
+
+    private fun showPreviewCell(sheet: Bitmap, data: PlayerAPI.VideoShotData, align: Int) {
+        val cols = data.img_x_len
+        val rows = data.img_y_len
+        if (cols <= 0 || rows <= 0) return
+
+        // 格子宽高比 = 雪碧图的 cols/rows 均分
+        val cellW = sheet.width.toFloat() / cols
+        val cellH = sheet.height.toFloat() / rows
+        if (cellW <= 0f || cellH <= 0f) return
+
+        // 尺寸：全屏横屏给到 240dp（以前 108dp，用户反馈"小得看不见"），
+        // 其它模式 160dp；再按播放器可视区收一收（0.62 = 上下各留 ~19% 给字幕/时间条）。
+        // 注意源只有 160×90，放太大会糊 —— 这个上限是取"看得清内容"和"别太糊"的平衡。
+        val vh = height
+        val vw = width
+        if (vh <= 0 || vw <= 0) return
+        val want = if (mode == PlayerMode.FULL && isLandscapeLayout) dip(240) else dip(160)
+        var h = want.coerceAtMost((vh * 0.62f).toInt()).coerceAtLeast(dip(60))
+        var w = (h * cellW / cellH).toInt()
+        val maxW = (vw * 0.86f).toInt()
+        if (w > maxW) {
+            w = maxW
+            h = (w * cellH / cellW).toInt()
+        }
+
+        val lp = mSeekPreviewView.layoutParams as? LinearLayout.LayoutParams
+        if (lp == null) {
+            mSeekPreviewView.layoutParams = LinearLayout.LayoutParams(w, h)
+        } else if (lp.width != w || lp.height != h) {
+            lp.width = w
+            lp.height = h
+            mSeekPreviewView.layoutParams = lp
+        }
+        mSeekPreviewView.showCell(sheet, cols, rows, align)
+        mSeekPreviewView.visibility = VISIBLE
+        mSeekPreviewBox.visibility = VISIBLE
+    }
+
+    /** 刷新预览图下方的时间条（`当前 / 总长`） */
+    private fun updateSeekPreviewTime(timeMs: Long, totalMs: Long) {
+        if (!seekPreviewActive) return
+        val pos = CommonUtil.stringForTime(timeMs.coerceAtLeast(0L))
+        mSeekPreviewTimeTV.text = if (totalMs > 0) {
+            "$pos / ${CommonUtil.stringForTime(totalMs)}"
+        } else {
+            pos
+        }
+    }
+
+    private fun hideSeekPreview() {
+        seekPreviewActive = false
+        mSeekPreviewView.clear()
+        mSeekPreviewBox.visibility = GONE
+    }
+
+    /** 下载并解码一张雪碧图（带降采样：长视频的图可能 3000+ 宽，全尺寸解码会吃掉几十 MB） */
+    private fun downloadPreviewSheet(url: String) {
+        val token = previewLoadToken
+        previewScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                try {
+                    val res = MiaoHttp.request { this.url = url }.awaitCall()
+                    val bytes = res.body?.bytes() ?: return@withContext null
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                    var sample = 1
+                    while (bounds.outWidth / (sample * 2) >= 1920) sample *= 2
+                    BitmapFactory.decodeByteArray(
+                        bytes, 0, bytes.size,
+                        BitmapFactory.Options().apply {
+                            inSampleSize = sample
+                            // 缩略图不需要真彩：RGB_565 省一半内存，肉眼无差
+                            inPreferredConfig = Bitmap.Config.RGB_565
+                        }
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            } ?: return@launch
+            if (token != previewLoadToken) {
+                // 期间换了视频/清晰度：这张图已经没用了
+                return@launch
+            }
+            previewSheets[url] = bitmap
+            // 超过 3 张丢最早的（不手动 recycle：可能正被 onDraw 用着）
+            while (previewSheets.size > 3) {
+                val oldest = previewSheets.keys.firstOrNull() ?: break
+                previewSheets.remove(oldest)
+            }
+            // 图下好时如果用户还在拖，立刻补上
+            if (seekPreviewActive) {
+                val data = videoShotData ?: return@launch
+                val total = data.totalPerImage
+                if (total <= 0) return@launch
+                val cell = previewCellIndex(data, (mSeekTimePosition / 1000L).toInt())
+                val page = (cell / total).coerceIn(0, data.image.size - 1)
+                if (data.image[page] == url) showPreviewCell(bitmap, data, cell % total)
+            }
+        }
+    }
+
+    // [hermes-fix 2026-09-17] 原"预览图钩子"重载（totalTime: String?）与下方自定义 showProgressDialog
+    // （totalTime: String）JVM 签名相同 → Platform declaration clash 编译失败；已把 updateSeekPreview
+    // 调用并进下方自定义实现，此块删除。
+
+    override fun dismissProgressDialog() {
+        hideSeekPreview()
+        super.dismissProgressDialog()
+    }
+
+    /**
+     * 拖动**进度条本体**（SeekBar）时也要出预览图。
+     *
+     * 这条路径和"在画面上横向拖动"不是一回事：GSY 的 SeekBar 拖动过程中只更新底部时间文本
+     * （showDragProgressTextOnSeekBar），走到 seek 是在**松手**时（onStopTrackingTouch → seekTo），
+     * 全程不碰 showProgressDialog —— 所以预览图得单独挂在这里。
+     * 这里只更新中央预览图，不改播放状态、不发起 seek（真正的 seek 仍由 GSY 在松手时做）。
+     */
+    override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+        super.onProgressChanged(seekBar, progress, fromUser)
+        if (!fromUser || seekBar == null) return
+        val total = duration
+        if (total <= 0L) return
+        val target = total * progress / 100
+        updateSeekPreview(target)
+        updateSeekPreviewTime(target, total)
+    }
+
+    override fun onStopTrackingTouch(seekBar: SeekBar?) {
+        // 松手即收：接下来 GSY 会按进度条位置 seek，预览图不该继续挂在画面中央
+        hideSeekPreview()
+        super.onStopTrackingTouch(seekBar)
     }
 
 // TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
@@ -1082,6 +1379,12 @@ initDanmakuTouchListener()
             val seekTime = CommonUtil.stringForTime(mSeekTimePosition)
             val totalTime = CommonUtil.stringForTime(totalTimeDuration)
             showProgressDialog(deltaX, seekTime, mSeekTimePosition, totalTime, totalTimeDuration)
+            // ★ 字幕跟手：拖动进度条时，底部字幕立即切到目标时间点那一句。
+            //   只读取+切文本，不碰播放器状态、不发起 seek（真正的 seek 仍由松手后的 GSY 逻辑负责），
+            //   所以对播放没有任何副作用；松手后由 100ms 字幕定时器接管，自动回到真实播放位置。
+            if (subtitleBody.isNotEmpty()) {
+                setBottomSubtitleText(mSeekTimePosition)
+            }
         } else if (mChangeVolume) {
             val deltaYNeg = -deltaY
             // ★ 绕过 GSY 的 mAudioManager 缓存（复用播放器时可能为 null），直接从 context 获取
@@ -1201,37 +1504,50 @@ initDanmakuTouchListener()
         }
     }
 
-    private fun setBottomSubtitleText() {
+    /**
+     * 按时间显示对应字幕。
+     *
+     * @param timeMs 指定显示哪个时间点的字幕（拖动进度条时传拖动目标位置，实现"字幕跟手"）；
+     *               不传则用当前播放位置。
+     *
+     * 用二分查找定位，而不是从上次的索引逐条走：
+     * 拖动时目标位置可能一次跳几分钟，逐条走会遍历上千条字幕（每帧一次），必然卡顿。
+     */
+    private fun setBottomSubtitleText(timeMs: Long = currentPositionWhenPlaying) {
         if (subtitleBody.isEmpty()) return
-        val currentTime = currentPositionWhenPlaying
-        // 读取上一次索引位置，顺便检查是否在范围内
-        var index = if (subtitleIndex < 0) {
-            0
-        } else if (subtitleIndex < subtitleBody.size) {
-            subtitleIndex
-        } else {
-            subtitleBody.size - 1
-        }
-        while (index in subtitleBody.indices) {
-            val item = subtitleBody[index] // 索引位置字幕信息
-            if (item.from > currentTime) {
-                // 字幕开始时间大于当前时间
-                if (index != 0 && currentTime > subtitleBody[index - 1].to) {
-                    // 上一个字幕结束时间小于当前时间
-                    mBottomSubtitleTV.visibility = GONE
-                    break
-                } else {
-                    index--
-                }
-            } else if (item.to < currentTime) {
-                // 字幕结束时间小于当前时间
-                index++
-            } else {
-                subtitleIndex = index // 保存当前索引
-                mBottomSubtitleTV.text = item.content // 设置字幕内容
+        val currentTime = timeMs
+
+        // 已经落在上一条字幕区间内就沿用它，避免频繁二分
+        val cached = subtitleIndex
+        if (cached in subtitleBody.indices) {
+            val c = subtitleBody[cached]
+            if (currentTime >= c.from && currentTime <= c.to) {
+                mBottomSubtitleTV.text = c.content
                 mBottomSubtitleTV.visibility = VISIBLE
-                break
+                return
             }
+        }
+
+        // 二分找到最后一条 from <= currentTime 的字幕
+        var lo = 0
+        var hi = subtitleBody.size - 1
+        var found = -1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            if (subtitleBody[mid].from <= currentTime) {
+                found = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        if (found >= 0 && currentTime <= subtitleBody[found].to) {
+            subtitleIndex = found
+            mBottomSubtitleTV.text = subtitleBody[found].content
+            mBottomSubtitleTV.visibility = VISIBLE
+        } else {
+            // 这个时间点没有字幕：保持隐藏（拖动时先不猜，松手后按真实播放位置刷新）
+            mBottomSubtitleTV.visibility = GONE
         }
     }
 
@@ -1334,6 +1650,9 @@ initDanmakuTouchListener()
         // 亮度手势结束后重置跟踪，下一轮手势重新从系统亮度读取
         lastGestureBrightness = -1f
         super.touchSurfaceUp()
+        // super 里会 dismissProgressDialog()（已重写为同时收预览图），
+        // 这里再兜一次：触摸被取消/中途被别的逻辑吃掉时也保证预览图不残留
+        hideSeekPreview()
     }
 
     /** 双击快进/快退的步长（默认 10 秒，设置页可改） */
@@ -1343,8 +1662,9 @@ initDanmakuTouchListener()
     /**
      * 双击：左 1/3 快退、右 1/3 快进，中间保持 GSY 默认行为（播放/暂停）。
      *
-     * GSY 的默认实现是 `touchDoubleUp() { clickStartIcon() }` —— 双击 = 播放/暂停，
-     * 这和 B 站用户的肌肉记忆正相反（左右两侧双击应该快进/快退）。
+     * GSY 的默认实现是 `touchDoubleUp() { clickStartIcon() }` —— 双击 = 播放/暂停。
+     * 步长设置成"关闭"（0）时整个屏幕都用 GSY 默认行为（双击 = 播放/暂停）；
+     * 设了步长才按左/右三分之一快退/快进。
      * 不弹任何提示（用户要求：快进就快进、快退就快退，提示挡画面）。
      */
     override fun touchDoubleUp(e: MotionEvent?) {
@@ -1357,15 +1677,15 @@ initDanmakuTouchListener()
             super.touchDoubleUp(e)
             return
         }
-        val w = if (touchViewWidth > 0) touchViewWidth else width
-        val total = duration
-        if (w <= 0 || total <= 0L) {
+        // 步长"关闭"（0）：双击哪都一样 —— 播放/暂停（交给 GSY 的 clickStartIcon）。
+        // 注意不能 return 掉：否则左右两侧的双击会被吃掉，什么都不发生。
+        if (doubleTapSeekMs <= 0L) {
             super.touchDoubleUp(e)
             return
         }
-        // 步长设置成"关闭"（0）时：左右两侧双击什么都不做（中间三分之一的播放/暂停仍交给 GSY）
-        if (doubleTapSeekMs <= 0L) {
-            if (e.x < w / 3f || e.x > w * 2f / 3f) return
+        val w = if (touchViewWidth > 0) touchViewWidth else width
+        val total = duration
+        if (w <= 0 || total <= 0L) {
             super.touchDoubleUp(e)
             return
         }
@@ -2013,6 +2333,14 @@ initDanmakuTouchListener()
         totalTime: String,
         totalTimeDuration: Long
     ) {
+        // 拖动进度时 GSY 会调它显示中央时间气泡 —— 预览图跟着这个生命周期走；
+        // 先更预览图再处理弹窗，弹窗弹不出（BadTokenException）也不连累预览。
+        updateSeekPreview(seekTimePosition)
+        updateSeekPreviewTime(seekTimePosition, totalTimeDuration)
+        // 有预览图时用我们自己的"大预览 + 时间条"接管：
+        // GSY 那个 152dp 的居中盒子窗口层级比播放器里的预览图高，会直接压住大预览的中间，
+        // 而且它占满半屏后大预览根本放不下 —— 所以这条路径干脆不弹它。
+        if (seekPreviewActive) return
         if (!canShowDialog()) return
         if (mProgressDialog == null) {
             val localView = LayoutInflater.from(activityContext).inflate(

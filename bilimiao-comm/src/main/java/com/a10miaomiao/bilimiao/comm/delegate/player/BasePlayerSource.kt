@@ -1,5 +1,6 @@
 package com.a10miaomiao.bilimiao.comm.delegate.player
 
+import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceIds
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceInfo
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.SubtitleSourceInfo
@@ -29,6 +30,14 @@ abstract class BasePlayerSource() {
 //     open suspend fun getTranslateLanguages(quality: Int, fnval: Int): List<PlayerSourceInfo.LanguageInfo> = emptyList()
 
     open suspend fun getSubtitles(): List<SubtitleSourceInfo> = emptyList()
+
+    /**
+     * 进度条拖动预览图（B 站 videoshot 缩略图雪碧图）。
+     *
+     * 拿不到（视频太短 / 番剧没这数据 / 风控 / 网络失败）就返回 null，
+     * 播放器那边会退化成"只显示时间气泡"，不影响播放。
+     */
+    open suspend fun getVideoShot(): PlayerAPI.VideoShotData? = null
     open suspend fun getDanmakuParser(): BaseDanmakuParser? = null
     open suspend fun historyReport(progress: Long) {}
 

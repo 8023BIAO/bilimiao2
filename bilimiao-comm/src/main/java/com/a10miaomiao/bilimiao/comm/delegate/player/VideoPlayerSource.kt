@@ -5,6 +5,7 @@ import bilibili.app.playurl.v1.PlayViewReq
 import bilibili.app.playurl.v1.Stream
 import bilibili.community.service.dm.v1.DMGRPC
 import bilibili.community.service.dm.v1.DmViewReq
+import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.DashSource
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceIds
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceInfo
@@ -315,6 +316,17 @@ class VideoPlayerSource(
             e.printStackTrace()
         }
         return emptyList()
+    }
+
+    override suspend fun getVideoShot(): PlayerAPI.VideoShotData? {
+        return try {
+            // 优先 bvid（接口原生字段），没有就退回 av 号；两者都没有就放弃
+            val videoId = bvid.ifBlank { aid }.removePrefix("av")
+            BiliApiService.playerAPI.getVideoShot(aid = videoId, cid = this.id)?.toHttps()
+        } catch (e: Exception) {
+            // 预览图是"锦上添花"，任何失败都静默降级，绝不弹错
+            null
+        }
     }
 
     override suspend fun historyReport(progress: Long) {

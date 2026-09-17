@@ -92,6 +92,11 @@ class BilimiaoCommApp(
             val jsonStr = String(jsonByteArray)
             val loginInfo = MiaoJson.fromJson<LoginInfo>(jsonStr)
             this.loginInfo = loginInfo
+            // ★ 冷启动必须把 cookie 重新灌回 WebView CookieManager：
+            //   saveAuthInfo 只在"登录那一刻"灌过一次，App 重启后 CookieManager 常常是空的，
+            //   于是所有 WEB 接口（图片上传 upload_bfs、web 评论等）都会 -101 未登录，
+            //   而走 Authorization 头的 APP 接口照常能用 —— 表现就是"能发文字评论、发不了图"。
+            loginInfo.cookie_info?.let { setCookie(it) }
             return loginInfo
         } catch (e: Exception) {
             miaoLogger().e("读取AuthInfo失败", e)

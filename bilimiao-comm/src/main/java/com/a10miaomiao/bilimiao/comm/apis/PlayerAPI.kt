@@ -10,6 +10,7 @@ import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.proxy.ProxyServerInfo
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import kotlinx.serialization.Serializable
 
 class PlayerAPI {
@@ -197,6 +198,63 @@ class PlayerAPI {
         return MiaoHttp.request {
             url = "https://comment.bilibili.com/$cid.xml"
         }
+    }
+
+    /**
+     * 进度条拖动预览图（B 站的"视频缩略图雪碧图"）。
+     *
+     * 返回一张（长视频是多张）拼接大图 + 每小格对应的起始秒数，客户端按拖动位置取格子。
+     * 做法对齐 PiliPlus（`lib/http/video.dart:1052` 起 `videoshot()`）：web 风格请求 + index=1，
+     * 不塞 appkey/sign（APP 参数会让服务端按客户端语义处理，历史上踩过坑）。
+     *
+     * 没有预览图的情况很常见：视频太短、番剧部分剧集、风控拦截 —— 一律返回 null，
+     * 调用方按"这个视频没有预览图"降级（拖动时只显示时间气泡）。
+     */
+    suspend fun getVideoShot(aid: String, cid: String): VideoShotData? {
+        if (aid.isBlank() || cid.isBlank()) return null
+        val res = MiaoHttp.request {
+            // web 语义：不加 app-key/env/Authorization，只带 Cookie + WBI 签名
+            isWebApi = true
+            url = "https://api.bilibili.com/x/player/videoshot?" + ApiHelper.urlencode(
+                mapOf(
+                    "aid" to aid,
+                    "cid" to cid,
+                    "index" to "1",
+                )
+            )
+            headers["Referer"] = "https://www.bilibili.com/video/av$aid"
+        }.awaitCall().json<ResponseData<VideoShotData>>()
+        if (!res.isSuccess) return null
+        return res.data?.takeIf { it.index.isNotEmpty() && it.image.isNotEmpty() }
+    }
+
+    /**
+     * 缩略图雪碧图数据。
+     *
+     * 取第 i 张小格的算法（与 PiliPlus 一致）：
+     *   page = i / (img_x_len * img_y_len)   —— 第几张雪碧图
+     *   col  = i % img_x_len                 —— 图内列
+     *   row  = i / img_x_len                 —— 图内行
+     * 注意 PiliPlus 这里写的是 `i ~/ imgYLen`（列数≠行数时会错行）；我们按列数取整，
+     * B 站目前是 10×10 所以两者等价，但列行不等时我们是对的。
+     */
+    @Serializable
+    data class VideoShotData(
+        val pvdata: String? = null,
+        val img_x_len: Int = 0,
+        val img_y_len: Int = 0,
+        val img_x_size: Double = 0.0,
+        val img_y_size: Double = 0.0,
+        /** 雪碧图 URL 列表（http 会被换成 https） */
+        val image: List<String> = emptyList(),
+        /** 每小格的起始时间，单位秒 */
+        val index: List<Int> = emptyList(),
+    ) {
+        /** 一张雪碧图里有几小格 */
+        val totalPerImage: Int get() = img_x_len * img_y_len
+
+        fun toHttps(): VideoShotData =
+            copy(image = image.map { UrlUtil.autoHttps(it) })
     }
 
     fun sendDamaku(

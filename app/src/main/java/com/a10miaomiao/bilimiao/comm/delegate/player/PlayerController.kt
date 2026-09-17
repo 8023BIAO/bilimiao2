@@ -89,8 +89,10 @@ class PlayerController(
 
     private var onlyFull = false // 仅全屏播放
     private var hasCheckedAutoFullScreen = false
-    private var showSubtitle = false // 默认显示字幕
-    private var showAiSubtitle = true // 默认显示AI字幕
+    // null = 还没从设置里读过（首次读取前按"显示"处理，见 getDefaultSubtitle）。
+    // 之前写死 false 初值，一旦"设置还没读出来就先加载完字幕列表"，就会误判成"用户不要字幕"。
+    private var showSubtitle: Boolean? = null // 字幕显示
+    private var showAiSubtitle: Boolean? = null // AI字幕显示
     private var canAutoCloseFullScreen = false
     var isBackgroundPlay = false // 后台播放
         private set
@@ -524,8 +526,32 @@ class PlayerController(
         player?.showBottomProgressBarInPipMode = (
             show and SettingConstants.PLAYER_BOTTOM_PROGRESS_BAR_SHOW_IN_PIP != 0
         )
-        showSubtitle = preferences[SettingPreferences.PlayerSubtitleShow] ?: true
-        showAiSubtitle = preferences[SettingPreferences.PlayerAiSubtitleShow] ?: false
+        val newShowSubtitle = preferences[SettingPreferences.PlayerSubtitleShow] ?: true
+        val newShowAiSubtitle = preferences[SettingPreferences.PlayerAiSubtitleShow] ?: false
+        // ★ 播放中改「字幕显示 / AI字幕显示」要立即生效：
+        //   这两个开关原来只在"设置读出来的那一刻"记进字段，没有任何人重新挑轨道，
+        //   所以正在播的视频要等下次换清晰度/重开播放器才变 —— 用户感受就是"开了不显示、关了不消失"。
+        //   这里检测到变化就按新设置重挑一次轨道（关 → null → 立即隐藏；开 → 立即走加载/缓存）。
+        val subtitleSettingChanged =
+            newShowSubtitle != showSubtitle || newShowAiSubtitle != showAiSubtitle
+        showSubtitle = newShowSubtitle
+        showAiSubtitle = newShowAiSubtitle
+        if (subtitleSettingChanged) {
+            // 只有"选出来的轨道确实变了"才重新赋值：否则设置流每次发射都会重挑同一轨，
+            // 白白把已经加载/正在加载的字幕请求打断重来
+            val target = getDefaultSubtitle(player.subtitleSourceList)
+            if (target?.subtitle_url != player.currentSubtitleSource?.subtitle_url) {
+                player.currentSubtitleSource = target
+            }
+        }
+        // 拖动进度条预览图（默认开）。关掉后连数据都不再拉，省流量
+        player.showSeekPreview = preferences[SettingPreferences.PlayerSeekPreviewShow] ?: true
+        // 字幕字号（sp）：设置页允许手输，这里兜底夹到合理区间（12~30），
+        // 避免误输 0 把字幕弄没、或 999 糊满屏
+        player.subtitleTextSizeSp =
+            (preferences[SettingPreferences.PlayerSubtitleTextSize] ?: 16)
+                .coerceIn(12, 30)
+                .toFloat()
         player.longPressSpeedMultiplier =
             (preferences[SettingPreferences.PlayerLongPressSpeed] ?: 300) / 100f
         // 快进/快退步长：0（或没设置）= 关闭 —— 双击屏幕不做快进/快退（默认就是关闭）
@@ -742,8 +768,9 @@ class PlayerController(
     fun getDefaultSubtitle(
         list: List<DanmakuVideoPlayer.SubtitleSourceInfo>
     ): DanmakuVideoPlayer.SubtitleSourceInfo? {
-        if (showSubtitle) {
-            return list.find { showAiSubtitle || it.ai_status == 0 }
+        // showSubtitle == null（设置还没读出来）也按"显示"处理，避免开局把字幕吞掉
+        if (showSubtitle != false) {
+            return list.find { showAiSubtitle == true || it.ai_status == 0 }
         }
         return null
     }

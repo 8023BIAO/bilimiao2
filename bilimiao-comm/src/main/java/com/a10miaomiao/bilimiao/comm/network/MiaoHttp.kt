@@ -149,6 +149,49 @@ class MiaoHttp(var url: String? = null) {
         var isWbiEnabled: Boolean = true
 
         /**
+         * 取 web 侧 CSRF token（cookie 里的 bili_jct）。
+         *
+         * 一些 web 接口（如图片上传 upload_bfs）需要它；APP 接口不需要。
+         * 取不到就返回 null，调用方应自行决定是否带上该参数。
+         */
+        fun csrfToken(): String? = cookieValue("bili_jct")
+
+        /** Web 登录态（SESSDATA）。APP 扫码登录时这里可能为空 */
+        fun sessDataToken(): String? = cookieValue("SESSDATA")
+
+        /**
+         * 取当前 CookieManager 里 WebView 侧的某个 cookie 值（api.bilibili.com）。
+         * 用于判断"有没有 web 登录态"以及给 web 接口补 csrf。
+         */
+        fun cookieValue(name: String): String? {
+            return try {
+                val cookie = CookieManager.getInstance()
+                    .getCookie("https://api.bilibili.com")
+                    ?: return null
+                cookie.split(";")
+                    .map { it.trim() }
+                    .firstOrNull { it.startsWith("$name=") }
+                    ?.substringAfter('=')
+                    ?.takeIf { it.isNotBlank() }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        /** 诊断用：只回 cookie 名字，绝不回值（SESSDATA 是凭据） */
+        fun cookieNames(): String {
+            return try {
+                (CookieManager.getInstance().getCookie("https://api.bilibili.com") ?: "")
+                    .split(";")
+                    .map { it.trim().substringBefore('=') }
+                    .filter { it.isNotBlank() }
+                    .joinToString(",")
+            } catch (e: Exception) {
+                "err:${e.message}"
+            }
+        }
+
+        /**
          * 全局共享 OkHttpClient：复用连接池 + 启用 HTTP 缓存，避免每个请求新建 client。
          * OkHttp 5.x 默认支持 HTTP/2 与 ALPN，无需额外配置。
          * 缓存仅对带 Cache-Control/Expires 的响应生效，B 站 API 多数不带，不会误缓存实时数据。
