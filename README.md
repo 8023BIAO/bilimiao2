@@ -4,7 +4,6 @@
 
 - [#314 集成小电视空降助手](https://github.com/10miaomiao/bilimiao2/issues/314)
 - [#214 希望能联动Ｂ站空降助手做到自动空降](https://github.com/10miaomiao/bilimiao2/issues/214)
-- [#312 Dynamic proto 模型错误](https://github.com/10miaomiao/bilimiao2/issues/312)
 - [#257 希望能增加听视频功能](https://github.com/10miaomiao/bilimiao2/issues/257)
 - [#218 增加仅听音频选项](https://github.com/10miaomiao/bilimiao2/issues/218)
 - [#81 聽視頻功能](https://github.com/10miaomiao/bilimiao2/issues/81)
