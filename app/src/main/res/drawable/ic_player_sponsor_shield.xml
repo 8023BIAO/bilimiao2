@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 空降助手「提交片段」：盾牌 + 播放三角（对齐 PiliPlus 的 shield_play_arrow） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 盾牌轮廓 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,1L3,5v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V5L12,1zM12,3.18l7,3.11V11c0,4.52 -3.05,8.85 -7,9.93C8.05,19.85 5,15.52 5,11V6.3L12,3.18z" />
+    <!-- 中间播放三角 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M10,8.5l6,3.5 -6,3.5z" />
+</vector>

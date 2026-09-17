@@ -8,6 +8,12 @@
     <item android:title="弹幕设置"
         android:id="@+id/danmuku_setting" />
 
+    <item android:title="空降助手片段"
+        android:id="@+id/sponsor_block_detail" />
+
+    <item android:title="提交片段到空降助手"
+        android:id="@+id/sponsor_block_submit" />
+
     <item android:id="@+id/player_scale"
         android:title="画面比例"
         android:orderInCategory="1"

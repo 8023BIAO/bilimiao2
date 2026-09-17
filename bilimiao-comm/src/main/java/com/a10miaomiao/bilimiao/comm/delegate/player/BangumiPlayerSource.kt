@@ -8,6 +8,9 @@ import bilibili.pgc.gateway.player.v2.PlayViewReq
 import bilibili.pgc.gateway.player.v2.CodeType
 import bilibili.pgc.gateway.player.v2.Stream
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorActionType
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorCategory
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSegment
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.DashSource
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceIds
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceInfo
@@ -67,6 +70,12 @@ class BangumiPlayerSource(
         val res = BiliApiService.playerAPI.getBangumiUrl(
             epid, id, quality, fnval
         )
+        runCatching {
+            val clips = res.clip_info_list.orEmpty()
+            if (clips.isNotEmpty()) {
+                pgcClips = clips.mapNotNull { toPgcSegment(it.start, it.end, it.clipType) }
+            }
+        }
         return defaultPlayerSource.also {
             // TODO AI 原声翻译：暂时关闭（原来是 languages / currentLanguage 赋值）
             // 保留调用方预设的进度（如空降跳转），不覆盖
@@ -155,6 +164,21 @@ class BangumiPlayerSource(
             PlayURLGRPC.playView(req)
         }.awaitCall()
         val videoInfo = result.videoInfo ?: return null
+        // 番剧跳片头片尾：gRPC 的 business.clip_info 里就带着（含 B 站自己的提示语）
+        runCatching {
+            // pbandk 生成的 repeated 字段访问器就是字段名本身（clipInfo），不是 protobuf-java 的 clipInfoList
+            val clips = result.business?.clipInfo.orEmpty()
+            if (clips.isNotEmpty()) {
+                pgcClips = clips.mapNotNull {
+                    toPgcSegment(
+                        startSec = it.start.toDouble(),
+                        endSec = it.end.toDouble(),
+                        clipType = it.clipType.name.orEmpty(),
+                        toastText = it.toastText.orEmpty(),
+                    )
+                }
+            }
+        }
         val playerSource = defaultPlayerSource
         result.business?.dimension?.let {
             playerSource.height = it.height
@@ -288,6 +312,14 @@ class BangumiPlayerSource(
             .getProxyBangumiUrl(
                 epid, id, quality, fnval, proxy
             )
+        // ★ 代理/解锁线路也要收集"跳过片头片尾"配置：
+        //   以前只有直连 HTTP 那条路读了 clip_info_list，走代理的用户永远拿不到番剧片段
+        runCatching {
+            val clips = res.clip_info_list.orEmpty()
+            if (clips.isNotEmpty()) {
+                pgcClips = clips.mapNotNull { toPgcSegment(it.start, it.end, it.clipType) }
+            }
+        }
         return PlayerSourceInfo().also {
             // 保留调用方预设的进度（如空降跳转）
             val preCid = defaultPlayerSource.lastPlayCid
@@ -400,6 +432,47 @@ class BangumiPlayerSource(
         } else {
             ByteArrayInputStream(CompressionTools.decompressXML(body.bytes()))
         }
+    }
+
+    // ─────────────── 番剧「跳过片头/片尾」（PGC 自带的 clip_info，不走 SponsorBlock）───────────────
+    // PiliPlus 对 PGC 的做法：不查 SponsorBlock，改用 playurl 返回的 clip_info_list，
+    // 由独立的 pgcSkipType 控制。我们把它映射成同一套片段模型，复用"每类别策略"
+    // （开场动画=intro / 片尾=outro / 广告=sponsor），由用户在设置里逐类开关。
+
+    /** 本次播放拿到的 PGC 片段（gRPC 优先，HTTP 兜底） */
+    private var pgcClips: List<SponsorSegment> = emptyList()
+
+    override suspend fun getSponsorSegments(cid: String): List<SponsorSegment> = pgcClips
+
+    /**
+     * 一条 PGC clip → 片段。
+     *
+     * clipType 映射：OP→开场动画、ED→片尾、AD→赞助/恰饭；
+     * **HE / MULTI_VIEW / 未知一律不处理** —— 这里和 PiliPlus 不同（它把未知类型兜底成 sponsor），
+     * 因为那些类型覆盖的是正片内容，按"赞助"自动跳过会误伤。
+     */
+    private fun toPgcSegment(
+        startSec: Double,
+        endSec: Double,
+        clipType: String,
+        toastText: String = "",
+    ): SponsorSegment? {
+        val category = when (clipType) {
+            "CLIP_TYPE_OP" -> SponsorCategory.Intro.id
+            "CLIP_TYPE_ED" -> SponsorCategory.Outro.id
+            "CLIP_TYPE_AD" -> SponsorCategory.Sponsor.id
+            else -> return null
+        }
+        if (endSec <= startSec) return null
+        return SponsorSegment(
+            // PGC 没有服务端 UUID：造一个稳定的本地 ID（前缀 pgc- 用于"不上报"判定）
+            UUID = "pgc-$clipType-$startSec-$endSec",
+            category = category,
+            actionType = SponsorActionType.Skip.id,
+            segment = listOf(startSec, endSec),
+            cid = id,
+            description = toastText,
+        )
     }
 
     override suspend fun getVideoShot(): PlayerAPI.VideoShotData? {

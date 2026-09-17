@@ -310,6 +310,14 @@ class PlayerAPI {
 //          */
 //         val language: LanguageInfo? = null,
         val last_play_cid: String? = null,
+        /**
+         * 番剧/影视的"跳过片头片尾"配置（PGC 才有）。
+         * 每项：`{start, end, clipType}`，start/end 单位**秒**；clipType 形如 CLIP_TYPE_OP/CLIP_TYPE_ED。
+         */
+        // 可空：兄弟字段 durl/dash 都是可空的，这里写死非空的话，
+        // 服务端一旦返回 "clip_info_list": null 会让**整个** PlayurlData 反序列化抛异常，
+        // 连带把 HTTP 播放回退链打断（丢的不只是跳过片头片尾）
+        val clip_info_list: List<ClipInfo>? = null,
     )
 
 // TODO AI 原声翻译：暂时关闭。恢复时把这段注释放开。
@@ -325,6 +333,14 @@ class PlayerAPI {
 //         val lang: String = "",
 //         val title: String? = null,
 //     )
+
+    /** 番剧"跳过片头/片尾"的一项（HTTP playurl 的 clip_info_list） */
+    @Serializable
+    data class ClipInfo(
+        val start: Double = 0.0,
+        val end: Double = 0.0,
+        val clipType: String = "",
+    )
 
     @Serializable
     data class Durl(

@@ -26,6 +26,8 @@ import cn.a10miaomiao.bilimiao.compose.pages.video.VideoPagesPage
 import com.a10miaomiao.bilimiao.R
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorCategory
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSkipType
 import com.a10miaomiao.bilimiao.comm.delegate.helper.StatusBarHelper
 import com.a10miaomiao.bilimiao.comm.dialogx.showTop
 import com.a10miaomiao.bilimiao.comm.navigation.openBottomSheet
@@ -43,6 +45,7 @@ import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
 import com.a10miaomiao.bilimiao.widget.player.DlnaManager
 import com.a10miaomiao.bilimiao.widget.player.DlnaDevice
 import com.a10miaomiao.bilimiao.widget.player.VideoPlayerCallBack
+import com.a10miaomiao.bilimiao.widget.player.SponsorBlockUi
 import master.flame.danmaku.controller.DanmakuFilters
 import com.a10miaomiao.bilimiao.widget.scaffold.ScaffoldView
 import com.a10miaomiao.bilimiao.comm.toast
@@ -546,6 +549,34 @@ class PlayerController(
         }
         // 拖动进度条预览图（默认开）。关掉后连数据都不再拉，省流量
         player.showSeekPreview = preferences[SettingPreferences.PlayerSeekPreviewShow] ?: true
+        // 空降助手：总开关 + 每类别策略（默认档 = 11 个类别全部"跳过一次"，见 DEFAULT_SKIP_TYPES）
+        // ★ 默认**开**（这里是故意与 PiliPlus 不同：用户要开箱即用；PiliPlus 默认关是隐私考虑）
+        val sponsorEnabled = preferences[SettingPreferences.SponsorBlockEnable] ?: true
+        val sponsorWasEnabled = player.sponsorSkipEnabled
+        player.sponsorSkipEnabled = sponsorEnabled
+        player.sponsorSkipTypes = SponsorCategory.entries.associate { category ->
+            val ordinal = preferences[SettingPreferences.sponsorBlockSkipTypeKey(category.id)]
+            category.id to if (ordinal == null) {
+                SponsorCategory.DEFAULT_SKIP_TYPES[category.id] ?: SponsorSkipType.Disable
+            } else {
+                SponsorSkipType.of(ordinal)
+            }
+        }
+        // 最短片段时长 / 跳过提示 / 上报（对齐 PiliPlus 的 blockLimit、blockToast、blockTrack）
+        player.sponsorLimitSec = preferences[SettingPreferences.SponsorBlockLimit] ?: 0
+        // 自定义服务端（镜像站）——直接写给 API 单例，它每个请求现取
+        com.a10miaomiao.bilimiao.comm.apis.SponsorBlockApi.serverOverride =
+            preferences[SettingPreferences.SponsorBlockServer]
+        // 自定义色块颜色（缺省就是类别默认色）
+        player.sponsorColors = SponsorCategory.entries.mapNotNull { category ->
+            preferences[SettingPreferences.sponsorBlockColorKey(category.id)]?.let { category.id to it }
+        }.toMap()
+        player.sponsorToastEnabled = preferences[SettingPreferences.SponsorBlockToast] ?: true
+        player.sponsorTrackEnabled = preferences[SettingPreferences.SponsorBlockTrack] ?: true
+        // 播放中途打开开关：立刻补一次片段请求，否则要等下一个视频才生效
+        if (sponsorEnabled && !sponsorWasEnabled) {
+            delegate.playerSource?.let { delegate.loadSponsorSegments(it) }
+        }
         // 字幕字号（sp）：设置页允许手输，这里兜底夹到合理区间（12~30），
         // 避免误输 0 把字幕弄没、或 999 糊满屏
         player.subtitleTextSizeSp =
@@ -675,7 +706,7 @@ class PlayerController(
     fun showPagesOrEpisodes(view: View) {
         val playerSource = delegate.playerSource
         if (playerSource is VideoPlayerSource) {
-            activity.openBottomSheet(VideoPagesPage(playerSource.aid))
+            activity.openBottomSheet(VideoPagesPage(playerSource.aid, playerSource.effectiveBvid))
         }
         if (playerSource is BangumiPlayerSource) {
             activity.openBottomSheet(BangumiEpisodesPage(
@@ -705,6 +736,26 @@ class PlayerController(
 
     private fun moreMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
+            R.id.sponsor_block_detail -> {
+                val p = views.videoPlayer
+                if (p == null) {
+                    toast("播放器还没准备好")
+                } else {
+                    SponsorBlockUi.showSegments(activity, p)
+                }
+                return true
+            }
+            R.id.sponsor_block_submit -> {
+                val p = views.videoPlayer
+                if (p == null) {
+                    toast("播放器还没准备好")
+                } else if (p.sponsorVideoId.isBlank()) {
+                    toast("这个视频不支持提交片段（番剧/本地视频没有 BVID）")
+                } else {
+                    SponsorBlockUi.showSubmit(activity, p, p.sponsorVideoId, p.sponsorCid)
+                }
+                return true
+            }
             R.id.mini_window -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     val height = playerSourceInfo?.height

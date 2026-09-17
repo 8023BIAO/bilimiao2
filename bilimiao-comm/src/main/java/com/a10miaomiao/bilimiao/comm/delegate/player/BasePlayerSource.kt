@@ -1,6 +1,7 @@
 package com.a10miaomiao.bilimiao.comm.delegate.player
 
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSegment
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceIds
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceInfo
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.SubtitleSourceInfo
@@ -38,6 +39,15 @@ abstract class BasePlayerSource() {
      * 播放器那边会退化成"只显示时间气泡"，不影响播放。
      */
     open suspend fun getVideoShot(): PlayerAPI.VideoShotData? = null
+
+    /**
+     * 「空降助手」（BilibiliSponsorBlock）的赞助/恰饭等片段，用于播放时自动跳过。
+     *
+     * 默认空实现：番剧（PGC）跟随 PiliPlus 的做法**不查 SponsorBlock**，
+     * UGC（VideoPlayerSource）和番剧（BangumiPlayerSource）都覆写了它。取不到就是空列表，播放侧完全静默。
+     */
+    open suspend fun getSponsorSegments(cid: String): List<SponsorSegment> = emptyList()
+
     open suspend fun getDanmakuParser(): BaseDanmakuParser? = null
     open suspend fun historyReport(progress: Long) {}
 

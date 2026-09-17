@@ -39,10 +39,14 @@ import android.widget.RelativeLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.annotation.RequiresApi
+import com.a10miaomiao.bilimiao.comm.utils.SponsorDiag
 import com.a10miaomiao.bilimiao.R
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
 import com.a10miaomiao.bilimiao.comm.delegate.helper.StatusBarHelper
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerSeekBus
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorCategory
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSegment
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSkipType
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.service.PlaybackService
 import com.a10miaomiao.bilimiao.comm.toast
@@ -685,6 +689,45 @@ initDanmakuTouchListener()
                 Gravity.CENTER
             )
         )
+
+        // 空降助手：顶栏两个图标，插在**章节按钮后面**（对齐 PiliPlus header 的 ADS / 盾牌+播放）
+        runCatching {
+            val topBar = findViewById<ViewGroup>(R.id.layout_top)
+            val chapterBtn = findViewById<View>(R.id.chapter_btn_layout)
+            val at = (topBar.indexOfChild(chapterBtn).takeIf { it >= 0 } ?: (topBar.childCount - 1)) + 1
+            val lp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.CENTER_VERTICAL }
+            // 与 PiliPlus 一致：提交(盾+播放) 在前，片段信息(ADS) 在后
+            topBar.addView(mSponsorSubmitTopBtn, at, lp)
+            topBar.addView(mSponsorInfoTopBtn, at + 1, lp)
+        }.onFailure {
+            // 裸 runCatching 会让"按钮没出现"变成无解之谜，至少留一行日志
+            SponsorDiag.log("ui-buttons", "插入空降顶栏按钮失败：${it.javaClass.simpleName}: ${it.message}")
+        }
+
+        // 空降助手：入口只在顶栏（用户要求：底栏那两个按钮和顶栏重复，已去掉）
+
+        // 空降助手：色块**只画在可拖动的那条进度条上**（用户要求：底部细条重复，去掉）。
+        // 实现见 mSeekSegmentsDrawable（以 LayerDrawable 叠在进度条 drawable 上）。
+        // 手动跳过的气泡仍加在最上层。
+
+        addView(
+            mSponsorSkipTip,
+            // 位置对齐 PiliPlus：左下角、浮在控制栏上方（全屏时更高一点）
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.START
+            ).apply {
+                leftMargin = dip(16)
+                // bottomMargin 在**显示气泡时**按当前模式重算（见 showSponsorSkipTip）：
+                // 这里 initView 阶段 mode 还是默认的 SMALL_TOP、height 还是 0，
+                // 写在这里的话全屏分支永远走不到（用户反馈过气泡位置不对）
+                bottomMargin = dip(75)
+            }
+        )
         mButtomPlay.setOnClickListener {
             clickStartIcon()
         }
@@ -1035,6 +1078,24 @@ initDanmakuTouchListener()
             "$pos / ${CommonUtil.stringForTime(totalMs)}"
         } else {
             pos
+        }
+    }
+
+    /** 把片段换算成"进度条上的一段"（0~1 + 颜色），同时供可拖动进度条使用 */
+    private fun updateSeekBarMarks() {
+        val total = duration
+        mSeekSegmentsDrawable.marks = if (total <= 0L) {
+            emptyList()
+        } else {
+            sponsorSegments
+                .filter { it.skipTypeOf(sponsorSkipTypes, sponsorLimitSec) != SponsorSkipType.Disable }
+                .map {
+                    Triple(
+                        it.startMs.toFloat() / total,
+                        it.endMs.toFloat() / total,
+                        sponsorColors[it.category] ?: SponsorCategory.colorOf(it.category)
+                    )
+                }
         }
     }
 
@@ -1486,11 +1547,19 @@ initDanmakuTouchListener()
         if (subtitleBody.isNotEmpty()) {
             postDelayed(subtitleTask, 100)
         }
+        if (sponsorSkipEnabled && sponsorSegments.isNotEmpty()) {
+            postDelayed(sponsorTask, 500)
+        }
     }
 
     override fun cancelProgressTimer() {
         super.cancelProgressTimer()
         removeCallbacks(subtitleTask)
+        removeCallbacks(sponsorTask)
+        // 这两个以前只 post 不 remove：播放器/页面销毁后补偿重试还会继续跑（最多 20×500ms），
+        // 可能对着已经没了的界面 seekTo / toast
+        removeCallbacks(sponsorCompensateRetry)
+        removeCallbacks(hideSponsorTipTask)
     }
 
     var subtitleTask: Runnable = object : Runnable {
@@ -1502,6 +1571,345 @@ initDanmakuTouchListener()
                 postDelayed(this, 100)
             }
         }
+    }
+
+    // ─────────────────── 空降助手（赞助/恰饭片段自动跳过）───────────────────
+    // 数据来自 BilibiliSponsorBlock（bsbsb.top）；判定/降级/上报逻辑对齐 PiliPlus 的 sponsor_block 模块。
+
+    /** 总开关（设置页下发；**设置项默认开**——这里字段初值 false，等设置下发后再打开） */
+    var sponsorSkipEnabled = false
+        set(value) {
+            field = value
+            updateSponsorButtons()
+        }
+
+    /** 每个类别的处理策略（5 档）。默认档 = 11 个类别全部"跳过一次"（PiliPlus 的 DEFAULT_SKIP_TYPES） */
+    var sponsorSkipTypes: Map<String, SponsorSkipType> = SponsorCategory.DEFAULT_SKIP_TYPES
+
+    /** 最短片段时长（秒）：短于它的片段降级成"仅显示"（PiliPlus 的 blockLimit，0=不限制） */
+    var sponsorLimitSec = 0
+
+    /** 类别 → 色块颜色（设置页可自定义；空 = 用默认色） */
+    var sponsorColors: Map<String, Int> = emptyMap()
+        set(value) {
+            field = value
+            updateSeekBarMarks()
+        }
+
+    /** 跳过时是否弹提示（PiliPlus 的 blockToast） */
+    var sponsorToastEnabled = true
+
+    /** 是否上报"已跳过"（PiliPlus 的 blockTrack，服务端拿它统计省下多少时间） */
+    var sponsorTrackEnabled = true
+
+    /** 上报回调（由委托接到 API；为空就只跳不报） */
+    var sponsorReporter: ((uuid: String) -> Unit)? = null
+
+    /** 打开"片段列表/投票"界面（UI 在 SponsorBlockUi，免得播放器文件继续膨胀） */
+    var onShowSponsorSegments: (() -> Unit)? = null
+
+    /** 打开"提交片段"界面 */
+    var onSubmitSponsorSegment: (() -> Unit)? = null
+
+    /** 本视频的片段（按起点升序）；空 = 没数据或没启用 */
+    var sponsorSegments: List<SponsorSegment> = emptyList()
+        set(value) {
+            field = value
+            skippedSponsorUuids.clear()
+            lastSponsorCheckSec = -1
+            sponsorCompensationTries = 0
+            SponsorDiag.log(
+                "segments",
+                "count=${value.size} enabled=$sponsorSkipEnabled duration=${duration} " +
+                    "state=$mCurrentState marks=${value.count { it.skipTypeOf(sponsorSkipTypes, sponsorLimitSec) != SponsorSkipType.Disable }}"
+            )
+            sponsorVideoLabel = value.filter { it.isPoint }
+                .map { SponsorCategory.labelOf(it.category) }
+                .distinct()
+                .joinToString("/")
+            updateSeekBarMarks()
+            updateSponsorButtons()
+            if (value.isNotEmpty() && sponsorSkipEnabled) {
+                removeCallbacks(sponsorTask)
+                postDelayed(sponsorTask, 300)
+                // ★ 越界补偿：数据是起播后才到的，此时可能已经站在片段里了（续播/空降/切分P）
+                compensateSponsorEntry()
+            }
+            // 整片标记（如"赞助/恰饭"）：本视频整体属于某类别时提示一次（对齐 PiliPlus 的 videoLabel）
+            removeCallbacks(sponsorVideoLabelToast)
+            if (value.isNotEmpty() && sponsorVideoLabel.isNotBlank() && sponsorSkipEnabled && sponsorToastEnabled) {
+                postDelayed(sponsorVideoLabelToast, 600)
+            }
+        }
+
+    /** 当前视频的标识（提交片段要用）；番剧/本地视频为空 → 不支持提交 */
+    var sponsorVideoId = ""
+    var sponsorCid = ""
+
+    /** 整片标记（如"赞助/恰饭"），由 [0,0] 形式的片段聚合而来（PiliPlus 的 videoLabel） */
+    var sponsorVideoLabel = ""
+        private set
+
+    private val skippedSponsorUuids = HashSet<String>()
+    private var lastSponsorCheckSec = -1
+
+    /**
+     * 顶栏「片段信息」按钮 = **ADS 小标**（点开当前视频的片段列表：哪一段是什么、能不能跳）。
+     *
+     * 语义与图标都对齐 PiliPlus（`header_control.dart:1843` 用 `MdiIcons.advertisements`，
+     * 点 `showSBDetail()`）；顺序上也照抄：**提交在前、信息在后**。
+     */
+    private val mSponsorInfoTopBtn: TextView by lazy {
+        TextView(context).apply {
+            text = "ADS"
+            setTextColor(Color.WHITE)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10f)
+            setPadding(dip(6), dip(2), dip(6), dip(2))
+            background = androidx.core.content.ContextCompat.getDrawable(
+                context, R.drawable.shape_player_ads_bg
+            )
+            visibility = GONE
+            setOnClickListener { onShowSponsorSegments?.invoke() }
+        }
+    }
+
+    /**
+     * 顶栏「提交片段」图标 = **盾+播放**（对齐 PiliPlus `header_control.dart:1838` 的
+     * `CustomIcons.shield_play_arrow`，点 `onBlock()`）；显示条件是 `enableSponsorBlock`。
+     * 放在章节按钮后面、ADS 前面（与 PiliPlus 的排布一致）。
+     */
+    private val mSponsorSubmitTopBtn: ImageView by lazy {
+        ImageView(context).apply {
+            setImageResource(R.drawable.ic_player_sponsor_shield)
+            visibility = GONE
+            setPadding(dip(10), dip(10), dip(10), dip(10))
+            setOnClickListener { onSubmitSponsorSegment?.invoke() }
+        }
+    }
+
+    /** 两个空降按钮的显隐：提交=总开关开；片段信息=本视频有片段 */
+    private fun updateSponsorButtons() {
+        runCatching {
+            val hasSegments = sponsorSegments.isNotEmpty()
+            // 顶栏两个（章节按钮后面）：提交=盾+播放，片段信息=ADS
+            mSponsorSubmitTopBtn.visibility = if (sponsorSkipEnabled) VISIBLE else GONE
+            mSponsorInfoTopBtn.visibility = if (hasSegments) VISIBLE else GONE
+        }.onFailure {
+            // 以前是裸 runCatching：真出问题时按钮就是不出现，且没有任何线索
+            SponsorDiag.log("ui-buttons", "更新空降按钮失败：${it.javaClass.simpleName}: ${it.message}")
+        }
+    }
+
+    /** 叠在**可拖动进度条**上的色块层 */
+    private val mSeekSegmentsDrawable = SegmentMarksDrawable()
+
+    /** 上次给色块算归一化用的时长（变了才重算） */
+    private var lastMarksDuration = -1L
+
+    /** "手动跳过"气泡（"手动跳过"策略用；4 秒后自动消失） */
+    private val mSponsorSkipTip: TextView by lazy {
+        TextView(context).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(dip(14), dip(7), dip(14), dip(7))
+            background = GradientDrawable().apply {
+                cornerRadius = 18f * resources.displayMetrics.density
+                setColor(Color.parseColor("#E6000000"))
+            }
+            visibility = GONE
+            setOnClickListener {
+                pendingManualSkip?.let { seg ->
+                    pendingManualSkip = null
+                    doSponsorSkip(seg)
+                }
+                hideSponsorSkipTip()
+            }
+        }
+    }
+    private var pendingManualSkip: SponsorSegment? = null
+    private val hideSponsorTipTask = Runnable { hideSponsorSkipTip() }
+
+    /** "本片标记：xx" 的延迟 toast；可取消，避免片段列表重建时连着弹好几次 */
+    private val sponsorVideoLabelToast = Runnable {
+        if (sponsorVideoLabel.isNotBlank()) toast("本片标记：$sponsorVideoLabel")
+    }
+
+    /** 越界补偿的重试（起播阶段状态还没到 PLAYING 时用） */
+    private var sponsorCompensationTries = 0
+    private val sponsorCompensateRetry = object : Runnable {
+        override fun run() {
+            if (!sponsorSkipEnabled || sponsorSegments.isEmpty()) return
+            compensateSponsorEntry()
+        }
+    }
+
+    private val sponsorTask = object : Runnable {
+        override fun run() {
+            // 时长可能比片段数据晚到（起播阶段），每跳顺便同步一次色块的归一化分母
+            if (lastMarksDuration != duration) {
+                lastMarksDuration = duration
+                updateSeekBarMarks()
+            }
+            checkSponsorSkip()
+            if (mPostProgress) {
+                postDelayed(this, 500)
+            }
+        }
+    }
+
+    private fun sponsorSkipTypeOf(seg: SponsorSegment): SponsorSkipType =
+        seg.skipTypeOf(sponsorSkipTypes, sponsorLimitSec)
+
+    /**
+     * 正常播放时的判定：**只认"跨过片段起点"**，不认"落在片段内部"。
+     *
+     * 这是 PiliPlus 的抗打架设计（`block_mixin.dart:93` 判定 `start ∈ [当前秒, 当前秒+1s)`）：
+     * 用户手动拖到广告中间想看看到底是什么，不该被硬弹出去；只有正常播放跨过起点才处理。
+     * 拖动进度 / 长按倍速 / 非播放态，一律不插手。
+     */
+    private fun checkSponsorSkip() {
+        if (!sponsorSkipEnabled || sponsorSegments.isEmpty()) return
+        if (mChangePosition || isSpeedPlaying) return
+        if (mCurrentState != CURRENT_STATE_PLAYING) return
+        val pos = currentPositionWhenPlaying
+        if (pos <= 0L) return
+        val sec = (pos / 1000L).toInt()
+        if (sec == lastSponsorCheckSec) return
+        lastSponsorCheckSec = sec
+        val winStart = sec * 1000L
+        val winEnd = winStart + 1000L   // 半开区间 [winStart, winEnd)
+        val hit = sponsorSegments.firstOrNull { seg ->
+            !seg.isPoint && seg.startMs >= winStart && seg.startMs < winEnd
+        } ?: return
+        handleSponsorHit(hit)
+    }
+
+    /**
+     * 越界补偿：片段数据到达时已经站在片段内部。
+     * PiliPlus 也只在"首次拿到数据"时做（`handleSBData` 里 `_blockListener == null` 分支），
+     * 我们等价地在 `sponsorSegments` 赋值时调一次 —— 之后不再补，避免和用户手动拖拽打架。
+     */
+    private fun compensateSponsorEntry() {
+        // ★ 起播瞬间状态还是 PREPARING/缓冲中：这时不能放弃，挂起重试
+        //   （PiliPlus 也是 `player.stream.playing.firstWhere { … }` 等播放态才跳）
+        if (mCurrentState != CURRENT_STATE_PLAYING && mCurrentState != CURRENT_STATE_PAUSE) {
+            if (sponsorCompensationTries++ < 20) {
+                postDelayed(sponsorCompensateRetry, 500)
+            }
+            return
+        }
+        var pos = currentPositionWhenPlaying
+        if (pos <= 0L) return
+        sponsorCompensationTries = 0
+        var endTarget = -1L
+        var count = 0
+        var guard = 0
+        // 连续片段**一起跳**：对齐 PiliPlus 的 getFirstSegment —— 下一段起点紧挨着上一段
+        // （差值 < 100ms）就继续往后跳，避免"跳完一个广告又落进下一个广告"来回蹦。
+        while (guard++ < 20) {
+            val hit = sponsorSegments.firstOrNull { seg ->
+                !seg.isPoint && pos >= seg.startMs - 100L && pos < seg.endMs &&
+                    when (sponsorSkipTypeOf(seg)) {
+                        SponsorSkipType.AlwaysSkip -> true
+                        SponsorSkipType.SkipOnce -> skippedSponsorUuids.add(seg.UUID)
+                        else -> false
+                    }
+            } ?: break
+            endTarget = hit.endMs
+            pos = hit.endMs + 100L
+            count++
+        }
+        SponsorDiag.log(
+            "compensate",
+            "pos=$pos state=$mCurrentState hits=$count endTarget=$endTarget tries=$sponsorCompensationTries"
+        )
+        if (endTarget > 0L) {
+            val target = if (duration > 0L) {
+                (endTarget + 100L).coerceAtMost(duration)
+            } else {
+                endTarget + 100L
+            }
+            seekTo(target)
+            if (sponsorToastEnabled) {
+                toast(if (count > 1) "已跳过 $count 个片段" else "已跳过片段")
+            }
+        }
+    }
+
+    /** 命中片段 → 按该类别的策略决定：自动跳 / 弹手动按钮 / 只显示 */
+    private fun handleSponsorHit(seg: SponsorSegment) {
+        when (sponsorSkipTypeOf(seg)) {
+            SponsorSkipType.AlwaysSkip -> doSponsorSkip(seg)
+            SponsorSkipType.SkipOnce -> {
+                // "跳过一次"：标记后再拖回来不重复跳（PiliPlus 的默认档）
+                if (skippedSponsorUuids.add(seg.UUID)) {
+                    doSponsorSkip(seg)
+                }
+            }
+            SponsorSkipType.SkipManually -> showSponsorSkipTip(seg)
+            SponsorSkipType.ShowOnly, SponsorSkipType.Disable -> Unit
+        }
+    }
+
+    /** 给"片段列表"界面用：这个片段当前会被怎么处理（显示成"跳过/跳至"按钮） */
+    fun sponsorSkipTypeFor(seg: SponsorSegment): SponsorSkipType = sponsorSkipTypeOf(seg)
+
+    /**
+     * 给"片段列表"界面用：手动跳到片段起点（仅显示档）/ 终点（其它档）。
+     * 走自己的 seekTo ✓，但**不**上报"已跳过"（用户只是点了列表里的一行，不代表自动跳过）。
+     */
+    fun sponsorJumpTo(seg: SponsorSegment, toEnd: Boolean) {
+        val target = if (toEnd) seg.endMs + 100L else seg.startMs
+        seekTo(if (target < 0L) 0L else target)
+    }
+
+    private fun doSponsorSkip(seg: SponsorSegment) {
+        // 跳到片段终点（+100ms 容错，避免正好落在终点帧上）；时长未知时不设上限
+        val target = if (duration > 0L) {
+            (seg.endMs + 100L).coerceAtMost(duration)
+        } else {
+            seg.endMs + 100L
+        }
+        SponsorDiag.log(
+            "skip",
+            "cat=${seg.category} ${seg.startMs}->${seg.endMs} target=$target pos=$currentPositionWhenPlaying"
+        )
+        // 走我们自己的 seekTo 覆写：它会把续播账本/GSY 的一次性槽一起同步，
+        // 否则这次跳转会被随后的任何一次 re-prepare 抹掉（历史上踩过）。
+        seekTo(target)
+        if (sponsorToastEnabled) {
+            // 番剧的 clip_info 自带提示语（B 站的 toast_text），有就用它
+            val msg = seg.description.ifBlank { "已跳过${SponsorCategory.shortLabelOf(seg.category)}片段" }
+            toast(msg)
+        }
+        // 只上报服务端认识的片段：PGC 片段的 UUID 是我们本地造的（pgc- 前缀），报上去是脏数据
+        if (sponsorTrackEnabled && !seg.UUID.startsWith("pgc-")) {
+            sponsorReporter?.invoke(seg.UUID)
+        }
+    }
+
+    private fun showSponsorSkipTip(seg: SponsorSegment) {
+        pendingManualSkip = seg
+        mSponsorSkipTip.text = "跳过 ${SponsorCategory.shortLabelOf(seg.category)}（${CommonUtil.stringForTime(seg.startMs)}）"
+        // ★ 每次显示都按**当前**模式/尺寸重算位置：PiliPlus `video/view.dart:1490` 是全屏时
+        //   bottom = max(75, 高度*0.25)，而 initView() 那一刻 mode 还是默认值、height 还是 0，
+        //   所以这个计算只能放在这里（放 initView 里等于永远走小屏分支）
+        (mSponsorSkipTip.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+            lp.bottomMargin = if (mode == PlayerMode.FULL) {
+                maxOf(dip(75), (height * 0.25f).toInt())
+            } else {
+                dip(75)
+            }
+            mSponsorSkipTip.layoutParams = lp
+        }
+        mSponsorSkipTip.visibility = VISIBLE
+        removeCallbacks(hideSponsorTipTask)
+        postDelayed(hideSponsorTipTask, 4000)
+    }
+
+    private fun hideSponsorSkipTip() {
+        mSponsorSkipTip.visibility = GONE
+        pendingManualSkip = null
     }
 
     /**
@@ -1650,6 +2058,13 @@ initDanmakuTouchListener()
         // 亮度手势结束后重置跟踪，下一轮手势重新从系统亮度读取
         lastGestureBrightness = -1f
         super.touchSurfaceUp()
+        // ★★ 必须在 super 之后清 mChangePosition ★★
+        // GSY v13 只在 touchSurfaceDown() 里清它，touchSurfaceUp() **只读不写**，
+        // 而 checkSponsorSkip() 的守卫是 `if (mChangePosition || isSpeedPlaying) return`。
+        // 结果：用户拖过一次进度条之后，这个标记永远是 true → **之后整部片子都不再自动跳过**
+        // （症状就是"一开始能跳，拖着拖着就不跳了"）。这里补上清理。
+        // 位置必须在 super 之后：super 内部要先读这个标记才会真正 seek。
+        mChangePosition = false
         // super 里会 dismissProgressDialog()（已重写为同时收预览图），
         // 这里再兜一次：触摸被取消/中途被别的逻辑吃掉时也保证预览图不残留
         hideSeekPreview()
@@ -2573,8 +2988,10 @@ initDanmakuTouchListener()
 
         val draw = PlayerViewDrawable.progressBarDrawable(context, themeColor)
         val bounds = mProgressBar.progressDrawable.bounds
-        mProgressBar.progressDrawable = draw
+        // 色块层整条叠在进度条之上（高度全覆盖，对齐 PiliPlus）：可拖动的那条进度条上也能看见片段颜色
+        mProgressBar.progressDrawable = LayerDrawable(arrayOf(draw, mSeekSegmentsDrawable))
         mProgressBar.progressDrawable.bounds = bounds
+        updateSeekBarMarks()
         mProgressBar.thumb.setColorFilter(themeColor, PorterDuff.Mode.SRC_ATOP)
         val baseDrawable = PlayerViewDrawable.bottomProgressBarDrawable(context, themeColor)
         mBottomProgressBar.progressDrawable = if (baseDrawable is LayerDrawable) {

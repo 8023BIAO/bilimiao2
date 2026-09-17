@@ -197,6 +197,23 @@ object SettingPreferences {
     val PlayerAiSubtitleShow = booleanPreferencesKey("player_ai_subtitle_show")
     // 拖动进度条时在画面中央显示预览缩略图（默认开）
     val PlayerSeekPreviewShow = booleanPreferencesKey("player_seek_preview_show")
+    // ── 空降助手（BilibiliSponsorBlock：跳过赞助/恰饭等片段）──
+    // 总开关**默认开**（★有意与 PiliPlus 不同：PiliPlus 默认关。理由是要开箱即用；
+    // 代价是首次安装就会向第三方 bsbsb.top 发查询——所以设置页里把开关和隐私说明都写清楚了）
+    val SponsorBlockEnable = booleanPreferencesKey("sponsor_block_enable")
+
+    /** 每个类别一个处理策略，存 `SponsorSkipType.ordinal`（0禁用/1仅显示/2手动/3跳一次/4总是跳） */
+    fun sponsorBlockSkipTypeKey(id: String) = intPreferencesKey("sponsor_block_skip_$id")
+    /** 自定义服务端地址（留空 = 用默认 https://www.bsbsb.top；镜像站可填这里） */
+    val SponsorBlockServer = stringPreferencesKey("sponsor_block_server")
+    /** 每个类别的色块颜色（ARGB int）；缺省 = 用 SponsorCategory 的默认色 */
+    fun sponsorBlockColorKey(id: String) = intPreferencesKey("sponsor_block_color_$id")
+    // 最短片段时长（秒）：短于它的片段降级成"仅显示"；0 = 不限制
+    val SponsorBlockLimit = intPreferencesKey("sponsor_block_limit")
+    // 跳过时是否弹提示
+    val SponsorBlockToast = booleanPreferencesKey("sponsor_block_toast")
+    // 是否上报"已跳过"（服务端统计用）
+    val SponsorBlockTrack = booleanPreferencesKey("sponsor_block_track")
     // 长按倍速的倍率（存 ×100 的整数：150=1.5× 200=2× 300=3× 400=4×，默认 3×）
     val PlayerLongPressSpeed = intPreferencesKey("player_long_press_speed")
     // 双击快进/快退的秒数（默认 10 秒）

@@ -8,6 +8,8 @@ import kotlinx.android.parcel.Parcelize
 @Parcelize
 data class PlayListItemInfo(
     val aid: String,
+    /** 裸 BVID（空降助手要用；老数据可能没有，为空时上层会尝试用 aid 换算） */
+    val bvid: String = "",
     val cid: String,
     val duration: Int,
     val title: String,
@@ -33,6 +35,7 @@ data class PlayListItemInfo(
             title = title,
             coverUrl = cover,
             aid = aid,
+            bvid = bvid,
             id = cid,
             ownerId = ownerId,
             ownerName = ownerName,

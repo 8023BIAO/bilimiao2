@@ -6,6 +6,7 @@ import bilibili.app.playurl.v1.Stream
 import bilibili.community.service.dm.v1.DMGRPC
 import bilibili.community.service.dm.v1.DmViewReq
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
+import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSegment
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.DashSource
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceIds
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceInfo
@@ -14,6 +15,7 @@ import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
+import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.a10miaomiao.bilimiao.comm.utils.CdnSelector
 import com.a10miaomiao.bilimiao.comm.utils.CompressionTools
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
@@ -36,6 +38,21 @@ class VideoPlayerSource(
 ): BasePlayerSource() {
 
     var pages = emptyList<PageInfo>()
+
+    /**
+     * 空降助手要用的 BV 号。
+     *
+     * 取值优先级：① `bvid` 本身是**合法 BV 号**时用它；② 否则用 `aid` 现算。
+     *
+     * ★ 关键：这里**必须校验 bvid 的形态**，不能只判空串。
+     *   因为很多入口传进来的 `bvid` 其实是 **av 号**（「继续播放」卡片传 `playerState.aid`、
+     *   历史/收藏卡片传 `it.aid.toString()`），拿它去查会得到 `[]` →
+     *   **片头片尾等片段全部消失**（用户实测报的 bug）。
+     *   现算那一路对超出经典算法范围的新 av 号会返回 null（`BvUtils.toBvid` 的保护），
+     *   宁可不查也不能查错视频。
+     */
+    val effectiveBvid: String
+        get() = bvid.takeIf { BvUtils.isValidBvid(it) } ?: BvUtils.toBvid(aid).orEmpty()
 
     // TODO AI 原声翻译：暂时关闭（原来这里还有个 language: String? 参数）。
     override suspend fun getPlayerUrl(
@@ -329,6 +346,18 @@ class VideoPlayerSource(
         }
     }
 
+    /**
+     * 「空降助手」片段。
+     *
+     * 必须用**裸 BVID**（哈希端点算的就是 `SHA256(bvid)`，喂 av 号或 `bvid+cid` 拼接串
+     * 都会静默查不到），所以只有 bvid 非空时才发请求。
+     */
+    override suspend fun getSponsorSegments(cid: String): List<SponsorSegment> {
+        val bv = effectiveBvid
+        if (bv.isBlank()) return emptyList()
+        return BiliApiService.sponsorBlockAPI.getSegments(bv, cid)
+    }
+
     override suspend fun historyReport(progress: Long) {
         try {
             val realtimeProgress = progress.toString()  // 秒数
@@ -358,6 +387,7 @@ class VideoPlayerSource(
                 title = nextPage.title,
                 coverUrl = coverUrl,
                 aid = aid,
+                bvid = bvid,
                 id = nextPage.cid,
                 ownerId = ownerId,
                 ownerName = ownerName,
@@ -378,6 +408,7 @@ class VideoPlayerSource(
                 title = prevPage.title,
                 coverUrl = coverUrl,
                 aid = aid,
+                bvid = bvid,
                 id = prevPage.cid,
                 ownerId = ownerId,
                 ownerName = ownerName,

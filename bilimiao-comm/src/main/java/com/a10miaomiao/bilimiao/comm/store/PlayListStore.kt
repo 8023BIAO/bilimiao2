@@ -21,6 +21,7 @@ import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.base.BaseStore
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
+import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.a10miaomiao.bilimiao.comm.toast
 import com.kongzue.dialogx.dialogs.PopTip
 import kotlinx.coroutines.Dispatchers
@@ -158,6 +159,9 @@ class PlayListStore(override val di: DI) :
         val items = sectionInfo.episodes.map {
             PlayListItemInfo(
                 aid = it.aid,
+                // ★ 带上真实 BV 号：空降助手只认 BV，缺了它新视频（av 超出经典算法范围）
+                //   会退化成"查不到片段"，自动连播时就表现为"片段又没了"
+                bvid = it.bvid,
                 cid = it.cid,
                 duration = 0,
                 title = it.title,
@@ -194,6 +198,7 @@ class PlayListStore(override val di: DI) :
         }
         val items = sectionInfo.episodes.map {
             PlayListItemInfo(
+                bvid = it.bvid,
                 aid = it.aid.toString(),
                 cid = it.cid.toString(),
                 duration = 0,
@@ -318,6 +323,7 @@ class PlayListStore(override val di: DI) :
                 )
                 items = (section?.episodes ?: listOf()).map {
                     PlayListItemInfo(
+                        bvid = it.bvid,
                         aid = it.aid.toString(),
                         cid = it.cid.toString(),
                         duration = 0,
@@ -382,6 +388,7 @@ class PlayListStore(override val di: DI) :
                             val firstPage = it.pages.firstOrNull() ?: return@mapNotNull null
                             PlayListItemInfo(
                                 aid = it.id,
+                                bvid = it.bv_id,
                                 cid = firstPage.id,
                                 duration = it.duration.toInt(),
                                 title = it.title,
@@ -455,6 +462,8 @@ class PlayListStore(override val di: DI) :
                         val page = it.page
                         PlayListItemInfo(
                             aid = it.aid.toString(),
+                            // 稍后再看接口自带 bvid（ToViewItemInfo.bvid）
+                            bvid = it.bvid,
                             cid = it.cid.toString(),
                             duration = it.duration,
                             title = it.title,
@@ -500,12 +509,17 @@ class PlayListStore(override val di: DI) :
 
     fun bilibili.app.archive.v1.Arc.toPlayListItem(
         viewPages: List<bilibili.app.archive.v1.Page>,
+        bvid: String = "",
     ): PlayListItemInfo {
         val from = PlayListFrom.Video(
             aid = aid.toString(),
         )
         return PlayListItemInfo(
             aid = aid.toString(),
+            // ★ 校验形态：调用点五花八门，有的是 av 号（「继续播放」/历史卡片），
+            //   直接存进去会让空降助手查到空数据或别的视频。非法一律存空串，
+            //   由 VideoPlayerSource.effectiveBvid 用 aid 现算兜底。
+            bvid = bvid.takeIf { BvUtils.isValidBvid(it) } ?: "",
             cid = firstCid.toString(),
             title = title,
             cover = pic,

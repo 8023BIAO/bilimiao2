@@ -1,5 +1,34 @@
 [releases APK](../../releases/latest)
 
+## 已实现的上游 issue
+
+- [#314 集成小电视空降助手](https://github.com/10miaomiao/bilimiao2/issues/314)
+- [#214 希望能联动Ｂ站空降助手做到自动空降](https://github.com/10miaomiao/bilimiao2/issues/214)
+- [#312 Dynamic proto 模型错误](https://github.com/10miaomiao/bilimiao2/issues/312)
+- [#257 希望能增加听视频功能](https://github.com/10miaomiao/bilimiao2/issues/257)
+- [#218 增加仅听音频选项](https://github.com/10miaomiao/bilimiao2/issues/218)
+- [#81 聽視頻功能](https://github.com/10miaomiao/bilimiao2/issues/81)
+- [#287 增加屏蔽重复弹幕功能](https://github.com/10miaomiao/bilimiao2/issues/287)
+- [#258 增加按弹幕屏蔽的功能](https://github.com/10miaomiao/bilimiao2/issues/258)
+- [#303 增加切换CDN节点的功能](https://github.com/10miaomiao/bilimiao2/issues/303)
+- [#296 将定时功能添加到播放器控制栏](https://github.com/10miaomiao/bilimiao2/issues/296)
+- [#253 添加小窗开关和修改首页默认开关](https://github.com/10miaomiao/bilimiao2/issues/253)
+- [#203 后台不播放](https://github.com/10miaomiao/bilimiao2/issues/203)
+- [#40 增加进入详情页自动播放](https://github.com/10miaomiao/bilimiao2/issues/40)
+- [#62 增加直接播放视频的设置](https://github.com/10miaomiao/bilimiao2/issues/62)
+- [#272 点开后直接观看，而不是先进入详情页](https://github.com/10miaomiao/bilimiao2/issues/272)
+- [#234 搜索框支持 BV 号 / URL 链接跳转](https://github.com/10miaomiao/bilimiao2/issues/234)
+- [#266 突然无法搜索](https://github.com/10miaomiao/bilimiao2/issues/266)
+- [#179 字幕不显示](https://github.com/10miaomiao/bilimiao2/issues/179)
+- [#72 字幕相关功能失效](https://github.com/10miaomiao/bilimiao2/issues/72)
+- [#222 字幕不同步](https://github.com/10miaomiao/bilimiao2/issues/222)
+- [#28 默认关闭生成中文字幕](https://github.com/10miaomiao/bilimiao2/issues/28)
+- [#169 三倍速播放功能取消](https://github.com/10miaomiao/bilimiao2/issues/169)
+- [#205 播放位置记忆错误](https://github.com/10miaomiao/bilimiao2/issues/205)
+
+## 参考的开源项目
+
+- [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)
 - [blbl](https://github.com/cat3399/blbl)
 - [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)

@@ -73,6 +73,8 @@ import org.kodein.di.instance
 @Serializable
 class VideoPagesPage(
     val aid: String,
+    /** 真实 BVID（空降助手要用；从播放器传进来，别靠 aid 现算） */
+    val bvid: String = "",
 ) : ComposePage() {
 
     @Composable
@@ -80,7 +82,7 @@ class VideoPagesPage(
         val viewModel: VideoPagesPageViewModel = diViewModel(
             key = aid,
         ) {
-            VideoPagesPageViewModel(it, aid)
+            VideoPagesPageViewModel(it, aid, bvid)
         }
         VideoPagesPageContent(viewModel)
     }
@@ -89,6 +91,8 @@ class VideoPagesPage(
 private class VideoPagesPageViewModel(
     override val di: DI,
     val aid: String,
+    /** 真实 BVID（空降助手要用；从播放器带过来，别用 aid 现算） */
+    val bvid: String = "",
 ) : ViewModel(), DIAware {
 
     private val pageNavigation by instance<PageNavigation>()
@@ -132,6 +136,7 @@ private class VideoPagesPageViewModel(
         val arc = arcInfo ?: return
         val playerSource = VideoPlayerSource(
             aid = aid,
+            bvid = bvid,
             id = page.cid.toString(),
             coverUrl = arc.pic,
             mainTitle = arc.title,

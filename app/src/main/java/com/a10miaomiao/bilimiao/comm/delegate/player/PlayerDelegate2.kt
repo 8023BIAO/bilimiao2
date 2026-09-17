@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import com.a10miaomiao.bilimiao.comm.utils.SponsorDiag
 import com.a10miaomiao.bilimiao.MainUi
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -63,6 +64,7 @@ import com.a10miaomiao.bilimiao.comm.entity.player.SubtitleJsonInfo
 import com.a10miaomiao.bilimiao.comm.exception.AreaLimitException
 import com.a10miaomiao.bilimiao.comm.exception.DabianException
 import com.a10miaomiao.bilimiao.comm.network
+import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.player.BilimiaoPlayerManager
@@ -80,6 +82,7 @@ import com.a10miaomiao.bilimiao.service.PlaybackService
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.widget.player.ChapterNavigator
 import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
+import com.a10miaomiao.bilimiao.widget.player.SponsorBlockUi
 import com.a10miaomiao.bilimiao.widget.player.media3.ExoMediaSourceInterceptListener
 import com.a10miaomiao.bilimiao.widget.player.media3.ExoSourceManager
 import com.a10miaomiao.bilimiao.widget.scaffold.getScaffoldView
@@ -353,6 +356,17 @@ class PlayerDelegate2(
         controller.initController()
         vp.subtitleLoader = this::loadSubtitleData
         vp.subtitleSourceSelector = controller::getDefaultSubtitle
+        // 空降助手：把"已跳过"上报给服务端（统计省下多少时间），失败静默
+        vp.sponsorReporter = { uuid -> reportSponsorViewed(uuid) }
+        // 底栏两个空降按钮 → 片段列表 / 提交片段
+        vp.onShowSponsorSegments = { SponsorBlockUi.showSegments(activity, vp) }
+        vp.onSubmitSponsorSegment = {
+            if (vp.sponsorVideoId.isBlank()) {
+                toast("这个视频不支持提交片段（番剧/本地视频没有 BVID）")
+            } else {
+                SponsorBlockUi.showSubmit(activity, vp, vp.sponsorVideoId, vp.sponsorCid)
+            }
+        }
         // 音频焦点冲突时不释放播放器（暂停而非杀死，配合"不放生"策略）
         vp.isReleaseWhenLossAudio = false
 
@@ -583,6 +597,9 @@ class PlayerDelegate2(
     }
 
     override fun onDestroy() {
+        // 空降助手的弹窗挂在 Activity 上：Activity 先销毁而弹窗还在 → WindowLeaked
+        // （片段列表/投票/提交/颜色等弹窗都登记在 SponsorBlockUi.currentDialog 里）
+        SponsorBlockUi.dismissAll()
         // 画中画广播接收器兜底注销（进入画中画后直接销毁 Activity 时不会走退出回调 → leaked receiver）
         picInPicHelper?.unregisterReceiverSafe()
         // 最后保存一次位置 + 源信息（供 Activity 重建后恢复）
@@ -1090,6 +1107,8 @@ class PlayerDelegate2(
                 }
                 // 拖动进度条预览图：和字幕一样后台补一次（没数据/失败就静默降级，不影响播放）
                 loadVideoShot(source)
+                // 空降助手：赞助/恰饭片段（第三方服务端，同样静默降级）
+                loadSponsorSegments(source)
 // TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
 //                 // 正常播放走 gRPC，拿不到 language 列表 → 后台补一次 HTTP 只为填"翻译"菜单
 //                 if (!isChangedQuality) {
@@ -1203,6 +1222,52 @@ class PlayerDelegate2(
             withContext(Dispatchers.Main) {
                 if (token != videoShotToken) return@withContext
                 player?.videoShotData = data
+            }
+        }
+    }
+
+    /** 空降助手片段请求令牌：换视频作废（避免上一个视频的片段跳到新视频上） */
+    private var sponsorToken = 0
+
+    /**
+     * 拉取「空降助手」（BilibiliSponsorBlock）片段。
+     *
+     * 粒度是"整个视频一次"（不像预览图要按时间取图），拿到后交给播放器；
+     * 播放器那边的 500ms 判定器会按分类/跳过策略决定跳不跳。
+     * 任何失败都是空列表 —— 服务端不可达时功能静默失效，绝不影响播放。
+     */
+    fun loadSponsorSegments(source: BasePlayerSource) {
+        val token = ++sponsorToken
+        player?.sponsorSegments = emptyList()
+        // 记下 BVID/CID：提交片段时要用（番剧源没有 bvid → 留空，界面会提示不支持）
+        player?.sponsorVideoId = (source as? VideoPlayerSource)?.effectiveBvid.orEmpty()
+        player?.sponsorCid = source.id
+        // 总开关没开就不请求第三方服务端；但番剧的片头片尾是 playurl 自带的（零请求），照常加载
+        if (player?.sponsorSkipEnabled != true && source !is BangumiPlayerSource) return
+        val cid = source.id
+        SponsorDiag.log("load", "bvid=${(source as? VideoPlayerSource)?.effectiveBvid} cid=$cid enabled=${player?.sponsorSkipEnabled}")
+        playerCoroutineScope.launch(Dispatchers.IO) {
+            val list = try {
+                source.getSponsorSegments(cid)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            if (list.isEmpty()) return@launch
+            withContext(Dispatchers.Main) {
+                if (token != sponsorToken) return@withContext
+                player?.sponsorSegments = list
+            }
+        }
+    }
+
+    /** 上报"这个片段确实被跳过了"（服务端统计用；失败无所谓，绝不打扰用户） */
+    private fun reportSponsorViewed(uuid: String) {
+        if (uuid.isBlank()) return
+        playerCoroutineScope.launch(Dispatchers.IO) {
+            try {
+                BiliApiService.sponsorBlockAPI.reportViewed(uuid)
+            } catch (e: Exception) {
+                // 静默：上报失败不影响播放
             }
         }
     }

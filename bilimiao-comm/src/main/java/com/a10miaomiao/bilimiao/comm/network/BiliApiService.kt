@@ -30,6 +30,8 @@ object BiliApiService {
     val commentApi = CommentApi()
     val searchApi = SearchApi()
     val playerAPI = PlayerAPI()
+    /** 小电视空降助手（BilibiliSponsorBlock）：独立服务端 bsbsb.top，与 B 站 API 无关 */
+    val sponsorBlockAPI = SponsorBlockApi()
     val userApi = UserApi()
     val userRelationApi = UserRelationApi()
     val messageApi = MessageAPI()

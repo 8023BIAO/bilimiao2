@@ -49,6 +49,7 @@ import com.a10miaomiao.bilimiao.comm.store.PlayerStore
 import com.a10miaomiao.bilimiao.comm.store.UserLibraryStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
+import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.a10miaomiao.bilimiao.comm.toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -133,6 +134,24 @@ class VideoDetailViewModel(
 
     private var _id = id
 
+    /**
+     * 当前视频的真实 BV 号（空降助手要用）。
+     *
+     * ★ **不能直接用 `_id`**：`_id` 不一定是 BV 号 ——「继续播放」卡片
+     *   （`StartViewContent.kt:312` 传的是 `playerState.aid`）、历史/收藏/稍后再看卡片
+     *   （`StartLibraryCard.kt:211` 传的是 `it.aid.toString()`）、点赞消息、动态里的
+     *   UGC 合集等入口传进来的**都是 av 号**。把 av 号当 bvid 用 →
+     *   查询变成 `videoID=98935548`（av 号）→ 服务端返回 `[]` → **片头片尾等片段全部消失**
+     *   （用户实测报的"刚才好了怎么又不见了"）。
+     *
+     * 取值优先级：
+     * ① 视频详情接口返回的 bvid（最可靠，av 入口也能拿到真 BV 号）；
+     * ② `_id` **本身就是合法 BV 号**时用它（详情还没加载完时的兜底）；
+     * ③ 都没有 → 空串，交给 `VideoPlayerSource.effectiveBvid` 用 aid 现算（带范围保护）。
+     */
+    private val currentBvid: String
+        get() = getBvid().ifBlank { _id.takeIf { BvUtils.isValidBvid(it) } ?: "" }
+
     init {
         loadData()
     }
@@ -171,6 +190,9 @@ class VideoDetailViewModel(
             _aiConclusionData.value = null
             val req = if (_id.startsWith("BV")) {
                 ViewReq(
+                    // ⚠️ 这里必须用 _id（不能用 currentBvid）：本函数就是**去加载详情**的，
+                    //    此刻 detailData 还是空的，currentBvid 会算出空串 → 请求发不出去。
+                    //    入口传 av 号时走下面的 else 分支，本来就正确。
                     bvid = _id,
                 )
             } else {
@@ -282,7 +304,7 @@ class VideoDetailViewModel(
                 || playerStore.state.aid.isEmpty()) {
                 // 以当前视频创建新的播放列表
                 val playListItem = playListStore.run {
-                    arc.toPlayListItem(viewPages)
+                    arc.toPlayListItem(viewPages, bvid = currentBvid)
                 }
                 playListStore.setPlayList(
                     name = arc.title,
@@ -294,7 +316,7 @@ class VideoDetailViewModel(
             } else {
                 // 将视频添加到播放列表末尾
                 playListStore.addItem(playListStore.run {
-                    arc.toPlayListItem(viewPages)
+                    arc.toPlayListItem(viewPages, bvid = currentBvid)
                 })
             }
         }
@@ -306,6 +328,11 @@ class VideoDetailViewModel(
                 title = title,
                 coverUrl = arc.pic,
                 aid = arc.aid.toString(),
+                // ★ 真实 BVID：必须用 _id，不能用主构造参数 id —— 无 val/var 的构造参数
+                //   在成员函数体内不可见（Kotlin 规则，编译报 Unresolved reference）；
+                //   而且 _id 会被 changeVideo() 更新，语义正好是"当前正在看的视频"。
+                //   绝不能靠 aid 现算：新的 BV 号已不在经典算法的编码范围内，会算出别的视频。
+                bvid = currentBvid,
                 id = cid.toString(),
                 ownerId = author.mid.toString(),
                 ownerName = author.name,
@@ -579,7 +606,8 @@ class VideoDetailViewModel(
 
     fun openVideoPages() {
         val arc = detailData.value?.getArcData() ?: return
-        bottomSheetState.open(VideoPagesPage(arc.aid.toString()))
+        // 分 P 列表也要带上真实 BV 号，否则从分 P 切集会丢掉 bvid，空降助手查不到片段
+        bottomSheetState.open(VideoPagesPage(arc.aid.toString(), currentBvid))
     }
 
     fun openCoverActivity() {
@@ -806,7 +834,7 @@ class VideoDetailViewModel(
                 if (current != -1) {
                     playListStore.run {
                         addItem(
-                            videoArc.toPlayListItem(viewPages),
+                            videoArc.toPlayListItem(viewPages, bvid = currentBvid),
                             current + 1
                         )
                     }
@@ -819,7 +847,7 @@ class VideoDetailViewModel(
                 // 添加至最后一个播放
                 playListStore.run {
                     addItem(
-                        videoArc.toPlayListItem(viewPages),
+                        videoArc.toPlayListItem(viewPages, bvid = currentBvid),
                         state.items.size,
                     )
                 }
