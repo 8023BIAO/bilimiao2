@@ -4,11 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +20,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import com.a10miaomiao.bilimiao.comm.store.RegionStore
 import org.kodein.di.instance
 
@@ -154,15 +152,13 @@ internal fun MoreConditionsDialog(
         Icon(Icons.Default.Check, null)
     }
     if (state.visible) {
-        AlertDialog(
+        OverlayAlertDialog(
             title = {
                 Text("搜索筛选")
             },
             text = {
-                val scrollState = rememberScrollState()
-                Column(
-                    modifier = Modifier.verticalScroll(scrollState)
-                ) {
+                // 滚动交给 OverlayAlertDialog 的正文区域（自己再套一层 verticalScroll 会抢手势）
+                Column {
                     Text(
                         "发布时间",
                         color = MaterialTheme.colorScheme.onSurface,

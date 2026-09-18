@@ -237,22 +237,26 @@ object SponsorBlockUi {
             activity,
             "${SponsorCategory.labelOf(seg.category)} · ${CommonUtil.stringForTime(seg.startMs)}",
             items,
-        ) { which ->
-            currentDialog?.dismiss()
-            when (which) {
-                0 -> vote(activity, seg, type = 1, category = null)
-                1 -> vote(activity, seg, type = 0, category = null)
-                else -> showCategoryPicker(activity, seg)
-            }
-        }.also { currentDialog = it }
+            onPick = { which ->
+                currentDialog?.dismiss()
+                when (which) {
+                    0 -> vote(activity, seg, type = 1, category = null)
+                    1 -> vote(activity, seg, type = 0, category = null)
+                    else -> showCategoryPicker(activity, seg)
+                }
+            },
+        ).also { currentDialog = it }
     }
 
     private fun showCategoryPicker(activity: Activity, seg: SponsorSegment) {
         val categories = SponsorCategory.entries
-        OverlayDialog.showList(activity, "改成哪个类别？", categories.map { it.label }) { which ->
-            currentDialog?.dismiss()
-            vote(activity, seg, type = null, category = categories[which].id)
-        }.also { currentDialog = it }
+        OverlayDialog.showList(
+            activity, "改成哪个类别？", categories.map { it.label },
+            onPick = { which ->
+                currentDialog?.dismiss()
+                vote(activity, seg, type = null, category = categories[which].id)
+            },
+        ).also { currentDialog = it }
     }
 
     private fun vote(
@@ -320,10 +324,13 @@ object SponsorBlockUi {
             setPadding(0, dp(12), 0, dp(12))
             isClickable = true
             setOnClickListener {
-                OverlayDialog.showList(ctx, "选择分类", SponsorCategory.entries.map { it.label }) { which ->
-                    category = SponsorCategory.entries[which]
-                    text = "分类：${category.label}"
-                }
+                OverlayDialog.showList(
+                    ctx, "选择分类", SponsorCategory.entries.map { it.label },
+                    onPick = { which ->
+                        category = SponsorCategory.entries[which]
+                        text = "分类：${category.label}"
+                    },
+                )
             }
         }
         val actionTv = TextView(ctx).apply {
@@ -332,10 +339,13 @@ object SponsorBlockUi {
             setPadding(0, dp(12), 0, dp(12))
             isClickable = true
             setOnClickListener {
-                OverlayDialog.showList(ctx, "这段是什么行为", SponsorActionType.entries.map { it.label }) { which ->
-                    action = SponsorActionType.entries[which]
-                    text = "动作：${action.label}"
-                }
+                OverlayDialog.showList(
+                    ctx, "这段是什么行为", SponsorActionType.entries.map { it.label },
+                    onPick = { which ->
+                        action = SponsorActionType.entries[which]
+                        text = "动作：${action.label}"
+                    },
+                )
             }
         }
 

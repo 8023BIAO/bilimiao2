@@ -2,7 +2,6 @@ package cn.a10miaomiao.bilimiao.compose.components.dialogs
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -27,7 +26,7 @@ fun SingleChoiceDialog(
 ) {
     val scope = rememberCoroutineScope()
     if (state.openDialog) {
-        AlertDialog(
+        OverlayAlertDialog(
             onDismissRequest = {
                 state.openDialog = false
             },

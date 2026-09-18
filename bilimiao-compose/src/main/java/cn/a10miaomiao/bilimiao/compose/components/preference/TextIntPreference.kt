@@ -3,7 +3,6 @@ package cn.a10miaomiao.bilimiao.compose.components.preference
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -19,6 +18,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import me.zhanghai.compose.preference.Preference
 import me.zhanghai.compose.preference.rememberPreferenceState
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 
 fun LazyListScope.textIntPreference(
     key: String,
@@ -78,7 +78,7 @@ fun TextIntPreference(
     )
 
     if (showDialog) {
-        AlertDialog(
+        OverlayAlertDialog(
             onDismissRequest = { showDialog = false },
             title = title,
             text = {

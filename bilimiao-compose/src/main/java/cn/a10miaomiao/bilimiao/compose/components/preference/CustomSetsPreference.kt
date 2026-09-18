@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
@@ -26,6 +25,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import com.a10miaomiao.bilimiao.comm.toast
 import me.zhanghai.compose.preference.Preference
 import me.zhanghai.compose.preference.rememberPreferenceState
@@ -138,7 +138,7 @@ fun CustomSetsPreference(
     if (editDialogStateValue is EditDialogState.Add) {
         val text = remember { mutableStateOf("") }
         val errorMessage = remember { mutableStateOf("") }
-        AlertDialog(
+        OverlayAlertDialog(
             onDismissRequest = {
                 editDialogState.value = EditDialogState.Closed
             },
@@ -207,7 +207,7 @@ fun CustomSetsPreference(
             )
         }
         val errorMessage = remember { mutableStateOf("") }
-        AlertDialog(
+        OverlayAlertDialog(
             onDismissRequest = {
                 editDialogState.value = EditDialogState.Closed
             },

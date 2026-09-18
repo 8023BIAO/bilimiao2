@@ -9,9 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -22,6 +19,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import com.a10miaomiao.bilimiao.comm.entity.video.AiConclusionResult
 
 @Composable
@@ -49,7 +47,7 @@ fun VideoAiConclusionDialog(
         }
     }.trim()
 
-    AlertDialog(
+    OverlayAlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text("AI 视频总结", style = MaterialTheme.typography.titleLarge)
@@ -76,8 +74,10 @@ fun VideoAiConclusionDialog(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(Modifier.height(6.dp))
-                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(list) { o ->
+                    // 正文滚动由 OverlayAlertDialog 的 text 槽负责，
+                    // 这里不能用 LazyColumn：它会拿到"无限高"约束直接崩（大纲条目也不多）
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        list.forEach { o ->
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()

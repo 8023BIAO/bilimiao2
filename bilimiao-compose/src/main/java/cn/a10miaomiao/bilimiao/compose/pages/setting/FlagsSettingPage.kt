@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -25,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
@@ -599,7 +599,7 @@ private fun FlagsSettingPageContent(
         }
 
         if (showGuestConfirmDialog) {
-            AlertDialog(
+            OverlayAlertDialog(
                 onDismissRequest = { showGuestConfirmDialog = false },
                 title = { Text("开启游客模式") },
                 text = {
@@ -623,7 +623,7 @@ private fun FlagsSettingPageContent(
         }
 
         if (showResetDialog) {
-            AlertDialog(
+            OverlayAlertDialog(
                 onDismissRequest = { showResetDialog = false },
                 title = { Text("确认重置") },
                 text = { Text("将把所有设置恢复为默认值，并清除屏蔽数据\n（不会退出登录，也不会清理图片/播放缓存）\n此操作不可撤销。确定继续？") },
@@ -676,7 +676,7 @@ private fun FlagsSettingPageContent(
         if (showDpiDialog) {
             val defaultDpi = context.applicationContext.resources.configuration.densityDpi
             val defaultFontScale = context.applicationContext.resources.configuration.fontScale
-            AlertDialog(
+            OverlayAlertDialog(
                 onDismissRequest = { showDpiDialog = false },
                 title = { Text("DPI 设置") },
                 text = {

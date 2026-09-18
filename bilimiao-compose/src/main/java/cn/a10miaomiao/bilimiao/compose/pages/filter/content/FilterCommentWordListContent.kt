@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -42,6 +41,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.edit
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -216,7 +216,7 @@ internal fun FilterCommentWordListContent() {
     }
 
     if (inputMode > -2) {
-        AlertDialog(
+        OverlayAlertDialog(
             onDismissRequest = ::handleDismiss,
             title = {
                 if (inputMode < 0) {

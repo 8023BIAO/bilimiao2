@@ -69,7 +69,7 @@ object OverlayDialog {
                 setColor(surface)
             }
             isClickable = true          // 吃掉点击，避免穿透到遮罩
-            addView(content, LayoutParams(
+            addView(content, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ))

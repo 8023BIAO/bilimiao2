@@ -26,11 +26,11 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.text.font.FontWeight
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import cn.a10miaomiao.bilimiao.compose.pages.user.components.FavouriteEditForm
 import cn.a10miaomiao.bilimiao.compose.pages.user.components.FavouriteEditFormState
 import androidx.compose.runtime.Composable
@@ -430,7 +430,7 @@ fun VideoAddFavoriteDialog(
                 }
             }
 
-            AlertDialog(
+            OverlayAlertDialog(
                 onDismissRequest = { showAddFolderDialog = false },
                 title = {
                     Text(

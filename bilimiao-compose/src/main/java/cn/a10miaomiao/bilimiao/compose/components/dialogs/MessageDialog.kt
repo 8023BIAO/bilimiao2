@@ -1,10 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.components.dialogs
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,19 +15,14 @@ fun MessageDialog(
     when(val messageState = state.messageState.value) {
         MessageDialogState.NoneState -> Unit
         is MessageDialogState.AlertState -> {
-            AlertDialog(
+            // 走覆盖层：窗口铺满屏幕、卡片高度封顶，长文本不会把"确定"顶到屏幕外
+            OverlayAlertDialog(
                 onDismissRequest = state::close,
                 title = {
                     Text(messageState.title)
                 },
                 text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        Text(messageState.text)
-                    }
+                    Text(messageState.text)
                 },
                 confirmButton = {
                     TextButton(
@@ -43,7 +34,7 @@ fun MessageDialog(
             )
         }
         is MessageDialogState.LoadingState -> {
-            AlertDialog(
+            OverlayAlertDialog(
                 onDismissRequest = {},
                 title = {
                     Text(messageState.title)
@@ -57,7 +48,7 @@ fun MessageDialog(
             )
         }
         is MessageDialogState.CustomState -> {
-            AlertDialog(
+            OverlayAlertDialog(
                 onDismissRequest = messageState.onDismissRequest,
                 confirmButton = messageState.confirmButton,
                 modifier = messageState.modifier,

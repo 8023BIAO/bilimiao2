@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import com.a10miaomiao.bilimiao.comm.utils.CdnHosts
 import com.a10miaomiao.bilimiao.comm.utils.CdnSelector
+import com.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,7 +58,7 @@ fun CdnSelectDialog(
         testing = false
     }
 
-    AlertDialog(
+    OverlayAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("CDN 选择") },
         text = {

@@ -2751,10 +2751,42 @@ initDanmakuTouchListener()
         return !act.isFinishing && !act.isDestroyed
     }
 
+    /**
+     * 按**当前**播放器尺寸与屏幕位置，重算 GSY 手势气泡（进度 / 音量）的窗口几何。
+     *
+     * 为什么需要（和"旋转后弹窗点的位置 ≠ 看到的位置"是同一个病）：
+     * GSY 的 `StandardGSYVideoPlayer.showVolumeDialog()`，以及我们 override 的
+     * `showProgressDialog()`，都只在**创建 Dialog 的那一次**做了
+     * `setLayout(getWidth(), getHeight())` + `LayoutParams.x/y = getLocationOnScreen()`，
+     * 之后这个 Dialog 被**一直复用**（只有为 null 时才重建）。
+     * 本 App 在 Manifest 里声明了 `configChanges=orientation|screenSize|...`，
+     * **旋转时 Activity 不会重建**，气泡窗口里的像素几何也没有任何人再更新 →
+     * 横竖屏切换 / 分屏 / 折叠屏展开后，气泡仍停在**旧方向的尺寸和旧坐标**上（甚至被甩到屏幕外）。
+     *
+     * 只更新尺寸与坐标，**不动 gravity**（沿用 GSY 自己设的方向语义，避免气泡跳位）。
+     */
+    private fun applyGestureDialogGeometry(dialog: Dialog?) {
+        val w = width
+        val h = height
+        if (dialog == null || w <= 0 || h <= 0) return
+        val window = dialog.window ?: return
+        val location = IntArray(2)
+        getLocationOnScreen(location)
+        window.setLayout(w, h)
+        val lp = window.attributes ?: return
+        lp.width = w
+        lp.height = h
+        lp.x = location[0]
+        lp.y = location[1]
+        window.attributes = lp
+    }
+
     override fun showVolumeDialog(deltaY: Float, volumePercent: Int) {
         if (!canShowDialog()) return
         try {
             super.showVolumeDialog(deltaY, volumePercent)
+            // super 只在首次创建时钉死像素几何 → 每次显示都按当前方向重算一遍
+            applyGestureDialogGeometry(mVolumeDialog)
         } catch (_: Exception) {
             // Activity token 已失效（切后台/销毁/重建中）：丢弃弹窗避免崩溃，
             // 下次手势会用当前 Activity 重建，否则会一直 show 失败 → 永久不显示
@@ -2816,6 +2848,8 @@ initDanmakuTouchListener()
             localLayoutParams.y = location[1]
             mProgressDialog.window!!.attributes = localLayoutParams
         }
+        // 窗口几何按当前方向重算：首次创建后是幂等的，复用时则是唯一会更新它的地方
+        applyGestureDialogGeometry(mProgressDialog)
         if (!mProgressDialog.isShowing) {
             try {
                 mProgressDialog.show()
