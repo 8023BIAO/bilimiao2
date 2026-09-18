@@ -45,6 +45,13 @@ class SponsorBlockApi {
         private const val EXT_VERSION = "1.0"
 
         private const val HEX = "0123456789abcdef"
+
+        /** 公开 ID 缓存（算一次五千次哈希不便宜，别每次刷界面都算） */
+        @Volatile private var cachedPublicId: String? = null
+        @Volatile private var cachedPublicForId: String? = null
+
+        /** 首启动时生成的私人 ID（用来判断用户有没有改过） */
+        @Volatile private var defaultUserId: String = ""
         private const val USER_ID_PREF = "sponsor_block"
         private const val USER_ID_KEY = "user_id"
 
@@ -86,6 +93,7 @@ class SponsorBlockApi {
             sp.getString(USER_ID_KEY, null)?.takeIf { it.isNotBlank() }?.let { return it }
             val id = randomUserId()
             sp.edit().putString(USER_ID_KEY, id).apply()
+            defaultUserId = id
             return id
         }
 
@@ -112,13 +120,43 @@ class SponsorBlockApi {
             if (v.length < 30 || v.length > 128) return false
             if (!v.all { it in '0'..'9' || it in 'a'..'z' || it in 'A'..'Z' }) return false
             prefs().edit().putString(USER_ID_KEY, v).apply()
+            cachedPublicId = null      // 换了私人 ID，公开 ID 跟着变
             return true
+        }
+
+        /**
+         * **公开 ID** = 私人 ID 做 `SHA256` **五千次**（每次都哈希上一轮的十六进制串），64 位十六进制。
+         * 排行榜、统计接口里展示/使用的就是它 —— 可以随便公开，反推不出私人 ID。
+         * 实测核对过：本地算出来的值与 `userInfo` 返回的 `userID` 完全一致。
+         */
+        fun publicUserId(): String {
+            val priv = localUserId()
+            cachedPublicId?.let { if (cachedPublicForId == priv) return it }
+            var h = priv
+            repeat(5000) { h = sha256Hex(h) }
+            cachedPublicForId = priv
+            cachedPublicId = h
+            return h
+        }
+
+        /** 私人 ID 是不是"看起来还没被改过"（用于界面提示） */
+        fun isDefaultUserId(id: String = localUserId()): Boolean = id == defaultUserId
+
+        private fun sha256Hex(s: String): String {
+            val d = MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8))
+            val sb = StringBuilder(64)
+            for (b in d) {
+                val v = b.toInt() and 0xFF
+                sb.append(HEX[v ushr 4]).append(HEX[v and 0x0F])
+            }
+            return sb.toString()
         }
 
         /** 重掷一个随机 ID 并保存，返回新 ID */
         fun resetUserId(): String {
             val id = randomUserId()
             prefs().edit().putString(USER_ID_KEY, id).apply()
+            cachedPublicId = null
             return id
         }
 
@@ -378,6 +416,58 @@ class SponsorBlockApi {
     /** 服务器是否在线 */
     suspend fun uptimeStatus(): Boolean = uptimeSeconds() != null
 
+    /**
+     * 设置**公开昵称**（排行榜/统计里显示的名字，支持中文）。
+     *
+     * 请求形态是实测出来的：`POST /api/setUsername?userID=&username=` —— 参数走 **URL 查询串**，
+     * 用 JSON body 或表单 body 都会被 400 拒（`Bad Request`）。
+     * 传空字符串 = 清除昵称（排行榜里退回显示公开 ID）。
+     */
+    suspend fun setUsername(
+        username: String,
+        userId: String = localUserId(),
+    ): Boolean {
+        return try {
+            val query = "userID=" + java.net.URLEncoder.encode(userId, "UTF-8") +
+                "&username=" + java.net.URLEncoder.encode(username.trim(), "UTF-8")
+            val res = MiaoHttp.request {
+                url = "$baseUrl/api/setUsername?$query"
+                isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
+                method = MiaoHttp.POST
+                // okhttp 的 POST 必须带 body（哪怕空的），否则 method() 直接抛
+                body = "".toRequestBody("application/x-www-form-urlencoded".toMediaType())
+            }.awaitCall()
+            res.use { it.code == 200 }
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SponsorDiag.log("api-username", "设置昵称失败：${e.javaClass.simpleName}: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * 取当前昵称。**没设置过时服务端会返回公开 ID**，所以调用方要拿它和
+     * [publicUserId] 比一下才知道到底设没设。
+     */
+    suspend fun getUsername(userId: String = localUserId()): String? {
+        return try {
+            val res = MiaoHttp.request {
+                url = "$baseUrl/api/getUsername?userID=" + java.net.URLEncoder.encode(userId, "UTF-8")
+                isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
+            }.awaitCall().json<SponsorNameBody>()
+            res?.userName
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** 本机在该服务端的统计数据（省下多少分钟等） */
     suspend fun userInfo(userId: String = localUserId()): SponsorUserInfo? {
         return try {
@@ -397,6 +487,10 @@ class SponsorBlockApi {
             null
         }
     }
+
+    /** `/api/getUsername` 的返回体 */
+    @Serializable
+    private data class SponsorNameBody(val userName: String = "")
 
     /** 上报体 */
     @Serializable

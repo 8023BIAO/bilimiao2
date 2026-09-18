@@ -180,10 +180,17 @@ private fun SponsorBlockSettingPageContent() {
             // ── 身份与服务端 ──
             preferenceCategory(key = "sponsor_identity", title = { Text("身份与服务端") })
             preference(
-                key = "sponsor_user_id",
-                title = { Text("用户ID") },
+                key = "sponsor_username",
+                title = { Text("公开昵称") },
                 enabled = sponsorEnabled,
-                summary = { Text("投票/提交用的匿名身份（本地生成，与账号无关）。可编辑或重掷随机值") },
+                summary = { Text("排行榜/统计里显示的名字（支持中文）。不设就显示那串公开ID") },
+                onClick = { SponsorBlockSettingsUi.showUsernameDialog(context) }
+            )
+            preference(
+                key = "sponsor_user_id",
+                title = { Text("私人ID") },
+                enabled = sponsorEnabled,
+                summary = { Text("投票/提交用的身份，相当于密码（别外发）。可编辑或重掷随机值") },
                 onClick = { SponsorBlockSettingsUi.showUserIdDialog(context) }
             )
             preference(

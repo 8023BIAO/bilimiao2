@@ -53,7 +53,13 @@ object SponsorBlockSettingsUi {
                             append("服务端：暂时不可达")
                         }
                         append("\n服务端地址：${SponsorBlockApi.baseUrl}")
-                        append("\n本机用户ID：${SponsorBlockApi.localUserId()}")
+                        // 私人 ID 相当于密码，这里只露头尾；对外可见的是公开 ID
+                        val priv = SponsorBlockApi.localUserId()
+                        val masked = if (priv.length > 12) priv.take(6) + "…" + priv.takeLast(4) else priv
+                        append("\n私人ID（密码，别外发）：$masked")
+                        append("\n公开ID（可公开）：${SponsorBlockApi.publicUserId()}")
+                        val name = SponsorBlockApi().getUsername()
+                        append("\n昵称：${if (name.isNullOrBlank() || name == SponsorBlockApi.publicUserId()) "未设置" else name}")
                         if (info != null) {
                             append("\n\n被跳过的片段：${info.viewCount} 次")
                             append("\n累计节省时间：${"%.1f".format(info.minutesSaved)} 分钟")
@@ -83,6 +89,65 @@ object SponsorBlockSettingsUi {
         }
     }
 
+    // ───────────────────────── 公开昵称 ─────────────────────────
+
+    /**
+     * 设置**公开昵称**：排行榜 / 统计里显示的名字（支持中文）。
+     *
+     * 背景（官方 API 文档「用户ID」一节）：私人 ID 相当于密码、不该外发；服务端对外只认
+     * **公开 ID**（私人 ID 做 SHA256 五千次）和**用户名**；没设用户名时排行榜就显示公开 ID 那一长串。
+     * 所以「想让排行榜里显示自己的名字」= 调一次 `POST /api/setUsername`。
+     */
+    fun showUsernameDialog(context: Context) {
+        scope.launch {
+            val publicId = withContext(Dispatchers.IO) { SponsorBlockApi.publicUserId() }
+            val current = withContext(Dispatchers.IO) { SponsorBlockApi().getUsername() }
+            // 服务端在"没设过昵称"时会把公开 ID 当名字返回，这里要区分开
+            val shown = if (current.isNullOrBlank() || current == publicId) "" else current
+
+            val density = context.resources.displayMetrics.density
+            val dp = { v: Int -> (v * density).toInt() }
+            val input = EditText(context).apply {
+                inputType = InputType.TYPE_CLASS_TEXT
+                hint = "留空 = 不用昵称（排行榜显示公开ID）"
+                setText(shown)
+                setSelection(text?.length ?: 0)
+            }
+            val tip = TextView(context).apply {
+                text = "排行榜和统计里显示的名字，支持中文。\n" +
+                    "你的公开ID：${publicId}\n" +
+                    "（私人ID 相当于密码，别外发；改私人ID = 换一个身份，昵称也得重设）"
+                textSize = 12f
+                setPadding(dp(PAD), dp(8), dp(PAD), 0)
+            }
+            val box = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(PAD), dp(8), dp(PAD), 0)
+                addView(input)
+                addView(tip)
+            }
+            AlertDialog.Builder(context)
+                .setTitle("公开昵称")
+                .setView(ScrollView(context).apply { addView(box) })
+                .setPositiveButton("保存") { _, _ ->
+                    val value = input.text?.toString()?.trim().orEmpty()
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) { SponsorBlockApi().setUsername(value) }
+                        toast(
+                            context,
+                            when {
+                                !ok -> "保存失败：网络异常或服务端拒绝"
+                                value.isEmpty() -> "已清除昵称（排行榜将显示公开ID）"
+                                else -> "已保存：$value"
+                            }
+                        )
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+    }
+
     // ───────────────────────── 用户ID（对齐 PiliPlus 的「用户ID」项）─────────────────────────
 
     /**
@@ -101,8 +166,9 @@ object SponsorBlockSettingsUi {
             setSelection(text?.length ?: 0)
         }
         val tip = TextView(context).apply {
-            text = "至少 30 个字符、只能是字母和数字（建议直接用「随机」）。\n" +
-                "换 ID 后：投票/提交记录、服务端统计都会从零开始，且无法找回旧 ID 的数据。"
+            text = "这是**私人ID（相当于密码）**：至少 30 个字符、只能字母和数字，别外发。\n" +
+                "换 ID = 换一个身份：投票/提交记录、统计、昵称都会从零开始，且找不回旧 ID 的数据。\n" +
+                "想在排行榜显示名字，请用上面的「公开昵称」。"
             textSize = 12f
             setPadding(dp(PAD), dp(8), dp(PAD), 0)
         }
