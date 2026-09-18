@@ -74,7 +74,13 @@ object SponsorBlockUi {
             d.fixWindow()
         }
 
-    /** 统一的窗口校正（见 showAndTrack 的说明） */
+    /**
+     * 统一的窗口校正（见 showAndTrack 的说明）。
+     *
+     * 尺寸用 WRAP_CONTENT 交给对话框自己按**当前**配置测量 —— 千万不要在这里写死像素，
+     * 否则横竖屏切换后弹窗还是旧尺寸（本 App 旋转不重建 Activity，这类"存下来的几何量"
+     * 一定会过期；同类问题见 AnyPopDialog 里的 decorView 尺寸监听）。
+     */
     private fun AlertDialog.fixWindow() {
         runCatching {
             window?.apply {
@@ -96,10 +102,13 @@ object SponsorBlockUi {
      * 高度封顶的 ScrollView：横屏时屏幕矮，内容不封顶的话弹窗会长到屏幕外面去
      * （按钮被顶出可视区，用户"看得到标题、点不到按钮"就是这么来的）。
      */
-    private class CappedScrollView(context: Context, private val maxHeightPx: Int) :
+    private class CappedScrollView(context: Context, private val maxHeightFraction: Float) :
         ScrollView(context) {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            val capped = MeasureSpec.makeMeasureSpec(maxHeightPx, MeasureSpec.AT_MOST)
+            // ★ 每次测量都用**当前**屏幕高度算上限：本 App 旋转时不重建 Activity，
+            //   要是像以前那样在构造时就定死像素值，横竖屏切换后弹窗还按旧高度排版
+            val maxH = (resources.displayMetrics.heightPixels * maxHeightFraction).toInt()
+            val capped = MeasureSpec.makeMeasureSpec(maxH, MeasureSpec.AT_MOST)
             super.onMeasure(widthMeasureSpec, capped)
         }
     }
@@ -408,8 +417,7 @@ object SponsorBlockUi {
                 }
             })
         }
-        val screenH = ctx.resources.displayMetrics.heightPixels
-        val scroll = CappedScrollView(ctx, (screenH * 0.55f).toInt()).apply { addView(form) }
+        val scroll = CappedScrollView(ctx, 0.55f).apply { addView(form) }
 
         // ★ 取消/提交放在**滚动区外面**的固定页脚：
         //   以前塞在 form 里，横屏时表单比屏幕还高 → 按钮被顶到可视区外，

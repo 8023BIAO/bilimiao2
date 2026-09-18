@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -130,8 +131,38 @@ private fun DialogFullScreen(
             val dialogWindow = getDialogWindow()
             val parentView = LocalView.current.parent as View
             // 处理预览模式，宽高问题
-            val displayWidth = activityWindow?.decorView?.width ?: LocalContext.current.getDisplayWidth()
-            val displayHeight = activityWindow?.decorView?.height ?: LocalContext.current.getDisplayHeight()
+            val displayWidth = activityWindow?.decorView?.width?.takeIf { it > 0 }
+                ?: LocalContext.current.getDisplayWidth()
+            val displayHeight = activityWindow?.decorView?.height?.takeIf { it > 0 }
+                ?: LocalContext.current.getDisplayHeight()
+
+            // ★ 让弹窗尺寸**跟着宿主 decorView 走**（旋转/分屏/折叠屏展开都要跟上）
+            //
+            // 为什么必须这么做：本 App 在 Manifest 里声明了
+            // `configChanges=orientation|screenSize|...`，**旋转时 Activity 不会重建**；
+            // 而上面那两行只在重组时求值一次，重组又发生在 decorView 重新布局**之前** ——
+            // 于是旋转时拿到的是**旧方向**的宽高，之后再没有人重新 setLayout，
+            // 弹窗就永久停在旧尺寸/旧位置上（用户报的"竖屏点筛选弹出、切横屏后不是全屏覆盖、
+            // 非要重启 Activity 才对"就是这个）。
+            // 这里挂一个布局监听：宿主尺寸一变就重新 setLayout，不用重启 Activity，
+            // 也不依赖 Activity 重建/onConfigurationChanged。
+            DisposableEffect(activityWindow, dialogWindow) {
+                val decor = activityWindow?.decorView
+                var lastW = -1
+                var lastH = -1
+                val listener = View.OnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
+                    val w = r - l
+                    val h = b - t
+                    if (dialogWindow != null && w > 0 && h > 0 && (w != lastW || h != lastH)) {
+                        lastW = w
+                        lastH = h
+                        dialogWindow.setLayout(w, h)
+                    }
+                }
+                decor?.addOnLayoutChangeListener(listener)
+                onDispose { decor?.removeOnLayoutChangeListener(listener) }
+            }
+
             SideEffect {
                 if (
                     (isPreview && (isBackPress || isAnimateLayout)) ||
