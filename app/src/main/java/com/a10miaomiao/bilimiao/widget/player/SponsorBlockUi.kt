@@ -73,6 +73,7 @@ object SponsorBlockUi {
             currentDialog = d
             d.show()
             d.fixWindow(activity)
+            d.followHostSize(activity)
         }
 
     /**
@@ -103,6 +104,35 @@ object SponsorBlockUi {
                 decorView.post { decorView.requestLayout() }
             }
         }
+    }
+
+    /**
+     * 让弹窗**跟着宿主窗口的尺寸走** —— 这是"旋转后点不准"的关键一步。
+     *
+     * 为什么必须有它：本 App 旋转不重建 Activity；而弹窗窗口的尺寸是**显式像素**设的，
+     * 旋转后窗口不会自己更新（还是旧方向的宽高/位置），内容却被重新排版 →
+     * 用户看到的和点到的就对不上。首页那个筛选弹层（AnyPopDialog）就是靠同一招修好的：
+     * 监听宿主 decorView 的布局变化，尺寸一变就重新 setLayout + requestLayout。
+     */
+    private fun AlertDialog.followHostSize(activity: Activity?) {
+        val host = activity ?: return
+        val decor = host.window?.decorView ?: return
+        var lastW = -1
+        var lastH = -1
+        val listener = View.OnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
+            val w = r - l
+            val h = b - t
+            if (w > 0 && h > 0 && (w != lastW || h != lastH)) {
+                lastW = w
+                lastH = h
+                runCatching {
+                    window?.setLayout((w * 0.94f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+                    window?.decorView?.requestLayout()
+                }
+            }
+        }
+        decor.addOnLayoutChangeListener(listener)
+        setOnDismissListener { decor.removeOnLayoutChangeListener(listener) }
     }
 
     /**
@@ -451,6 +481,7 @@ object SponsorBlockUi {
         currentDialog = dialog
         dialog.show()
         dialog.fixWindow(activity)
+        dialog.followHostSize(activity)
     }
 
     // ───────────────────────── 小工具 ─────────────────────────

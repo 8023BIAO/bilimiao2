@@ -322,14 +322,36 @@ object SponsorBlockSettingsUi {
     private fun AlertDialog.Builder.showFixed(context: Context): AlertDialog =
         create().also { d ->
             d.show()
-            runCatching {
-                val decorW = (context as? android.app.Activity)?.window?.decorView?.width ?: 0
-                d.window?.setLayout(
-                    if (decorW > 0) (decorW * 0.94f).toInt()
-                    else android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-                d.window?.setGravity(android.view.Gravity.CENTER)
+            val activity = context as? android.app.Activity
+            val decor = activity?.window?.decorView
+            val applyWidth = { w: Int ->
+                runCatching {
+                    d.window?.setLayout(
+                        if (w > 0) (w * 0.94f).toInt()
+                        else android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                    d.window?.setGravity(android.view.Gravity.CENTER)
+                }
+            }
+            applyWidth(decor?.width ?: 0)
+            // ★ 跟着宿主窗口尺寸走：旋转不重建 Activity 时，弹窗窗口不会自己更新，
+            //   会出现"看到的和点到的不一样"（首页筛选弹层就是靠同一招修好的）
+            if (decor != null) {
+                var lastW = -1
+                var lastH = -1
+                val listener = android.view.View.OnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
+                    val w = r - l
+                    val h = b - t
+                    if (w > 0 && h > 0 && (w != lastW || h != lastH)) {
+                        lastW = w
+                        lastH = h
+                        applyWidth(w)
+                        d.window?.decorView?.requestLayout()
+                    }
+                }
+                decor.addOnLayoutChangeListener(listener)
+                d.setOnDismissListener { decor.removeOnLayoutChangeListener(listener) }
             }
         }
 
