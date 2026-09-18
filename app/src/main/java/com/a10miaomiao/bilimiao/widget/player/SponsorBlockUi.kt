@@ -8,6 +8,8 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -57,9 +59,50 @@ object SponsorBlockUi {
         currentDialog = null
     }
 
-    /** 统一入口：显示并记住弹窗 */
+    /**
+     * 统一入口：显示 → **再校正一次窗口参数** → 记住引用。
+     *
+     * 为什么要多这一步：全屏（横屏）下系统弹窗出现过"**画在这个位置、点却点到别处**"，
+     * 连取消都点不到 —— 这是 immersive 全屏 + 方向切换下窗口帧/输入区域没跟着布局走的老毛病。
+     * show() 之后再显式 setLayout + setGravity 一次，会强制 WindowManager 重算窗口与输入区域；
+     * 软键盘也用 ADJUST_RESIZE（配合可滚动内容），避免 adjustPan 把窗口顶跑偏。
+     */
     private fun AlertDialog.Builder.showAndTrack(): AlertDialog =
-        show().also { currentDialog = it }
+        create().also { d ->
+            currentDialog = d
+            d.show()
+            d.fixWindow()
+        }
+
+    /** 统一的窗口校正（见 showAndTrack 的说明） */
+    private fun AlertDialog.fixWindow() {
+        runCatching {
+            window?.apply {
+                setLayout(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                setGravity(Gravity.CENTER)
+                setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                        WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+                )
+                decorView.post { decorView.requestLayout() }
+            }
+        }
+    }
+
+    /**
+     * 高度封顶的 ScrollView：横屏时屏幕矮，内容不封顶的话弹窗会长到屏幕外面去
+     * （按钮被顶出可视区，用户"看得到标题、点不到按钮"就是这么来的）。
+     */
+    private class CappedScrollView(context: Context, private val maxHeightPx: Int) :
+        ScrollView(context) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val capped = MeasureSpec.makeMeasureSpec(maxHeightPx, MeasureSpec.AT_MOST)
+            super.onMeasure(widthMeasureSpec, capped)
+        }
+    }
 
     // ───────────────────────── 片段列表 ─────────────────────────
 
@@ -324,8 +367,8 @@ object SponsorBlockUi {
         var dialog: AlertDialog? = null
         val footer = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
-            setPadding(0, dp(8), 0, 0)
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), dp(PAD), dp(10))
             addView(button(ctx, "取消") { dialog?.dismiss() })
             addView(button(ctx, "提交") {
                 val start = parseTimeSec(startEt.text.toString())
@@ -365,15 +408,27 @@ object SponsorBlockUi {
                 }
             })
         }
-        form.addView(footer)
+        val screenH = ctx.resources.displayMetrics.heightPixels
+        val scroll = CappedScrollView(ctx, (screenH * 0.55f).toInt()).apply { addView(form) }
+
+        // ★ 取消/提交放在**滚动区外面**的固定页脚：
+        //   以前塞在 form 里，横屏时表单比屏幕还高 → 按钮被顶到可视区外，
+        //   用户以为"点了没反应"，其实那位置根本没有按钮（截图里连取消都看不见）。
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            // 水平内边距由 form / footer 各自负责，这里别再套一层（否则内容会缩两遍）
+            setPadding(0, 0, 0, 0)
+            addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(footer, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
 
         dialog = AlertDialog.Builder(ctx)
             .setTitle("提交片段到空降助手")
-            .setView(ScrollView(ctx).apply { addView(form) })
+            .setView(root)
             .create()
-        dialog.show()
-        // 这个弹窗是 create() + show() 两段式（内部按钮要引用 dialog），单独登记一次
         currentDialog = dialog
+        dialog.show()
+        dialog.fixWindow()
     }
 
     // ───────────────────────── 小工具 ─────────────────────────
