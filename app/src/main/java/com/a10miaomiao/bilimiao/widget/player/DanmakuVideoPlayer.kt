@@ -1616,7 +1616,7 @@ initDanmakuTouchListener()
         set(value) {
             field = value
             skippedSponsorUuids.clear()
-            lastSponsorCheckSec = -1
+            lastSponsorPosMs = -1L
             sponsorCompensationTries = 0
             SponsorDiag.log(
                 "segments",
@@ -1651,7 +1651,9 @@ initDanmakuTouchListener()
         private set
 
     private val skippedSponsorUuids = HashSet<String>()
-    private var lastSponsorCheckSec = -1
+
+    /** 上一次判定的播放位置（ms）：用来识别"自然播放跨过了片段起点"，而不是靠秒桶 */
+    private var lastSponsorPosMs = -1L
 
     /**
      * 顶栏「片段信息」按钮 = **ADS 小标**（点开当前视频的片段列表：哪一段是什么、能不能跳）。
@@ -1763,8 +1765,12 @@ initDanmakuTouchListener()
     /**
      * 正常播放时的判定：**只认"跨过片段起点"**，不认"落在片段内部"。
      *
-     * 这是 PiliPlus 的抗打架设计（`block_mixin.dart:93` 判定 `start ∈ [当前秒, 当前秒+1s)`）：
-     * 用户手动拖到广告中间想看看到底是什么，不该被硬弹出去；只有正常播放跨过起点才处理。
+     * 抗打架设计：用户手动拖到广告中间想看看到底是什么，不该被硬弹出去 —— 只有"刚跨过起点"才处理。
+     *
+     * ⚠️ PiliPlus 的做法是判 `start ∈ [当前秒, 当前秒+1s)`（`block_mixin.dart:93`），
+     * 那会**提前最多 1 秒**跳（片段起点 119.447s，我在 119.05s 就被跳走），
+     * 上游也有人吐槽"跳过时间点与网页端不一致、提前跳过"。
+     * 我们改成"真到点才跳"：`pos >= start` 且刚进入（或上一采样还在起点之前）。
      * 拖动进度 / 长按倍速 / 非播放态，一律不插手。
      */
     private fun checkSponsorSkip() {
@@ -1773,15 +1779,11 @@ initDanmakuTouchListener()
         if (mCurrentState != CURRENT_STATE_PLAYING) return
         val pos = currentPositionWhenPlaying
         if (pos <= 0L) return
-        val sec = (pos / 1000L).toInt()
-        if (sec == lastSponsorCheckSec) return
-        lastSponsorCheckSec = sec
-        val winStart = sec * 1000L
-        val winEnd = winStart + 1000L   // 半开区间 [winStart, winEnd)
-        val hit = sponsorSegments.firstOrNull { seg ->
-            !seg.isPoint && seg.startMs >= winStart && seg.startMs < winEnd
-        } ?: return
-        handleSponsorHit(hit)
+        val prev = lastSponsorPosMs
+        // 位置没动（暂停/缓冲/卡住）就没什么可判的，省掉一次遍历
+        if (pos == prev) return
+        lastSponsorPosMs = pos
+        handleSponsorHit(sponsorSegments.firstOrNull { shouldSkipAt(it, pos, prev) } ?: return)
     }
 
     /**
@@ -1808,7 +1810,7 @@ initDanmakuTouchListener()
         // （差值 < 100ms）就继续往后跳，避免"跳完一个广告又落进下一个广告"来回蹦。
         while (guard++ < 20) {
             val hit = sponsorSegments.firstOrNull { seg ->
-                !seg.isPoint && pos >= seg.startMs - 100L && pos < seg.endMs &&
+                !seg.isPoint && pos >= seg.startMs && pos < seg.endMs &&
                     when (sponsorSkipTypeOf(seg)) {
                         SponsorSkipType.AlwaysSkip -> true
                         SponsorSkipType.SkipOnce -> skippedSponsorUuids.add(seg.UUID)
@@ -1837,6 +1839,25 @@ initDanmakuTouchListener()
     }
 
     /** 命中片段 → 按该类别的策略决定：自动跳 / 弹手动按钮 / 只显示 */
+    /**
+     * 此刻该不该跳到这条片段上（纯函数，不碰播放器状态）。
+     *
+     * 规则（"真到点才跳"）：
+     *  ① `pos >= 起点` —— **绝不提前**。以前这里是"片段起点落在当前这一秒内就跳"，
+     *     于是起点 119.447s 的片段在刚进第 119 秒（如 119.05s）就被跳掉，最多提前近 1 秒；
+     *     这正是上游吐槽"跳过时间点与网页端不一致、提前跳过"的根因（PiliPlus 也是这个秒桶规则）。
+     *  ② `pos < 终点` —— 已经越过终点就放过，否则会把画面往回 seek。
+     *  ③ 只认"刚进入"：上一次采样还在起点之前（自然播放跨过；3 倍速/卡顿导致采样间隔大也能补上），
+     *     或者这一次离起点不到 1 秒。用户手动拖到片段中间时两条都不满足 → 不会被硬弹出去。
+     *  ④ 零宽片段（整片标记）不参与跳过。
+     */
+    private fun shouldSkipAt(seg: SponsorSegment, pos: Long, prev: Long): Boolean {
+        if (seg.isPoint) return false
+        if (pos < seg.startMs) return false
+        if (pos >= seg.endMs) return false
+        return (prev in 1 until seg.startMs) || (pos - seg.startMs < 1000L)
+    }
+
     private fun handleSponsorHit(seg: SponsorSegment) {
         when (sponsorSkipTypeOf(seg)) {
             SponsorSkipType.AlwaysSkip -> doSponsorSkip(seg)

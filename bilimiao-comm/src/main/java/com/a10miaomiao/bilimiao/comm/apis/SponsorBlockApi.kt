@@ -36,6 +36,14 @@ class SponsorBlockApi {
     companion object {
         const val BASE_URL = "https://www.bsbsb.top"
 
+        /**
+         * API 文档（wiki/API 「公用参数」）要求请求头带上来源与版本，
+         * 方便服务端区分调用方；不带也能用，但属于不规范。
+         * 原插件是 `origin: chrome-extension://…` + `x-ext-version: 0.5.0`。
+         */
+        private const val ORIGIN = "bilimiao-mod"
+        private const val EXT_VERSION = "1.0"
+
         private const val HEX = "0123456789abcdef"
         private const val USER_ID_PREF = "sponsor_block"
         private const val USER_ID_KEY = "user_id"
@@ -144,6 +152,8 @@ class SponsorBlockApi {
             val response = MiaoHttp.request {
                 this.url = url
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
             }.awaitCall()
             val bodyText = response.body?.string().orEmpty()
             SponsorDiag.log("api-flat", "GET $url -> http=${response.code} len=${bodyText.length}")
@@ -169,6 +179,8 @@ class SponsorBlockApi {
                 this.url = url
                 // 纯 web 语义：不带 app-key/env/Authorization（那是给 bilibili 域名的）
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
             }.awaitCall()
             val bodyText = response.body?.string().orEmpty()
             SponsorDiag.log("api", "GET $url -> http=${response.code} len=${bodyText.length}")
@@ -221,6 +233,8 @@ class SponsorBlockApi {
             val res = MiaoHttp.request {
                 url = "$baseUrl/api/voteOnSponsorTime?$params"
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
                 method = MiaoHttp.POST
                 // ★★ 必须给一个 body（哪怕是空的）★★
                 // okhttp 的 `Request.Builder.method("POST", null)` 会直接抛
@@ -254,6 +268,8 @@ class SponsorBlockApi {
             val res = MiaoHttp.request {
                 url = "$baseUrl/api/viewedVideoSponsorTime"
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
                 method = MiaoHttp.POST
                 body = MiaoJson.toJson(SponsorViewedBody(uuid))
                     .toRequestBody("application/json".toMediaType())
@@ -294,6 +310,8 @@ class SponsorBlockApi {
             val res = MiaoHttp.request {
                 url = "$baseUrl/api/skipSegments"
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
                 method = MiaoHttp.POST
                 this.body = MiaoJson.toJson(body).toRequestBody("application/json".toMediaType())
             }.awaitCall()
@@ -322,6 +340,8 @@ class SponsorBlockApi {
             val res = MiaoHttp.request {
                 url = "$baseUrl/api/status/uptime"
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
             }.awaitCall()
             if (res.code == 200) {
                 res.body?.string()?.trim()?.toDoubleOrNull()?.let {
@@ -340,6 +360,8 @@ class SponsorBlockApi {
             val res = MiaoHttp.request {
                 url = "$baseUrl/api/status"
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
             }.awaitCall()
             val text = if (res.code == 200) res.body?.string().orEmpty() else ""
             Regex("\"uptime\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)")
@@ -363,6 +385,8 @@ class SponsorBlockApi {
             val res = MiaoHttp.request {
                 url = "$baseUrl/api/userInfo?userID=$userId&values=${java.net.URLEncoder.encode(values, "UTF-8")}"
                 isWebApi = true
+                headers["origin"] = ORIGIN
+                headers["x-ext-version"] = EXT_VERSION
             }.awaitCall().json<SponsorUserInfo>()
             res
         } catch (e: java.util.concurrent.CancellationException) {
