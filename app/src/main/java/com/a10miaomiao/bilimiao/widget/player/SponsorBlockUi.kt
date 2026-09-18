@@ -1,6 +1,7 @@
 package com.a10miaomiao.bilimiao.widget.player
 
 import android.app.Activity
+import android.app.Dialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -16,8 +17,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import com.a10miaomiao.bilimiao.comm.apis.SponsorBlockApi
+import com.a10miaomiao.bilimiao.comm.utils.OverlayDialog
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorActionType
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorCategory
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSegment
@@ -52,7 +53,7 @@ object SponsorBlockUi {
      * 就会 WindowLeaked（本项目其它地方已经有 `dismissCachedDialogs()` 在防这个）。
      * 播放器销毁时由 `PlayerDelegate2.onDestroy()` 调 [dismissAll] 统一收掉。
      */
-    private var currentDialog: AlertDialog? = null
+    private var currentDialog: Dialog? = null
 
     /** Activity 销毁时调用：关掉残留弹窗。 */
     fun dismissAll() {
@@ -61,78 +62,38 @@ object SponsorBlockUi {
     }
 
     /**
-     * 统一入口：显示 → **再校正一次窗口参数** → 记住引用。
-     *
-     * 为什么要多这一步：全屏（横屏）下系统弹窗出现过"**画在这个位置、点却点到别处**"，
-     * 连取消都点不到 —— 这是 immersive 全屏 + 方向切换下窗口帧/输入区域没跟着布局走的老毛病。
-     * show() 之后再显式 setLayout + setGravity 一次，会强制 WindowManager 重算窗口与输入区域；
-     * 软键盘也用 ADJUST_RESIZE（配合可滚动内容），避免 adjustPan 把窗口顶跑偏。
+     * 覆盖层的**卡片内容**：标题 + 内容 +（可选）关闭按钮。
+     * 观感对齐首页筛选弹层（标题在卡片里、按钮在卡片底部）。
      */
-    private fun AlertDialog.Builder.showAndTrack(activity: Activity? = null): AlertDialog =
-        create().also { d ->
-            currentDialog = d
-            d.show()
-            d.fixWindow(activity)
-            d.followHostSize(activity)
-        }
-
-    /**
-     * 统一的窗口校正（见 showAndTrack 的说明）。
-     *
-     * 尺寸用 WRAP_CONTENT 交给对话框自己按**当前**配置测量 —— 千万不要在这里写死像素，
-     * 否则横竖屏切换后弹窗还是旧尺寸（本 App 旋转不重建 Activity，这类"存下来的几何量"
-     * 一定会过期；同类问题见 AnyPopDialog 里的 decorView 尺寸监听）。
-     */
-    private fun AlertDialog.fixWindow(activity: Activity? = null) {
-        runCatching {
-            window?.apply {
-                // ★ 宽度按**宿主窗口的实时宽度**收窄（94%），别交给 WRAP_CONTENT 自由发挥：
-                //   本 App 旋转不重建 Activity，一旦按"旧方向"的配置量尺寸，横屏下弹窗就会
-                //   又宽又高、内容顶到屏幕外（用户实测：取消/提交根本看不到）。
-                //   decorView 是当前真实窗口，永远是最新值。
-                val decorW = activity?.window?.decorView?.width ?: 0
-                setLayout(
-                    if (decorW > 0) (decorW * 0.94f).toInt()
-                    else ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-                setGravity(Gravity.CENTER)
-                setSoftInputMode(
-                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
-                        WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
-                )
-                decorView.post { decorView.requestLayout() }
+    private fun cardOf(
+        context: Context,
+        title: String,
+        content: View,
+        closeLabel: String? = "关闭",
+        onClose: () -> Unit,
+    ): View {
+        val density = context.resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(PAD), dp(14), dp(PAD), dp(8))
+            addView(TextView(context).apply {
+                text = title
+                textSize = 17f
+                setPadding(0, 0, 0, dp(10))
+            })
+            addView(content, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            if (closeLabel != null) {
+                addView(TextView(context).apply {
+                    text = closeLabel
+                    textSize = 15f
+                    gravity = Gravity.END
+                    setPadding(0, dp(10), 0, dp(6))
+                    isClickable = true
+                    setOnClickListener { onClose() }
+                }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             }
         }
-    }
-
-    /**
-     * 让弹窗**跟着宿主窗口的尺寸走** —— 这是"旋转后点不准"的关键一步。
-     *
-     * 为什么必须有它：本 App 旋转不重建 Activity；而弹窗窗口的尺寸是**显式像素**设的，
-     * 旋转后窗口不会自己更新（还是旧方向的宽高/位置），内容却被重新排版 →
-     * 用户看到的和点到的就对不上。首页那个筛选弹层（AnyPopDialog）就是靠同一招修好的：
-     * 监听宿主 decorView 的布局变化，尺寸一变就重新 setLayout + requestLayout。
-     */
-    private fun AlertDialog.followHostSize(activity: Activity?) {
-        val host = activity ?: return
-        val decor = host.window?.decorView ?: return
-        var lastW = -1
-        var lastH = -1
-        val listener = View.OnLayoutChangeListener { _, l, t, r, b, _, _, _, _ ->
-            val w = r - l
-            val h = b - t
-            if (w > 0 && h > 0 && (w != lastW || h != lastH)) {
-                lastW = w
-                lastH = h
-                runCatching {
-                    window?.setLayout((w * 0.94f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
-                    window?.decorView?.requestLayout()
-                }
-            }
-        }
-        decor.addOnLayoutChangeListener(listener)
-        setOnDismissListener { decor.removeOnLayoutChangeListener(listener) }
     }
 
     /**
@@ -192,12 +153,11 @@ object SponsorBlockUi {
             }))
         }
 
-        val scroll = ScrollView(ctx).apply { addView(box) }
-        AlertDialog.Builder(ctx)
-            .setTitle("空降助手片段（${segments.size}）")
-            .setView(scroll)
-            .setNegativeButton("关闭", null)
-            .showAndTrack()
+        val scroll = CappedScrollView(activity, 0.62f).apply { addView(box) }
+        // 走全屏覆盖层（和首页筛选弹层同一套），不用系统小弹窗
+        OverlayDialog.show(activity, cardOf(activity, "空降助手片段（${segments.size}）", scroll) {
+            currentDialog?.dismiss()
+        }).also { currentDialog = it }
     }
 
     /**
@@ -272,30 +232,27 @@ object SponsorBlockUi {
         // ★ locked 的片段**不拦着用户投**（这点跟 PiliPlus 保持一致：它压根不看 locked）。
         //   实测服务端对 locked=1 的片段投票返回 200 但**不计数**（静默忽略），
         //   所以"能不能投"交给服务端，我们只负责把结果**如实**告诉用户（见 vote()）。
-        val items = arrayOf("赞成票", "反对票", "更改类别")
-        AlertDialog.Builder(activity)
-            .setTitle("${SponsorCategory.labelOf(seg.category)} · ${CommonUtil.stringForTime(seg.startMs)}")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> vote(activity, seg, type = 1, category = null)
-                    1 -> vote(activity, seg, type = 0, category = null)
-                    else -> showCategoryPicker(activity, seg)
-                }
+        val items = listOf("赞成票", "反对票", "更改类别")
+        OverlayDialog.showList(
+            activity,
+            "${SponsorCategory.labelOf(seg.category)} · ${CommonUtil.stringForTime(seg.startMs)}",
+            items,
+        ) { which ->
+            currentDialog?.dismiss()
+            when (which) {
+                0 -> vote(activity, seg, type = 1, category = null)
+                1 -> vote(activity, seg, type = 0, category = null)
+                else -> showCategoryPicker(activity, seg)
             }
-            .setNegativeButton("取消", null)
-            .showAndTrack()
+        }.also { currentDialog = it }
     }
 
     private fun showCategoryPicker(activity: Activity, seg: SponsorSegment) {
         val categories = SponsorCategory.entries
-        val labels = categories.map { it.label }.toTypedArray()
-        AlertDialog.Builder(activity)
-            .setTitle("改成哪个类别？")
-            .setItems(labels) { _, which ->
-                vote(activity, seg, type = null, category = categories[which].id)
-            }
-            .setNegativeButton("取消", null)
-            .showAndTrack()
+        OverlayDialog.showList(activity, "改成哪个类别？", categories.map { it.label }) { which ->
+            currentDialog?.dismiss()
+            vote(activity, seg, type = null, category = categories[which].id)
+        }.also { currentDialog = it }
     }
 
     private fun vote(
@@ -363,14 +320,10 @@ object SponsorBlockUi {
             setPadding(0, dp(12), 0, dp(12))
             isClickable = true
             setOnClickListener {
-                AlertDialog.Builder(ctx)
-                    .setTitle("选择分类")
-                    .setItems(SponsorCategory.entries.map { it.label }.toTypedArray()) { _, which ->
-                        category = SponsorCategory.entries[which]
-                        text = "分类：${category.label}"
-                    }
-                    .setNegativeButton("取消", null)
-                    .showAndTrack()
+                OverlayDialog.showList(ctx, "选择分类", SponsorCategory.entries.map { it.label }) { which ->
+                    category = SponsorCategory.entries[which]
+                    text = "分类：${category.label}"
+                }
             }
         }
         val actionTv = TextView(ctx).apply {
@@ -379,14 +332,10 @@ object SponsorBlockUi {
             setPadding(0, dp(12), 0, dp(12))
             isClickable = true
             setOnClickListener {
-                AlertDialog.Builder(ctx)
-                    .setTitle("这段是什么行为")
-                    .setItems(SponsorActionType.entries.map { it.label }.toTypedArray()) { _, which ->
-                        action = SponsorActionType.entries[which]
-                        text = "动作：${action.label}"
-                    }
-                    .setNegativeButton("取消", null)
-                    .showAndTrack()
+                OverlayDialog.showList(ctx, "这段是什么行为", SponsorActionType.entries.map { it.label }) { which ->
+                    action = SponsorActionType.entries[which]
+                    text = "动作：${action.label}"
+                }
             }
         }
 
@@ -417,7 +366,7 @@ object SponsorBlockUi {
 
         // ★ 取消/提交做成弹窗**自己的按钮**，不用 AlertDialog 的系统按钮栏：
         //   系统按钮点了会**无条件关掉弹窗**，校验失败时用户会觉得"点了没反应/白填了"。
-        var dialog: AlertDialog? = null
+        var dialog: Dialog? = null
         val footer = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
@@ -474,14 +423,12 @@ object SponsorBlockUi {
             addView(footer, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
 
-        dialog = AlertDialog.Builder(ctx)
-            .setTitle("提交片段到空降助手")
-            .setView(root)
-            .create()
+        // 提交弹窗也走全屏覆盖层（卡片里：标题 + 可滚动表单 + 固定页脚按钮）
+        dialog = OverlayDialog.show(
+            activity,
+            cardOf(activity, "提交片段到空降助手", root, closeLabel = null) { dialog?.dismiss() },
+        )
         currentDialog = dialog
-        dialog.show()
-        dialog.fixWindow(activity)
-        dialog.followHostSize(activity)
     }
 
     // ───────────────────────── 小工具 ─────────────────────────
