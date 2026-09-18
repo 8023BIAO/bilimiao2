@@ -68,11 +68,11 @@ object SponsorBlockUi {
      * show() 之后再显式 setLayout + setGravity 一次，会强制 WindowManager 重算窗口与输入区域；
      * 软键盘也用 ADJUST_RESIZE（配合可滚动内容），避免 adjustPan 把窗口顶跑偏。
      */
-    private fun AlertDialog.Builder.showAndTrack(): AlertDialog =
+    private fun AlertDialog.Builder.showAndTrack(activity: Activity? = null): AlertDialog =
         create().also { d ->
             currentDialog = d
             d.show()
-            d.fixWindow()
+            d.fixWindow(activity)
         }
 
     /**
@@ -82,11 +82,17 @@ object SponsorBlockUi {
      * 否则横竖屏切换后弹窗还是旧尺寸（本 App 旋转不重建 Activity，这类"存下来的几何量"
      * 一定会过期；同类问题见 AnyPopDialog 里的 decorView 尺寸监听）。
      */
-    private fun AlertDialog.fixWindow() {
+    private fun AlertDialog.fixWindow(activity: Activity? = null) {
         runCatching {
             window?.apply {
+                // ★ 宽度按**宿主窗口的实时宽度**收窄（94%），别交给 WRAP_CONTENT 自由发挥：
+                //   本 App 旋转不重建 Activity，一旦按"旧方向"的配置量尺寸，横屏下弹窗就会
+                //   又宽又高、内容顶到屏幕外（用户实测：取消/提交根本看不到）。
+                //   decorView 是当前真实窗口，永远是最新值。
+                val decorW = activity?.window?.decorView?.width ?: 0
                 setLayout(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    if (decorW > 0) (decorW * 0.94f).toInt()
+                    else ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
                 setGravity(Gravity.CENTER)
@@ -103,13 +109,20 @@ object SponsorBlockUi {
      * 高度封顶的 ScrollView：横屏时屏幕矮，内容不封顶的话弹窗会长到屏幕外面去
      * （按钮被顶出可视区，用户"看得到标题、点不到按钮"就是这么来的）。
      */
-    private class CappedScrollView(context: Context, private val maxHeightFraction: Float) :
-        ScrollView(context) {
+    private class CappedScrollView(
+        private val host: Activity,
+        private val maxHeightFraction: Float,
+    ) : ScrollView(host) {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            // ★ 每次测量都用**当前**屏幕高度算上限：本 App 旋转时不重建 Activity，
-            //   要是像以前那样在构造时就定死像素值，横竖屏切换后弹窗还按旧高度排版
-            val maxH = (resources.displayMetrics.heightPixels * maxHeightFraction).toInt()
-            val capped = MeasureSpec.makeMeasureSpec(maxH, MeasureSpec.AT_MOST)
+            // ★ 用**宿主 decorView 的实时高度**算上限，别用 resources.displayMetrics：
+            //   本 App 旋转不重建 Activity，resources 里可能还是旧方向的配置 ——
+            //   这就是"横屏下弹窗又高又宽、取消/提交被顶到屏幕外"的来源。
+            //   decorView 是当前真实窗口，永远最新。
+            val decorH = host.window?.decorView?.height ?: 0
+            val base = if (decorH > 0) decorH else resources.displayMetrics.heightPixels
+            val capped = MeasureSpec.makeMeasureSpec(
+                (base * maxHeightFraction).toInt(), MeasureSpec.AT_MOST
+            )
             super.onMeasure(widthMeasureSpec, capped)
         }
     }
@@ -437,7 +450,7 @@ object SponsorBlockUi {
             .create()
         currentDialog = dialog
         dialog.show()
-        dialog.fixWindow()
+        dialog.fixWindow(activity)
     }
 
     // ───────────────────────── 小工具 ─────────────────────────

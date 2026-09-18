@@ -39,7 +39,7 @@ object SponsorBlockSettingsUi {
             .setTitle("空降助手状态")
             .setMessage("查询中…")
             .setPositiveButton("关闭", null)
-            .show()
+            .showFixed(context)
         scope.launch {
             val text = withContext(Dispatchers.IO) {
                 try {
@@ -144,7 +144,7 @@ object SponsorBlockSettingsUi {
                     }
                 }
                 .setNegativeButton("取消", null)
-                .show()
+                .showFixed(context)
         }
     }
 
@@ -194,7 +194,7 @@ object SponsorBlockSettingsUi {
                 }
             }
             .setNegativeButton("取消", null)
-            .show()
+            .showFixed(context)
     }
 
     /** 「关于空降助手」：把项目地址复制出来说明清楚（设置页那边用系统浏览器打开） */
@@ -239,7 +239,7 @@ object SponsorBlockSettingsUi {
                 .setTitle("进度条片段颜色")
                 .setView(ScrollView(context).apply { addView(box) })
                 .setNegativeButton("关闭", null)
-                .show()
+                .showFixed(context)
         }
     }
 
@@ -268,7 +268,7 @@ object SponsorBlockSettingsUi {
             .setTitle("${category.label} · 选择颜色")
             .setView(ScrollView(context).apply { addView(box) })
             .setNegativeButton("关闭", null)
-            .show()
+            .showFixed(context)
     }
 
     // ───────────────────────── 自定义服务端 ─────────────────────────
@@ -306,11 +306,32 @@ object SponsorBlockSettingsUi {
                     }
                 }
                 .setNegativeButton("取消", null)
-                .show()
+                .showFixed(context)
         }
     }
 
     // ───────────────────────── 小工具 ─────────────────────────
+
+    /**
+     * 显示弹窗并按**宿主窗口的实时尺寸**收窄宽度。
+     *
+     * 为什么：本 App 旋转不重建 Activity（Manifest 里声明了 configChanges），
+     * 弹窗一旦按"旧方向"的配置量尺寸，横屏下就会又宽又高、内容被顶到屏幕外。
+     * decorView 是当前真实窗口，永远是最新值 —— 播放器那边的空降弹窗同样这么处理。
+     */
+    private fun AlertDialog.Builder.showFixed(context: Context): AlertDialog =
+        create().also { d ->
+            d.show()
+            runCatching {
+                val decorW = (context as? android.app.Activity)?.window?.decorView?.width ?: 0
+                d.window?.setLayout(
+                    if (decorW > 0) (decorW * 0.94f).toInt()
+                    else android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                d.window?.setGravity(android.view.Gravity.CENTER)
+            }
+        }
 
     private fun dot(context: Context, color: Int): View {
         val size = (10 * context.resources.displayMetrics.density).toInt()
