@@ -189,6 +189,24 @@ internal class ThreadRipperDataSource(
         @Volatile
         private var breakerUntilMs = 0L
 
+        /**
+         * 连续失败计数：每成功一块清零，累计 3 次分块失败就把并发整体关掉 10 分钟。
+         *
+         * 为什么需要它（2026-09-19 实机反馈）：国内冷门视频常被分到 PCDN/MCDN 节点，
+         * 这类节点对"任意 Range + 多并发"支持很差。以前只有在"一个字节都没交付"时才熔断，
+         * 于是"第 1 块成功、第 N 块失败"的视频会**每段都失败一次**，播放器反复重试整段 ——
+         * 用户看到的就是"开了反而死活加载不出来，关掉秒播"。
+         */
+        private val failureStreak = java.util.concurrent.atomic.AtomicInteger(0)
+
+        fun noteChunkFailure() {
+            if (failureStreak.incrementAndGet() >= 3) tripBreaker()
+        }
+
+        fun noteChunkSuccess() {
+            failureStreak.set(0)
+        }
+
         fun parallelAllowed(): Boolean = SystemClock.uptimeMillis() >= breakerUntilMs
 
         fun tripBreaker() {
@@ -278,11 +296,20 @@ internal class ThreadRipperDataSource(
         this.pendingOffset = 0
 
         val length = dataSpec.length
+        val host = dataSpec.uri.host.orEmpty()
+        // PCDN / MCDN 节点（B 站冷门视频常见）对任意 Range + 多并发支持很差：
+        // 命中就直接单连接，别每次都先失败一遍。
+        val pcdnHost = host.contains("pcdn", ignoreCase = true) ||
+            host.contains("mcdn", ignoreCase = true)
+        if (pcdnHost && ThreadRipperSettings.enabled) {
+            RipperDiag.log("skip", "命中 PCDN/MCDN 节点（$host）→ 这个视频走单连接")
+        }
         val splittable = length != C.LENGTH_UNSET.toLong() &&
             length >= MIN_PARALLEL_BYTES &&
             dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET &&
             dataSpec.httpBody == null &&
             !dataSpec.isFlagSet(DataSpec.FLAG_ALLOW_GZIP) &&
+            !pcdnHost &&
             ThreadRipperSettings.enabled &&
             parallelAllowed()
 
@@ -375,7 +402,17 @@ internal class ThreadRipperDataSource(
                     fallbackToSingle()
                     return read(buffer, offset, length)
                 }
-                throw (error as? IOException) ?: IOException("分段下载失败：${error.message}", error)
+                // ★ 已经交付过字节 → **就地无缝降级**：掐掉所有并发分块，用一条单连接
+                //   从"已经交付到的位置"继续拉剩下的。
+                //   以前这里直接抛 IOException：播放器只能把整段重来，而重试又落在并发模式上
+                //   再失败一次 —— 用户看到的就是"开了反而加载不出来"。现在用户完全无感。
+                RipperDiag.log(
+                    "degrade",
+                    "分块失败（已交付 ${bytesRead / 1024}KB）→ 该分段就地降级为单连接续传"
+                )
+                failureStreak.incrementAndGet()
+                fallbackToSingleFrom(bytesRead)
+                return read(buffer, offset, length)
             }
             if (chunk.done) {
                 nextChunk++
@@ -384,6 +421,27 @@ internal class ThreadRipperDataSource(
             }
             // 否则是 worker 还在跑（或还没被线程池调度到），继续等
         }
+    }
+
+    /**
+     * 中途降级：从已经交付给上层的字节数之后，用**一条单连接**继续拉（不重下已交付的部分）。
+     * 位置算的是"原始请求的 position + 已交付字节"，长度是原请求剩余部分。
+     */
+    private fun fallbackToSingleFrom(delivered: Long) {
+        val spec = dataSpec ?: throw IOException("没有可以回退的 DataSpec")
+        cancelWorkers()
+        val remaining = if (spec.length == C.LENGTH_UNSET.toLong()) {
+            C.LENGTH_UNSET.toLong()
+        } else {
+            (spec.length - delivered).coerceAtLeast(0L)
+        }
+        val resumeSpec = spec.buildUpon()
+            .setPosition(spec.position + delivered)
+            .setLength(remaining)
+            .build()
+        val source = upstreamFactory.createDataSource()
+        source.open(resumeSpec)
+        single = source
     }
 
     /** 并行模式未交付任何字节就失败时的兜底：原样重开一个单连接请求 */
@@ -529,6 +587,7 @@ internal class ThreadRipperDataSource(
                                 "分块 ${start / 1024}KB 重试 $MAX_ATTEMPTS 次仍失败：${e.javaClass.simpleName}: ${e.message}"
                             )
                             error = e
+                            noteChunkFailure()
                             return
                         }
                         RipperDiag.log(
@@ -545,7 +604,10 @@ internal class ThreadRipperDataSource(
                         }
                     }
                 }
-                if (!closed && pushed >= length) done = true
+                if (!closed && pushed >= length) {
+                    done = true
+                    noteChunkSuccess()
+                }
             } finally {
                 unregisterChunk(this)
                 runCatching { source?.close() }
