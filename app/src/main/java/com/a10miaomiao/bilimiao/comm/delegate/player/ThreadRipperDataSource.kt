@@ -872,21 +872,33 @@ internal class ThreadRipperDataSource(
             }
 
             fun awaitFinish(multiNode: Boolean) {
-                val started = if (dataStartAt > 0) dataStartAt else SystemClock.uptimeMillis()
+                // 速度窗口：只在"上层正等着数据"的时候累计（停着的时间不算，见下面的注释）
+                var windowStart = SystemClock.uptimeMillis()
+                var windowBytes = 0L
                 while (!finished && failure == null && !lost && !closed) {
-                    // 单节点时不判定速度（没有别的路可换，慢也得拉）；
-                    // 多节点时只甩掉"活着但基本不动"的连接：慢但一直在出数据的，让它继续拉完。
                     if (multiNode) {
-                        val elapsed = SystemClock.uptimeMillis() - started
-                        val bytes = delivered
-                        if (elapsed > BPS_GRACE_MS) {
-                            val bps = bytes * 1000L / elapsed
-                            if (bps < MIN_ATTEMPT_BPS) {
-                                CdnNodePool.noteFailure(url, "太慢：${bps / 1024}KB/s")
-                                throw IOException(
-                                    "节点太慢（${bps / 1024}KB/s < ${MIN_ATTEMPT_BPS / 1024}KB/s）→ 换节点续传"
-                                )
+                        val now = SystemClock.uptimeMillis()
+                        if (queue.remainingCapacity() > 0) {
+                            // ★★ 只有"队列没满 = 播放器正等着我们的数据"时才算速度（我们才是瓶颈）。
+                            //    vc107 的教训：没加这个判断，把**正常的预读停驻**当成了"0KB/s 的慢节点" ——
+                            //    番剧一次请求几百 MB，8 条连接抢跑时另外 7 条队列早满了，它们只是**在等播放器取走**，
+                            //    却被判"太慢"掐掉 → 12 个分块连续失败 → 连锁触发 10 次熔断（10 分钟单连接）。
+                            //    这和看门狗 `checkStall` 里的 `queue.remainingCapacity() == 0 → return` 是同一个道理。
+                            val elapsed = now - windowStart
+                            if (elapsed > BPS_GRACE_MS) {
+                                val bps = (delivered - windowBytes) * 1000L / elapsed
+                                if (bps < MIN_ATTEMPT_BPS) {
+                                    CdnNodePool.noteFailure(url, "太慢：${bps / 1024}KB/s")
+                                    throw IOException(
+                                        "节点太慢（${bps / 1024}KB/s < ${MIN_ATTEMPT_BPS / 1024}KB/s）→ 换节点续传"
+                                    )
+                                }
                             }
+                        } else {
+                            // 队列满 = 上层还没取走（正常预读/缓冲已满）→ 速度当然是 0，不能因此判它慢；
+                            // 把窗口往后挪，等它真的开始等数据时再重新计时。
+                            windowStart = now
+                            windowBytes = delivered
                         }
                     }
                     Thread.sleep(20L)

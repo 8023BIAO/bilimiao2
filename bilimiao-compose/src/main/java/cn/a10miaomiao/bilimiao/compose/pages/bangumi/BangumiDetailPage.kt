@@ -44,6 +44,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
+import cn.a10miaomiao.bilimiao.compose.components.layout.DataDrivenNavigator
 import cn.a10miaomiao.bilimiao.compose.components.layout.DoubleColumnAutofitLayout
 import cn.a10miaomiao.bilimiao.compose.components.layout.chain_scrollable.rememberChainScrollableLayoutState
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
@@ -1117,33 +1118,45 @@ private fun BangumiDetailPageContent(
                                 BackHandler(enabled = currentReply != null) {
                                     vm.clearCurrentReply()
                                 }
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    if (currentReply != null) {
+                                // ★ vc108：一级 ↔ 二级评论之间补上**过渡动画**（和普通视频、专栏、动态评论区一致）。
+                                //   以前这里是 `Box { if (currentReply != null) 二级 else 一级 }` —— **硬切**，
+                                //   没有任何过渡效果，用户反馈"二级评论点进去再退回来，看得眼睛痛"。
+                                //   换成 DataDrivenNavigator（内部就是 SharedTransitionLayout + AnimatedContent），
+                                //   顺带把评论头像的 sharedElement 共享元素动画也带上（ReplyItemBox 拿到 scope 时会用）。
+                                DataDrivenNavigator(
+                                    modifier = Modifier.fillMaxSize(),
+                                    data = currentReply,
+                                    dataKey = { it.id },
+                                    dataContent = { data ->
                                         ReplyDetailContent(
-                                            reply = currentReply!!,
+                                            reply = data,
                                             innerPadding = PaddingValues(
                                                 bottom = innerPadding.calculateBottomPadding(),
                                                 start = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
                                                 end = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
                                             ),
+                                            sharedTransitionScope = sharedTransitionScope,
+                                            animatedVisibilityScope = animatedVisibilityScope,
                                             usePageConfig = true,
                                             onCloseClick = { vm.clearCurrentReply() },
                                             onLikeReply = vm::likeReply,
                                             onDeletedReply = vm::removeReplyItem,
                                         )
-                                    } else {
-                                        ReplyListContent(
-                                            viewModel = vm,
-                                            innerPadding = PaddingValues(
-                                                bottom = innerPadding.calculateBottomPadding(),
-                                                start = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
-                                                end = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
-                                            ),
-                                            listState = replyListState,
-                                            usePageConfig = true,
-                                            pageTitle = "评论",
-                                        )
-                                    }
+                                    },
+                                ) {
+                                    ReplyListContent(
+                                        viewModel = vm,
+                                        innerPadding = PaddingValues(
+                                            bottom = innerPadding.calculateBottomPadding(),
+                                            start = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
+                                            end = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
+                                        ),
+                                        listState = replyListState,
+                                        sharedTransitionScope = sharedTransitionScope,
+                                        animatedVisibilityScope = animatedVisibilityScope,
+                                        usePageConfig = true,
+                                        pageTitle = "评论",
+                                    )
                                 }
                             } ?: Box(
                                 modifier = Modifier.fillMaxSize(),
