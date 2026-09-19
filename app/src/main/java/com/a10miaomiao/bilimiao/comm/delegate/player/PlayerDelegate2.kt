@@ -196,8 +196,18 @@ class PlayerDelegate2(
             // 自定义 CacheKeyFactory：只取 path 作为缓存 key，跨 CDN 节点互通
             // Bilibili 同个视频在不同 API 调用中可能返回不同的 CDN host，
             // 若不统一 key，则每次重建播放器都会因 URL host 变化而缓存不命中
+            //
+            // ★★ vc107：key 前面加**版本前缀** `v2:`。
+            //   起因（2026-09-20 定位）：vc105 的候选池 bug 让"视频分块的请求"打到了**音频文件**上，
+            //   而 CacheDataSource 是拿 **DataSpec（=视频）的 key** 落盘的 ——
+            //   于是**音频字节被写进了视频文件的缓存块**。这些坏数据会一直按 path 命中，
+            //   表现就是"这几个剧集怎么都播不出来（黑屏、连报错都没有）"，而 MP4（另一个 path）却没事。
+            //   改 key 前缀 = 旧的污染条目全部作废（由 LRU 自然淘汰），新数据重新落盘；
+            //   以后万一再出类似事故，改这个前缀就能一键隔离。
             val cacheKeyFactory = CacheKeyFactory { dataSpec ->
-                dataSpec.uri.path ?: dataSpec.uri.buildUpon().clearQuery().build().toString()
+                val path = dataSpec.uri.path
+                    ?: dataSpec.uri.buildUpon().clearQuery().build().toString()
+                "v2:$path"
             }
             // cacheReadDataSourceFactory 使用 DefaultDataSource 支持本地文件读取，
             // 确保已缓存的内容直接从本地存储读取而不走网络
@@ -762,6 +772,14 @@ class PlayerDelegate2(
                 audioCandidates?.firstOrNull()?.let { CdnNodePool.register(it, audioCandidates) }
                 val videoFactory = wrapWithFailover(baseFactory, videoCandidates)
                 val audioFactory = wrapWithFailover(baseFactory, audioCandidates ?: videoCandidates)
+                // 诊断：把"这一路到底在放哪两个文件"写下来（只记文件名，签名不落盘）
+                // —— vc105 的"音频 URL 混进视频候选"就是靠这行才能一眼看出来
+                PlayerDiag.log(
+                    "merging",
+                    "视频候选=${videoCandidates.size} 条（${videoCandidates.firstOrNull()?.let { Uri.parse(it).lastPathSegment }}）" +
+                        " 音频候选=${(audioCandidates ?: videoCandidates).size} 条" +
+                        "（${(audioCandidates ?: videoCandidates).firstOrNull()?.let { Uri.parse(it).lastPathSegment }}）"
+                )
                 val videoMedia = MediaItem.Builder().apply {
                     setUri(videoCandidates.firstOrNull() ?: dataSourceArr[1])
                     mediaMetadata?.let(::setMediaMetadata)
