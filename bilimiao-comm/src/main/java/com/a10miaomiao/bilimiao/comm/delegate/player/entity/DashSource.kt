@@ -43,6 +43,33 @@ class DashSource(
      * 生成多 CDN 的 BaseURL XML 片段。
      * primaryUrl + backupUrls → 多个 <BaseURL> 元素，ExoPlayer 自动故障转移。
      */
+    /**
+     * **XML 文本转义** —— 这个 MPD 播不出来的直接原因就是漏了它。
+     *
+     * B 站 CDN 的 URL 里全是 `&`（`...&nbs=1&os=hwbv&og=hw&platform=android&...`），
+     * 直接塞进 `<BaseURL>` 会让整个 MPD 变成**非良构 XML**（实测 144 个裸 &，解析在
+     * line 1 column 658 就炸）→ `DashManifestParser` 抛异常 → `getMediaSource` 返回 null →
+     * GSY 把整串 `[dash-mpd]\n…` 当 URL 打开 → `MalformedURLException: no protocol: [dash-mpd]`。
+     *
+     * 顺序必须是**先转 `&`**，否则会把后面生成的 `&amp;` 二次转义成 `&amp;amp;`。
+     */
+    private fun xmlEscape(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
+
+    /** MPD 必须真的是良构 XML，否则调用方要回退（别让播放器拿到一串假 URL） */
+    fun isWellFormedXml(mpd: String): Boolean = try {
+        val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        factory.newDocumentBuilder().parse(mpd.byteInputStream())
+        true
+    } catch (e: Throwable) {
+        false
+    }
+
     private fun buildBaseUrlElements(
         primaryUrl: String,
         backupUrls: List<String>,
@@ -62,7 +89,7 @@ class DashSource(
             }
         }
         return allUrls.distinct().joinToString("\n") { url ->
-            "                    <BaseURL>${url}</BaseURL>"
+            "                    <BaseURL>${xmlEscape(url)}</BaseURL>"
         }
     }
 
@@ -121,6 +148,7 @@ $audioBaseUrls
         """.trimIndent()
         // ★ 记一笔：SegmentBase 有没有真的写进 MPD、Representation 里长什么样。
         //   番剧 DASH 播不出来的那次，就是因为它被写在了 <Representation> 外面（被解析器忽略）。
+        val wellFormed = isWellFormedXml(mpdStr)
         runCatching {
             PlayerDiag.log(
                 "mpd",
@@ -130,8 +158,13 @@ $audioBaseUrls
                     // 会编译报 "receiver type mismatch"（vc100 首次编译就是这么挂的）。
                     // 数出现次数用 split：出现 n 次 → 切成 n+1 段 → n
                     " | baseUrl 数=${videoBaseUrls.split("<BaseURL>").size - 1}" +
-                    " | audio=${if (audio != null) "有" else "无"}"
+                    " | audio=${if (audio != null) "有" else "无"}" +
+                    " | XML=${if (wellFormed) "良构 ✓" else "非良构 ✗（& 没转义？）"}"
             )
+        }
+        if (!wellFormed) {
+            // 宁可让调用方回退成 [merging]（能播），也不要把假 URL 交给播放器
+            return ""
         }
         val primaryUrl = if (uposHost == "backup") {
             video.backupUrl.firstOrNull { it.isNotBlank() } ?: video.baseUrl

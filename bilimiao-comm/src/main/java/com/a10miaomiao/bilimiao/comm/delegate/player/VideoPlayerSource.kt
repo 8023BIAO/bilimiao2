@@ -98,10 +98,23 @@ class VideoPlayerSource(
                 it.width = dashVideo.width
                 // 使用 uposHost（如果有设置）进行 CDN 替换，同时 MPD 内包含 backup_url 备选 CDN
                 val dashSource = DashSource(uposHost)
-                it.url = dashSource.getMDPUrl(
+                val mpd = dashSource.getMDPUrl(
                     dashData = dash,
                     quality = res.quality
                 )
+                if (mpd.startsWith("[dash-mpd]")) {
+                    it.url = mpd
+                } else {
+                    val v = dash.video.firstOrNull { it.id == res.quality } ?: dash.video.firstOrNull()
+                    val a = dash.audio?.firstOrNull()
+                    val videoUrl = v?.base_url.orEmpty()
+                    it.url = if (a?.base_url.isNullOrBlank()) {
+                        videoUrl
+                    } else {
+                        "[merging]\n$videoUrl\n${a!!.base_url}"
+                    }
+                    PlayerDiag.log("video-http", "MPD 不可用 → 退回 [merging]（qn=${res.quality}）")
+                }
             } else {
                 val durl = res.durl ?: throw Exception("Missing durl in video player response")
                 PlayerDiag.log(

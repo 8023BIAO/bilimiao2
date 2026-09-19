@@ -816,6 +816,13 @@ class PlayerDelegate2(
             // 源构建失败（如 DASH MPD 解析异常）不能抛出：Media3ExoPlayerManager
             // 会吞掉异常后继续 prepareAsync，ExoPlayer.setMediaSource(null) → NPE 闪退
             miaoLogger() error "getMediaSource 构建失败: ${e.message}"
+            // ★ 这个 catch 会把"MPD 解析失败"之类的真异常吞掉（release 包里 miaoLogger 是静默的），
+            //   于是播放器只会拿着原始串去开连接，报一个误导性的 MalformedURLException。
+            //   把真异常写进诊断日志，免得下次又要靠猜。
+            PlayerDiag.log(
+                "media-source",
+                "构建失败并返回 null（GSY 会拿原始串当 URL）：${e.javaClass.simpleName}: ${e.message}"
+            )
             null
         }
     }

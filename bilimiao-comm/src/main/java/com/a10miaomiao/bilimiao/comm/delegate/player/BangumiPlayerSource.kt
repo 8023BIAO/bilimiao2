@@ -105,10 +105,25 @@ class BangumiPlayerSource(
                 val dashVideo = dash.video.firstOrNull() ?: throw Exception("未找到可播放的dash视频")
                 it.height = dashVideo.height
                 it.width = dashVideo.width
-                it.url = DashSource().getMDPUrl(
+                val mpd = DashSource().getMDPUrl(
                     dashData = dash,
                     quality = res.quality
                 )
+                if (mpd.startsWith("[dash-mpd]")) {
+                    it.url = mpd
+                } else {
+                    // MPD 生成/自检没过（比如 XML 非良构）→ 退回"视频+音频两条流"，
+                    // 跟 gRPC 路径一个套路：没有分段索引，但**至少能播**，不会卡死
+                    val v = dash.video.firstOrNull { it.id == res.quality } ?: dash.video.firstOrNull()
+                    val a = dash.audio?.firstOrNull()
+                    val videoUrl = v?.base_url.orEmpty()
+                    it.url = if (a?.base_url.isNullOrBlank()) {
+                        videoUrl
+                    } else {
+                        "[merging]\n$videoUrl\n${a!!.base_url}"
+                    }
+                    PlayerDiag.log("bangumi-http", "MPD 不可用 → 退回 [merging]（qn=${res.quality}）")
+                }
             } else if (durl != null && durl.isNotEmpty()) {
                 PlayerDiag.log(
                     "bangumi-http",
