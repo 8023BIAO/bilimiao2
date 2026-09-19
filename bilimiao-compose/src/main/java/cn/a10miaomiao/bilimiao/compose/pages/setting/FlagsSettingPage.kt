@@ -548,7 +548,7 @@ private fun FlagsSettingPageContent(
                 summary = {
                     Text(
                         if (mp4Selected) "当前是 MP4 源，改了也没用；先把「视频格式选择」改成 DASH"
-                        else "自动并发 / 手动连接数（1 ~ 本机 $maxThreads 条连接，或不限）"
+                        else "并发连接数（默认 4；1 ~ 本机 $maxThreads 条，或不限）"
                     )
                 },
                 onClick = viewModel::toThreadRipperSettingPage,

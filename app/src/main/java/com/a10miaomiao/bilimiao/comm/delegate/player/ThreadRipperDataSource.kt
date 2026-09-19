@@ -53,29 +53,29 @@ internal object ThreadRipperSettings {
     @Volatile
     var enabled: Boolean = false
 
-    /** 自动并发（默认开）：连接数按分段大小自适应，上限取 [threads] */
+    /**
+     * **并发连接数**（用户唯一要设的档，默认 4）。
+     *  0 = 不限（= 本机核数），1..max = 最多用几条连接。
+     *  ★ 2026-09-19：原来的「自动并发」开关已删除 —— 上游 Bilibili-thread-ripper 就只有
+     *    这一个档位（`concurrency`），我们那个开关和它语义重叠、只会互相打架。
+     */
     @Volatile
-    var autoThreads: Boolean = true
-
-    /** 并发连接数档位：0 = 不限（自适应，最多到本机核数），1..max = 固定连接数 */
-    @Volatile
-    var threads: Int = 0
+    var threads: Int = 4
 
     /** 本机"最大并发连接数" = 处理器核数（设置页滑块的上限就是它），至少 1 */
     val maxThreads: Int
         get() = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
 
     /**
-     * 自动模式下**每条连接**负责的字节数：要拉的字节越多，连接越多。
+     * 每条连接**最少**分到的字节数：**64KB**，与上游 Bilibili-thread-ripper 的
+     * `minChunkBytes: 64 * 1024`（`range-core.js` / `splitRange`）完全一致。
      *
-     * 为什么从 512KB 提到 2MB（2026-09-19 实机日志驱动）：
-     * 走磁盘缓存时，回源请求经常只有 1~5MB（实测 `ripper_diag.log` 里同一分段
-     * 一分钟内被请求 60 多次），按 512KB 切就是"每个请求开 2~8 条连接、每条只拉几百 KB"——
-     * TCP + TLS 握手和服务端 seek 的开销还没摊平就传完了，跨境线路上反而更慢。
-     * 改成 2MB/连接后：2MB→2 条、6MB→3 条、16MB 以上才吃满本机上限，
-     * 而真正吃力的几十~几百 MB 大分段照样并发。
+     * 上游的切法就是"把这次请求的字节区间**平均分给 N 条连接**"，唯一的下限是它：
+     * 分段不够大就自动少开几条（200KB 的请求只会开 3 条，而不是硬开 8 条）。
+     * ★ 我 2026-09-19 曾自己发明过"每连接 512KB / 2MB"的规则，那跟上游无关，
+     *   已于 vc104 删除：并发度应该由用户设的连接数决定，而不是由我拍一个 KB 数。
      */
-    private const val AUTO_BYTES_PER_THREAD = 2L * 1024L * 1024L
+    private const val MIN_CHUNK_BYTES = 64L * 1024L
 
     /**
      * 从 DataStore 刷新一份快照。
@@ -89,12 +89,11 @@ internal object ThreadRipperSettings {
             runBlocking {
                 withTimeoutOrNull(300L) {
                     SettingPreferences.mapData(context) { prefs ->
-                        Triple(
-                            prefs[SettingPreferences.ThreadRipperEnable] ?: false,
-                            prefs[SettingPreferences.ThreadRipperAutoThreads] ?: true,
-                            (prefs[SettingPreferences.ThreadRipperThreads] ?: 0)
-                                .coerceIn(0, maxThreads),
-                        )
+                        // ThreadRipperAutoThreads 这个键保留在 DataStore 里但已不再使用（旧版本的开关）
+                        val enable = prefs[SettingPreferences.ThreadRipperEnable] ?: false
+                        val conn = (prefs[SettingPreferences.ThreadRipperThreads] ?: 4)
+                            .coerceIn(0, maxThreads)
+                        enable to conn
                     }
                 }
             }
@@ -103,31 +102,25 @@ internal object ThreadRipperSettings {
         }
         if (snapshot != null) {
             enabled = snapshot.first
-            autoThreads = snapshot.second
-            threads = snapshot.third
+            threads = snapshot.second
         }
     }
 
     /**
-     * 决定这次请求用几个线程（1 = 不并发）。
+     * 决定这次请求开几条连接（1 = 不并发）。
      *
-     * 档位语义（设置页里逐条有说明）：
-     *  - 自动并发 **开** → 并发连接数按分段大小自适应，上限 = 你设的档位（不限 = 本机核数）；
-     *  - 自动并发 **关** → 档位是几就用几条连接；档位选「不限」则自适应（最多到本机核数）。
+     * **完全照上游 Bilibili-thread-ripper 的模型**（`range-core.js: splitRange`）：
+     *   count = min(用户设的连接数, ceil(本次字节数 / 64KB))
+     * 也就是"把这次的区间平均分给 N 条连接"，只有每份不足 64KB 时才自动少开。
+     * 「不限」= 上限取本机核数。
      */
     fun resolveThreads(chunkBytes: Long): Int {
         if (!enabled) return 1
         val max = maxThreads
         val configured = threads
         val cap = if (configured <= 0) max else configured.coerceIn(1, max)
-        val bySize = ((chunkBytes + AUTO_BYTES_PER_THREAD - 1) / AUTO_BYTES_PER_THREAD).toInt()
-        // 不再强制"至少 2 条"：1~2MB 的回源请求单连接就够，硬拆成两条只增加握手开销
-        val adaptive = bySize.coerceIn(1, cap)
-        return when {
-            autoThreads -> adaptive
-            configured <= 0 -> adaptive
-            else -> cap
-        }
+        val bySize = ((chunkBytes + MIN_CHUNK_BYTES - 1) / MIN_CHUNK_BYTES).toInt()
+        return bySize.coerceIn(1, cap)
     }
 }
 
@@ -153,8 +146,12 @@ internal class ThreadRipperDataSource(
         /** 每个分块最多预读几块（4 × 64KB = 256KB/线程；线程数有上限，内存占用可控） */
         const val QUEUE_CAPACITY = 4
 
-        /** 小于这个长度不值得并发（请求本身就没多大，多开连接反而更慢） */
-        const val MIN_PARALLEL_BYTES = 1L * 1024L * 1024L
+        /**
+         * 小于这个长度不值得并发（请求本身就没多大，多开连接反而更慢）。
+         * 取 128KB：上游 `range-core.js` 里 `splitRange(..., minChunkBytes = 128 * 1024)`
+         * 的默认值同量级；实际播放中回源请求都是 MB 级，这个值基本不会碰到。
+         */
+        const val MIN_PARALLEL_BYTES = 128L * 1024L
 
         /** 线程数硬上限（核数再多也不超过它：连接、校验、重组本身也有开销） */
         const val MAX_WORKERS = 16

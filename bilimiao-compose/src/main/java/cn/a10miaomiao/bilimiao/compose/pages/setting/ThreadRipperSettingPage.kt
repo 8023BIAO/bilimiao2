@@ -24,7 +24,6 @@ import kotlinx.serialization.Serializable
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import me.zhanghai.compose.preference.preference
 import me.zhanghai.compose.preference.preferenceCategory
-import me.zhanghai.compose.preference.switchPreference
 import org.kodein.di.compose.rememberInstance
 
 /**
@@ -35,11 +34,13 @@ import org.kodein.di.compose.rememberInstance
  * 叫「线程撕裂者」会让人以为是拼 CPU，所以用户可见文案统一成「分段并发下载」。
  * 代码里的类名/键名仍然是 `ThreadRipper*`（与上游一致，方便对照）。
  *
- * 两个设置项（用户要求）：
- *  1. **自动并发**（开关，默认开）——连接数按分段大小自适应；开启时下面那根滑块**置灰不可拖**，
- *     但它的档位仍然生效：作为自动模式的**上限**（"自动并发就是取你最多设置的那个数"）。
- *  2. **并发连接数（手动档）**（滑块）——档位 = 不限 / 1 / 2 / … / 本机处理器核数。
- *     关掉自动并发后可以拖：选几就是几个并发连接；选「不限」= 由程序按分段大小自适应。
+ * **只有一个设置项**（vc104 起，完全照上游 Bilibili-thread-ripper 的模型）：
+ *  「并发连接数」滑块 —— 档位 = 不限 / 1 / 2 / … / 本机处理器核数，**默认 4**。
+ *  程序把这次请求的字节区间**平均分给 N 条连接**，唯一的下限是"每份至少 64KB"
+ *  （上游 `range-core.js` 的 `minChunkBytes`），分段小就自动少开几条。
+ *
+ * 为什么删掉了原来的「自动并发」开关：上游本来就只有这一个档位（`concurrency`），
+ * 我们那个开关和它语义重叠，开着的时候这根滑块还会置灰，反而让人不知道怎么调。
  *
  * 上限用的是 `Runtime.getRuntime().availableProcessors()`（手机给到的最大并发数），
  * 与上游项目一致：连接不是越多越快，连接/加密/调度/重组的开销会一起涨。
@@ -73,16 +74,15 @@ private fun ThreadRipperSettingPageContent() {
 
     ProvidePreferenceLocals(flow = prefFlow) {
         val preferences = prefFlow.collectAsState().value
-        val autoThreads =
-            (preferences[SettingPreferences.ThreadRipperAutoThreads.name] as? Boolean) ?: true
         // 视频格式是 MP4 时，分段并发下载对它无效（MP4 整段顺序下载、没有分段可切）→ 这里整页置灰
         val fnvalValue = (preferences[SettingPreferences.PlayerFnval.name] as? Int)
             ?: SettingConstants.PLAYER_FNVAL_DASH
         val mp4Selected = fnvalValue == SettingConstants.PLAYER_FNVAL_MP4
         val threadValue =
-            (preferences[SettingPreferences.ThreadRipperThreads.name] as? Int) ?: 0
+            (preferences[SettingPreferences.ThreadRipperThreads.name] as? Int) ?: 4
 
-        fun labelOf(value: Int): String = if (value <= 0) "不限" else "$value 条连接"
+        fun labelOf(value: Int): String =
+            if (value <= 0) "不限（= 本机 $maxThreads 条）" else "$value 条连接"
 
         LazyColumn(
             modifier = Modifier
@@ -114,41 +114,23 @@ private fun ThreadRipperSettingPageContent() {
                 )
             }
             preferenceCategory(key = "tr_threads", title = { Text("并发") })
-            switchPreference(
-                key = SettingPreferences.ThreadRipperAutoThreads.name,
-                defaultValue = true,
-                enabled = { !mp4Selected },
-                title = { Text("自动并发") },
-                summary = {
-                    if (it) {
-                        Text("开启：按分段大小自适应连接数，上限取下面的「并发连接数」（当前上限：${labelOf(threadValue)}）")
-                    } else {
-                        Text("关闭：完全按下面的「并发连接数」固定连接数")
-                    }
-                },
-            )
             sliderIntPreference(
                 key = SettingPreferences.ThreadRipperThreads.name,
-                defaultValue = 0,
+                defaultValue = 4,
                 valueRange = 0..maxThreads,
                 // zhanghai 的 SliderPreference：steps = 两端点之间的档位数，故为 (end - start - 1)
                 valueSteps = (maxThreads - 1).coerceAtLeast(0),
-                // ★ 自动线程开着时这根滑块置灰（用户要求）：值仍然作为自动模式的上限生效；
-                //   MP4 源整页置灰（分段并发下载对 MP4 无效）
-                enabled = { !autoThreads && !mp4Selected },
-                title = { Text("并发连接数（手动档）") },
+                // MP4 源下整页置灰（分段并发下载对 MP4 无效）；其余情况这根滑块就是唯一开关
+                enabled = { !mp4Selected },
+                title = { Text("并发连接数") },
                 valueText = { value -> Text(labelOf(value)) },
                 summary = { value ->
+                    // 把"这个档位实际会发生什么"直接算给用户看（上游的算法：区间平均等分，每份至少 64KB）
+                    val n = if (value <= 0) maxThreads else value
                     Text(
-                        when {
-                            autoThreads ->
-                                "已置灰：自动并发开着。它只作为自动模式的上限（当前 ${labelOf(value)}）；" +
-                                    "想手动固定连接数，请先关掉上面的「自动并发」"
-                            value <= 0 ->
-                                "不限：由程序按分段大小自适应，最多到本机 $maxThreads 条连接"
-                            else ->
-                                "固定 $value 个连接并发下载（本机最多 $maxThreads）"
-                        }
+                        "当前：${labelOf(value)}。把一个分段的字节区间平均分给 $n 条连接" +
+                            "（每份至少 64KB，分段小就自动少开）；" +
+                            "默认 4 条，缓冲跟不上再往上加；连接不是越多越快，手机一般 4~8 就够"
                     )
                 },
             )
@@ -160,8 +142,8 @@ private fun ThreadRipperSettingPageContent() {
                 enabled = false,
                 summary = {
                     Text(
-                        "一般不用动：默认「自动并发」就能覆盖大多数情况。\n" +
-                            "缓冲还是跟不上（4K / 冷门视频）再手动调大；设备较老或网络本身就抖，往小调。\n" +
+                        "这个数字就是**最多同时开几条连接**（和上游 Bilibili-thread-ripper 的「并发线程」是同一个意思）。\n" +
+                            "海外/冷门视频、4K 缓冲跟不上 → 往大调（8~16）；设备较老或网络本身就抖 → 往小调。\n" +
                             "连接不是越多越快：连接、加密、调度和重组的开销会一起增加。"
                     )
                 },

@@ -1418,13 +1418,16 @@ class PlayerDelegate2(
                     //   但反过来 MP4 也可能给 1080P，所以不该由代码一刀切）。
                     //   内存问题现在由 Media3ExoPlayerManager 的 64MB 堆内硬上限兜住
                     //   （缓冲到顶就停止下载，不是继续往堆里分配），所以不必再拿清晰度换内存。
-                    PlayerDiag.log(
-                        "open",
-                        "开播 source=${source::class.java.simpleName} fnval=$fnval(4048=DASH,2=MP4) quality=$quality"
-                    )
-                    PlayerDiag.memory("open")
                     quality = it[PlayerQuality] ?: 64
                     speed = it[PlayerSpeed] ?: 1f
+                    // ★ 日志放在读设置**之后**：以前打在这一行前面，打印的是上一个视频的清晰度
+                    //   （实机日志里出现"quality=64 但请求 qn=112"就是这么来的），纯误导。
+                    PlayerDiag.log(
+                        "open",
+                        "开播 source=${source::class.java.simpleName} fnval=$fnval(4048=DASH,2=MP4) " +
+                            "quality=$quality(用户设置) speed=$speed"
+                    )
+                    PlayerDiag.memory("open")
                     // 占用音频焦点：这个开关以前是死的（:308 写死 isReleaseWhenLossAudio = false），
                     // 打开后应该"别的 App 出声就暂停自己"，关掉则允许同时出声
                     views.videoPlayer?.isReleaseWhenLossAudio = it[SettingPreferences.PlayerAudioFocus] ?: false

@@ -10,6 +10,7 @@ import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.proxy.ProxyServerInfo
+import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import kotlinx.serialization.Serializable
 
@@ -77,12 +78,27 @@ class PlayerAPI {
         if (fnval > 2) {
             params.put("fourk", "1")
         }
+        // ★ 诊断日志（用户 2026-09-19 要求）：把"我们到底请求了什么、服务端给了什么"写下来。
+        //   清晰度不是客户端能"解锁"的：qn/fnval/fourk 只是"我想要什么"，
+        //   真正给什么由服务端按**账号权限 + 内容**决定（accept_quality 就是它给的清单）。
+        PlayerDiag.log(
+            "playurl-req",
+            "x/player/playurl (UGC) avid=$avid cid=$cid qn=$quality fnval=$fnval " +
+                "fourk=${params["fourk"] ?: "0"} otype=json module=普通视频"
+        )
         val res = MiaoHttp.request {
             url = BiliApiService.biliApi("x/player/playurl", *params.toList().toTypedArray())
             headers.putAll(getVideoHeaders(avid))
         }.awaitCall().json<ResponseData<PlayurlData>>()
         if (res.isSuccess) {
-            return res.requireData()
+            val data = res.requireData()
+            PlayerDiag.log(
+                "playurl-res",
+                "quality=${data.quality} accept=${data.accept_quality} " +
+                    "acceptDesc=${data.accept_description} " +
+                    "dash=${if (data.dash != null) "有" else "无"} durl=${data.durl?.size ?: 0}段"
+            )
+            return data
         } else {
             throw Exception(res.message)
         }
@@ -119,6 +135,12 @@ class PlayerAPI {
         if (fnval > 2) {
             params["fourk"] = "1"
         }
+        // ★ 诊断日志：番剧走的是 pgc 接口，参数和普通视频不同（module=bangumi、fourk=1）
+        PlayerDiag.log(
+            "playurl-req",
+            "pgc/player/api/playurl (番剧) ep_id=$epid cid=$cid qn=$qn fnval=$fnval " +
+                "fourk=${params["fourk"] ?: "0"} module=bangumi season_type=1"
+        )
         val res = MiaoHttp.request {
             url = BiliApiService.biliApi(
                 "pgc/player/api/playurl",
@@ -126,6 +148,12 @@ class PlayerAPI {
             )
         }.awaitCall().json<PlayurlData>()
         if (res.code == 0) {
+            PlayerDiag.log(
+                "playurl-res",
+                "code=0 quality=${res.quality} accept=${res.accept_quality} " +
+                    "acceptDesc=${res.accept_description} " +
+                    "dash=${if (res.dash != null) "有" else "无"} durl=${res.durl?.size ?: 0}段"
+            )
             return res
         } else if (res.code == -10403) {
             throw AreaLimitException()
