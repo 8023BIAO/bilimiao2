@@ -7,11 +7,12 @@ plugins {
 
 android {
     namespace = "cn.a10miaomiao.bilimiao.download"
-    compileSdk = 36
+    compileSdk = 37
+    // 37 这一代开始按 minor 分平台（SDK 里是 android-37.0），要显式声明 minor 才能对上
+    compileSdkMinor = 0
 
     defaultConfig {
         minSdk = 21
-        targetSdk = 36
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")

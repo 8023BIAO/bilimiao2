@@ -10,11 +10,12 @@ plugins {
 }
 
 android {
-    compileSdk = 36
+    compileSdk = 37
+    // 37 这一代开始按 minor 分平台（SDK 里是 android-37.0），要显式声明 minor 才能对上
+    compileSdkMinor = 0
 
     defaultConfig {
         minSdk = 21
-        targetSdk = 34
         version = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -99,6 +100,20 @@ protobuf {
 }
 
 
+// ★ Gradle 9 起，Copy 类任务遇到"重名条目"直接报错（Gradle 8 只是警告）。
+//   protobuf 插件生成的 processXxxProtoResources 输入有两份同样的 proto：
+//   一份来自 src/main/proto，另一份是 AGP 把 proto 当 java 资源拷进 build/intermediates/java_res/… 的，
+//   于是必然重名。这里显式指定策略（EXCLUDE = 保留先到的那份，等价于 Gradle 8 的老行为）。
+//   用 afterEvaluate 是为了确保在 protobuf / AGP 插件自己配置完这个任务之后再改，
+//   否则可能被插件随后的配置覆盖掉。类型用 AbstractCopyTask（Copy/Sync/Jar 都覆盖）。
+afterEvaluate {
+    tasks.matching { it.name.endsWith("ProtoResources") }.configureEach {
+        (this as? org.gradle.api.tasks.AbstractCopyTask)?.duplicatesStrategy =
+            org.gradle.api.file.DuplicatesStrategy.EXCLUDE
+        logger.lifecycle("[proto] $name 类型=${this::class.java.name} 重复策略已设为 EXCLUDE")
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
@@ -125,7 +140,7 @@ dependencies {
     implementation(libs.okhttp3)
     implementation(libs.pbandk.runtime)
 
-    implementation("javax.annotation:javax.annotation-api:1.2")
+    implementation("javax.annotation:javax.annotation-api:1.3.2")
 
     implementation(project(":DanmakuFlameMaster"))
 

@@ -7,14 +7,16 @@ plugins {
 
 android {
     namespace = "com.a10miaomiao.bilimiao"
-    compileSdk = 36
+    compileSdk = 37
+    // 37 这一代开始按 minor 分平台（SDK 里是 android-37.0），要显式声明 minor 才能对上
+    compileSdkMinor = 0
 
     defaultConfig {
         applicationId = "com.a10miaomiao.bilimiao.mod"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 36
-        versionCode = 113
-        versionName = "v2026.09.20-05"
+        versionCode = 114
+        versionName = "v2026.09.20-06"
 
         flavorDimensions("default")
 
@@ -25,6 +27,12 @@ android {
             abiFilters.add("arm64-v8a")
             abiFilters.add("armeabi-v7a")
         }
+    }
+
+    // AGP 9 起 resValues 默认关闭（全局的 android.defaults.buildfeatures.* 已被移除），
+    // 下面 debug 里用了 resValue(...)，所以这里显式打开
+    buildFeatures {
+        resValues = true
     }
 
     buildTypes {

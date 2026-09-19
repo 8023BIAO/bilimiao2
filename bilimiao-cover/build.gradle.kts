@@ -5,11 +5,12 @@ plugins {
 }
 
 android {
-    compileSdk = 36
+    compileSdk = 37
+    // 37 这一代开始按 minor 分平台（SDK 里是 android-37.0），要显式声明 minor 才能对上
+    compileSdkMinor = 0
 
     defaultConfig {
         minSdk = 21
-        targetSdk = 33
         version = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

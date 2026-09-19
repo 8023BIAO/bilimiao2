@@ -182,3 +182,9 @@
 -dontwarn androidx.compose.runtime.internal.**
 # Activity 1.13.0 internal
 -dontwarn androidx.activity.compose.PredictiveBackHandlerKt
+
+# ★ R8（AGP 9 / compileSdk 37）报缺类：splitties 的 getFingerPrintManager() 引用了
+#   android.hardware.fingerprint.FingerprintManager —— 这个类在 SDK 37 的 android.jar 里已经没有了，
+#   而我们根本没用到指纹服务（只是 splitties 的 SystemServices 扩展里有这么个方法）→ 直接放行警告。
+#   （这行就是 R8 自己生成在 app/build/outputs/mapping/fossRelease/missing_rules.txt 里的建议）
+-dontwarn android.hardware.fingerprint.FingerprintManager

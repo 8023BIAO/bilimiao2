@@ -46,15 +46,13 @@ import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.bumptech.glide.Glide
 import com.bumptech.glide.RequestManager
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
-import com.bumptech.glide.integration.compose.GlideImage
-import com.bumptech.glide.integration.compose.GlideSubcomposition
-import com.bumptech.glide.integration.compose.RequestState
 import com.bumptech.glide.integration.compose.placeholder
 import com.bumptech.glide.load.resource.gif.GifDrawable
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.target.SimpleTarget
 import com.bumptech.glide.request.transition.Transition
 import com.a10miaomiao.bilimiao.comm.toast
+import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -245,20 +243,25 @@ fun MyImagePreviewer(
             } else {
                 imageUrl
             }
-            val painterState = remember(previewUrl) { mutableStateOf<Painter?>(null) }
-            key(previewUrl) {
-                GlideSubcomposition(
-                    model = previewUrl,
-                ) {
-                    if (state is RequestState.Success) {
-                        painterState.value = painter
-                        // 设置原图已下载标志
-                        imagePreviewerState.onImageLoaded(page)
+            // ★ Glide Compose 1.0.0-beta10 删掉了 GlideSubcomposition / RequestState，
+            //   这里改成「Glide 自己取 Drawable + accompanist 的 rememberDrawablePainter 转 Painter」：
+            //   行为跟以前一致 —— 图到了就给出 painter，并标记"原图已下载"。
+            val drawableState = remember(previewUrl) { mutableStateOf<Drawable?>(null) }
+            LaunchedEffect(previewUrl) {
+                val drawable = runCatching {
+                    withContext(Dispatchers.IO) {
+                        Glide.with(activity).asDrawable().load(previewUrl).submit().get()
                     }
+                }.getOrNull()
+                if (drawable != null) {
+                    drawableState.value = drawable
+                    // 设置原图已下载标志
+                    imagePreviewerState.onImageLoaded(page)
                 }
             }
+            val loadedDrawable = drawableState.value
             return@ImagePreviewer Pair(
-                painterState.value,
+                if (loadedDrawable != null) rememberDrawablePainter(loadedDrawable) else null,
                 Size(model.width, model.height)
             )
         }
