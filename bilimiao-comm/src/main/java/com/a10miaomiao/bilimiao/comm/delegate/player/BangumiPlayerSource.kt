@@ -25,6 +25,7 @@ import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.CdnSelector
 import com.a10miaomiao.bilimiao.comm.utils.CompressionTools
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import com.a10miaomiao.bilimiao.comm.utils.VideoCodecSupport
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import master.flame.danmaku.danmaku.loader.android.DanmakuLoaderFactory
 import master.flame.danmaku.danmaku.parser.BaseDanmakuParser
@@ -111,9 +112,15 @@ class BangumiPlayerSource(
                 //  ③ merging 让播放器顺序读文件、用**文件自带**的索引寻址，天生一致，拖进度条也能秒跳。
                 //  代价：不再有 MPD 的"多 BaseURL 自适应"；我们用 `|` 候选列表 + CdnFailoverDataSource 顶上。
                 it.duration = dash.duration * 1000L
-                val v = dash.video.firstOrNull { it.id == res.quality }
-                    ?: dash.video.firstOrNull()
-                    ?: throw Exception("未找到可播放的dash视频")
+                // ★ vc110：同一个清晰度 B 站会给多条不同编码（AV1/HEVC/AVC），以前直接取"接口第一条"
+                //   —— 而 fnval=4048 时接口通常把 **AV1 排在前面**；没有 AV1 硬解的老机器只能软解（卡/发热），
+                //   个别机型直接黑屏。改成按本机解码能力挑（HEVC > AVC > AV1，硬解优先），见 [VideoCodecSupport]。
+                val v = VideoCodecSupport.pickBest(
+                    list = dash.video,
+                    qualityOf = { it.id },
+                    codecsOf = { it.codecs },
+                    quality = res.quality,
+                ) ?: throw Exception("未找到可播放的dash视频")
                 it.height = v.height
                 it.width = v.width
                 val a = dash.audio?.firstOrNull()

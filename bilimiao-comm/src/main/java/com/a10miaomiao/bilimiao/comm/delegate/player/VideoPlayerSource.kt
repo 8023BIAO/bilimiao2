@@ -20,6 +20,7 @@ import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.a10miaomiao.bilimiao.comm.utils.CdnSelector
 import com.a10miaomiao.bilimiao.comm.utils.CompressionTools
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import com.a10miaomiao.bilimiao.comm.utils.VideoCodecSupport
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import master.flame.danmaku.danmaku.loader.android.DanmakuLoaderFactory
 import master.flame.danmaku.danmaku.parser.BaseDanmakuParser
@@ -105,7 +106,13 @@ class VideoPlayerSource(
                 if (mpd.startsWith("[dash-mpd]")) {
                     it.url = mpd
                 } else {
-                    val v = dash.video.firstOrNull { it.id == res.quality } ?: dash.video.firstOrNull()
+                    // vc110：按本机解码能力挑编码（AV1 优先会给老机器带来软解卡顿/黑屏）
+                    val v = VideoCodecSupport.pickBest(
+                        list = dash.video,
+                        qualityOf = { it.id },
+                        codecsOf = { it.codecs },
+                        quality = res.quality,
+                    )
                     val a = dash.audio?.firstOrNull()
                     val videoUrl = v?.base_url.orEmpty()
                     it.url = if (a?.base_url.isNullOrBlank()) {
@@ -192,9 +199,13 @@ class VideoPlayerSource(
                 acceptInfo.newDescription
             )
         }
-        val stream = availableStreamList.firstOrNull {
-            it.streamInfo?.quality == quality
-        } ?: availableStreamList.firstOrNull()
+        // ★ vc110：优先挑"本机能解"的那条流。
+        //   gRPC 返回的流如果只有 AV1 而手机没有 AV1 硬解，会退化成软解：CPU 拉满、发热、掉帧，
+        //   个别机型直接黑屏（上游 Bilibili-thread-ripper 0.9.2.0 也是为这个加了"编码跟随播放策略"）。
+        //   挑不到能解的 → 保持原来的行为（同清晰度第一条），绝不因此放不出来。
+        val stream = pickDecodableStream(availableStreamList, quality)
+            ?: availableStreamList.firstOrNull { it.streamInfo?.quality == quality }
+            ?: availableStreamList.firstOrNull()
         val streamContent = stream?.content ?: return null
         playerSource.quality = stream.streamInfo?.quality ?: videoInfo.quality
         playerSource.duration = videoInfo.timelength
@@ -313,6 +324,31 @@ class VideoPlayerSource(
             parser.load(dataSource)
             parser
         }
+    }
+
+
+    /**
+     * 从 gRPC 返回的流列表里挑一条**本机能解码**的（vc110）。
+     *
+     * 优先级：同清晰度且能解 → 低于等于目标清晰度里最高的那条能解的 → null（调用方按原逻辑处理）。
+     * 拿不到 codecid（不是 DASH）时视为"能解"，不做干预。
+     */
+    private fun pickDecodableStream(
+        list: List<bilibili.app.playurl.v1.Stream>,
+        quality: Int,
+    ): bilibili.app.playurl.v1.Stream? {
+        fun codecidOf(s: bilibili.app.playurl.v1.Stream): Int? =
+            (s.content as? Stream.Content.DashVideo)?.value?.codecid
+
+        fun decodable(s: bilibili.app.playurl.v1.Stream): Boolean {
+            val id = codecidOf(s) ?: return true
+            return VideoCodecSupport.score(VideoCodecSupport.mimeOfCodecid(id)) >= 0
+        }
+
+        list.firstOrNull { it.streamInfo?.quality == quality && decodable(it) }?.let { return it }
+        return list
+            .filter { (it.streamInfo?.quality ?: 0) <= quality && decodable(it) }
+            .maxByOrNull { it.streamInfo?.quality ?: 0 }
     }
 
     private suspend fun getBiliDanmukuStream(): InputStream? {

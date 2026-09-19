@@ -3,6 +3,7 @@ package com.a10miaomiao.bilimiao.comm.delegate.player.entity
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
 import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import com.a10miaomiao.bilimiao.comm.utils.VideoCodecSupport
 
 class DashSource(
     val uposHost: String = "",
@@ -31,6 +32,7 @@ class DashSource(
     private fun codecidToCodecString(codecid: Int): String = when (codecid) {
         7 -> "avc1.64001F"
         12 -> "hev1.1.6.L93.90"
+        13 -> "av01.0.08M.08"   // vc110 补：AV1（原来返回空串，走 MPD 时会缺 codecs）
         else -> ""
     }
 
@@ -268,9 +270,13 @@ $audioBaseUrls
         dashData: PlayerAPI.Dash,
         quality: Int,
     ): String {
-        val video = dashData.video.firstOrNull {
-            it.id == quality
-        } ?: dashData.video.lastOrNull() ?: return ""
+        // vc110：同样按本机解码能力挑编码（老设备别被 AV1 拖死）
+        val video = VideoCodecSupport.pickBest(
+            list = dashData.video,
+            qualityOf = { it.id },
+            codecsOf = { it.codecs },
+            quality = quality,
+        ) ?: dashData.video.lastOrNull() ?: return ""
         val audio = dashData.audio?.firstOrNull()
         return getMDPUrl(
             video = DashItem(
