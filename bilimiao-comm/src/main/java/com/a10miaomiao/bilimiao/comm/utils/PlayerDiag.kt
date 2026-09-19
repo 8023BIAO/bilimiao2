@@ -57,7 +57,14 @@ object PlayerDiag {
             val rt = Runtime.getRuntime()
             val used = (rt.totalMemory() - rt.freeMemory()) / 1048576L
             val max = rt.maxMemory() / 1048576L
-            log("mem:$tag", "堆已用 ${used}MB / 上限 ${max}MB")
+            // 占用偏高（>60% 上限）时先强制一次 GC 再测：这样能一眼分清
+            // "只是还没回收的垃圾"（GC 后掉很多）和"真的在涨"（GC 后基本不变）
+            val extra = if (used > max * 6 / 10) {
+                System.gc()
+                val after = (rt.totalMemory() - rt.freeMemory()) / 1048576L
+                "（GC 后 ${after}MB）"
+            } else ""
+            log("mem:$tag", "堆已用 ${used}MB / 上限 ${max}MB$extra")
         }
     }
 }

@@ -96,7 +96,7 @@ private class FlagsSettingPageViewModel(
         pageNavigation.navigate(SponsorBlockSettingPage())
     }
 
-    /** 线程撕裂者的线程子设置页 */
+    /** 分段并发下载（原「线程撕裂者」）的并发子设置页 */
     fun toThreadRipperSettingPage() {
         pageNavigation.navigate(ThreadRipperSettingPage())
     }
@@ -171,7 +171,7 @@ private fun FlagsSettingPageContent(
     var showGuestConfirmDialog by remember { mutableStateOf(false) }
     val currentDpi = context.resources.configuration.densityDpi
     val currentFontScale = context.resources.configuration.fontScale
-    // 线程撕裂者：本机最多能开多少线程 = 处理器核数（线程设置页滑块的上限也是它）
+    // 分段并发下载：本机最多能开多少连接 = 处理器核数（并发设置页滑块的上限也是它）
     val maxThreads = remember {
         Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
     }
@@ -361,7 +361,7 @@ private fun FlagsSettingPageContent(
     ProvidePreferenceLocals(
         flow = prefFlow
     ) {
-        // 视频格式：MP4(2) 时线程撕裂者**对它无效**（MP4 是整段顺序下载、没有分段可切，
+        // 视频格式：MP4(2) 时分段并发下载**对它无效**（MP4 是整段顺序下载、没有分段可切，
         // ThreadRipperDataSource 的并发条件要求"请求长度已知"，渐进式请求 length=UNSET → 直接单连接透传）
         // → 按用户要求：置灰不可点，并且如果原本开着就自动关掉，同时把原因写在说明里。
         val prefValues = prefFlow.collectAsState().value
@@ -377,7 +377,7 @@ private fun FlagsSettingPageContent(
                 }
                 Toast.makeText(
                     context,
-                    "当前视频格式是 MP4：线程撕裂者对它无效，已自动关闭",
+                    "当前视频格式是 MP4：分段并发下载对它无效，已自动关闭",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -518,45 +518,45 @@ private fun FlagsSettingPageContent(
                 onClick = viewModel::toSponsorBlockSettingPage,
             )
 
-            // ===== 海外加速（线程撕裂者）=====
+            // ===== 海外加速（分段并发下载，原「线程撕裂者」）=====
             // 思路来自 MrTangLuyao/Bilibili-thread-ripper：把播放器要读的分段再切成多个字节 Range 并发拉。
             // 与上面的 CDN 设置**互不干扰**：CDN 决定"用哪个节点"，这里只决定"节点上的字节怎么并发拉"。
             preferenceCategory(
                 key = "thread_ripper",
-                title = { Text("海外加速（线程撕裂者）") }
+                title = { Text("海外加速（分段并发下载）") }
             )
             switchPreference(
                 key = SettingPreferences.ThreadRipperEnable.name,
                 defaultValue = false,
                 // MP4 源下置灰（不可点）—— 见上面 mp4Selected 的说明
                 enabled = { !mp4Selected },
-                title = { Text("启用线程撕裂者") },
+                title = { Text("启用分段并发下载") },
                 summary = {
                     if (mp4Selected) {
-                        Text("已停用：当前「视频格式选择」是 MP4。MP4 是整段顺序下载、没有分段可切，多线程对它无效；想用请先把视频格式改成 DASH")
+                        Text("已停用：当前「视频格式选择」是 MP4。MP4 是整段顺序下载、没有分段可切，分段并发下载对它无效；想用请先把视频格式改成 DASH")
                     } else if (it) {
-                        Text("已开启：把每个分段的字节范围再切成多块并发下载（只对 DASH 分段流有效）。海外建议开、国内不建议，自行测试；播放异常就关掉")
+                        Text("已开启：把一个分段的字节范围切成多块、用多条连接并发下载（只对 DASH 分段流有效）。海外建议开、国内不建议，自行测试；播放异常就关掉")
                     } else {
-                        Text("建议海外用户开启，国内不建议开启，自行测试（多线程并发下载，默认关闭；仅对 DASH 分段流有效）")
+                        Text("建议海外用户开启，国内不建议开启，自行测试（多连接并发下载，默认关闭；仅对 DASH 分段流有效）")
                     }
                 },
             )
             preference(
                 key = "thread_ripper_threads_entry",
-                title = { Text("线程设置") },
+                title = { Text("并发设置") },
                 enabled = !mp4Selected,
                 summary = {
                     Text(
                         if (mp4Selected) "当前是 MP4 源，改了也没用；先把「视频格式选择」改成 DASH"
-                        else "自动线程 / 手动线程数（1 ~ 本机 $maxThreads 线程，或不限）"
+                        else "自动并发 / 手动连接数（1 ~ 本机 $maxThreads 条连接，或不限）"
                     )
                 },
                 onClick = viewModel::toThreadRipperSettingPage,
             )
             preference(
                 key = "thread_ripper_about",
-                title = { Text("关于线程撕裂者") },
-                summary = { Text("原理与上游项目：MrTangLuyao/Bilibili-thread-ripper") },
+                title = { Text("关于上游项目（Bilibili-thread-ripper）") },
+                summary = { Text("本功能的思路来自上游开源项目：MrTangLuyao/Bilibili-thread-ripper") },
                 onClick = {
                     // 防连点：连点 N 次不该拉起 N 个浏览器
                     if (ClickGuard.allow("flags:thread_ripper_about")) {

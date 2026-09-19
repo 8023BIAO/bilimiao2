@@ -8,7 +8,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * 「线程撕裂者」的**文件诊断日志**（和 [SponsorDiag] 同一套路，独立一个文件）。
+ * 「分段并发下载」（原「线程撕裂者」）的**文件诊断日志**（和 [SponsorDiag] 同一套路，独立一个文件）。
  *
  * 为什么要它：这台 ROM 把 App 的 logcat 全掐了，而 `miaoLogger().debug` 在
  * **release 包里是静默的**（`BuildConfig.DEBUG` 为 false 直接 return）—— 也就是说

@@ -24,7 +24,7 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 /**
- * 「线程撕裂者」——**分段多线程下载**（海外加速，实验性功能）。
+ * 「分段并发下载」（原「线程撕裂者」，类名沿用上游）——**分段多连接下载**（海外加速，实验性功能）。
  *
  * 思路对齐 [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)：
  * B 站的 DASH 播放清单里每个分段的字节范围是已知的，而播放器一次只用一个连接顺序拉；

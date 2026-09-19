@@ -180,7 +180,7 @@ class PlayerDelegate2(
             val httpFactory = DefaultHttpDataSource.Factory()
             httpFactory.setUserAgent(userAgent)
             httpFactory.setDefaultRequestProperties(header)
-            // ── 线程撕裂者（海外加速，实验性）──
+            // ── 分段并发下载（原「线程撕裂者」，海外加速，实验性）──
             // 只包在**回源**这一层：缓存命中仍走本地；已有的「CDN 竞速 / CDN 固定主机 /
             // 音频不跟随 CDN」全部照旧生效 —— 它们决定"用哪个 URL"，这一层只决定
             // "这个 URL 上的字节怎么并发拉"，所以开关本功能**不需要**动任何 CDN 设置。
