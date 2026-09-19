@@ -76,9 +76,13 @@ protobuf {
         all().forEach { task ->
             task.plugins {
                 id("pbandk") {
-                    if (!generatorJarFile.exists()) {
-                        task.dependsOn(":$generatorModule:jar")
-                    }
+                    // ★ 必须**无条件**依赖生成器 jar。
+                    //   原来写成 `if (!generatorJarFile.exists())`：这个判断发生在**配置期**，
+                    //   而 `clean` 是**执行期**才把 jar 删掉 —— 于是
+                    //   `./gradlew clean :app:assembleFossRelease` 这种全量编译必然缺包：
+                    //   ClassNotFoundException: cn.a10miaomiao.generator.GrpcServiceGenerator
+                    //   （增量编译因为 jar 还在而侥幸能过，所以一直没暴露）
+                    task.dependsOn(":$generatorModule:jar")
                     option("log=debug")
                     var jarPath = generatorJarFile.path
                     jarPath.indexOf(':')
