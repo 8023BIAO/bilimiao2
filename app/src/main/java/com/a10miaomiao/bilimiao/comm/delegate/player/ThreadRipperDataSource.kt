@@ -38,7 +38,9 @@ import java.util.concurrent.TimeUnit
  *   - 每个分块**错峰 900ms 抢跑**：主节点太久没首字节，就同时向另一个节点（必须不同 host）也发一条，
  *     谁先交出首块谁赢，输的那条立刻掐掉且**不算失败**；
  *   - 节点记速度分（bps 滑动平均）+ 失败退避（3s 起、60s 封顶），坏节点自动靠后；
- *   - 超时对齐上游：首字节 5.5s / 无进度 4s / 单次尝试 15s（最后一条只在多节点时生效）。
+ *   - 超时：首字节 5.5s / 无进度 4s 掐连接（上游同值）；**不设"单次尝试总时长上限"**
+ *     （vc107 教训：番剧走 `[merging]` 后一次请求就是几百 MB，15 秒上限会把正常下载反复掐断 → 黑屏），
+ *     改成"最低速度 80KB/s、宽限 10s"——只甩掉活着但基本不动的连接。
  *   用户把 CDN 固定成某个主机时候选全是同一个 host → 抢跑自然退化成"不换节点"。
  *
  * ★ 与 CDN 选择的关系：**完全独立、互不干扰**。
@@ -256,10 +258,19 @@ internal class ThreadRipperDataSource(
         const val HEDGE_DELAY_MS = 900L
 
         /**
-         * **单次尝试总时长上限**：只在"有多个候选节点"时生效（单节点时慢但有进度就不打断）。
-         * 与上游 `attemptTimeoutMs: 15000` 一致；超时后从已续传的位置**换节点**继续。
+         * **单次尝试的最低速度**：低于它、且还有别的节点可选 → 认定这条连接"活着但基本不动"，换节点续传。
+         *
+         * ★ vc107 修正：vc105 抄了上游的"单次尝试 15 秒上限"（`attemptTimeoutMs`），
+         *   结果在番剧改走 `[merging]` 之后**成了黑屏元凶** —— 播放器现在一次请求就是几百 MB
+         *   （日志实测 1,463,152KB / 1,507,360KB），拆成 8 块后每块几十 MB，
+         *   15 秒**根本不可能下完** → 每块刚到 15 秒就被掐、重试、再掐 → 死循环 + 一直请求 + 黑屏。
+         *   上游能用这个上限，是因为它的"一块"是内存里的小分片；我们的块是流式续传的大区间，不适用。
+         *   现在改成"看速度不看时长"：慢到没意义才换，慢但一直在出数据就让它拉。
          */
-        const val ATTEMPT_TIMEOUT_MS = 15_000L
+        const val MIN_ATTEMPT_BPS = 80_000L      // 80KB/s：8 条连接合计约 640KB/s，再低就纯属拖后腿
+
+        /** 速度判定的宽限期：刚连上那几秒不算，免得把正常的慢启动掐掉 */
+        const val BPS_GRACE_MS = 10_000L
 
         /** 首块等待的宽限：首字节超时 + 抢跑错峰之后，再给这么多时间让数据真的到达 */
         const val FIRST_BLOCK_SLACK_MS = 3_000L
@@ -574,7 +585,7 @@ internal class ThreadRipperDataSource(
      *    输的那条立刻掐掉，而且**不算失败**（这正是抢跑的意义：慢的不该被记账）；
      *  - 赢家继续把这一块剩下的读完，所以稳定后每个块仍然只有一条活跃连接；
      *  - 首字节 [FIRST_BYTE_TIMEOUT_MS] / 无进度 [STALL_TIMEOUT_MS] / 单次尝试
-     *    [ATTEMPT_TIMEOUT_MS]（仅多节点时）三个超时都对齐上游；
+     *    "活着但基本不动"（80KB/s 以下）才换节点；
      *  - 失败会记进 [CdnNodePool]，坏节点被暂停（指数退避、60 秒封顶），重试时自动换节点；
      *  - **分块级重试**：只重下这一块没下完的部分（`pushed` 记录已确认入队的字节数）。
      *
@@ -840,6 +851,9 @@ internal class ThreadRipperDataSource(
             var finished = false
 
             private var ds: DataSource? = null
+
+            /** 本次尝试已经交付的字节数（[awaitFinish] 用它算速度） */
+            @Volatile
             private var delivered = 0L
 
             /** 真正开始收数据的时刻（速度分用它算，抢跑的 900ms 错峰不该算进去） */
@@ -858,14 +872,22 @@ internal class ThreadRipperDataSource(
             }
 
             fun awaitFinish(multiNode: Boolean) {
-                val deadline = SystemClock.uptimeMillis() + ATTEMPT_TIMEOUT_MS
+                val started = if (dataStartAt > 0) dataStartAt else SystemClock.uptimeMillis()
                 while (!finished && failure == null && !lost && !closed) {
-                    // 单节点时**不设**总时长上限：慢但一直在出数据就别打断它；
-                    // 有多个节点可选时才用上游的 15 秒上限，超时就换节点续传。
-                    if (multiNode && SystemClock.uptimeMillis() > deadline) {
-                        // 慢到超时的节点要记一笔，否则下一轮还会优先选它
-                        CdnNodePool.noteFailure(url, "单次尝试超过 ${ATTEMPT_TIMEOUT_MS / 1000} 秒")
-                        throw IOException("单次尝试超过 ${ATTEMPT_TIMEOUT_MS / 1000} 秒 → 换节点续传")
+                    // 单节点时不判定速度（没有别的路可换，慢也得拉）；
+                    // 多节点时只甩掉"活着但基本不动"的连接：慢但一直在出数据的，让它继续拉完。
+                    if (multiNode) {
+                        val elapsed = SystemClock.uptimeMillis() - started
+                        val bytes = delivered
+                        if (elapsed > BPS_GRACE_MS) {
+                            val bps = bytes * 1000L / elapsed
+                            if (bps < MIN_ATTEMPT_BPS) {
+                                CdnNodePool.noteFailure(url, "太慢：${bps / 1024}KB/s")
+                                throw IOException(
+                                    "节点太慢（${bps / 1024}KB/s < ${MIN_ATTEMPT_BPS / 1024}KB/s）→ 换节点续传"
+                                )
+                            }
+                        }
                     }
                     Thread.sleep(20L)
                 }
