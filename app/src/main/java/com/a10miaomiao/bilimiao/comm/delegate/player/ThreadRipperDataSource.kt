@@ -10,10 +10,13 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
+import com.a10miaomiao.bilimiao.comm.utils.RipperDiag
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadFactory
@@ -190,6 +193,54 @@ internal class ThreadRipperDataSource(
 
         fun tripBreaker() {
             breakerUntilMs = SystemClock.uptimeMillis() + 10 * 60 * 1000L
+            RipperDiag.log("breaker", "并发拉取失败 → 10 分钟内全部回退单连接（避免每段都先失败一次）")
+        }
+
+        /**
+         * 单个分块的**最大尝试次数**（对齐 N_m3u8DL-RE 的 `--download-retry-count` 默认 3）：
+         * 一次失败不再让整段重来，只重下这一块**没下完的部分**（续传式重试）。
+         */
+        const val MAX_ATTEMPTS = 3
+
+        /**
+         * **无进度超时**（对齐 burst-download 的 no-progress timeout）：
+         * 单块 20 秒一个字节都没新增，就掐掉这条连接换一条重试 ——
+         * 海外线路最常见的就是"连接还活着但彻底不动了"，光等没有意义。
+         */
+        const val STALL_TIMEOUT_MS = 20_000L
+        const val STALL_CHECK_PERIOD_MS = 5_000L
+
+        /** 正在下载的分块（卡死巡检用） */
+        private val activeChunks: MutableSet<ThreadRipperDataSource.Chunk> =
+            ConcurrentHashMap.newKeySet()
+
+        @Volatile
+        private var watchdogStarted = false
+
+        fun registerChunk(chunk: ThreadRipperDataSource.Chunk) {
+            activeChunks.add(chunk)
+            ensureWatchdog()
+        }
+
+        fun unregisterChunk(chunk: ThreadRipperDataSource.Chunk) {
+            activeChunks.remove(chunk)
+        }
+
+        /** 一个极轻量的巡检线程（守护线程，只做"看时间戳 + 掐连接"） */
+        private fun ensureWatchdog() {
+            if (watchdogStarted) return
+            synchronized(this) {
+                if (watchdogStarted) return
+                watchdogStarted = true
+                runCatching {
+                    Executors.newSingleThreadScheduledExecutor { r ->
+                        Thread(r, "thread-ripper-watchdog").apply { isDaemon = true }
+                    }.scheduleWithFixedDelay({
+                        val now = SystemClock.uptimeMillis()
+                        activeChunks.forEach { chunk -> runCatching { chunk.checkStall(now) } }
+                    }, STALL_CHECK_PERIOD_MS, STALL_CHECK_PERIOD_MS, TimeUnit.MILLISECONDS)
+                }
+            }
         }
     }
 
@@ -242,6 +293,11 @@ internal class ThreadRipperDataSource(
         }
 
         if (threads <= 1) return openSingle(dataSpec)
+
+        RipperDiag.log(
+            "parallel",
+            "并发拉取：${threads} 线程 / ${length / 1024}KB（${dataSpec.uri.lastPathSegment ?: ""}）"
+        )
 
         return try {
             openParallel(dataSpec, length, threads)
@@ -332,6 +388,7 @@ internal class ThreadRipperDataSource(
 
     /** 并行模式未交付任何字节就失败时的兜底：原样重开一个单连接请求 */
     private fun fallbackToSingle() {
+        RipperDiag.log("fallback", "并发模式一个字节都没交付就失败 → 退回单连接重开同一请求")
         val spec = dataSpec ?: throw IOException("没有可以回退的 DataSpec")
         cancelWorkers()
         val source = upstreamFactory.createDataSource()
@@ -395,6 +452,19 @@ internal class ThreadRipperDataSource(
      * 以 64KB 为单位塞进有界队列（队列满就阻塞 —— 这是"预读"的边界，也是内存闸门；
      * 上层不读了就靠 [cancel] 打断 `put`）。
      */
+    /**
+     * 一个字节块：在自己的连接上把 `[start, start+length)` 拉下来，
+     * 以 64KB 为单位塞进有界队列（队列满就阻塞 —— 这是"预读"的边界，也是内存闸门；
+     * 上层不读了就靠 [cancel] 打断 `put`）。
+     *
+     * ★ 失败处理（2026-09-19 依据 N_m3u8DL-RE / burst-download 的做法重做）：
+     *  - **分块级重试**：单块最多试 [MAX_ATTEMPTS] 次，只重下这一块**没下完的部分**
+     *    （[pushed] 记录已确认入队的字节数，重试时从 `start + pushed` 续传，不重下已有的）；
+     *  - **无进度超时**：卡死巡检发现 20 秒没有新字节（且队列没满 = 不是被上层拖住）
+     *    就掐掉这条连接，让 read() 抛错走上面的重试 —— 相当于"换一条 CDN 连接再试"；
+     *  - 只有**所有尝试都失败**才把错误交给上层（此时若一个字节都没交付，read() 会
+     *    悄悄回退单连接；已经交付过就只能让播放器重试这一段了）。
+     */
     private inner class Chunk(
         private val spec: DataSpec,
         private val start: Long,
@@ -412,34 +482,105 @@ internal class ThreadRipperDataSource(
         @Volatile
         private var source: DataSource? = null
 
+        /** 已经"下载并确认入队"的字节数 = 可以续传的位置 */
+        @Volatile
+        private var pushed = 0L
+
+        /** 最近一次拿到新字节的时间（无进度超时用） */
+        @Volatile
+        private var lastProgressAt = SystemClock.uptimeMillis()
+
+        private var attempts = 0
+
         fun cancel() {
             runCatching { source?.close() }
         }
 
+        /**
+         * 卡死巡检回调。
+         * 只在"队列没满"时才判定卡死：队列满说明是**上层还没取走**（正常预读），
+         * 这时候掐连接会把正常的预读反复打断。
+         */
+        fun checkStall(now: Long) {
+            if (closed || done || error != null) return
+            if (queue.remainingCapacity() == 0) return
+            if (now - lastProgressAt < STALL_TIMEOUT_MS) return
+            lastProgressAt = now
+            RipperDiag.log("stall", "分块 ${start / 1024}KB 处 20 秒无新字节 → 掐掉连接重试")
+            runCatching { source?.close() }
+        }
+
         override fun run() {
-            var ds: DataSource? = null
+            registerChunk(this)
             try {
-                if (closed) return
-                val opened = upstreamFactory.createDataSource()
-                ds = opened
-                source = opened
-                val rangeSpec = spec.buildUpon()
-                    .setPosition(start)
-                    .setLength(length)
-                    .build()
-                val openedLength = opened.open(rangeSpec)
-                // ★ 校验：服务端不认 Range 时会按 200 全量返回（此时 openedLength 是"从 start 到文件尾"，
-                //   通常远大于我们要的这一块）→ 直接判失败并熔断，交给单连接兜底
-                if (openedLength != C.LENGTH_UNSET.toLong() && openedLength > length) {
-                    throw IOException("服务端未按 Range 返回（期望 $length，实得 $openedLength）")
+                while (!closed && pushed < length) {
+                    try {
+                        downloadAttempt()
+                        break
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        return
+                    } catch (e: Throwable) {
+                        if (closed) return
+                        attempts++
+                        if (attempts > MAX_ATTEMPTS) {
+                            RipperDiag.log(
+                                "chunk-fail",
+                                "分块 ${start / 1024}KB 重试 $MAX_ATTEMPTS 次仍失败：${e.javaClass.simpleName}: ${e.message}"
+                            )
+                            error = e
+                            return
+                        }
+                        RipperDiag.log(
+                            "chunk-retry",
+                            "分块 ${start / 1024}KB 第 $attempts 次失败（已续传 ${pushed / 1024}KB）：" +
+                                "${e.javaClass.simpleName}: ${e.message}"
+                        )
+                        // 退避一下再换一条连接（CDN 单连接被掐/超时是最常见的偶发失败）
+                        try {
+                            Thread.sleep(200L * attempts)
+                        } catch (ie: InterruptedException) {
+                            Thread.currentThread().interrupt()
+                            return
+                        }
+                    }
                 }
-                var remaining = if (openedLength == C.LENGTH_UNSET.toLong()) length else openedLength
+                if (!closed && pushed >= length) done = true
+            } finally {
+                unregisterChunk(this)
+                runCatching { source?.close() }
+                source = null
+            }
+        }
+
+        /** 一次完整的（或续传的）拉取尝试：从 `start + pushed` 拉到这一块的末尾 */
+        private fun downloadAttempt() {
+            val offset = start + pushed
+            val remainingTotal = length - pushed
+            if (remainingTotal <= 0) return
+            val pushedBefore = pushed
+            val ds = upstreamFactory.createDataSource()
+            source = ds
+            lastProgressAt = SystemClock.uptimeMillis()
+            try {
+                val rangeSpec = spec.buildUpon()
+                    .setPosition(offset)
+                    .setLength(remainingTotal)
+                    .build()
+                val openedLength = ds.open(rangeSpec)
+                // ★ 校验：服务端不认 Range 时会按 200 全量返回（此时 openedLength 是"从 offset 到文件尾"，
+                //   通常远大于我们要的这一块）→ 判失败并（最终）熔断，交给单连接兜底
+                if (openedLength != C.LENGTH_UNSET.toLong() && openedLength > remainingTotal) {
+                    throw IOException("服务端未按 Range 返回（期望 $remainingTotal，实得 $openedLength）")
+                }
+                var remaining =
+                    if (openedLength == C.LENGTH_UNSET.toLong()) remainingTotal else openedLength
                 while (remaining > 0 && !closed) {
                     val want = minOf(BUFFER_SIZE.toLong(), remaining).toInt()
                     val buf = ByteArray(want)
                     var filled = 0
                     while (filled < want) {
-                        val n = opened.read(buf, filled, want - filled)
+                        val n = ds.read(buf, filled, want - filled)
                         if (n == C.RESULT_END_OF_INPUT) break
                         filled += n
                     }
@@ -447,17 +588,18 @@ internal class ThreadRipperDataSource(
                         throw IOException("分段提前结束（还差 $remaining 字节）")
                     }
                     remaining -= filled
+                    lastProgressAt = SystemClock.uptimeMillis()
                     queue.put(if (filled == buf.size) buf else buf.copyOf(filled))
+                    pushed += filled
                 }
-                done = true
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-            } catch (e: Throwable) {
-                // 主动关闭造成的异常不算错误
-                if (!closed) error = e
             } finally {
-                runCatching { ds?.close() }
+                runCatching { ds.close() }
                 source = null
+            }
+            // ★ 一次尝试必须"有推进"：服务器对 Range 返回 0 字节（Content-Length: 0 / 立刻 EOF）
+            //   时不能当成功 —— 否则外层 while 会原地空转，疯狂重发请求。
+            if (pushed == pushedBefore) {
+                throw IOException("分段返回 0 字节（offset=${offset / 1024}KB）")
             }
         }
     }
