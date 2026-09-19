@@ -3088,7 +3088,27 @@ initDanmakuTouchListener()
         val draw = PlayerViewDrawable.progressBarDrawable(context, themeColor)
         val bounds = mProgressBar.progressDrawable.bounds
         // 色块层整条叠在进度条之上（高度全覆盖，对齐 PiliPlus）：可拖动的那条进度条上也能看见片段颜色
-        mProgressBar.progressDrawable = LayerDrawable(arrayOf(draw, mSeekSegmentsDrawable))
+        //
+        // ★★ 必须把原来的三层**拆成直接子层**并把 id 重新 setId，不能 `LayerDrawable(arrayOf(draw, 色块层))` 包一层：
+        //    ProgressBar 是按 `android.R.id.progress` / `android.R.id.secondaryProgress` 找到"那一层"再单独
+        //    setLevel 的（ClipDrawable 靠 level 裁切）。包一层之后这两个 id 跑到孙子层里，ProgressBar 找不到，
+        //    结果两层的 level 都变成"最后一次设置的那个值"——而 GSY 的 setProgressAndTime 是
+        //    **先 setProgress(播放位置)、后 setSecondaryProgress(缓冲位置)**，所以填充色跟的是**缓冲进度**：
+        //    表现就是"已播放的颜色超过了进度条上的圆点（当前时间）"，而且缓冲一变就往前超/往回跳。
+        //    （用户 2026-09-20 实测反馈的正是这个；下面底栏那条进度条一直是拆开+setId 的写法，所以它没事。）
+        mProgressBar.progressDrawable = if (draw is LayerDrawable && draw.numberOfLayers >= 3) {
+            val n = draw.numberOfLayers
+            val layers = Array<Drawable?>(n + 1) { i ->
+                if (i < n) draw.getDrawable(i) else mSeekSegmentsDrawable
+            }
+            LayerDrawable(layers).apply {
+                setId(0, android.R.id.background)
+                setId(1, android.R.id.secondaryProgress)
+                setId(2, android.R.id.progress)
+            }
+        } else {
+            LayerDrawable(arrayOf(draw, mSeekSegmentsDrawable))
+        }
         mProgressBar.progressDrawable.bounds = bounds
         updateSeekBarMarks()
         mProgressBar.thumb.setColorFilter(themeColor, PorterDuff.Mode.SRC_ATOP)
