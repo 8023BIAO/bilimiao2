@@ -423,11 +423,20 @@ class SponsorBlockApi {
      * 请求形态是实测出来的：`POST /api/setUsername?userID=&username=` —— 参数走 **URL 查询串**，
      * 用 JSON body 或表单 body 都会被 400 拒（`Bad Request`）。
      * 传空字符串 = 清除昵称（排行榜里退回显示公开 ID）。
+     *
+     * ★ 返回 **HTTP 状态码**（-1 = 网络异常/超时），不是 true/false —— 因为不同状态码要给用户
+     *   完全不同的解释（2026-09-19 实测 bsbsb.top）：
+     *   - **429**：**按身份限流**。同一个私人 ID 约每分钟只能改一次昵称
+     *     （实测：改完立刻再改、隔 10/20/30/45/60 秒都是 429，**90 秒后恢复**）；
+     *   - **400**：名字超过 64 字符（上游 `setUsername` 的硬限制）；
+     *   - **200**：请求被接受 —— ⚠️ 但**不等于生效**：上游服务端有一条 requestValidator 风控会
+     *     "静默忽略"改名（照样回 200）。所以调用方必须再用 [getUsername] 读回核对，
+     *     否则就会出现"它说已保存，我点进去还是原样"（用户 2026-09-19 报的正是这个）。
      */
     suspend fun setUsername(
         username: String,
         userId: String = localUserId(),
-    ): Boolean {
+    ): Int {
         return try {
             val query = "userID=" + java.net.URLEncoder.encode(userId, "UTF-8") +
                 "&username=" + java.net.URLEncoder.encode(username.trim(), "UTF-8")
@@ -440,12 +449,12 @@ class SponsorBlockApi {
                 // okhttp 的 POST 必须带 body（哪怕空的），否则 method() 直接抛
                 body = "".toRequestBody("application/x-www-form-urlencoded".toMediaType())
             }.awaitCall()
-            res.use { it.code == 200 }
+            res.use { it.code }
         } catch (e: java.util.concurrent.CancellationException) {
             throw e
         } catch (e: Exception) {
             SponsorDiag.log("api-username", "设置昵称失败：${e.javaClass.simpleName}: ${e.message}")
-            false
+            -1
         }
     }
 

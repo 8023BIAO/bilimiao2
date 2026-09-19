@@ -199,15 +199,38 @@ object SponsorBlockSettingsUi {
                     } else {
                         val value = input.text?.toString()?.trim().orEmpty()
                         scope.launch {
-                            val ok = withContext(Dispatchers.IO) { SponsorBlockApi().setUsername(value) }
-                            toast(
-                                context,
-                                when {
-                                    !ok -> "保存失败：网络异常或服务端拒绝"
-                                    value.isEmpty() -> "已清除昵称（排行榜将显示公开ID）"
-                                    else -> "已保存：$value"
+                            val code = withContext(Dispatchers.IO) { SponsorBlockApi().setUsername(value) }
+                            when {
+                                // ★ 429 = 按身份限流（同一个私人ID 约每分钟只能改一次）
+                                code == 429 -> toast(
+                                    context,
+                                    "改得太频繁了：服务端限流（同一个身份约 1 分钟只能改一次昵称），过一会儿再试"
+                                )
+                                code == 400 -> toast(context, "服务端拒绝：名字太长或格式不合法（上限 64 个字符）")
+                                code != 200 -> toast(context, "保存失败：网络异常或服务端拒绝（HTTP $code）")
+                                else -> {
+                                    // ★ 200 只代表"请求被接受"，服务端风控可能静默忽略改名 ——
+                                    //   必须读回核对，否则会出现"它说已保存、点进去还是原样"
+                                    val readBack = withContext(Dispatchers.IO) {
+                                        runCatching { SponsorBlockApi().getUsername() }.getOrNull()
+                                    }
+                                    val publicId = withContext(Dispatchers.IO) { SponsorBlockApi.publicUserId() }
+                                    val applied = if (value.isEmpty()) {
+                                        readBack.isNullOrBlank() || readBack == publicId
+                                    } else {
+                                        readBack == value
+                                    }
+                                    toast(
+                                        context,
+                                        if (applied) {
+                                            if (value.isEmpty()) "已清除昵称（排行榜将显示公开ID）"
+                                            else "已保存并核对通过：$value"
+                                        } else {
+                                            "服务端返回成功但没生效（可能被风控/限流），过一会儿再试"
+                                        }
+                                    )
                                 }
-                            )
+                            }
                             dlg?.dismiss()
                         }
                     }
@@ -227,13 +250,14 @@ object SponsorBlockSettingsUi {
             input.setSelection(input.text?.length ?: 0)
             input.isEnabled = true
             loaded = true
+            // ★ 把"昵称"和"公开ID"分两行写清楚：公开ID 是身份编号、不是昵称，
+            //   以前这两行挨在一起，用户会以为"我设的昵称没生效、还是那串哈希"
             tip.text = buildString {
-                append("排行榜和统计里显示的名字，支持中文。\n你的公开ID：")
+                append("当前昵称：")
+                append(if (shown.isBlank()) "未设置（排行榜会显示下面这串公开ID）" else shown)
+                append("\n公开ID（身份编号，不是昵称、也改不了）：")
                 append(publicId)
-                append("\n（私人ID 相当于密码，别外发；改私人ID = 换一个身份，昵称也得重设）")
-                if (current != null && current.isNotBlank() && current != publicId) {
-                    append("\n当前昵称已填在上面的输入框里，可直接改。")
-                }
+                append("\n（昵称随便改；私人ID 相当于密码别外发，改私人ID = 换一个身份，昵称也得重设）")
             }
         }
     }
