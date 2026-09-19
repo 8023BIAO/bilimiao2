@@ -21,6 +21,7 @@ import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.proxy.ProxyServerInfo
+import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.CdnSelector
 import com.a10miaomiao.bilimiao.comm.utils.CompressionTools
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
@@ -67,6 +68,7 @@ class BangumiPlayerSource(
             e.printStackTrace()
         }
         // 如果grpc api获取失败则使用旧版api
+        PlayerDiag.log("bangumi", "gRPC 没给出结果 → 回退 HTTP JSON playurl（fnval=$fnval qn=$quality）")
         val res = BiliApiService.playerAPI.getBangumiUrl(
             epid, id, quality, fnval
         )
@@ -92,8 +94,26 @@ class BangumiPlayerSource(
             )
             val durl = res.durl
             val dash = res.dash
-            if (durl != null && durl.isNotEmpty()) {
-                // 优先使用直链 (MP4/FLV)，避免 DASH 导致的 OOM 和兼容性问题
+            // ★ 跟随"视频格式选择"：fnval > 2 = DASH，= 2 = MP4/FLV（用户 2026-09-19 明确要求）。
+            //   以前这里写死"durl 优先"，等于把设置架空 —— 而 PGC 的 MP4(durl) 实测上限只有 720P。
+            //   实测 PGC 的 dash 带完整 SegmentBase（initialization + index_range），MPD 是好的。
+            val preferDash = fnval > 2
+            if (preferDash && dash != null) {
+                PlayerDiag.log("bangumi-http", "DASH 优先 → 生成 MPD（qn=${res.quality}）")
+                it.duration = dash.duration * 1000L
+                val dashVideo = dash.video.firstOrNull() ?: throw Exception("未找到可播放的dash视频")
+                it.height = dashVideo.height
+                it.width = dashVideo.width
+                it.url = DashSource().getMDPUrl(
+                    dashData = dash,
+                    quality = res.quality
+                )
+            } else if (durl != null && durl.isNotEmpty()) {
+                PlayerDiag.log(
+                    "bangumi-http",
+                    if (durl.size == 1) "MP4 直链（1 段 ${durl[0].length}ms）"
+                    else "MP4 多段直链（${durl.size} 段 → ConcatenatingMediaSource）"
+                )
                 if (durl.size == 1) {
                     it.duration = durl[0].length
                     it.url = if (uposHost.isNotBlank()) {
@@ -115,7 +135,7 @@ class BangumiPlayerSource(
                     it.width = dv.width
                 }
             } else if (dash != null) {
-                // TODO: DASH 路径暂留，后续若 GRPC 修复可重新启用
+                PlayerDiag.log("bangumi-http", "只有 DASH 可用 → 生成 MPD（qn=${res.quality}）")
                 it.duration = dash.duration * 1000L
                 val dashVideo = dash.video.firstOrNull() ?: throw Exception("未找到可播放的dash视频")
                 it.height = dashVideo.height
@@ -208,6 +228,9 @@ class BangumiPlayerSource(
         playerSource.duration = videoInfo.timelength
         when (streamContent) {
             is Stream.Content.DashVideo -> {
+                // gRPC 的 DashVideo 没有 SegmentBase（proto 里就没这个字段）→ 只能当两条普通流合并播放，
+                // 但清晰度是完整的（DASH 才有 1080P）——所以它是"番剧 DASH"的主路径，不是坏的。
+                PlayerDiag.log("bangumi-grpc", "[merging] DashVideo 视频+音频两条流（qn=${videoInfo.quality}）")
                 val dash = streamContent.value
                 val dashAudio = videoInfo.dashAudio
                 val audio = dashAudio.firstOrNull {
@@ -296,6 +319,7 @@ class BangumiPlayerSource(
             }
             is Stream.Content.SegmentVideo -> {
                 val durl = streamContent.value
+                PlayerDiag.log("bangumi-grpc", "[concatenating] MP4 分片 ${durl.segment.size} 段（qn=${videoInfo.quality}）")
                 playerSource.url = "[concatenating]\n" + durl.segment.joinToString("\n") { it.url }
             }
         }

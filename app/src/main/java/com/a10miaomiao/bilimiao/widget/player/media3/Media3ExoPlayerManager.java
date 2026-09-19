@@ -96,6 +96,11 @@ public class Media3ExoPlayerManager extends BasePlayerManager {
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build();
         exoMediaPlayer.setLoadControl(loadControl);
+        com.a10miaomiao.bilimiao.comm.utils.PlayerDiag.INSTANCE.log(
+                "loadcontrol",
+                "min/max=" + bufferMs + "ms playback=2500/5000ms targetBufferBytes="
+                        + (TARGET_BUFFER_BYTES / (1024 * 1024)) + "MB dashBufferSec=" + dashBufferSec);
+        com.a10miaomiao.bilimiao.comm.utils.PlayerDiag.INSTANCE.memory("player-built");
         return exoMediaPlayer;
     }
 

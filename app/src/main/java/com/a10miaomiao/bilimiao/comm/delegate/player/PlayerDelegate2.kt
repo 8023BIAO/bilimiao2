@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.SponsorDiag
 import com.a10miaomiao.bilimiao.MainUi
 import android.content.res.ColorStateList
@@ -844,6 +845,9 @@ class PlayerDelegate2(
         return null
     }
 
+    /** 内存曲线的节拍器：historyReport 每 5 秒一次，每 6 次（≈30 秒）记一条 */
+    private var diagMemoryTick = 0
+
     internal fun historyReport(currentPosition: Long) {
 //        if (!userStore.isLogin()) {
 //            return
@@ -853,6 +857,8 @@ class PlayerDelegate2(
             return
         }
         lastReportProgress = currentPosition
+        // ★ 播放中每约 30 秒记一条堆内存：治 OOM 时能看出是"一直涨"还是"某一刻炸"
+        if (++diagMemoryTick % 6 == 0) PlayerDiag.memory("playing")
         val progressSec = currentPosition / 1000
         // 存内存 + 持久化（Activity 重建、进程被杀都能恢复）
         savePlaybackPosition()
@@ -1398,11 +1404,17 @@ class PlayerDelegate2(
                 var selectedHost = "default"
                 SettingPreferences.getData(activity) {
                     fnval = it[PlayerFnval] ?: SettingConstants.PLAYER_FNVAL_DASH
-                    // 番剧/影视强制使用 MP4 源：fnval 必须为 MP4，否则 API 返回的
-                    // durl 是 DASH 小分段 → ConcatenatingMediaSource 多段缓存 → OOM
-                    if (source is BangumiPlayerSource) {
-                        fnval = SettingConstants.PLAYER_FNVAL_MP4
-                    }
+                    // ★ 番剧/影视**跟随设置**（用户 2026-09-19 明确要求）：
+                    //   以前这里写死 `fnval = PLAYER_FNVAL_MP4`，理由是"durl 多段会 OOM"，
+                    //   代价是 PGC 的 MP4 源**上限只有 720P**（实测 accept_quality=[64,16]），
+                    //   1080P 只有 DASH 给（实测 [112,80,64,32,16]）。
+                    //   内存问题现在由 Media3ExoPlayerManager 的 64MB 堆内硬上限兜住
+                    //   （缓冲到顶就停止下载，不是继续往堆里分配），所以不必再拿清晰度换内存。
+                    PlayerDiag.log(
+                        "open",
+                        "开播 source=${source::class.java.simpleName} fnval=$fnval(4048=DASH,2=MP4) quality=$quality"
+                    )
+                    PlayerDiag.memory("open")
                     quality = it[PlayerQuality] ?: 64
                     speed = it[PlayerSpeed] ?: 1f
                     // 占用音频焦点：这个开关以前是死的（:308 写死 isReleaseWhenLossAudio = false），

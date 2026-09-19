@@ -15,6 +15,7 @@ import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
+import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.a10miaomiao.bilimiao.comm.utils.CdnSelector
 import com.a10miaomiao.bilimiao.comm.utils.CompressionTools
@@ -69,6 +70,7 @@ class VideoPlayerSource(
             e.printStackTrace()
         }
         // 如果grpc api获取失败则使用旧版api
+        PlayerDiag.log("video", "gRPC 没给出结果 → 回退 HTTP JSON playurl（fnval=$fnval qn=$quality）")
         val res = BiliApiService.playerAPI
             .getVideoPalyUrl(aid, id, quality, fnval)
 
@@ -89,6 +91,7 @@ class VideoPlayerSource(
                 "User-Agent" to BiliApiService.playerAPI.DEFAULT_USER_AGENT,
             )
             if (dash != null) {
+                PlayerDiag.log("video-http", "DASH → 生成 MPD（qn=${res.quality}）")
                 it.duration = dash.duration * 1000L
                 val dashVideo = dash.video.firstOrNull() ?: throw Exception("未找到可播放的dash视频")
                 it.height = dashVideo.height
@@ -101,6 +104,10 @@ class VideoPlayerSource(
                 )
             } else {
                 val durl = res.durl ?: throw Exception("Missing durl in video player response")
+                PlayerDiag.log(
+                    "video-http",
+                    if (durl.size == 1) "MP4 直链（1 段）" else "MP4 多段直链（${durl.size} 段）"
+                )
                 if (durl.size == 1) {
                     it.duration = durl[0].length
                     it.url = if (uposHost.isNotBlank()) {
@@ -254,6 +261,7 @@ class VideoPlayerSource(
                     }
                 }
 
+                PlayerDiag.log("video-grpc", "[merging] DASH 视频+音频两条流（qn=${playerSource.quality}）")
                 playerSource.url = if (finalAudioCandidates == null) {
                     finalVideoCandidates
                 } else {
@@ -262,6 +270,7 @@ class VideoPlayerSource(
             }
             is Stream.Content.SegmentVideo -> {
                 val durl = streamContent.value
+                PlayerDiag.log("video-grpc", "[concatenating] MP4 分片 ${durl.segment.size} 段（qn=${playerSource.quality}）")
                 playerSource.url = "[concatenating]\n" + durl.segment.joinToString("\n") { it.url }
             }
         }
