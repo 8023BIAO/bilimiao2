@@ -1,19 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 截图按钮：相机 -->
+<!--
+  截图按钮：相机。
+  ★ 尺寸/画风对齐官方播放器图标（bili_player_danmaku_is_open.png / ic_player_locked_2.png 等）：
+  官方 PNG 是 60x40 画布、描边 3px、纯白不透明；这里用同样的 60x40 画布 + strokeWidth 3，
+  配合布局里的 layout_height="20dp"，实际绘制尺寸和官方图标完全一致（30x20dp），
+  不会再有"比别的图标小一圈/细一圈"的问题。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <!-- 机身 + 顶部取景凸起 -->
+    android:width="60dp"
+    android:height="40dp"
+    android:viewportWidth="60"
+    android:viewportHeight="40">
+    <!-- 机身 + 顶部取景凸起（一笔画完，转角用圆角） -->
     <path
-        android:pathData="M3.4,7.6 h3.4 l1.4,-2.2 h7.6 l1.4,2.2 h3.4 a1.2,1.2 0 0 1 1.2,1.2 v9.6 a1.2,1.2 0 0 1 -1.2,1.2 H3.4 a1.2,1.2 0 0 1 -1.2,-1.2 V8.8 a1.2,1.2 0 0 1 1.2,-1.2 z"
+        android:pathData="M11,10.5 L19.5,10.5 L22,5.6 Q22.5,4.5 23.7,4.5 L36.3,4.5 Q37.5,4.5 38,5.6 L40.5,10.5 L49,10.5 Q55.5,10.5 55.5,17 L55.5,29 Q55.5,35.5 49,35.5 L11,35.5 Q4.5,35.5 4.5,29 L4.5,17 Q4.5,10.5 11,10.5 Z"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.6"
+        android:strokeWidth="3"
         android:strokeLineJoin="round" />
     <!-- 镜头 -->
     <path
-        android:pathData="M12,9.2 a3.6,3.6 0 1 0 0.01,0 z"
+        android:pathData="M22.5,23 c0,-4.142 3.358,-7.5 7.5,-7.5 c4.142,0 7.5,3.358 7.5,7.5 c0,4.142 -3.358,7.5 -7.5,7.5 c-4.142,0 -7.5,-3.358 -7.5,-7.5 z"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.6" />
+        android:strokeWidth="3" />
 </vector>

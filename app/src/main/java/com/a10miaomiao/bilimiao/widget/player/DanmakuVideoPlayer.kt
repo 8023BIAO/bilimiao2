@@ -58,6 +58,7 @@ import com.shuyu.gsyvideoplayer.utils.CommonUtil
 import com.shuyu.gsyvideoplayer.utils.Debuger
 import com.shuyu.gsyvideoplayer.video.StandardGSYVideoPlayer
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoView
+import java.io.File
 import master.flame.danmaku.controller.DrawHandler
 import master.flame.danmaku.danmaku.model.BaseDanmaku
 import master.flame.danmaku.danmaku.model.DanmakuTimer
@@ -171,11 +172,12 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
 //     private val mAiTranslateSwitchIV: ImageView by lazy { findViewById(R.id.ai_translate_switch_icon) }
 //     private val mAiTranslateSwitchTV: TextView by lazy { findViewById(R.id.ai_translate_switch_text) }
 
-    // 听视频（仅音频）开关 + 黑屏遮罩
+    // 听视频（仅音频）开关（现在在**顶栏**，紧挨空降两个按钮左边，只有图标）+ 黑屏遮罩
     private val mAudioOnlySwitch: ViewGroup by lazy { findViewById(R.id.audio_only_switch) }
-    private val mAudioOnlySwitchIV: ImageView by lazy { findViewById(R.id.audio_only_switch_icon) }
-    private val mAudioOnlySwitchTV: TextView by lazy { findViewById(R.id.audio_only_switch_text) }
     private val mAudioOnlyOverlay: View by lazy { findViewById(R.id.audio_only_overlay) }
+
+    // 顶栏标题（长标题单行滚动，靠 isSelected 触发 marquee）
+    private val mTitleView: TextView by lazy { findViewById(R.id.title) }
 
     // 截图
     private val mScreenshotSwitch: ViewGroup by lazy { findViewById(R.id.screenshot_switch) }
@@ -480,15 +482,43 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         return null
     }
 
+    /**
+     * 顶栏标题：长标题走"单行滚动"（XML 里 ellipsize=marquee + singleLine）。
+     *
+     * TextView 的 marquee 只在 `isSelected == true` 时才滚，而且**改完文字要重新选一次**才会从头滚；
+     * 控制栏重新显示时也重启一次，否则隐藏过一次之后标题就定住不动了。
+     */
+    private fun restartTitleMarquee() {
+        runCatching {
+            mTitleView.isSelected = false
+            mTitleView.isSelected = true
+        }
+    }
+
+    override fun setUp(
+        url: String?,
+        cacheWithPlay: Boolean,
+        cachePath: File?,
+        headers: Map<String, String>?,
+        title: String?
+    ): Boolean {
+        val r = super.setUp(url, cacheWithPlay, cachePath, headers, title)
+        restartTitleMarquee()
+        return r
+    }
+
+    override fun setUp(url: String?, cacheWithPlay: Boolean, title: String?): Boolean {
+        val r = super.setUp(url, cacheWithPlay, title)
+        restartTitleMarquee()
+        return r
+    }
+
     fun setAudioOnly(enabled: Boolean) {
         if (isAudioOnly == enabled) return
         isAudioOnly = enabled
         setViewShowState(mAudioOnlyOverlay, if (enabled) VISIBLE else GONE)
-        mAudioOnlySwitchIV.setImageResource(
-            if (enabled) R.drawable.ic_player_audio_only_on
-            else R.drawable.ic_player_audio_only_off
-        )
-        mAudioOnlySwitchTV.text = if (enabled) "听视频中" else "听视频"
+        // 按钮搬去顶栏后只留图标（和空降盾牌同款 24dp 实心耳机），
+        // 开/关靠画面上的黑色遮罩 + "听视频中"提示，不再有文字标签和图标切换
         // 画面都藏起来了，双指旋转/缩放必须一起关掉：
         // 否则黑屏上还会转画面、还会冒出"还原屏幕"按钮（用户明确要求关掉）
         if (enabled) {
@@ -694,7 +724,11 @@ initDanmakuTouchListener()
         runCatching {
             val topBar = findViewById<ViewGroup>(R.id.layout_top)
             val chapterBtn = findViewById<View>(R.id.chapter_btn_layout)
-            val at = (topBar.indexOfChild(chapterBtn).takeIf { it >= 0 } ?: (topBar.childCount - 1)) + 1
+            // 锚点优先用「听视频」按钮：它要待在空降两个按钮**左边**（用户要求），
+            // 所以把这两个插到它后面；听视频按钮不存在时退回原来的"章节按钮后面"
+            val audioBtn = findViewById<View>(R.id.audio_only_switch)
+            val anchor = audioBtn ?: chapterBtn
+            val at = (topBar.indexOfChild(anchor).takeIf { it >= 0 } ?: (topBar.childCount - 1)) + 1
             val lp = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -2051,6 +2085,10 @@ initDanmakuTouchListener()
             }
         } else {
             super.setViewShowState(view, visibility)
+            if (view.id == R.id.layout_top && visibility == VISIBLE) {
+                // 顶栏重新显示 → 长标题重新滚一遍（隐藏期间 marquee 是停的）
+                restartTitleMarquee()
+            }
             if (view.id == mBottomLayout.id) {
                 // ★ 通知双指控制器：控件可见状态变化
                 if (::pinchToZoom.isInitialized) {
@@ -2962,7 +3000,9 @@ initDanmakuTouchListener()
     fun setWindowInsets(left: Int, top: Int, right: Int, bottom: Int, displayCutout: DisplayCutout?) {
         if (mode == PlayerMode.FULL) {
             mTopContainer.setPadding(left, top, right, 0)
-            mBottomContainer.setPadding(left, 0, right, 0)
+            // ★ 底栏以前只吃左右 inset，**底下不留**（bottom=0）→ 全屏时按钮/文字贴着屏幕下沿，
+            //   手势条那一块正好压在"锁定"上，看着像被切掉、也容易误触。现在把底部 inset 也算进去。
+            mBottomContainer.setPadding(left, 0, right, bottom)
             mLockContainer.setPadding(left, 0, right, 0)
         } else {
             if (mode == PlayerMode.SMALL_FLOAT) {

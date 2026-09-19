@@ -91,7 +91,7 @@
                 android:id="@+id/current"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="8dp"
+                android:layout_marginLeft="12dp"
                 android:text="00:00"
                 android:textColor="#ffffff" />
 
@@ -140,7 +140,7 @@
                 android:id="@+id/fullscreen"
                 android:layout_width="36dp"
                 android:layout_height="36dp"
-                android:paddingRight="8dp"
+                android:paddingRight="12dp"
                 android:src="@drawable/ic_player_portrait_fullscreen"
                 android:contentDescription="全屏切换按钮"/>
 
@@ -152,7 +152,7 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingHorizontal="5dp"
+            android:paddingHorizontal="12dp"
             android:visibility="gone">
 
             <ImageView
@@ -167,7 +167,7 @@
 
             <TextView
                 android:id="@+id/send_danmaku"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="30dp"
                 android:layout_weight="1"
                 android:text="发送弹幕"
@@ -184,6 +184,7 @@
                 android:id="@+id/subtitle_switch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
                 android:gravity="center"
                 android:orientation="vertical">
 
@@ -232,31 +233,6 @@
             </LinearLayout>
 
             <!-- 听视频（仅音频）开关 -->
-            <LinearLayout
-                android:id="@+id/audio_only_switch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:gravity="center"
-                android:orientation="vertical">
-
-                <ImageView
-                    android:id="@+id/audio_only_switch_icon"
-                    android:layout_width="wrap_content"
-                    android:layout_height="20dp"
-                    android:layout_marginBottom="3dp"
-                    android:src="@drawable/ic_player_audio_only_off" />
-
-                <TextView
-                    android:id="@+id/audio_only_switch_text"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="听视频"
-                    android:textColor="@android:color/white"
-                    android:textSize="@dimen/default_tiny_text_size" />
-
-            </LinearLayout>
-
             <!-- 截图 -->
             <LinearLayout
                 android:id="@+id/screenshot_switch"
@@ -287,6 +263,7 @@
                 android:id="@+id/danmaku_switch"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
                 android:gravity="center"
                 android:orientation="vertical">
 
@@ -312,6 +289,7 @@
                 android:id="@+id/quality"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
                 android:foreground="?attr/selectableItemBackground"
                 android:gravity="center"
                 android:orientation="vertical">
@@ -335,6 +313,7 @@
                 android:id="@+id/lock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
                 android:foreground="?attr/selectableItemBackground"
                 android:gravity="center"
                 android:orientation="vertical">
@@ -418,13 +397,23 @@
             android:src="@drawable/ic_close_white_24dp"
             android:contentDescription="退出按钮"/>
 
+        <!--
+          标题：长标题改为**单行滚动**（marquee）。
+          以前 maxLines=2 会占两行、盖住更多画面，而且还是会省略号截断；
+          滚动只在控制栏显示时进行（控制栏几秒后自动隐藏，滚动也随 View 一起不可见），
+          所以对看视频没影响，反而比两行占的地方更小。
+          layout_width 用 0dp + weight=1：让标题拿到"去掉右侧按钮后剩下的"确定宽度，
+          marquee 需要确定宽度才能正常滚动。
+        -->
         <TextView
             android:id="@+id/title"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="2"
+            android:ellipsize="marquee"
+            android:marqueeRepeatLimit="marquee_forever"
+            android:maxLines="1"
+            android:singleLine="true"
             android:paddingLeft="10dp"
             android:textColor="@android:color/white"
             android:textSize="18sp" />
@@ -486,6 +475,30 @@
                 android:text="章节"
                 android:textColor="@android:color/white"
                 android:textSize="16sp" />
+
+        </LinearLayout>
+
+        <!--
+          听视频（仅音频）：进顶栏、紧挨空降助手两个按钮的左边（用户在底栏点的位置够不着 + 图标风格不统一）。
+          位置：XML 里放在 chapter_btn_layout 之后、play_speed 之前；空降两个按钮是运行时插在
+          chapter_btn_layout 后面的，所以最终顺序 = [听视频] [盾·空降] [盾·提交]。
+          样式与空降盾牌一致：24dp 纯白实心图标 + 10dp 内边距。
+        -->
+        <LinearLayout
+            android:id="@+id/audio_only_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/audio_only_switch_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:src="@drawable/ic_player_audio_only_on"
+                android:contentDescription="听视频（仅音频）" />
 
         </LinearLayout>
 
