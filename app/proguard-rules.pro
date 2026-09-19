@@ -41,24 +41,14 @@
 -keep class kotlin.coroutines.Continuation { *; }
 
 # ===== kotlinx.serialization =====
+# 只需要保住运行库本身：
+#  - @Serializable 类的 $serializer/Companion 由 kotlinx-serialization **自带的 consumer rules** 负责；
+#  - 我们自家的 @Serializable 类（含导航路由页）都在下面
+#    `-keep class com.a10miaomiao.**` / `cn.a10miaomiao.**` 的范围内，本来就不会被删。
+# 2026-09-20 清理：原来这里还有两条 `@kotlinx.serialization.Serializable <fields>` 的过滤器 +
+# 一个以它为条件的 -if —— **注解打在类上、不在字段上**，条件永远不成立，属于空规则，已删（不影响行为）。
 -keep class kotlinx.serialization.** { *; }
 -keepclassmembers class kotlinx.serialization.** { *; }
-# 保护 @Serializable 类的 $serializer 伴生对象
--keepclassmembers class * {
-    @kotlinx.serialization.Serializable <fields>;
-}
--if class * {
-    @kotlinx.serialization.Serializable <fields>;
-}
--keepclassmembers class <1>$serializer {
-    *** INSTANCE;
-}
--if class * implements kotlinx.serialization.internal.GeneratedSerializer {
-    static ** $instance;
-}
--keepclassmembers class <1> {
-    static <1>$serializer INSTANCE;
-}
 
 # ===== Compose (BOM 2026.05 + Kotlin Compose Compiler Plugin) =====
 # 防止 R8 删除 @Composable 函数（Kotlin 2.x Compose compiler 生成新字节码模式）
@@ -70,7 +60,9 @@
 -keep class androidx.compose.runtime.snapshots.** { *; }
 
 # ===== Navigation 2.9.8 (反射路由) =====
--keep class cn.a10miaomiao.bilimiao.compose.pages.**.PageConfig { *; }
+# 2026-09-20 清理：原来这里还有一条 `pages.**.PageConfig` —— `PageConfig` 是**函数/文件名**
+# （common/mypage/PageConfig.kt），那个包下并不存在这个类，属于空规则，已删。
+# 真正需要保的是"路由页"（@Serializable + ComposePage），见文件末尾那一组。
 -keep class * implements androidx.navigation.NavArgs { *; }
 
 # ===== 播放器 =====
@@ -89,8 +81,10 @@
 
 # ===== DI (Kodein) =====
 -keep class org.kodein.type.** { *; }
--keep class * extends org.kodein.type.TypeReference
--keep class * extends org.kodein.type.TypeToken
+# TypeReference / TypeToken 子类：Kodein 靠它们的成员做类型查找，必须连成员一起保
+# （2026-09-20 修正：原来只有 `-keep class * extends …`，没写 { *; } —— 只保住了类名）
+-keep class * extends org.kodein.type.TypeReference { *; }
+-keep class * extends org.kodein.type.TypeToken { *; }
 # Kodein Compose 内联函数生成类（rememberInstance 等反射依赖）
 -keep class org.kodein.di.compose.**$* { *; }
 -keepclassmembers class org.kodein.di.compose.** {
@@ -159,6 +153,10 @@
 }
 
 # ===== 静默警告 =====
+# 说明（2026-09-20 复核）：这些都是**第三方库引用的可选依赖**（TLS 提供方 / OSGi 注解 / 脱糖用到
+# java.* 之外的类型 / 库内部实现类），Android 上本来就不存在，不 -dontwarn 只会在编译期刷一片警告。
+# 想进一步收紧（只保留真正触发警告的那几条）必须在**有编译环境**的地方做 —— 删多了会直接编译失败，
+# 所以这里保持现状，只补注释。
 -dontwarn okhttp3.internal.**
 -dontwarn okio.**
 -dontwarn javax.annotation.**

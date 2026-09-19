@@ -1,72 +1,26 @@
 package com.a10miaomiao.bilimiao.comm.utils
 
-import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import java.io.File
-
 /**
- * **播放器诊断日志**（文件版）。
+ * **播放器诊断日志 —— 发布版已停用（2026-09-20）**。
  *
- * 为什么需要它（2026-09-19 用户要求）：
- *  - 这台 ROM 把 App 的 logcat 全掐了，`miaoLogger().debug` 在 release 包里又是静默的
- *    （`BuildConfig.DEBUG == false` 直接 return）→ 装机版上"到底走了哪条取流路径、
- *    缓冲参数是多少、内存涨到多少"**完全看不见**；
- *  - 之前"番剧 DASH 会 OOM、MP4 只有 720P"这类问题只能靠猜，猜错一次就白改一轮。
+ * 背景：2026-09-19 为了定位"番剧 DASH 播不出来 / 内存曲线 / 清晰度协商"等问题，
+ * 这里会把每次开播的取流路径、LoadControl 参数、堆内存等写进
+ * `/sdcard/Android/data/<包名>/files/player_diag.log`（超过 400KB 自动清空）。
  *
- * 记什么（每类事件一行，写得很少）：
- *  - 每次开播：来源类型 / fnval（用户设置 vs 实际生效）/ 清晰度 / 走的哪条路径
- *    （gRPC / HTTP / 代理）/ 建出来的源类型（MPD / merging / concatenating / 直链）；
- *  - LoadControl 的缓冲参数（含 64MB 堆内上限）；
- *  - 播放中每约 30 秒一条**堆内存**曲线（治 OOM 取证用）。
+ * 正式版发布前按用户要求**整体停用**：函数签名保留、实现清空，
+ * **不再创建、不再写入任何文件**。
  *
- * 路径：`/sdcard/Android/data/<包名>/files/player_diag.log`（debug 包是 `…​.mod.dev`）。
- * 超过 400KB 自动清空，不会无限长大。
+ * 为什么保留调用点（而不是把 55 处调用一起删掉）：
+ *  1. 线上再遇到同类问题，把这里的实现恢复即可，不用再把埋点重新插一遍；
+ *  2. 这两个方法现在是空方法、无副作用，R8 会把整段调用优化掉，不占体积、不影响性能。
  */
 object PlayerDiag {
 
-    private const val MAX_BYTES = 400 * 1024L
-    private const val FILE_NAME = "player_diag.log"
+    /** 记一行诊断日志（发布版：不落盘、不输出） */
+    @Suppress("UNUSED_PARAMETER")
+    fun log(tag: String, msg: String) = Unit
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-    private val file: File? by lazy {
-        runCatching {
-            BilimiaoCommApp.commApp.app.getExternalFilesDir(null)?.resolve(FILE_NAME)
-        }.getOrNull()
-    }
-
-    fun log(tag: String, msg: String) {
-        val f = file ?: return
-        scope.launch {
-            runCatching {
-                f.parentFile?.mkdirs()
-                if (f.exists() && f.length() > MAX_BYTES) {
-                    f.writeText("")
-                }
-                f.appendText("${System.currentTimeMillis()} [$tag] $msg\n")
-            }
-        }
-    }
-
-    /** 记一行堆内存（MB）：治 OOM 时看这条曲线就知道是"一直涨"还是"某一刻炸" */
-    fun memory(tag: String) {
-        runCatching {
-            val rt = Runtime.getRuntime()
-            val used = (rt.totalMemory() - rt.freeMemory()) / 1048576L
-            val max = rt.maxMemory() / 1048576L
-            // 占用到「本机堆上限的 1/4」或 128MB（取小的那个）就先强制一次 GC 再测：
-            // 实机（堆上限 512MB）播放中常态 130~210MB，若按 60% 阈值根本不会触发，探针等于没有。
-            // 这样能一眼分清"只是还没回收的垃圾"（GC 后掉很多）和"真的在涨"（GC 后基本不变）
-            val probeAt = (max / 4).coerceAtMost(128L)
-            val extra = if (used >= probeAt) {
-                System.gc()
-                val after = (rt.totalMemory() - rt.freeMemory()) / 1048576L
-                "（GC 后 ${after}MB）"
-            } else ""
-            log("mem:$tag", "堆已用 ${used}MB / 上限 ${max}MB$extra")
-        }
-    }
+    /** 记一行堆内存（发布版：不落盘、不输出） */
+    @Suppress("UNUSED_PARAMETER")
+    fun memory(tag: String) = Unit
 }
