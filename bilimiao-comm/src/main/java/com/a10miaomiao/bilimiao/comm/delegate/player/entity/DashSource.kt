@@ -125,7 +125,11 @@ $audioBaseUrls
             PlayerDiag.log(
                 "mpd",
                 "SegmentBase=${if (mpdStr.contains("<SegmentBase")) "已写入 Representation 内" else "缺失！"}" +
-                    " | baseUrl 数=${videoBaseUrls.count { it.contains("<BaseURL>") }}" +
+                    // 注意：videoBaseUrls 是 String（多个 <BaseURL> 用换行拼起来的），
+                    // 不是集合 —— 对它用 count{} 拿到的是 Char，Char 没有 contains(CharSequence)，
+                    // 会编译报 "receiver type mismatch"（vc100 首次编译就是这么挂的）。
+                    // 数出现次数用 split：出现 n 次 → 切成 n+1 段 → n
+                    " | baseUrl 数=${videoBaseUrls.split("<BaseURL>").size - 1}" +
                     " | audio=${if (audio != null) "有" else "无"}"
             )
         }
