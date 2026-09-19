@@ -398,12 +398,14 @@
             android:contentDescription="退出按钮"/>
 
         <!--
-          标题：长标题改为**单行滚动**（marquee）。
-          以前 maxLines=2 会占两行、盖住更多画面，而且还是会省略号截断；
-          滚动只在控制栏显示时进行（控制栏几秒后自动隐藏，滚动也随 View 一起不可见），
-          所以对看视频没影响，反而比两行占的地方更小。
-          layout_width 用 0dp + weight=1：让标题拿到"去掉右侧按钮后剩下的"确定宽度，
-          marquee 需要确定宽度才能正常滚动。
+          标题：**不再显示**（用户要求，对齐官方播放器）。
+          理由：播放器里这行字怎么都看不全（单行滚动也得几秒才滚完），还压着画面；
+          真想知道标题的人会去详情页看（详情页有完整标题 + 简介）。
+          做法：控件**保留但 invisible**（不是 GONE）——
+            · 保留：画中画窗口的标题就是从这个 TextView 的 text 读的（PicInPicHelper），
+              删了 PiP 就没标题；GSY 的 setUp 照样往里 setText，不受 visibility 影响；
+            · invisible 而不是 GONE：右侧按钮（听视频/空降/倍速/更多）位置不变，不会突然挤到左边。
+          marquee 那几个属性留着：以后想把标题放回来，改一行 visibility 就能继续滚。
         -->
         <TextView
             android:id="@+id/title"
@@ -416,7 +418,8 @@
             android:singleLine="true"
             android:paddingLeft="10dp"
             android:textColor="@android:color/white"
-            android:textSize="18sp" />
+            android:textSize="18sp"
+            android:visibility="invisible" />
 
         <LinearLayout
             android:id="@+id/cast_btn_layout"
