@@ -53,24 +53,29 @@ internal object ThreadRipperSettings {
     @Volatile
     var enabled: Boolean = false
 
-    /** 自动线程（默认开）：线程数按分段大小自适应，上限取 [threads] */
+    /** 自动并发（默认开）：连接数按分段大小自适应，上限取 [threads] */
     @Volatile
     var autoThreads: Boolean = true
 
-    /** 线程数档位：0 = 不限（自适应，最多到本机核数），1..max = 固定线程数 */
+    /** 并发连接数档位：0 = 不限（自适应，最多到本机核数），1..max = 固定连接数 */
     @Volatile
     var threads: Int = 0
 
-    /** 本机"最大线程数" = 处理器核数（设置页滑块的上限就是它），至少 1 */
+    /** 本机"最大并发连接数" = 处理器核数（设置页滑块的上限就是它），至少 1 */
     val maxThreads: Int
         get() = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
 
     /**
-     * 自动模式下每个线程负责的字节数：分段越大线程越多。
-     * 取 512KB 是因为 B 站普通分段大多在 1~4MB（→ 2~8 线程），
-     * 与上游项目"推荐 8 到 32"的经验值同量级，但小分段不会白白开一堆连接。
+     * 自动模式下**每条连接**负责的字节数：要拉的字节越多，连接越多。
+     *
+     * 为什么从 512KB 提到 2MB（2026-09-19 实机日志驱动）：
+     * 走磁盘缓存时，回源请求经常只有 1~5MB（实测 `ripper_diag.log` 里同一分段
+     * 一分钟内被请求 60 多次），按 512KB 切就是"每个请求开 2~8 条连接、每条只拉几百 KB"——
+     * TCP + TLS 握手和服务端 seek 的开销还没摊平就传完了，跨境线路上反而更慢。
+     * 改成 2MB/连接后：2MB→2 条、6MB→3 条、16MB 以上才吃满本机上限，
+     * 而真正吃力的几十~几百 MB 大分段照样并发。
      */
-    private const val AUTO_BYTES_PER_THREAD = 512L * 1024L
+    private const val AUTO_BYTES_PER_THREAD = 2L * 1024L * 1024L
 
     /**
      * 从 DataStore 刷新一份快照。
@@ -107,8 +112,8 @@ internal object ThreadRipperSettings {
      * 决定这次请求用几个线程（1 = 不并发）。
      *
      * 档位语义（设置页里逐条有说明）：
-     *  - 自动线程 **开** → 按分段大小自适应，上限 = 你设的档位（不限 = 本机核数）；
-     *  - 自动线程 **关** → 档位是几就用几个线程；档位选「不限」则自适应（最多到本机核数）。
+     *  - 自动并发 **开** → 并发连接数按分段大小自适应，上限 = 你设的档位（不限 = 本机核数）；
+     *  - 自动并发 **关** → 档位是几就用几条连接；档位选「不限」则自适应（最多到本机核数）。
      */
     fun resolveThreads(chunkBytes: Long): Int {
         if (!enabled) return 1
@@ -116,7 +121,8 @@ internal object ThreadRipperSettings {
         val configured = threads
         val cap = if (configured <= 0) max else configured.coerceIn(1, max)
         val bySize = ((chunkBytes + AUTO_BYTES_PER_THREAD - 1) / AUTO_BYTES_PER_THREAD).toInt()
-        val adaptive = bySize.coerceIn(1, cap).coerceAtLeast(minOf(2, cap))
+        // 不再强制"至少 2 条"：1~2MB 的回源请求单连接就够，硬拆成两条只增加握手开销
+        val adaptive = bySize.coerceIn(1, cap)
         return when {
             autoThreads -> adaptive
             configured <= 0 -> adaptive
@@ -148,7 +154,7 @@ internal class ThreadRipperDataSource(
         const val QUEUE_CAPACITY = 4
 
         /** 小于这个长度不值得并发（请求本身就没多大，多开连接反而更慢） */
-        const val MIN_PARALLEL_BYTES = 192L * 1024L
+        const val MIN_PARALLEL_BYTES = 1L * 1024L * 1024L
 
         /** 线程数硬上限（核数再多也不超过它：连接、校验、重组本身也有开销） */
         const val MAX_WORKERS = 16
@@ -191,6 +197,7 @@ internal class ThreadRipperDataSource(
 
         /**
          * 连续失败计数：每成功一块清零，累计 3 次分块失败就把并发整体关掉 10 分钟。
+         * （上层取消导致的 InterruptedException 不算失败，见 [Chunk.isCancellation]）
          *
          * 为什么需要它（2026-09-19 实机反馈）：国内冷门视频常被分到 PCDN/MCDN 节点，
          * 这类节点对"任意 Range + 多并发"支持很差。以前只有在"一个字节都没交付"时才熔断，
@@ -323,7 +330,8 @@ internal class ThreadRipperDataSource(
 
         RipperDiag.log(
             "parallel",
-            "并发拉取：${threads} 线程 / ${length / 1024}KB（${dataSpec.uri.lastPathSegment ?: ""}）"
+            "并发拉取：${threads} 连接 / ${length / 1024}KB @${dataSpec.position / 1024}KB" +
+                "（${dataSpec.uri.lastPathSegment ?: ""}）"
         )
 
         return try {
@@ -509,11 +517,6 @@ internal class ThreadRipperDataSource(
      * 一个字节块：在自己的连接上把 `[start, start+length)` 拉下来，
      * 以 64KB 为单位塞进有界队列（队列满就阻塞 —— 这是"预读"的边界，也是内存闸门；
      * 上层不读了就靠 [cancel] 打断 `put`）。
-     */
-    /**
-     * 一个字节块：在自己的连接上把 `[start, start+length)` 拉下来，
-     * 以 64KB 为单位塞进有界队列（队列满就阻塞 —— 这是"预读"的边界，也是内存闸门；
-     * 上层不读了就靠 [cancel] 打断 `put`）。
      *
      * ★ 失败处理（2026-09-19 依据 N_m3u8DL-RE / burst-download 的做法重做）：
      *  - **分块级重试**：单块最多试 [MAX_ATTEMPTS] 次，只重下这一块**没下完的部分**
@@ -555,6 +558,26 @@ internal class ThreadRipperDataSource(
         }
 
         /**
+         * 这个异常是"上层主动取消"，还是"下载真的失败"？
+         *
+         * media3 的 HttpDataSource 在读取线程被中断时会抛 `HttpDataSourceException`，
+         * cause 是 `InterruptedIOException: thread interrupted` —— 播放器 seek / 切集 /
+         * 关播放器都会走到这里。注意 `SocketTimeoutException` **也是** `InterruptedIOException`
+         * 的子类，但它代表"这条连接真的读超时了"，必须照旧重试，所以先把它排除掉。
+         */
+        private fun Throwable.isCancellation(): Boolean {
+            var c: Throwable? = this
+            var interrupted = false
+            while (c != null) {
+                if (c is java.net.SocketTimeoutException) return false
+                if (c is InterruptedException) return true
+                if (c is java.io.InterruptedIOException) interrupted = true
+                c = c.cause
+            }
+            return interrupted && (closed || Thread.currentThread().isInterrupted)
+        }
+
+        /**
          * 卡死巡检回调。
          * 只在"队列没满"时才判定卡死：队列满说明是**上层还没取走**（正常预读），
          * 这时候掐连接会把正常的预读反复打断。
@@ -580,6 +603,13 @@ internal class ThreadRipperDataSource(
                         return
                     } catch (e: Throwable) {
                         if (closed) return
+                        // 不是"下载失败"，而是"上层不要了"：seek / 切集 / 关播放器时读取线程被中断，
+                        // media3 会把它包成 HttpDataSourceException(InterruptedIOException: thread interrupted)。
+                        // 这种既不该重试、也不该记 `[chunk-retry]`，更不能喂给熔断器计数。
+                        if (e.isCancellation()) {
+                            Thread.currentThread().interrupt()
+                            return
+                        }
                         attempts++
                         if (attempts > MAX_ATTEMPTS) {
                             RipperDiag.log(
