@@ -139,6 +139,16 @@ object SettingPreferences {
     val SelectedCdnHost = stringPreferencesKey("selected_cdn_host") 
     // 【已移除】DanmakuEngineV2 — 新弹幕引擎已废弃，保留旧引擎
 
+    // ── 线程撕裂者（海外加速：把每个分段再切成多个字节 Range 并发下载）──
+    // 对齐 https://github.com/MrTangLuyao/Bilibili-thread-ripper 的思路：
+    // 不再赌单个 CDN 节点，而是把播放器要读的字节范围切小、多路并发拉，谁快用谁。
+    /** 总开关。**默认关**：实验性功能，海外用户建议开、国内不建议（自行测试） */
+    val ThreadRipperEnable = booleanPreferencesKey("thread_ripper_enable")
+    /** 自动线程：线程数按分段大小自适应，上限取 [ThreadRipperThreads]；开时下面那根滑块置灰 */
+    val ThreadRipperAutoThreads = booleanPreferencesKey("thread_ripper_auto_threads")
+    /** 线程数档位：0 = 不限（自适应，最多到本机处理器核数），1..max = 固定线程数 */
+    val ThreadRipperThreads = intPreferencesKey("thread_ripper_threads")
+
     /**
      * Player
      */

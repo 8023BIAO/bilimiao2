@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -61,6 +62,12 @@ class SponsorBlockSettingPage : ComposePage() {
 @Composable
 private fun SponsorBlockSettingPageContent() {
     PageConfig(title = "空降助手")
+
+    // 离开本页时把还开着的覆盖层弹窗（昵称/私人ID/颜色…）一起收掉：
+    // 它们是挂在 Activity 上的原生 Dialog，页面没了弹窗还在就会 WindowLeaked
+    DisposableEffect(Unit) {
+        onDispose { SponsorBlockSettingsUi.dismissAll() }
+    }
 
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsState().value

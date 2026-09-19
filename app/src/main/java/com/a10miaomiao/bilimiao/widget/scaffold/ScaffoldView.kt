@@ -75,13 +75,38 @@ class ScaffoldView @JvmOverloads constructor(
 
     var orientation = VERTICAL
         set(value) {
-            if (field != value) {
-                field = value
+            val changed = field != value
+            field = value
+            // ★ 挂起/折叠状态**无条件**复位：
+            //   以前只在"方向值真的变了"时复位，于是"ScaffoldView 认为方向没变、窗口其实变了"
+            //   （关掉系统自动旋转后手动旋转设备就是这种情形）会把播放器 UI 永久锁在
+            //   isHoldUp=true —— 除进度条外全部 GONE、点什么都没反应（用户报的"界面被锁住"）。
+            if (playerViewSizeStatus != PlayerViewSizeStatus.NORMAL) {
                 playerViewSizeStatus = PlayerViewSizeStatus.NORMAL
+            }
+            if (changed) {
                 this.appBar?.orientation = orientation
                 updateLayout()
             }
         }
+
+    /**
+     * 窗口**真实尺寸**变化回调（width, height）。方向判定的最终真源。
+     *
+     * 为什么需要它：旋转不重建 Activity（Manifest 里 configChanges 声明了 orientation），
+     * `onConfigurationChanged` 可能早于真正的大小变化，`resources.configuration` 也可能是旧值；
+     * 只有走到 onSizeChanged 才代表"尺寸已经变完了"。播放器靠它重算 全屏/小窗 模式。
+     */
+    var onWindowSizeChanged: ((width: Int, height: Int) -> Unit)? = null
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w > 0 && h > 0) {
+            // 宽 > 高 = 横屏。setter 里带"值没变就不重排"的判断，不会引起布局循环
+            orientation = if (w > h) HORIZONTAL else VERTICAL
+        }
+        onWindowSizeChanged?.invoke(w, h)
+    }
 
     var bottomBarLocked = false // 锁定底栏，不随滚动隐藏
 

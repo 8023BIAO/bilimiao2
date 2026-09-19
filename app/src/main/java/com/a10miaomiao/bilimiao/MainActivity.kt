@@ -68,6 +68,7 @@ import com.a10miaomiao.bilimiao.store.Store
 import com.a10miaomiao.bilimiao.widget.scaffold.ScaffoldView
 import com.a10miaomiao.bilimiao.widget.scaffold.behavior.DrawerBehaviorDelegate
 import com.a10miaomiao.bilimiao.widget.scaffold.behavior.AppBarBehavior
+import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
 import com.a10miaomiao.bilimiao.widget.scaffold.behavior.PlayerBehavior
 import com.a10miaomiao.bilimiao.widget.scaffold.getScaffoldView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -201,6 +202,14 @@ class MainActivity
         // 否则 ExoPlayer 还占着、通知栏还在，UI 上却看不到播放器（只能重开视频）
         ui.root.showPlayer = basePlayerDelegate.isPlaying() || basePlayerDelegate.isPause()
         ui.root.playerDelegate = basePlayerDelegate as PlayerDelegate2
+        // ★ 恢复"全屏中"这个事实：播放器 View 跨 Activity 复用（MainUi.keepPlayerView），
+        //   mode 是活的，但 ScaffoldView.fullScreenPlayer 只是普通字段、重建后回到 false ——
+        //   不恢复的话"全屏中重建"会被当成非全屏，mode 被降级成横屏浮动小窗。
+        ui.root.fullScreenPlayer =
+            (basePlayerDelegate as PlayerDelegate2).currentPlayerMode() ==
+                DanmakuVideoPlayer.PlayerMode.FULL
+        // 窗口真实尺寸是方向的最终真源（旋转不重建时 configuration 可能是旧值）
+        ui.root.onWindowSizeChanged = { w, h -> (basePlayerDelegate as PlayerDelegate2).onHostSizeChanged(w, h) }
         ui.root.onDrawerStateChanged = ::onDrawerStateChanged
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             ui.root.rootWindowInsets?.let {
@@ -660,10 +669,15 @@ class MainActivity
         super.onConfigurationChanged(newConfig)
         // AppCompatDelegate.setDefaultNightMode 已处理主题资源切换，不再使用已废弃的 resources.updateConfiguration
 
+        // ★ 顺序：先把方向写进 ScaffoldView，再通知播放器。
+        //   反过来的话，PlayerDelegate2/PlayerController 会在"scaffoldApp.orientation 还是旧值"的
+        //   窗口里推导模式（模式被钉错、控件串台的来源之一）。
+        //   mainUi 要等主题流首次发射才创建，这个窗口内不能访问 ui（否则 IllegalStateException 崩溃）。
+        if (mainUi != null) {
+            ui.root.orientation = newConfig.orientation
+        }
         basePlayerDelegate.onConfigurationChanged(newConfig)
-        // mainUi 要等主题流首次发射才创建，这个窗口内旋转/切配置不能再访问 ui（否则 IllegalStateException 崩溃）
         if (mainUi == null) return
-        ui.root.orientation = newConfig.orientation
         statusBarHelper.isLightStatusBar =
             !ui.root.showPlayer || (ui.root.orientation == ScaffoldView.HORIZONTAL && !ui.root.fullScreenPlayer)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {

@@ -149,17 +149,31 @@ object OverlayDialog {
         return dialog
     }
 
-    /** 纯列表选择（替代 `AlertDialog.setItems`），走同一套全屏覆盖层 */
+    /**
+     * 纯列表选择（替代 `AlertDialog.setItems`），走同一套全屏覆盖层。
+     *
+     * ★ 契约：默认 `dismissOnPick = true` —— **点选即关掉自己**。
+     *   以前只回调、关不关全看调用方；调用方漏写就变成"点了没反应、必须按返回键才消失"
+     *   （空降助手「提交片段」里的「选择分类 / 选择动作」就是这么坏的）。
+     *   这里只 dismiss **本函数自己 new 出来的那个 Dialog 实例**，不碰任何外部引用 ——
+     *   所以调用方在 `onPick` 里紧接着新开一个弹窗不会被误关（关自己发生在回调之前）。
+     *   需要"多选/连选"语义时显式传 `dismissOnPick = false`。
+     *
+     * 调用方**不要**再自己写 `currentDialog?.dismiss()` 关它：一来越权、二来容易关错对象。
+     */
     fun showList(
         context: Context,
         title: String?,
         items: List<String>,
         onPick: (Int) -> Unit,
         onDismiss: (() -> Unit)? = null,
+        dismissOnPick: Boolean = true,
     ): Dialog {
         val density = context.resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
         val textColor = onSurfaceColor(context)
+        // item 的监听器创建时机早于 show() 返回，实例只能先声明后回填
+        var self: Dialog? = null
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(14), dp(18), dp(14))
@@ -182,12 +196,16 @@ object OverlayDialog {
                         setTextColor(textColor)
                         setPadding(0, dp(12), 0, dp(12))
                         isClickable = true
-                        setOnClickListener { onPick(index) }
+                        setOnClickListener {
+                            // 先关自己，再回调：调用方在 onPick 里新开弹窗时旧窗口已经不在了
+                            if (dismissOnPick) runCatching { self?.dismiss() }
+                            onPick(index)
+                        }
                     })
                 }
             })
         })
-        return show(context, box, onDismiss = onDismiss)
+        return show(context, box, onDismiss = onDismiss).also { self = it }
     }
 
     // ── 颜色：直接用系统属性解析，避免依赖具体主题/库 ──

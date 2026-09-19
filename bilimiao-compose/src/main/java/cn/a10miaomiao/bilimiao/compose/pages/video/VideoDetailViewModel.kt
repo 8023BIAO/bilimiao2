@@ -48,6 +48,7 @@ import com.a10miaomiao.bilimiao.comm.store.PlayListStore
 import com.a10miaomiao.bilimiao.comm.store.PlayerStore
 import com.a10miaomiao.bilimiao.comm.store.UserLibraryStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
+import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.a10miaomiao.bilimiao.comm.toast
@@ -573,6 +574,11 @@ class VideoDetailViewModel(
             }
             return@launch
         }
+        // ★ 防连点：点赞是 toggle，但连点两次时第二次读到的还是**没更新的旧状态**，
+        //   于是同一个 like=1 被发两遍 —— 既白刷服务端，回来还会把本地状态改乱。
+        //   同一 aid 同一时刻只放一个请求进去（请求结束即释放，不影响正常单点）。
+        val likeKey = "video:like:${'$'}{arc.aid}"
+        if (!ClickGuard.enter(likeKey)) return@launch
         try {
             val res = BiliApiService.videoAPI
                 .like(
@@ -597,6 +603,8 @@ class VideoDetailViewModel(
             if (e is CancellationException) throw e
             e.printStackTrace()
             toast(e.message ?: e.toString())
+        } finally {
+            ClickGuard.leave(likeKey)
         }
     }
 

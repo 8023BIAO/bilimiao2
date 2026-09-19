@@ -179,6 +179,18 @@ class PlayerDelegate2(
             val httpFactory = DefaultHttpDataSource.Factory()
             httpFactory.setUserAgent(userAgent)
             httpFactory.setDefaultRequestProperties(header)
+            // ── 线程撕裂者（海外加速，实验性）──
+            // 只包在**回源**这一层：缓存命中仍走本地；已有的「CDN 竞速 / CDN 固定主机 /
+            // 音频不跟随 CDN」全部照旧生效 —— 它们决定"用哪个 URL"，这一层只决定
+            // "这个 URL 上的字节怎么并发拉"，所以开关本功能**不需要**动任何 CDN 设置。
+            // 关闭开关 / 长度未知 / 服务端不认 Range 时，它内部会自动透传单连接（行为与不加这层一致）。
+            ThreadRipperSettings.refreshBlocking(context)
+            val upstreamFactory: DataSource.Factory =
+                if (ThreadRipperSettings.enabled) {
+                    ThreadRipperDataSourceFactory(httpFactory)
+                } else {
+                    httpFactory
+                }
             val cache = getCache(context)
             // 自定义 CacheKeyFactory：只取 path 作为缓存 key，跨 CDN 节点互通
             // Bilibili 同个视频在不同 API 调用中可能返回不同的 CDN host，
@@ -194,7 +206,7 @@ class PlayerDelegate2(
                 .setCacheKeyFactory(cacheKeyFactory)
                 .setCacheReadDataSourceFactory(cacheReadFactory)
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-                .setUpstreamDataSourceFactory(httpFactory)
+                .setUpstreamDataSourceFactory(upstreamFactory)
         }
 
         /**
@@ -1520,10 +1532,22 @@ class PlayerDelegate2(
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         controller.updatePlayerMode(newConfig)
+        // ★ 配置变化时无条件解除"挂起"(拖到屏幕边缘后 UI 全隐藏)状态：
+        //   以前只靠 ScaffoldView.orientation 的 setter 在"方向值真的变了"时复位，
+        //   而关掉系统自动旋转后手动转设备可能根本不产生方向变化 → UI 永久锁死（用户报的"界面被锁住"）。
+        player?.setHoldStatus(false)
         if (scaffoldApp.orientation != newConfig.orientation) {
             controller.onChangedScreenOrientation(newConfig.orientation)
         }
     }
+
+    /** 宿主窗口真实尺寸变化（ScaffoldView.onSizeChanged）→ 重算播放器模式 */
+    fun onHostSizeChanged(width: Int, height: Int) {
+        controller.onHostSizeChanged(width, height)
+    }
+
+    /** 当前播放器模式（Activity 重建时恢复 ScaffoldView.fullScreenPlayer 用） */
+    fun currentPlayerMode(): DanmakuVideoPlayer.PlayerMode? = player?.mode
 
     override fun getSourceIds(): PlayerSourceIds {
         return playerSource?.getSourceIds() ?: PlayerSourceIds()

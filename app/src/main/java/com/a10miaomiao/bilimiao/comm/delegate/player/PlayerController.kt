@@ -295,9 +295,13 @@ class PlayerController(
         if (player?.mode == DanmakuVideoPlayer.PlayerMode.SMALL_FLOAT) {
             explicitExitSmallWindow = true
         }
-        player?.mode = DanmakuVideoPlayer.PlayerMode.SMALL_TOP
-        updatePlayerMode(activity.resources.configuration)
+        // ★ 顺序很重要：先落 fullScreenPlayer，再按**宿主窗口实时尺寸**重算 mode。
+        //   以前是"先写 mode，再读 resources.configuration"，而紧接着设置的
+        //   requestedOrientation=UNSPECIFIED 要等下一次配置回调才生效 —— 此刻 config 还是旧方向，
+        //   于是竖屏退出全屏会被算成横屏 → mode 钉成 SMALL_FLOAT → 竖屏下出现横屏形态的控件
+        //   （小白条、✕ 图标），就是用户报的那个 bug。
         scaffoldApp.fullScreenPlayer = false
+        updatePlayerMode(null)
         activity.requestedOrientation = getAppSettingScreenOrientation()
         statusBarHelper.isShowStatus = true
         statusBarHelper.isShowNavigation = true
@@ -314,17 +318,47 @@ class PlayerController(
         return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
-    fun updatePlayerMode(config: Configuration) {
-        val isLandscape = config.orientation != Configuration.ORIENTATION_PORTRAIT
-        if (player?.mode != DanmakuVideoPlayer.PlayerMode.FULL) {
-            player?.mode = if (config.orientation == ScaffoldView.VERTICAL) {
-                DanmakuVideoPlayer.PlayerMode.SMALL_TOP
-            } else {
-                DanmakuVideoPlayer.PlayerMode.SMALL_FLOAT
-            }
+    /**
+     * 重算播放器模式：全屏 / 竖屏小窗（SMALL_TOP）/ 横屏浮动小窗（SMALL_FLOAT）。
+     *
+     * ★ 方向一律以**宿主窗口的实时宽高**为准（decorView），`resources.configuration` 只作兜底：
+     *   本 Activity 声明了 configChanges、旋转不重建，而 `requestedOrientation` 的改动要等下一次
+     *   配置回调才反映到 config —— 在"刚退出全屏 / 刚切方向"的那个窗口里，config 是**过期值**。
+     *   `config` 参数只服务于 onConfigurationChanged 调用方（拿不到窗口尺寸时的兜底）。
+     *
+     * ★ 去掉了"mode == FULL 就早退"：那会让**复用播放器 View**（MainUi.keepPlayerView）时残留的
+     *   FULL 模式永远降不下来（竖屏了还按全屏排版）。现在统一按 `fullScreenPlayer` 推导。
+     */
+    fun updatePlayerMode(config: Configuration? = null) {
+        // 画中画：窗口方向 ≠ 设备方向，别按它推导（进出 PiP 由 PlayerDelegate2 负责恢复）
+        if (player?.isPicInPicMode == true) return
+        applyPlayerMode(hostIsLandscape(config))
+    }
+
+    /** 宿主窗口**真实尺寸**变化（ScaffoldView.onSizeChanged）→ 重算模式；尺寸是方向的最终真源 */
+    fun onHostSizeChanged(width: Int, height: Int) {
+        if (player?.isPicInPicMode == true) return
+        if (width <= 0 || height <= 0) return
+        applyPlayerMode(width > height)
+    }
+
+    private fun hostIsLandscape(fallback: Configuration? = null): Boolean {
+        val decor = activity.window?.decorView
+        val w = decor?.width ?: 0
+        val h = decor?.height ?: 0
+        if (w > 0 && h > 0) return w > h
+        val orientation = fallback?.orientation ?: activity.resources.configuration.orientation
+        return orientation == Configuration.ORIENTATION_LANDSCAPE
+    }
+
+    private fun applyPlayerMode(landscape: Boolean) {
+        player?.mode = when {
+            scaffoldApp.fullScreenPlayer -> DanmakuVideoPlayer.PlayerMode.FULL
+            !landscape -> DanmakuVideoPlayer.PlayerMode.SMALL_TOP
+            else -> DanmakuVideoPlayer.PlayerMode.SMALL_FLOAT
         }
         // 同步布局方向给播放器，用于横屏非全屏禁用双指手势
-        player?.isLandscapeLayout = isLandscape
+        player?.isLandscapeLayout = landscape
     }
 
     /**

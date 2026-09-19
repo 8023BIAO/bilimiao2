@@ -18,6 +18,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.a10miaomiao.bilimiao.comm.apis.SponsorBlockApi
+import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import com.a10miaomiao.bilimiao.comm.utils.OverlayDialog
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorActionType
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorCategory
@@ -47,18 +48,65 @@ object SponsorBlockUi {
     private const val PAD = 16
 
     /**
-     * 当前正在显示的弹窗（同一时刻只会有一个）。
+     * 正在显示的弹窗**栈**（片段列表 → 投票 → 改类别 会叠三层，单个引用表达不了）。
      *
-     * 为什么要留引用：这些弹窗是挂在 Activity 上的，如果 Activity 先销毁、弹窗还在，
-     * 就会 WindowLeaked（本项目其它地方已经有 `dismissCachedDialogs()` 在防这个）。
-     * 播放器销毁时由 `PlayerDelegate2.onDestroy()` 调 [dismissAll] 统一收掉。
+     * 为什么必须是栈：
+     *  - 这些弹窗挂在 Activity 上，Activity 先销毁而弹窗还在就 WindowLeaked；
+     *    播放器销毁时由 `PlayerDelegate2.onDestroy()` 调 [dismissAll] 统一收掉 ——
+     *    单引用漏掉的那几层（例如提交弹窗里的分类/动作选择）就必然泄漏。
+     *  - 以前用单个 `currentDialog`：子弹窗打开会覆盖父弹窗的引用，子弹窗关掉后引用既不回退
+     *    也不清空 → 父弹窗的「关闭」按钮 dismiss 的是一具已关闭的 Dialog（框架 `!mShowing`
+     *    直接早返回）→ **按钮静默失效**，且父弹窗再也不会被 dismissAll 关掉。
+     *
+     * 登记方式：`OverlayDialog.show(..., onDismiss = { stack.remove(dlg) })`。
+     * **不要**在返回的 Dialog 上再 `setOnDismissListener` —— 那会覆盖 OverlayDialog 自己设的
+     * 监听器，decorView 上的 OnLayoutChangeListener 就摘不掉了。
      */
-    private var currentDialog: Dialog? = null
+    private val dialogStack = mutableListOf<Dialog>()
 
-    /** Activity 销毁时调用：关掉残留弹窗。 */
+    // ── 防连点闸门 key（顶栏两个按钮连点 N 次不该叠 N 个弹窗）──
+    private const val KEY_SEGMENTS = "sponsor_ui:segments"
+    private const val KEY_SUBMIT = "sponsor_ui:submit"
+
+    /**
+     * 显示覆盖层弹窗并登记进栈（关闭时自动出栈）；弹窗里的「关闭」按钮请 dismiss 它的返回值。
+     * [onDismissExtra] 用来挂"释放防连点闸门"这类收尾动作。
+     */
+    private fun showOverlay(
+        activity: Activity,
+        card: View,
+        onDismissExtra: (() -> Unit)? = null,
+    ): Dialog {
+        var dlg: Dialog? = null
+        dlg = OverlayDialog.show(activity, card, onDismiss = {
+            dialogStack.remove(dlg)
+            onDismissExtra?.invoke()
+        })
+        dialogStack.add(dlg)
+        return dlg
+    }
+
+    /** 列表选择弹窗（点选即自动关闭，见 [OverlayDialog.showList] 的契约），同样登记进栈 */
+    private fun showOverlayList(
+        activity: Activity,
+        title: String,
+        items: List<String>,
+        onPick: (Int) -> Unit,
+    ): Dialog {
+        var dlg: Dialog? = null
+        dlg = OverlayDialog.showList(
+            activity, title, items,
+            onPick = onPick,
+            onDismiss = { dialogStack.remove(dlg) },
+        )
+        dialogStack.add(dlg)
+        return dlg
+    }
+
+    /** Activity 销毁时调用：关掉所有残留弹窗（从栈顶往下）。 */
     fun dismissAll() {
-        runCatching { currentDialog?.dismiss() }
-        currentDialog = null
+        dialogStack.toList().forEach { runCatching { it.dismiss() } }
+        dialogStack.clear()
     }
 
     /**
@@ -126,6 +174,8 @@ object SponsorBlockUi {
             toast(activity, "这个视频还没有人标记片段")
             return
         }
+        // 连点顶栏「片段」按钮只开一个（列表为空时上面已经 return，不会把闸门占死）
+        if (!ClickGuard.enter(KEY_SEGMENTS)) return
         val ctx = activity
         val density = ctx.resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
@@ -155,9 +205,13 @@ object SponsorBlockUi {
 
         val scroll = CappedScrollView(activity, 0.62f).apply { addView(box) }
         // 走全屏覆盖层（和首页筛选弹层同一套），不用系统小弹窗
-        OverlayDialog.show(activity, cardOf(activity, "空降助手片段（${segments.size}）", scroll) {
-            currentDialog?.dismiss()
-        }).also { currentDialog = it }
+        // ★「关闭」按钮 dismiss 的是**这个弹窗自己**，不是某个可能已过期的全局引用
+        var self: Dialog? = null
+        self = showOverlay(
+            activity,
+            cardOf(activity, "空降助手片段（${segments.size}）", scroll) { self?.dismiss() },
+            onDismissExtra = { ClickGuard.leave(KEY_SEGMENTS) },
+        )
     }
 
     /**
@@ -233,30 +287,26 @@ object SponsorBlockUi {
         //   实测服务端对 locked=1 的片段投票返回 200 但**不计数**（静默忽略），
         //   所以"能不能投"交给服务端，我们只负责把结果**如实**告诉用户（见 vote()）。
         val items = listOf("赞成票", "反对票", "更改类别")
-        OverlayDialog.showList(
+        // 点选后由 showList 自己关掉。这里**不要**再写 currentDialog?.dismiss()：
+        // 那个引用可能指向别的弹窗（父层片段列表），会把不该关的一起关掉。
+        showOverlayList(
             activity,
             "${SponsorCategory.labelOf(seg.category)} · ${CommonUtil.stringForTime(seg.startMs)}",
             items,
-            onPick = { which ->
-                currentDialog?.dismiss()
-                when (which) {
-                    0 -> vote(activity, seg, type = 1, category = null)
-                    1 -> vote(activity, seg, type = 0, category = null)
-                    else -> showCategoryPicker(activity, seg)
-                }
-            },
-        ).also { currentDialog = it }
+        ) { which ->
+            when (which) {
+                0 -> vote(activity, seg, type = 1, category = null)
+                1 -> vote(activity, seg, type = 0, category = null)
+                else -> showCategoryPicker(activity, seg)
+            }
+        }
     }
 
     private fun showCategoryPicker(activity: Activity, seg: SponsorSegment) {
         val categories = SponsorCategory.entries
-        OverlayDialog.showList(
-            activity, "改成哪个类别？", categories.map { it.label },
-            onPick = { which ->
-                currentDialog?.dismiss()
-                vote(activity, seg, type = null, category = categories[which].id)
-            },
-        ).also { currentDialog = it }
+        showOverlayList(activity, "改成哪个类别？", categories.map { it.label }) { which ->
+            vote(activity, seg, type = null, category = categories[which].id)
+        }
     }
 
     private fun vote(
@@ -301,6 +351,8 @@ object SponsorBlockUi {
             toast(activity, "这个视频不支持提交片段")
             return
         }
+        // 连点顶栏「提交」按钮只开一个（提交成功后弹窗关闭时释放闸门）
+        if (!ClickGuard.enter(KEY_SUBMIT)) return
         val ctx = activity
         val density = ctx.resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
@@ -324,13 +376,13 @@ object SponsorBlockUi {
             setPadding(0, dp(12), 0, dp(12))
             isClickable = true
             setOnClickListener {
-                OverlayDialog.showList(
-                    ctx, "选择分类", SponsorCategory.entries.map { it.label },
-                    onPick = { which ->
-                        category = SponsorCategory.entries[which]
-                        text = "分类：${category.label}"
-                    },
-                )
+                // 列表点选后由 showList 自动关闭（默认契约）。
+                // ★ 这里**绝不能**写 currentDialog?.dismiss()：此刻它指向底下的「提交片段」主弹窗，
+                //   会把用户填了一半的表单一起关掉（这正是不能照抄投票弹窗写法的原因）。
+                showOverlayList(ctx, "选择分类", SponsorCategory.entries.map { it.label }) { which ->
+                    category = SponsorCategory.entries[which]
+                    text = "分类：${category.label}"
+                }
             }
         }
         val actionTv = TextView(ctx).apply {
@@ -339,13 +391,10 @@ object SponsorBlockUi {
             setPadding(0, dp(12), 0, dp(12))
             isClickable = true
             setOnClickListener {
-                OverlayDialog.showList(
-                    ctx, "这段是什么行为", SponsorActionType.entries.map { it.label },
-                    onPick = { which ->
-                        action = SponsorActionType.entries[which]
-                        text = "动作：${action.label}"
-                    },
-                )
+                showOverlayList(ctx, "这段是什么行为", SponsorActionType.entries.map { it.label }) { which ->
+                    action = SponsorActionType.entries[which]
+                    text = "动作：${action.label}"
+                }
             }
         }
 
@@ -434,11 +483,11 @@ object SponsorBlockUi {
         }
 
         // 提交弹窗也走全屏覆盖层（卡片里：标题 + 可滚动表单 + 固定页脚按钮）
-        dialog = OverlayDialog.show(
+        dialog = showOverlay(
             activity,
             cardOf(activity, "提交片段到空降助手", root, closeLabel = null) { dialog?.dismiss() },
+            onDismissExtra = { ClickGuard.leave(KEY_SUBMIT) },
         )
-        currentDialog = dialog
     }
 
     // ───────────────────────── 小工具 ─────────────────────────

@@ -38,6 +38,7 @@ import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.utils.CdnHosts
+import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import cn.a10miaomiao.bilimiao.compose.pages.setting.widgets.CdnSelectDialog
 import com.a10miaomiao.bilimiao.comm.datastore.SettingsExporter
 import com.a10miaomiao.bilimiao.comm.entity.auth.LoginInfo
@@ -87,6 +88,16 @@ private class FlagsSettingPageViewModel(
 
     fun toErrorLogPage() {
         pageNavigation.navigate(ErrorLogPage())
+    }
+
+    /** 空降助手的完整设置页（从「播放设置」移到这里：用户说藏在播放设置里太难找） */
+    fun toSponsorBlockSettingPage() {
+        pageNavigation.navigate(SponsorBlockSettingPage())
+    }
+
+    /** 线程撕裂者的线程子设置页 */
+    fun toThreadRipperSettingPage() {
+        pageNavigation.navigate(ThreadRipperSettingPage())
     }
 
     // 身份信息导入导出已改为文件操作，见 FlagsSettingPageContent 中的 launchers
@@ -159,6 +170,10 @@ private fun FlagsSettingPageContent(
     var showGuestConfirmDialog by remember { mutableStateOf(false) }
     val currentDpi = context.resources.configuration.densityDpi
     val currentFontScale = context.resources.configuration.fontScale
+    // 线程撕裂者：本机最多能开多少线程 = 处理器核数（线程设置页滑块的上限也是它）
+    val maxThreads = remember {
+        Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+    }
     // 光标放末尾：String 重载会让 DPI/字缩输入框的光标停在开头
     var dpiText by remember {
         val t = currentDpi.toString()
@@ -465,6 +480,64 @@ private fun FlagsSettingPageContent(
                 defaultValue = false,
                 title = { Text("AI 视频总结") },
                 summary = { Text("在视频详情页「简介」上方显示，调用B站官方接口生成视频摘要") },
+            )
+
+            // ===== 空降助手（原在「播放设置」里，用户反馈藏得太深 → 移到这里）=====
+            preferenceCategory(
+                key = "sponsor_block",
+                title = { Text("空降助手（跳过赞助/恰饭片段）") }
+            )
+            preference(
+                key = "sponsor_block_entry",
+                title = { Text("空降助手") },
+                summary = { Text("自动跳过赞助/恰饭/片头片尾等片段；点这里进入完整设置") },
+                onClick = viewModel::toSponsorBlockSettingPage,
+            )
+
+            // ===== 海外加速（线程撕裂者）=====
+            // 思路来自 MrTangLuyao/Bilibili-thread-ripper：把播放器要读的分段再切成多个字节 Range 并发拉。
+            // 与上面的 CDN 设置**互不干扰**：CDN 决定"用哪个节点"，这里只决定"节点上的字节怎么并发拉"。
+            preferenceCategory(
+                key = "thread_ripper",
+                title = { Text("海外加速（线程撕裂者）") }
+            )
+            switchPreference(
+                key = SettingPreferences.ThreadRipperEnable.name,
+                defaultValue = false,
+                title = { Text("启用线程撕裂者") },
+                summary = {
+                    if (it) {
+                        Text("已开启：把每个分段的字节范围再切成多块并发下载。海外建议开、国内不建议，自行测试；播放异常就关掉")
+                    } else {
+                        Text("建议海外用户开启，国内不建议开启，自行测试（多线程并发下载，默认关闭）")
+                    }
+                },
+            )
+            preference(
+                key = "thread_ripper_threads_entry",
+                title = { Text("线程设置") },
+                summary = { Text("自动线程 / 手动线程数（1 ~ 本机 $maxThreads 线程，或不限）") },
+                onClick = viewModel::toThreadRipperSettingPage,
+            )
+            preference(
+                key = "thread_ripper_about",
+                title = { Text("关于线程撕裂者") },
+                summary = { Text("原理与上游项目：MrTangLuyao/Bilibili-thread-ripper") },
+                onClick = {
+                    // 防连点：连点 N 次不该拉起 N 个浏览器
+                    if (ClickGuard.allow("flags:thread_ripper_about")) {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(
+                                        "https://github.com/MrTangLuyao/Bilibili-thread-ripper"
+                                    )
+                                )
+                            )
+                        }
+                    }
+                },
             )
 
             // ===== CDN =====

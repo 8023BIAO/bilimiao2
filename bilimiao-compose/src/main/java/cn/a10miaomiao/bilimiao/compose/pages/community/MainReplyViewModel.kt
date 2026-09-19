@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import kotlinx.coroutines.CancellationException
 import org.kodein.di.DI
 import org.kodein.di.DIAware
@@ -182,6 +183,10 @@ class MainReplyViewModel(
             toast("请先登录")
             return@launch
         }
+        // ★ 防连点：连点两次时第二次读到的还是没更新的旧 action，会把同一个点赞请求发两遍。
+        //   同一楼层同一时刻只放一个请求进去（请求结束即释放）。
+        val likeKey = "reply:like:$index"
+        if (!ClickGuard.enter(likeKey)) return@launch
         try {
             val item = list.data.value[index]
             val isLike = item.replyControl?.action == 1L
@@ -213,6 +218,8 @@ class MainReplyViewModel(
             if (e is CancellationException) throw e
             e.printStackTrace()
             toast("加载失败:" + (e.message ?: e.toString()))
+        } finally {
+            ClickGuard.leave(likeKey)
         }
     }
 
@@ -222,6 +229,9 @@ class MainReplyViewModel(
             toast("请先登录")
             return@launch
         }
+        // 同上：按 rpid 的入口也要防连点（列表里连点同一个赞按钮）
+        val likeKey = "reply:like:$rpid"
+        if (!ClickGuard.enter(likeKey)) return@launch
         try {
             val index = list.data.value.indexOfFirst { it.id == rpid }
             if (index == -1) return@launch
@@ -255,6 +265,8 @@ class MainReplyViewModel(
             if (e is CancellationException) throw e
             e.printStackTrace()
             toast("加载失败:" + (e.message ?: e.toString()))
+        } finally {
+            ClickGuard.leave(likeKey)
         }
     }
 

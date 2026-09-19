@@ -58,6 +58,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.setting.AutoStopTimerPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.ExportSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.VideoSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.SponsorBlockSettingPage
+import cn.a10miaomiao.bilimiao.compose.pages.setting.ThreadRipperSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeRegionDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.mine.MyFollowPage
@@ -196,6 +197,7 @@ class BilimiaoPageRoute (
         composable<ThemeSettingPage>()
         composable<VideoSettingPage>()
         composable<SponsorBlockSettingPage>()
+        composable<ThreadRipperSettingPage>()
         composable<AutoStopTimerPage>()
         composable<DanmakuSettingPage>()
         composable<DanmakuDisplaySettingPage>()

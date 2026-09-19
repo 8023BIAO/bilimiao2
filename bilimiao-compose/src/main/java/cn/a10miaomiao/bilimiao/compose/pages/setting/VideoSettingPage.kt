@@ -154,13 +154,6 @@ private class VideoSettingPageViewModel(
         })
     }
 
-    /** 进入空降助手的独立设置页（设置项太多，不在这里铺开了） */
-    fun sponsorBlockClick() {
-        pageNavigation.navigate(SponsorBlockSettingPage(), navOptions {
-            launchSingleTop = true
-        })
-    }
-
 }
 
 
@@ -406,26 +399,9 @@ private fun VideoSettingPageContent(
                 defaultValue = true,
             )
 
-            // ── 空降助手（BilibiliSponsorBlock：「小电视空降助手」）──
-            // 设置项全部在独立页面里（SponsorBlockSettingPage）：原本这里有 1 个总开关 +
-            // 11 个类别策略 + 时长/提示/上报/服务端/颜色/状态，把播放设置撑得又长又杂。
-            // 独立成页后这个入口**永远可点**（总开关关掉也进得去，不会找不到设置）。
-            preferenceCategory(
-                key = "sponsor_block",
-                title = {
-                    Text("空降助手（跳过赞助/恰饭片段）")
-                }
-            )
-            preference(
-                key = "sponsor_block_entry",
-                title = {
-                    Text("空降助手")
-                },
-                summary = {
-                    Text("自动跳过赞助/恰饭/片头片尾等片段；点这里进入完整设置")
-                },
-                onClick = { viewModel.sponsorBlockClick() }
-            )
+            // ── 空降助手入口已移到「设置 → 实验性功能 → 空降助手」──
+            // 用户反馈放在播放设置里藏得太深（进了播放设置也不一定往下翻）。
+            // 设置页在 SponsorBlockSettingPage，逻辑一行没动，只是换了个入口位置。
 
             preferenceCategory(
                 key = "download",

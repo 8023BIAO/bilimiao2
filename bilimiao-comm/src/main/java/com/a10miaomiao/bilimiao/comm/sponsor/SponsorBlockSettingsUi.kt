@@ -2,6 +2,7 @@ package com.a10miaomiao.bilimiao.comm.sponsor
 
 import android.content.Context
 import android.app.Dialog
+import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import com.a10miaomiao.bilimiao.comm.utils.OverlayDialog
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
@@ -32,17 +33,62 @@ import kotlinx.coroutines.withContext
  * 为什么放在 bilimiao-comm 而不是 app 模块：设置页在 `bilimiao-compose` 里，
  * 而依赖方向是 app → compose（compose 看不到 app 的类）。这三个弹窗只依赖设置存储和 API，
  * 不需要播放器实例，所以放 comm 层最合适；需要播放器的那几个（片段列表/投票/提交）留在 app 模块。
+ *
+ * ★ 交互契约（2026-09-19 修）：
+ *  - 每个弹窗入口都过 [ClickGuard] 的**独占闸门**：连点 N 次只会有一个弹窗，
+ *    弹窗关掉（onDismiss）才释放 —— 以前「公开昵称」连点 N 次会排队弹 N 个。
+ *  - 「公开昵称」以前要等本机算公开ID（SHA256×5000）+ 一次网络取昵称**都完成**才显示，
+ *    点下去像卡住；现在**先立刻显示弹窗**（正文写"读取中…"、输入框禁用），数据回来再回填。
+ *  - 所有弹窗登记进 [dialogStack]，页面销毁时 [dismissAll] 统一收口（防 WindowLeaked）。
  */
 object SponsorBlockSettingsUi {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private const val PAD = 16
 
-    // ───────────────────────── 服务端状态 / 统计 ─────────────────────────
+    // ── 防连点闸门 key（一个入口一个，互不干扰）──
+    private const val KEY_STATS = "sponsor_ui:stats"
+    private const val KEY_USERNAME = "sponsor_ui:username"
+    private const val KEY_USER_ID = "sponsor_ui:user_id"
+    private const val KEY_SERVER = "sponsor_ui:server"
+    private const val KEY_COLORS = "sponsor_ui:colors"
+    private const val KEY_PALETTE = "sponsor_ui:palette"
+
+    /**
+     * 正在显示的弹窗（本项目设置页这几个弹窗可以叠第二层：颜色列表 → 调色板）。
+     * 页面销毁时由 [dismissAll] 统一关掉。
+     */
+    private val dialogStack = mutableListOf<Dialog>()
+
+    /**
+     * 显示一个覆盖层弹窗并登记进栈；[onDismissExtra] 用来挂"释放闸门"这类收尾动作。
+     * 注意：入栈/出栈走 `OverlayDialog.show` 的 `onDismiss` 形参，
+     * **不要**在返回的 Dialog 上再 setOnDismissListener（会覆盖它自己的监听器 → 监听器泄漏）。
+     */
+    private fun showOverlay(
+        context: Context,
+        card: View,
+        onDismissExtra: (() -> Unit)? = null,
+    ): Dialog {
+        var dlg: Dialog? = null
+        dlg = OverlayDialog.show(context, card, onDismiss = {
+            dialogStack.remove(dlg)
+            onDismissExtra?.invoke()
+        })
+        dialogStack.add(dlg)
+        return dlg
+    }
+
+    /** 设置页销毁/离开时收口：关掉所有还开着的弹窗 */
+    fun dismissAll() {
+        dialogStack.toList().forEach { runCatching { it.dismiss() } }
+        dialogStack.clear()
+    }
 
     // ───────────────────────── 服务端状态 / 统计 ─────────────────────────
 
     fun showStats(context: Context) {
+        if (!ClickGuard.enter(KEY_STATS)) return
         val density = context.resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
         val text = TextView(context).apply {
@@ -51,7 +97,11 @@ object SponsorBlockSettingsUi {
             setPadding(0, 0, 0, dp(4))
         }
         var dlg: Dialog? = null
-        dlg = OverlayDialog.show(context, cardOf(context, "空降助手状态", text) { dlg?.dismiss() })
+        dlg = showOverlay(
+            context,
+            cardOf(context, "空降助手状态", text) { dlg?.dismiss() },
+            onDismissExtra = { ClickGuard.leave(KEY_STATS) },
+        )
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
@@ -109,50 +159,82 @@ object SponsorBlockSettingsUi {
      *
      * 背景（官方 API 文档「用户ID」一节）：私人 ID 相当于密码、不该外发；服务端对外只认
      * **公开 ID**（私人 ID 做 SHA256 五千次）和**用户名**；没设用户名时排行榜就显示公开 ID 那一长串。
+     *
+     * ★ 为什么要重写（用户报"点一下很卡、连点 N 次弹 N 个"）：
+     *  - 以前是"两次读取（算公开ID + 取昵称网络请求）都完成后才 show()"，中间那段没有任何反馈，
+     *    点下去像卡死 → 现在**立刻显示弹窗**，输入框先禁用、正文写"读取中…"，数据回来再回填。
+     *  - 以前没有任何防重入，连点几次就排队弹几个 → 现在由 [ClickGuard] 独占闸门挡住，
+     *    弹窗关闭（onDismiss）才释放。
      */
     fun showUsernameDialog(context: Context) {
+        if (!ClickGuard.enter(KEY_USERNAME)) return
+        val density = context.resources.displayMetrics.density
+        val dp = { v: Int -> (v * density).toInt() }
+        var loaded = false
+        val input = EditText(context).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            hint = "留空 = 不用昵称（排行榜显示公开ID）"
+            isEnabled = false
+        }
+        val tip = TextView(context).apply {
+            text = "读取中…（正在本机计算公开ID并读取当前昵称）"
+            textSize = 12f
+            setPadding(0, dp(8), 0, 0)
+        }
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(input)
+            addView(tip)
+        }
+        var dlg: Dialog? = null
+        dlg = showOverlay(
+            context,
+            cardOf(
+                context, "公开昵称", box,
+                neutral = "取消" to { dlg?.dismiss() },
+                positive = "保存" to {
+                    // 数据还没回来时输入框是禁用+空值：这时按"保存"会把昵称清掉，必须挡住
+                    if (!loaded) {
+                        toast(context, "还在读取昵称，稍等一下再保存")
+                    } else {
+                        val value = input.text?.toString()?.trim().orEmpty()
+                        scope.launch {
+                            val ok = withContext(Dispatchers.IO) { SponsorBlockApi().setUsername(value) }
+                            toast(
+                                context,
+                                when {
+                                    !ok -> "保存失败：网络异常或服务端拒绝"
+                                    value.isEmpty() -> "已清除昵称（排行榜将显示公开ID）"
+                                    else -> "已保存：$value"
+                                }
+                            )
+                            dlg?.dismiss()
+                        }
+                    }
+                },
+            ),
+            onDismissExtra = { ClickGuard.leave(KEY_USERNAME) },
+        )
         scope.launch {
             val publicId = withContext(Dispatchers.IO) { SponsorBlockApi.publicUserId() }
-            val current = withContext(Dispatchers.IO) { SponsorBlockApi().getUsername() }
+            val current = withContext(Dispatchers.IO) {
+                runCatching { SponsorBlockApi().getUsername() }.getOrNull()
+            }
+            // 用户可能在读取期间已经关掉弹窗
+            if (dlg?.isShowing != true) return@launch
             val shown = if (current.isNullOrBlank() || current == publicId) "" else current
-
-            val density = context.resources.displayMetrics.density
-            val dp = { v: Int -> (v * density).toInt() }
-            val input = EditText(context).apply {
-                inputType = InputType.TYPE_CLASS_TEXT
-                hint = "留空 = 不用昵称（排行榜显示公开ID）"
-                setText(shown)
-                setSelection(text?.length ?: 0)
+            input.setText(shown)
+            input.setSelection(input.text?.length ?: 0)
+            input.isEnabled = true
+            loaded = true
+            tip.text = buildString {
+                append("排行榜和统计里显示的名字，支持中文。\n你的公开ID：")
+                append(publicId)
+                append("\n（私人ID 相当于密码，别外发；改私人ID = 换一个身份，昵称也得重设）")
+                if (current != null && current.isNotBlank() && current != publicId) {
+                    append("\n当前昵称已填在上面的输入框里，可直接改。")
+                }
             }
-            val box = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(input)
-                addView(TextView(context).apply {
-                    text = "排行榜和统计里显示的名字，支持中文。\n你的公开ID：$publicId\n" +
-                        "（私人ID 相当于密码，别外发；改私人ID = 换一个身份，昵称也得重设）"
-                    textSize = 12f
-                    setPadding(0, dp(8), 0, 0)
-                })
-            }
-            var dlg: Dialog? = null
-            dlg = OverlayDialog.show(
-                context,
-                cardOf(context, "公开昵称", box, positive = "保存" to {
-                    val value = input.text?.toString()?.trim().orEmpty()
-                    scope.launch {
-                        val ok = withContext(Dispatchers.IO) { SponsorBlockApi().setUsername(value) }
-                        toast(
-                            context,
-                            when {
-                                !ok -> "保存失败：网络异常或服务端拒绝"
-                                value.isEmpty() -> "已清除昵称（排行榜将显示公开ID）"
-                                else -> "已保存：$value"
-                            }
-                        )
-                        dlg?.dismiss()
-                    }
-                })
-            )
         }
     }
 
@@ -162,8 +244,10 @@ object SponsorBlockSettingsUi {
      * 查看 / 编辑 / 重掷本机匿名 userID。
      *
      * 私人 ID 是鉴权用的"密码"，换一个 = 在服务端眼里变成另一个人（投票/提交记录、统计都从零开始）。
+     * 本项只读本机 SharedPreferences（无网络），本来就秒开；这里补的是**防连点**（连点 N 次弹 N 个）。
      */
     fun showUserIdDialog(context: Context) {
+        if (!ClickGuard.enter(KEY_USER_ID)) return
         val density = context.resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
         val input = EditText(context).apply {
@@ -183,7 +267,7 @@ object SponsorBlockSettingsUi {
             })
         }
         var dlg: Dialog? = null
-        dlg = OverlayDialog.show(
+        dlg = showOverlay(
             context,
             cardOf(
                 context, "私人ID", box,
@@ -201,7 +285,8 @@ object SponsorBlockSettingsUi {
                         toast(context, "保存失败：至少 30 个字符、只能字母和数字")
                     }
                 },
-            )
+            ),
+            onDismissExtra = { ClickGuard.leave(KEY_USER_ID) },
         )
     }
 
@@ -217,6 +302,7 @@ object SponsorBlockSettingsUi {
     )
 
     fun showColors(context: Context) {
+        if (!ClickGuard.enter(KEY_COLORS)) return
         scope.launch {
             var current: Map<String, Int> = emptyMap()
             try {
@@ -234,29 +320,46 @@ object SponsorBlockSettingsUi {
             val box = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
             }
+            // 记住每行的色点，选完颜色就地更新（否则列表里的圆点还是旧色，看着像没生效）
+            val dots = HashMap<String, View>()
             SponsorCategory.entries.forEach { category ->
                 val color = current[category.id] ?: category.color
+                val dotView = dot(context, color)
+                dots[category.id] = dotView
                 box.addView(
-                    simpleRow(context, dot(context, color), category.label) {
-                        showPalette(context, category)
+                    simpleRow(context, dotView, category.label) {
+                        showPalette(context, category) { newColor ->
+                            (dots[category.id]?.background as? GradientDrawable)?.setColor(newColor)
+                            dots[category.id]?.invalidate()
+                        }
                     }
                 )
             }
             var dlg: Dialog? = null
-            dlg = OverlayDialog.show(
+            dlg = showOverlay(
                 context,
-                cardOf(context, "进度条片段颜色", ScrollView(context).apply { addView(box) }) { dlg?.dismiss() }
+                cardOf(context, "进度条片段颜色", ScrollView(context).apply { addView(box) }) { dlg?.dismiss() },
+                onDismissExtra = { ClickGuard.leave(KEY_COLORS) },
             )
         }
     }
 
-    private fun showPalette(context: Context, category: SponsorCategory) {
+    /**
+     * 调色板。
+     *
+     * ★ 修：以前点颜色只写设置 + toast，**弹窗不关**（要按返回键才消失，和播放器里
+     * 「提交片段」的二级菜单是同一个毛病）。现在选完立即 dismiss 自己，
+     * 并通过 [onPicked] 通知调用方就地刷新父列表的色点（父列表留在原地，不用重开、不叠层）。
+     */
+    private fun showPalette(context: Context, category: SponsorCategory, onPicked: (Int) -> Unit) {
+        if (!ClickGuard.enter(KEY_PALETTE)) return
         val density = context.resources.displayMetrics.density
         val dp = { v: Int -> (v * density).toInt() }
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(4), 0, dp(4))
         }
+        var dlg: Dialog? = null
         PALETTE.forEach { color ->
             box.addView(simpleRow(context, dot(context, color), "#%06X".format(0xFFFFFF and color)) {
                 scope.launch {
@@ -268,19 +371,24 @@ object SponsorBlockSettingsUi {
                     } catch (e: Exception) {
                         toast(context, "保存失败：${e.message}")
                     }
+                    onPicked(color)
+                    dlg?.dismiss()
                 }
             })
         }
-        var dlg: Dialog? = null
-        dlg = OverlayDialog.show(
+        dlg = showOverlay(
             context,
-            cardOf(context, "${category.label} · 选择颜色", ScrollView(context).apply { addView(box) }) { dlg?.dismiss() }
+            cardOf(context, "${category.label} · 选择颜色", ScrollView(context).apply { addView(box) }) {
+                dlg?.dismiss()
+            },
+            onDismissExtra = { ClickGuard.leave(KEY_PALETTE) },
         )
     }
 
     // ───────────────────────── 自定义服务端 ─────────────────────────
 
     fun showServerDialog(context: Context) {
+        if (!ClickGuard.enter(KEY_SERVER)) return
         scope.launch {
             var current = ""
             try {
@@ -305,10 +413,11 @@ object SponsorBlockSettingsUi {
                 })
             }
             var dlg: Dialog? = null
-            dlg = OverlayDialog.show(
+            dlg = showOverlay(
                 context,
                 cardOf(
                     context, "自定义服务端", box,
+                    neutral = "取消" to { dlg?.dismiss() },
                     positive = "保存" to {
                         val value = input.text?.toString()?.trim().orEmpty()
                         scope.launch {
@@ -323,7 +432,8 @@ object SponsorBlockSettingsUi {
                             dlg?.dismiss()
                         }
                     },
-                )
+                ),
+                onDismissExtra = { ClickGuard.leave(KEY_SERVER) },
             )
         }
     }

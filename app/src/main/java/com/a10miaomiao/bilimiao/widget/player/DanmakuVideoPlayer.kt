@@ -2996,7 +2996,11 @@ initDanmakuTouchListener()
     }
 
     fun hideSmallDargBar() {
-        mDragBarLayout.visibility = mTopContainer.visibility
+        // ★ 这条白条（拖动条）**只有横屏浮动小窗**才有。以前无条件 `= mTopContainer.visibility`，
+        //   于是全屏/竖屏小窗下只要有一次拖拽释放（PlayerBehaviorDelegate.onViewReleased 每次都会调它）
+        //   就会把白条点亮 → 用户看到的"横屏里同时出现小白条 + 左上角箭头"的串台就是它。
+        mDragBarLayout.visibility =
+            if (mode == PlayerMode.SMALL_FLOAT) mTopContainer.visibility else GONE
     }
 
     fun getHoldButtonWidth():Int{

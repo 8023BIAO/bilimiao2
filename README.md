@@ -1,6 +1,7 @@
 [releases APK](../../releases/latest)
 
 - [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)
+- [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)
 - [blbl](https://github.com/cat3399/blbl)
 - [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)

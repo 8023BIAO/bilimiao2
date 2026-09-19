@@ -19,6 +19,7 @@ import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.pages.article.ArticleReaderPage
 import cn.a10miaomiao.bilimiao.compose.pages.video.VideoDetailPage
 import cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions
+import cn.a10miaomiao.bilimiao.compose.common.singleTopNavOptions
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 
 class PageNavigation(
@@ -65,14 +66,20 @@ class PageNavigation(
         navOptions: NavOptions? = null,
         navigatorExtras: Navigator.Extras? = null
     ) {
-        hostController.navigate(route, navOptions, navigatorExtras)
+        // ★ 默认补 launchSingleTop：连点同一个入口 N 次不再往返回栈压 N 层
+        //   （全工程 40+ 个调用点没传 navOptions，以前它们全裸着 —— 用户要按 N 次返回）
+        hostController.navigate(route, navOptions ?: singleTopNavOptions, navigatorExtras)
     }
 
     fun <T : ComposePage> navigate(
         route: T,
         builder: NavOptionsBuilder.() -> Unit
     ) {
-        navigate(route, navOptions(builder))
+        // 同理：走 builder 的调用点若没自己写 launchSingleTop，这里兜底
+        navigate(route, navOptions {
+            launchSingleTop = true
+            builder()
+        })
     }
 
     /**
