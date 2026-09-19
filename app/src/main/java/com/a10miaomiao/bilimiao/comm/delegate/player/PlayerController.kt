@@ -37,6 +37,7 @@ import com.a10miaomiao.bilimiao.comm.store.PlayerStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.service.PlaybackService
+import com.a10miaomiao.bilimiao.widget.player.media3.Media3ExoPlayerManager
 import com.a10miaomiao.bilimiao.widget.player.ChapterInfo
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerSeekBus
@@ -550,6 +551,13 @@ class PlayerController(
     }
 
     fun initVideoSetting(preferences: Preferences) {
+        // ★ DASH 缓冲秒数：这个设置以前**只声明、没人读** —— setDashBufferSec() 全工程无人调用，
+        //   设置页里那个下拉也没渲染出来，所以用户"改成 50 秒"其实一点效果都没有（实测反馈）。
+        //   现在接上：0 = ExoPlayer 默认(50s)，其它 = 指定秒数（内部 clamp 5~120）。
+        //   放在 player 空判断之前：它只是给播放器工厂设参数，不需要播放器实例已经就绪。
+        Media3ExoPlayerManager.setDashBufferSec(
+            preferences[SettingPreferences.PlayerDashBufferSec] ?: 15
+        )
         val player = views.videoPlayer ?: return  // 播放器视图尚未就绪
         val show = SettingPreferences.run {
             preferences[PlayerBottomProgressBarShow] ?: 0

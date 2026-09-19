@@ -249,6 +249,19 @@ private fun VideoSettingPageContent(
                 values = viewModel.fnvalSelectionList,
                 valueToText = viewModel::fnvalSelectionName
             )
+            // DASH 缓冲时长：以前这个选项只有 map、没有渲染出来，等于摆设（用户改了几次都"没效果"）
+            listPreference(
+                key = SettingPreferences.PlayerDashBufferSec.name,
+                title = {
+                    Text("DASH 缓冲时长")
+                },
+                summary = {
+                    Text("缓冲越久越抗卡，但更吃内存；长视频/高码率建议调小（内存上限固定 64MB）")
+                },
+                defaultValue = 15,
+                values = viewModel.dashBufferSecSelectionList,
+                valueToText = viewModel::dashBufferSecSelectionName
+            )
             preferenceCategory(
                 key = "control",
                 title = {
