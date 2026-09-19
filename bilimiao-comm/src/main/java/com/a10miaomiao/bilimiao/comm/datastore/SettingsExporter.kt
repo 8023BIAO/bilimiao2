@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
+import com.a10miaomiao.bilimiao.comm.apis.SponsorBlockApi
 import com.a10miaomiao.bilimiao.comm.db.FilterTagDB
 import com.a10miaomiao.bilimiao.comm.db.FilterUpperDB
 import com.a10miaomiao.bilimiao.comm.db.FilterUpperNameDB
@@ -24,9 +25,10 @@ import kotlinx.serialization.json.jsonObject
 import java.io.File
 
 // v3: 新增 filterUpperNames（UP主名称屏蔽数据库）
+// v4: 新增 sponsorUserId（空降助手私人ID —— 不导出的话，换机/导入设置后身份就断了）
 @Serializable
 data class SettingsExport(
-    val version: Int = 3,
+    val version: Int = 4,
     val values: Map<String, SettingValue> = emptyMap(),
     // SQLite filter_db
     val filterWords: List<String> = emptyList(),
@@ -43,7 +45,14 @@ data class SettingsExport(
     val spAppFontScale: Float = 0f,
     val spPlayerQuality: Int = 64,
     // Proxy JSON file
-    val proxyServersJson: String = "[]"
+    val proxyServersJson: String = "[]",
+    /**
+     * 空降助手的**私人ID**（匿名身份，不是账号信息；服务端只用它做"一人一票"去重）。
+     * 不导出的话，换机或导入设置后你会变成"服务端眼里的另一个人"：
+     * 投票/提交记录、被跳过统计、排行榜昵称全部从零开始。
+     * ⚠️ 它相当于密码 —— 导出文件别随便发给别人。
+     */
+    val sponsorUserId: String = ""
 )
 
 @Serializable
@@ -124,6 +133,12 @@ object SettingsExporter {
         val proxyServersJson = if (proxyFile.exists() && proxyFile.isFile)
             proxyFile.readText() else "[]"
 
+        // 6. 空降助手私人ID（它存在自己的 SharedPreferences 里，不在 DataStore）
+        val sponsorUserId = runCatching {
+            context.getSharedPreferences(SponsorBlockApi.USER_ID_PREF, Context.MODE_PRIVATE)
+                .getString(SponsorBlockApi.USER_ID_KEY, "").orEmpty()
+        }.getOrDefault("")
+
         return json.encodeToString(SettingsExport(
             values = values,
             filterWords = filterWords,
@@ -137,7 +152,8 @@ object SettingsExporter {
             spAppDpi = spAppDpi,
             spAppFontScale = spAppFontScale,
             spPlayerQuality = spPlayerQuality,
-            proxyServersJson = proxyServersJson
+            proxyServersJson = proxyServersJson,
+            sponsorUserId = sponsorUserId
         ))
     }
 
@@ -156,7 +172,8 @@ object SettingsExporter {
         val signatureKeys = setOf(
             "version", "values", "filterWords", "filterUppers", "filterTags", "filterUpperNames",
             "spTimeType", "spTimeFrom", "spTimeTo", "spProxyUpos",
-            "spAppDpi", "spAppFontScale", "spPlayerQuality", "proxyServersJson"
+            "spAppDpi", "spAppFontScale", "spPlayerQuality", "proxyServersJson",
+            "sponsorUserId"
         )
         val looksLikeAuthExport = rootObj != null &&
                 listOf("cookie", "access_token", "refresh_token", "buvid").any { rootObj.containsKey(it) }
@@ -287,6 +304,14 @@ object SettingsExporter {
             val proxyFile = File(context.filesDir.path + "/proxy_server_list.json")
             proxyFile.writeText(export.proxyServersJson)
             count++
+
+            // 6. 空降助手私人ID：走 setUserId() 的校验（30~128 位字母数字），
+            //    格式不合法直接忽略 —— 绝不能让一个坏文件把身份写坏
+            if (export.sponsorUserId.isNotBlank() &&
+                SponsorBlockApi.setUserId(export.sponsorUserId)
+            ) {
+                count++
+            }
         }
 
         return count

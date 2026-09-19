@@ -52,8 +52,9 @@ class SponsorBlockApi {
 
         /** 首启动时生成的私人 ID（用来判断用户有没有改过） */
         @Volatile private var defaultUserId: String = ""
-        private const val USER_ID_PREF = "sponsor_block"
-        private const val USER_ID_KEY = "user_id"
+        /** 私人ID 的存储位置（公开给设置导出/导入用：见 SettingsExporter） */
+        const val USER_ID_PREF = "sponsor_block"
+        const val USER_ID_KEY = "user_id"
 
         /**
          * 服务端地址覆盖（设置页可填镜像站）。

@@ -418,7 +418,8 @@ private fun FlagsSettingPageContent(
                     Text("导出设置")
                 },
                 summary = {
-                    Text("导出所有设置项配置到文件")
+                    // 说清楚"全都导"，以及里面含身份：导出文件别随手发人
+                    Text("导出全部设置 + 屏蔽库 + 空降助手匿名身份（含私人ID，别外发）")
                 },
                 onClick = {
                     exportLauncher.launch("bilimiao_settings_${System.currentTimeMillis()}.json")
