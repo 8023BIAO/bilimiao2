@@ -242,21 +242,29 @@ private fun VideoSettingPageContent(
                 title = {
                     Text("视频格式选择")
                 },
-                summary = {
-                    Text("不能播放时，换个格式试试吧")
+                // ★ 把当前值写进摘要（用户要求）：不然每次都要点进去才知道现在选的是哪个。
+                //   listPreference 的 summary 回调会给出"当前值"，用它拼出来最准（不会滞后）。
+                summary = { value ->
+                    Text("不能播放时，换个格式试试吧（当前：${viewModel.fnvalSelectionName(value)}）")
                 },
                 defaultValue = SettingConstants.PLAYER_FNVAL_DASH,
                 values = viewModel.fnvalSelectionList,
                 valueToText = viewModel::fnvalSelectionName
             )
-            // DASH 缓冲时长：以前这个选项只有 map、没有渲染出来，等于摆设（用户改了几次都"没效果"）
+            // 播放缓冲时长（原名"DASH 缓冲时长"）：**对 DASH 和 MP4 都生效** ——
+            // Media3ExoPlayerManager 的 LoadControl 是给整个 ExoPlayer 设的，不分源类型
+            // （实机日志可证：MP4 播放时同样打印 min/max=... targetBufferBytes=64MB），
+            // 所以这里不隐藏，只在文案里说清楚 + 显示当前秒数。
             listPreference(
                 key = SettingPreferences.PlayerDashBufferSec.name,
                 title = {
-                    Text("DASH 缓冲时长")
+                    Text("播放缓冲时长")
                 },
-                summary = {
-                    Text("缓冲越久越抗卡，但更吃内存；长视频/高码率建议调小（内存上限固定 64MB）")
+                summary = { value ->
+                    Text(
+                        "当前：${viewModel.dashBufferSecSelectionName(value)}。" +
+                            "缓冲越久越抗卡、但更吃内存（DASH/MP4 都生效；堆内上限固定 64MB，不会因此爆内存）"
+                    )
                 },
                 defaultValue = 15,
                 values = viewModel.dashBufferSecSelectionList,

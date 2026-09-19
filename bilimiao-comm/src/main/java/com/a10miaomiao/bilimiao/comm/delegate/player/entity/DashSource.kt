@@ -1,6 +1,7 @@
 package com.a10miaomiao.bilimiao.comm.delegate.player.entity
 
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
+import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 
 class DashSource(
@@ -65,6 +66,17 @@ class DashSource(
         }
     }
 
+    /**
+     * ★ `<SegmentBase>` **必须放在 `<Representation>` 里面**（而且要在 `<BaseURL>` 之后）。
+     *
+     * 为什么（2026-09-19 定位到的番剧 DASH 播不出来的根因）：
+     * media3 的 `DashManifestParser` 是**顺序解析**的 —— 遇到 `<Representation>` 时就地用
+     * "此刻已解析到的 segmentBase" 构造 Representation；如果 `<SegmentBase>` 写在
+     * `<Representation>` 后面（我们以前就是这么写的），解析时它还是 null →
+     * **SegmentBase 被整个忽略** → ExoPlayer 把整个 .m4s 当成一个巨大分段（等于整集一次拉完），
+     * 表现就是"选了 DASH 播不出来/一直转圈"。普通视频走的是 [merging]（两条流）所以看不出问题，
+     * 只有番剧/影视会走到这条 MPD 路径。
+     */
     private fun getSegmentBaseXml(segmentBase: SegmentBase?): String {
         if (segmentBase == null) return ""
         return "<SegmentBase indexRange=\"${segmentBase.indexRange}\">" +
@@ -85,8 +97,8 @@ class DashSource(
             <ContentComponent contentType="video" id="1" />
             <Representation bandwidth="${video.bandwidth}" codecs="${video.codecs}" height="${video.height}" id="${video.id}" mimeType="${video.mimeType}" width="${video.width}">
 $videoBaseUrls
+                ${getSegmentBaseXml(video.segmentBase)}
             </Representation>
-            ${getSegmentBaseXml(video.segmentBase)}
         </AdaptationSet>
         ${
             if (audio != null) {
@@ -96,8 +108,8 @@ $videoBaseUrls
                     <ContentComponent contentType="audio" id="2" />
                     <Representation bandwidth="${audio.bandwidth}" codecs="${audio.codecs}" id="${audio.id}" mimeType="${audio.mimeType}" >
 $audioBaseUrls
+                        ${getSegmentBaseXml(audio.segmentBase)}
                     </Representation>
-                    ${getSegmentBaseXml(audio.segmentBase)}
                 </AdaptationSet>
                 """.trimIndent()
             } else {
@@ -107,6 +119,16 @@ $audioBaseUrls
     </Period>
 </MPD>
         """.trimIndent()
+        // ★ 记一笔：SegmentBase 有没有真的写进 MPD、Representation 里长什么样。
+        //   番剧 DASH 播不出来的那次，就是因为它被写在了 <Representation> 外面（被解析器忽略）。
+        runCatching {
+            PlayerDiag.log(
+                "mpd",
+                "SegmentBase=${if (mpdStr.contains("<SegmentBase")) "已写入 Representation 内" else "缺失！"}" +
+                    " | baseUrl 数=${videoBaseUrls.count { it.contains("<BaseURL>") }}" +
+                    " | audio=${if (audio != null) "有" else "无"}"
+            )
+        }
         val primaryUrl = if (uposHost == "backup") {
             video.backupUrl.firstOrNull { it.isNotBlank() } ?: video.baseUrl
         } else if (uposHost.isNotEmpty()) {

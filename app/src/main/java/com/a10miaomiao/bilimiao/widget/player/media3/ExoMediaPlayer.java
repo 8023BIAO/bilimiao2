@@ -623,6 +623,16 @@ public class ExoMediaPlayer extends AbstractMediaPlayer implements Player.Listen
 
     @Override
     public void onPlayerError(@NonNull PlaybackException error) {
+        // ★ 播放错误写进诊断日志：以前 release 包既看不到 logcat、也看不到错误详情，
+        //   只能靠"播不出来"三个字猜（2026-09-19 番剧 DASH 就是这么卡住的）
+        try {
+            com.a10miaomiao.bilimiao.comm.utils.PlayerDiag.INSTANCE.log(
+                    "player-error",
+                    "code=" + error.errorCode + " name=" + error.getErrorCodeName()
+                            + " msg=" + error.getMessage()
+                            + (error.getCause() != null ? " cause=" + error.getCause() : ""));
+        } catch (Throwable ignored) {
+        }
         notifyOnError(IMediaPlayer.MEDIA_ERROR_UNKNOWN, IMediaPlayer.MEDIA_ERROR_UNKNOWN);
     }
 
