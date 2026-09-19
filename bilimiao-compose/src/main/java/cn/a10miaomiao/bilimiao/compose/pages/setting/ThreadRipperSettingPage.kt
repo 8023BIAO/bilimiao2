@@ -102,9 +102,8 @@ private fun ThreadRipperSettingPageContent() {
                     summary = {
                         Text(
                             "MP4（含 durl 直链、[merging]/[concatenating] 源）在 ExoPlayer 里是「整段顺序下载」，" +
-                                "没有分段可以切，所以多线程一个字节也帮不上；\n" +
-                                "想用它请到 播放设置 → 视频格式选择 改成 DASH（DASH 才有分段 Range 可并发，" +
-                                "而且 1080P 也只有 DASH 给）。"
+                                "没有字节分段可以切，所以多线程一个字节也帮不上；\n" +
+                                "想用它请到 播放设置 → 视频格式选择 改成 DASH（DASH 的分段流才有 Range 可并发）。"
                         )
                     },
                 )

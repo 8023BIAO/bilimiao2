@@ -95,7 +95,8 @@ class BangumiPlayerSource(
             val durl = res.durl
             val dash = res.dash
             // ★ 跟随"视频格式选择"：fnval > 2 = DASH，= 2 = MP4/FLV（用户 2026-09-19 明确要求）。
-            //   以前这里写死"durl 优先"，等于把设置架空 —— 而 PGC 的 MP4(durl) 实测上限只有 720P。
+            //   以前这里写死"durl 优先"，等于把设置架空；顺带一提：MP4 源**不一定**没有高清晰度
+            //   （实测样本里只给了 720P/360P，但部分内容 MP4 也能到 1080P），所以清晰度不该由代码替用户决定。
             //   实测 PGC 的 dash 带完整 SegmentBase（initialization + index_range），MPD 是好的。
             val preferDash = fnval > 2
             if (preferDash && dash != null) {

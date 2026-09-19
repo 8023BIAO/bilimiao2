@@ -1405,9 +1405,10 @@ class PlayerDelegate2(
                 SettingPreferences.getData(activity) {
                     fnval = it[PlayerFnval] ?: SettingConstants.PLAYER_FNVAL_DASH
                     // ★ 番剧/影视**跟随设置**（用户 2026-09-19 明确要求）：
-                    //   以前这里写死 `fnval = PLAYER_FNVAL_MP4`，理由是"durl 多段会 OOM"，
-                    //   代价是 PGC 的 MP4 源**上限只有 720P**（实测 accept_quality=[64,16]），
-                    //   1080P 只有 DASH 给（实测 [112,80,64,32,16]）。
+                    //   以前这里写死 `fnval = PLAYER_FNVAL_MP4`（理由是"durl 多段会 OOM"）——
+                    //   等于替用户做了清晰度选择：有些内容的 MP4 源确实拿不到高清晰度
+                    //   （实测样本 accept_quality 只有 [64,16]，而 DASH 是 [112,80,64,32,16]；
+                    //   但反过来 MP4 也可能给 1080P，所以不该由代码一刀切）。
                     //   内存问题现在由 Media3ExoPlayerManager 的 64MB 堆内硬上限兜住
                     //   （缓冲到顶就停止下载，不是继续往堆里分配），所以不必再拿清晰度换内存。
                     PlayerDiag.log(
