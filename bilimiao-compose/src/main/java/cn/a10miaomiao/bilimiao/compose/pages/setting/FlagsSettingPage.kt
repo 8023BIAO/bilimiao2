@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
+import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import android.content.Context
 import android.content.SharedPreferences
 import android.webkit.CookieManager
@@ -356,9 +357,31 @@ private fun FlagsSettingPageContent(
         }
     }
 
+    val prefFlow = rememberPreferenceFlow(dataStore)
     ProvidePreferenceLocals(
-        flow = rememberPreferenceFlow(dataStore)
+        flow = prefFlow
     ) {
+        // 视频格式：MP4(2) 时线程撕裂者**对它无效**（MP4 是整段顺序下载、没有分段可切，
+        // ThreadRipperDataSource 的并发条件要求"请求长度已知"，渐进式请求 length=UNSET → 直接单连接透传）
+        // → 按用户要求：置灰不可点，并且如果原本开着就自动关掉，同时把原因写在说明里。
+        val prefValues = prefFlow.collectAsState().value
+        val fnvalValue = (prefValues[SettingPreferences.PlayerFnval.name] as? Int)
+            ?: SettingConstants.PLAYER_FNVAL_DASH
+        val mp4Selected = fnvalValue == SettingConstants.PLAYER_FNVAL_MP4
+        LaunchedEffect(mp4Selected) {
+            if (mp4Selected &&
+                (prefValues[SettingPreferences.ThreadRipperEnable.name] as? Boolean) == true
+            ) {
+                SettingPreferences.edit(context) {
+                    it[SettingPreferences.ThreadRipperEnable] = false
+                }
+                Toast.makeText(
+                    context,
+                    "当前视频格式是 MP4：线程撕裂者对它无效，已自动关闭",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
         // 游客模式状态（必须在 Composable 作用域内）
         val loginInfoState by userStore.stateFlow.collectAsState()
         // 组合期直接读 SharedPreferences 会在主线程做首次磁盘加载（进页面就掉帧）→ 异步读
@@ -505,19 +528,29 @@ private fun FlagsSettingPageContent(
             switchPreference(
                 key = SettingPreferences.ThreadRipperEnable.name,
                 defaultValue = false,
+                // MP4 源下置灰（不可点）—— 见上面 mp4Selected 的说明
+                enabled = { !mp4Selected },
                 title = { Text("启用线程撕裂者") },
                 summary = {
-                    if (it) {
-                        Text("已开启：把每个分段的字节范围再切成多块并发下载。海外建议开、国内不建议，自行测试；播放异常就关掉")
+                    if (mp4Selected) {
+                        Text("已停用：当前「视频格式选择」是 MP4。MP4 是整段顺序下载、没有分段可切，多线程对它无效；想用请先把视频格式改成 DASH")
+                    } else if (it) {
+                        Text("已开启：把每个分段的字节范围再切成多块并发下载（只对 DASH 分段流有效）。海外建议开、国内不建议，自行测试；播放异常就关掉")
                     } else {
-                        Text("建议海外用户开启，国内不建议开启，自行测试（多线程并发下载，默认关闭）")
+                        Text("建议海外用户开启，国内不建议开启，自行测试（多线程并发下载，默认关闭；仅对 DASH 分段流有效）")
                     }
                 },
             )
             preference(
                 key = "thread_ripper_threads_entry",
                 title = { Text("线程设置") },
-                summary = { Text("自动线程 / 手动线程数（1 ~ 本机 $maxThreads 线程，或不限）") },
+                enabled = !mp4Selected,
+                summary = {
+                    Text(
+                        if (mp4Selected) "当前是 MP4 源，改了也没用；先把「视频格式选择」改成 DASH"
+                        else "自动线程 / 手动线程数（1 ~ 本机 $maxThreads 线程，或不限）"
+                    )
+                },
                 onClick = viewModel::toThreadRipperSettingPage,
             )
             preference(

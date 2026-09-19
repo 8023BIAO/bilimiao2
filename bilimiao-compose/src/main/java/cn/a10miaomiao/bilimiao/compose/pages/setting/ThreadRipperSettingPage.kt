@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
+import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -69,6 +70,10 @@ private fun ThreadRipperSettingPageContent() {
         val preferences = prefFlow.collectAsState().value
         val autoThreads =
             (preferences[SettingPreferences.ThreadRipperAutoThreads.name] as? Boolean) ?: true
+        // 视频格式是 MP4 时，线程撕裂者对它无效（MP4 整段顺序下载、没有分段可切）→ 这里整页置灰
+        val fnvalValue = (preferences[SettingPreferences.PlayerFnval.name] as? Int)
+            ?: SettingConstants.PLAYER_FNVAL_DASH
+        val mp4Selected = fnvalValue == SettingConstants.PLAYER_FNVAL_MP4
         val threadValue =
             (preferences[SettingPreferences.ThreadRipperThreads.name] as? Int) ?: 0
 
@@ -88,10 +93,27 @@ private fun ThreadRipperSettingPageContent() {
                 )
             }
 
+            if (mp4Selected) {
+                // 说明性条目：不可点，只解释为什么这里的开关都灰了
+                preference(
+                    key = "tr_mp4_notice",
+                    title = { Text("当前是 MP4 源，线程撕裂者对它无效") },
+                    enabled = false,
+                    summary = {
+                        Text(
+                            "MP4（含 durl 直链、[merging]/[concatenating] 源）在 ExoPlayer 里是「整段顺序下载」，" +
+                                "没有分段可以切，所以多线程一个字节也帮不上；\n" +
+                                "想用它请到 播放设置 → 视频格式选择 改成 DASH（DASH 才有分段 Range 可并发，" +
+                                "而且 1080P 也只有 DASH 给）。"
+                        )
+                    },
+                )
+            }
             preferenceCategory(key = "tr_threads", title = { Text("线程") })
             switchPreference(
                 key = SettingPreferences.ThreadRipperAutoThreads.name,
                 defaultValue = true,
+                enabled = { !mp4Selected },
                 title = { Text("自动线程") },
                 summary = {
                     if (it) {
@@ -107,8 +129,9 @@ private fun ThreadRipperSettingPageContent() {
                 valueRange = 0..maxThreads,
                 // zhanghai 的 SliderPreference：steps = 两端点之间的档位数，故为 (end - start - 1)
                 valueSteps = (maxThreads - 1).coerceAtLeast(0),
-                // ★ 自动线程开着时这根滑块置灰（用户要求）：值仍然作为自动模式的上限生效
-                enabled = { !autoThreads },
+                // ★ 自动线程开着时这根滑块置灰（用户要求）：值仍然作为自动模式的上限生效；
+                //   MP4 源整页置灰（线程撕裂者对 MP4 无效）
+                enabled = { !autoThreads && !mp4Selected },
                 title = { Text("线程数（手动档）") },
                 valueText = { value -> Text(labelOf(value)) },
                 summary = { value ->
