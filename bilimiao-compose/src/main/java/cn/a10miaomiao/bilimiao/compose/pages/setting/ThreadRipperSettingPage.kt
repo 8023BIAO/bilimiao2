@@ -149,6 +149,18 @@ private fun ThreadRipperSettingPageContent() {
                 },
             )
             preference(
+                key = "tr_help_nodes",
+                title = { Text("为什么要填多个节点/多 CDN") },
+                enabled = false,
+                summary = {
+                    Text(
+                        "本功能会**同时向多个 CDN 节点要同一段数据**：哪个先回来用哪个，另一条立刻掐掉；\n" +
+                            "某个节点卡住或失败就被暂停一会儿（指数退避），重试时自动换别的节点。\n" +
+                            "所以「CDN 竞速」开着时它才有多个节点可用；你把 CDN 固定成某个主机时，它**不会**换节点。"
+                    )
+                },
+            )
+            preference(
                 key = "tr_help_cdn",
                 title = { Text("和 CDN 设置的关系") },
                 enabled = false,

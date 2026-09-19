@@ -33,6 +33,14 @@ import java.util.concurrent.TimeUnit
  * 再按原顺序交付给播放器 —— 不是把同一个文件重复下载 N 遍：每个连接只负责自己那段 Range，
  * 每块的实际返回长度都会校验，长度不对直接判失败。
  *
+ * ★ vc105 起补齐了上游的**多节点**部分（原来的实现只在一个节点上并发，海外遇到"节点活着但慢"就干等）：
+ *   - 候选节点来自 App 自己的 CDN 逻辑（`baseUrl` + `backupUrl`，竞速排序后的列表），登记进 [CdnNodePool]；
+ *   - 每个分块**错峰 900ms 抢跑**：主节点太久没首字节，就同时向另一个节点（必须不同 host）也发一条，
+ *     谁先交出首块谁赢，输的那条立刻掐掉且**不算失败**；
+ *   - 节点记速度分（bps 滑动平均）+ 失败退避（3s 起、60s 封顶），坏节点自动靠后；
+ *   - 超时对齐上游：首字节 5.5s / 无进度 4s / 单次尝试 15s（最后一条只在多节点时生效）。
+ *   用户把 CDN 固定成某个主机时候选全是同一个 host → 抢跑自然退化成"不换节点"。
+ *
  * ★ 与 CDN 选择的关系：**完全独立、互不干扰**。
  *   本工程已有的「CDN 竞速 / CDN 固定主机 / 音频不跟随 CDN」照旧生效 ——
  *   它们决定"用哪个 URL"，本层只决定"这个 URL 上的字节怎么并发拉"。
@@ -225,12 +233,37 @@ internal class ThreadRipperDataSource(
         const val MAX_ATTEMPTS = 3
 
         /**
-         * **无进度超时**（对齐 burst-download 的 no-progress timeout）：
-         * 单块 20 秒一个字节都没新增，就掐掉这条连接换一条重试 ——
-         * 海外线路最常见的就是"连接还活着但彻底不动了"，光等没有意义。
+         * **无进度超时**：单块这么久一个字节都没新增，就掐掉这条连接换一条重试。
+         * vc105 从 20 秒改成 **4 秒**，与上游 `range-core.js` 的 `stallTimeoutMs: 4000` 一致 ——
+         * 海外线路最常见的就是"连接还活着但彻底不动了"，20 秒够把缓冲耗光，4 秒才是对的。
          */
-        const val STALL_TIMEOUT_MS = 20_000L
-        const val STALL_CHECK_PERIOD_MS = 5_000L
+        const val STALL_TIMEOUT_MS = 4_000L
+        const val STALL_CHECK_PERIOD_MS = 2_000L
+
+        /**
+         * **首字节超时**：连接打开后这么久还没吐出第一个数据块，就当作这条路不行。
+         * 与上游 `firstByteTimeoutMs: 5500` 一致。
+         */
+        const val FIRST_BYTE_TIMEOUT_MS = 5_500L
+
+        /**
+         * **抢跑错峰**：主节点这么久还没交出首字节，就同时向第二个节点也发一条请求，
+         * 谁先回来用谁，输的那条立刻掐掉（**不算失败**）。
+         * 与上游 `hedgeDelayMs: 900` 一致 —— 这是它"哪个下载好了就先用哪个"的核心。
+         */
+        const val HEDGE_DELAY_MS = 900L
+
+        /**
+         * **单次尝试总时长上限**：只在"有多个候选节点"时生效（单节点时慢但有进度就不打断）。
+         * 与上游 `attemptTimeoutMs: 15000` 一致；超时后从已续传的位置**换节点**继续。
+         */
+        const val ATTEMPT_TIMEOUT_MS = 15_000L
+
+        /** 首块等待的宽限：首字节超时 + 抢跑错峰之后，再给这么多时间让数据真的到达 */
+        const val FIRST_BLOCK_SLACK_MS = 3_000L
+
+        /** 抢跑赢家等"判决"的最长时间（实际几毫秒，调用方每 15ms 就判决一次） */
+        const val DECISION_WAIT_MS = 1_500L
 
         /** 正在下载的分块（卡死巡检用） */
         private val activeChunks: MutableSet<ThreadRipperDataSource.Chunk> =
@@ -325,10 +358,16 @@ internal class ThreadRipperDataSource(
 
         if (threads <= 1) return openSingle(dataSpec)
 
+        val pool = CdnNodePool.orderFor(dataSpec.uri)
         RipperDiag.log(
             "parallel",
             "并发拉取：${threads} 连接 / ${length / 1024}KB @${dataSpec.position / 1024}KB" +
-                "（${dataSpec.uri.lastPathSegment ?: ""}）"
+                "（${dataSpec.uri.lastPathSegment ?: ""}）" +
+                if (pool.size > 1) {
+                    " 候选节点=${pool.map { hostOf(it) }.distinct().joinToString(",")}"
+                } else {
+                    ""
+                }
         )
 
         return try {
@@ -523,6 +562,23 @@ internal class ThreadRipperDataSource(
      *  - 只有**所有尝试都失败**才把错误交给上层（此时若一个字节都没交付，read() 会
      *    悄悄回退单连接；已经交付过就只能让播放器重试这一段了）。
      */
+    /**
+     * 一个字节块：把 `[start, start+length)` 拉下来，以 64KB 为单位塞进有界队列
+     * （队列满就阻塞 —— 这是"预读"的边界，也是内存闸门；上层不读了就靠 [cancel] 打断 `put`）。
+     *
+     * ★ vc105 起：**多节点抢跑**（对齐上游 Bilibili-thread-ripper 的核心机制）
+     *  - 本块先从节点池里的某个节点起步；若 [HEDGE_DELAY_MS] 内没交出第一个数据块，
+     *    就**同时**向第二个节点（必须是不同 host）也发一条 —— 谁先交出首块谁赢，
+     *    输的那条立刻掐掉，而且**不算失败**（这正是抢跑的意义：慢的不该被记账）；
+     *  - 赢家继续把这一块剩下的读完，所以稳定后每个块仍然只有一条活跃连接；
+     *  - 首字节 [FIRST_BYTE_TIMEOUT_MS] / 无进度 [STALL_TIMEOUT_MS] / 单次尝试
+     *    [ATTEMPT_TIMEOUT_MS]（仅多节点时）三个超时都对齐上游；
+     *  - 失败会记进 [CdnNodePool]，坏节点被暂停（指数退避、60 秒封顶），重试时自动换节点；
+     *  - **分块级重试**：只重下这一块没下完的部分（`pushed` 记录已确认入队的字节数）。
+     *
+     * 单节点（没登记过候选 / 用户固定了主机 / PCDN 节点）时行为与以前一样：
+     * 一条连接、慢但有进度就不打断，安全网（熔断 + 就地降级单连接）全部保留。
+     */
     private inner class Chunk(
         private val spec: DataSpec,
         private val start: Long,
@@ -537,8 +593,11 @@ internal class ThreadRipperDataSource(
         @Volatile
         var done = false
 
-        @Volatile
-        private var source: DataSource? = null
+        /** 本块正在用的连接（抢跑时可能同时有两条） */
+        private val activeSources = java.util.concurrent.ConcurrentHashMap.newKeySet<DataSource>()
+
+        /** 本块正在跑的尝试（取消时要连线程一起打断，否则可能卡在 queue.put 上） */
+        private val liveAttempts = java.util.concurrent.ConcurrentHashMap.newKeySet<Attempt>()
 
         /** 已经"下载并确认入队"的字节数 = 可以续传的位置 */
         @Volatile
@@ -550,8 +609,15 @@ internal class ThreadRipperDataSource(
 
         private var attempts = 0
 
+        /** 本块的候选节点（节点池给：跳过被暂停的，按速度分排 + 轮换） */
+        private val urls: List<String> = CdnNodePool.orderFor(spec.uri)
+
+        /** 轮换游标：赢家会被提到最前，下一次重试优先用它 */
+        private var urlCursor = 0
+
         fun cancel() {
-            runCatching { source?.close() }
+            liveAttempts.forEach { runCatching { it.lose() } }
+            activeSources.forEach { runCatching { it.close() } }
         }
 
         /**
@@ -584,8 +650,11 @@ internal class ThreadRipperDataSource(
             if (queue.remainingCapacity() == 0) return
             if (now - lastProgressAt < STALL_TIMEOUT_MS) return
             lastProgressAt = now
-            RipperDiag.log("stall", "分块 ${start / 1024}KB 处 20 秒无新字节 → 掐掉连接重试")
-            runCatching { source?.close() }
+            RipperDiag.log(
+                "stall",
+                "分块 ${start / 1024}KB 处 ${STALL_TIMEOUT_MS / 1000} 秒无新字节 → 掐掉连接换节点重试"
+            )
+            activeSources.forEach { runCatching { it.close() } }
         }
 
         override fun run() {
@@ -637,59 +706,270 @@ internal class ThreadRipperDataSource(
                 }
             } finally {
                 unregisterChunk(this)
-                runCatching { source?.close() }
-                source = null
+                liveAttempts.forEach { runCatching { it.lose() } }
+                activeSources.forEach { runCatching { it.close() } }
             }
         }
 
-        /** 一次完整的（或续传的）拉取尝试：从 `start + pushed` 拉到这一块的末尾 */
+        /** 把一个数据块交付给上层（只有**赢家**线程会调它，所以 [pushed] 是单写者） */
+        private fun deliver(buf: ByteArray) {
+            queue.put(buf)
+            pushed += buf.size
+            lastProgressAt = SystemClock.uptimeMillis()
+        }
+
+        /**
+         * 本轮试哪几条路：主节点先上，第二个候选错峰 [HEDGE_DELAY_MS]。
+         * 抢跑的第二个**必须换 host** —— 用户把 CDN 固定成某个主机时，候选全是同一个 host，
+         * 这里就自然退化成"单节点不换"（这是我们对用户的承诺）。
+         */
+        private fun planForThisAttempt(): List<Pair<String, Long>> {
+            val list = urls.ifEmpty { listOf(spec.uri.toString()) }
+            val primary = list[urlCursor % list.size]
+            urlCursor++
+            val hedge = list.firstOrNull { it != primary && hostOf(it) != hostOf(primary) }
+            return if (hedge == null) {
+                listOf(primary to 0L)
+            } else {
+                listOf(primary to 0L, hedge to HEDGE_DELAY_MS)
+            }
+        }
+
+        /** 让赢家成为下一轮的起点（同一块内不再回到慢节点） */
+        private fun promote(url: String) {
+            val idx = urls.indexOf(url)
+            if (idx > 0) urlCursor = idx
+        }
+
+        /**
+         * 一次（可续传的）尝试：**多节点抢跑** → 赢家读完这一块剩下的部分。
+         * 全部候选都失败时抛异常，交给 [run] 的重试循环（重试会换节点、从续传位置开始）。
+         */
         private fun downloadAttempt() {
             val offset = start + pushed
             val remainingTotal = length - pushed
             if (remainingTotal <= 0) return
             val pushedBefore = pushed
-            val ds = upstreamFactory.createDataSource()
-            source = ds
-            lastProgressAt = SystemClock.uptimeMillis()
-            try {
-                val rangeSpec = spec.buildUpon()
-                    .setPosition(offset)
-                    .setLength(remainingTotal)
-                    .build()
-                val openedLength = ds.open(rangeSpec)
-                // ★ 校验：服务端不认 Range 时会按 200 全量返回（此时 openedLength 是"从 offset 到文件尾"，
-                //   通常远大于我们要的这一块）→ 判失败并（最终）熔断，交给单连接兜底
-                if (openedLength != C.LENGTH_UNSET.toLong() && openedLength > remainingTotal) {
-                    throw IOException("服务端未按 Range 返回（期望 $remainingTotal，实得 $openedLength）")
-                }
-                var remaining =
-                    if (openedLength == C.LENGTH_UNSET.toLong()) remainingTotal else openedLength
-                while (remaining > 0 && !closed) {
-                    val want = minOf(BUFFER_SIZE.toLong(), remaining).toInt()
-                    val buf = ByteArray(want)
-                    var filled = 0
-                    while (filled < want) {
-                        val n = ds.read(buf, filled, want - filled)
-                        if (n == C.RESULT_END_OF_INPUT) break
-                        filled += n
-                    }
-                    if (filled <= 0) {
-                        throw IOException("分段提前结束（还差 $remaining 字节）")
-                    }
-                    remaining -= filled
-                    lastProgressAt = SystemClock.uptimeMillis()
-                    queue.put(if (filled == buf.size) buf else buf.copyOf(filled))
-                    pushed += filled
-                }
-            } finally {
-                runCatching { ds.close() }
-                source = null
+            val multiNode = urls.size > 1
+
+            val racers = planForThisAttempt().map { (url, delay) ->
+                Attempt(url, offset, remainingTotal, delay)
             }
-            // ★ 一次尝试必须"有推进"：服务器对 Range 返回 0 字节（Content-Length: 0 / 立刻 EOF）
-            //   时不能当成功 —— 否则外层 while 会原地空转，疯狂重发请求。
+            racers.forEach { attempt ->
+                liveAttempts.add(attempt)
+                attempt.start()
+            }
+
+            // ★ 抢跑阶段出错（超时/全挂）时也必须把还在跑的那几条停掉：它们可能马上就会
+            //   把首块塞进队列 —— 不停就会出现"重试的一条 + 旧的一条"同时往队列里写同一段字节（数据损坏）
+            val winner = try {
+                awaitWinner(racers)
+            } catch (e: Throwable) {
+                racers.forEach { r ->
+                    if (r.firstBlock == null) CdnNodePool.noteFailure(r.url)  // 9 秒都没首字节，记它一笔
+                    runCatching { r.lose() }
+                }
+                throw e
+            }
+            racers.forEach { if (it !== winner) it.lose() }
+            try {
+                winner.awaitFinish(multiNode)
+            } catch (e: Throwable) {
+                // 超时/失败也要把赢家停掉，否则它会继续往队列里塞数据（同上，会重）
+                runCatching { winner.lose() }
+                throw e
+            }
             if (pushed == pushedBefore) {
                 throw IOException("分段返回 0 字节（offset=${offset / 1024}KB）")
+            }
+            promote(winner.url)
+        }
+
+        /** 等第一个数据块：谁先到谁是赢家；全都失败了就把最后一个异常抛出去 */
+        private fun awaitWinner(racers: List<Attempt>): Attempt {
+            val deadline = SystemClock.uptimeMillis() +
+                FIRST_BYTE_TIMEOUT_MS + HEDGE_DELAY_MS + FIRST_BLOCK_SLACK_MS
+            while (true) {
+                if (closed) throw InterruptedIOException("ThreadRipperDataSource 已关闭")
+                racers.forEach { r ->
+                    if (r.firstBlock != null) {
+                        // ★ 关键：必须把 won 置 true —— 赢家线程在等这个判决，否则它会以为"没选我"而退出
+                        r.won = true
+                        return r
+                    }
+                }
+                val failures = racers.mapNotNull { it.failure }
+                if (failures.size == racers.size) throw failures.last()
+                if (SystemClock.uptimeMillis() > deadline) {
+                    throw IOException("${racers.size} 条路都没有首字节（等待超时）")
+                }
+                Thread.sleep(15L)
+            }
+        }
+
+        /**
+         * 一条连接的一次尝试（抢跑用）。
+         *
+         * 流程：错峰 → open → 读**首块**放进 [firstBlock] → 等判决（[won]）→
+         * 赢了就继续读完这一块；输了/被取消就立刻 close 并退出，不记失败。
+         */
+        private inner class Attempt(
+            val url: String,
+            private val offset: Long,
+            private val total: Long,
+            private val delayMs: Long,
+        ) {
+            @Volatile
+            var firstBlock: ByteArray? = null
+
+            @Volatile
+            var failure: Throwable? = null
+
+            @Volatile
+            var won = false
+
+            @Volatile
+            var lost = false
+
+            @Volatile
+            var finished = false
+
+            private var ds: DataSource? = null
+            private var delivered = 0L
+
+            /** 真正开始收数据的时刻（速度分用它算，抢跑的 900ms 错峰不该算进去） */
+            @Volatile
+            private var dataStartAt = 0L
+
+            private val thread = Thread({ body() }, "ripper-attempt").apply { isDaemon = true }
+
+            fun start() = thread.start()
+
+            /** 判负 / 取消：关连接 + 打断线程（可能正卡在 queue.put 上） */
+            fun lose() {
+                lost = true
+                runCatching { ds?.close() }
+                runCatching { thread.interrupt() }
+            }
+
+            fun awaitFinish(multiNode: Boolean) {
+                val deadline = SystemClock.uptimeMillis() + ATTEMPT_TIMEOUT_MS
+                while (!finished && failure == null && !lost && !closed) {
+                    // 单节点时**不设**总时长上限：慢但一直在出数据就别打断它；
+                    // 有多个节点可选时才用上游的 15 秒上限，超时就换节点续传。
+                    if (multiNode && SystemClock.uptimeMillis() > deadline) {
+                        // 慢到超时的节点要记一笔，否则下一轮还会优先选它
+                        CdnNodePool.noteFailure(url)
+                        throw IOException("单次尝试超过 ${ATTEMPT_TIMEOUT_MS / 1000} 秒 → 换节点续传")
+                    }
+                    Thread.sleep(20L)
+                }
+                failure?.let { throw it }
+                if (lost) throw IOException("赢家被取消（已续传 ${pushed / 1024}KB）")
+                if (!finished && !closed) {
+                    throw IOException("尝试提前结束（已续传 ${pushed / 1024}KB）")
+                }
+            }
+
+            private fun body() {
+                try {
+                    if (delayMs > 0) {
+                        Thread.sleep(delayMs)
+                        if (lost || closed) return
+                        // 走到这里 = 主节点 900ms 还没交出首字节 → 正式抢跑
+                        RipperDiag.log(
+                            "hedge",
+                            "分块 ${start / 1024}KB：主节点 ${HEDGE_DELAY_MS}ms 没首字节 → 抢跑第二条（${hostOf(url)}）"
+                        )
+                    }
+                    if (lost || closed) return
+                    val source = upstreamFactory.createDataSource()
+                    ds = source
+                    activeSources.add(source)
+                    val rangeSpec = spec.buildUpon()
+                        .setUri(Uri.parse(url))
+                        .setPosition(offset)
+                        .setLength(total)
+                        .build()
+                    val opened = source.open(rangeSpec)
+                    // 服务端不认 Range 时会按 200 全量返回（长度远大于我们要的这一块）→ 判失败
+                    if (opened != C.LENGTH_UNSET.toLong() && opened > total) {
+                        throw IOException("服务端未按 Range 返回（期望 $total，实得 $opened）")
+                    }
+                    dataStartAt = SystemClock.uptimeMillis()
+                    var remaining = if (opened == C.LENGTH_UNSET.toLong()) total else opened
+
+                    // ① 首块：谁先交出来谁赢（另一个还在等判决）
+                    val first = readBlock(source, remaining)
+                        ?: throw IOException("分段提前结束（还差 $remaining 字节）")
+                    remaining -= first.size
+                    firstBlock = first
+
+                    // ② 等判决：调用方每 15ms 轮询一次，正常几毫秒就出结果
+                    val judgeDeadline = SystemClock.uptimeMillis() + DECISION_WAIT_MS
+                    while (!won && !lost && !closed && SystemClock.uptimeMillis() < judgeDeadline) {
+                        Thread.sleep(10L)
+                    }
+                    if (!won || lost || closed) return
+
+                    // ③ 赢家：首块 + 剩下的全部按顺序交付
+                    deliver(first)
+                    delivered += first.size
+                    while (remaining > 0 && !closed && !lost) {
+                        val buf = readBlock(source, remaining)
+                            ?: throw IOException("分段提前结束（还差 $remaining 字节）")
+                        remaining -= buf.size
+                        deliver(buf)
+                        delivered += buf.size
+                    }
+                    finished = remaining <= 0
+                } catch (e: Throwable) {
+                    if (e is InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        return
+                    }
+                    // 输了 / 上层关了 → 不算失败（抢跑输的那条本来就会被掐）
+                    if (!lost && !closed) failure = e
+                } finally {
+                    runCatching { ds?.close() }
+                    ds?.let { source -> activeSources.remove(source) }
+                    liveAttempts.remove(this)
+                    when {
+                        finished -> CdnNodePool.noteSuccess(
+                            url,
+                            delivered,
+                            SystemClock.uptimeMillis() - (if (dataStartAt > 0) dataStartAt else SystemClock.uptimeMillis()),
+                        )
+                        failure != null -> CdnNodePool.noteFailure(url)
+                    }
+                }
+            }
+
+            /** 读满一个 64KB 块；只有"这一段就到头了"才会返回更短的块，读不到返回 null */
+            private fun readBlock(source: DataSource, remaining: Long): ByteArray? {
+                val want = minOf(BUFFER_SIZE.toLong(), remaining).toInt()
+                val buf = ByteArray(want)
+                var filled = 0
+                while (filled < want) {
+                    val n = source.read(buf, filled, want - filled)
+                    if (n == C.RESULT_END_OF_INPUT) break
+                    filled += n
+                }
+                return when {
+                    filled <= 0 -> null
+                    filled == want -> buf
+                    else -> buf.copyOf(filled)
+                }
             }
         }
     }
 }
+
+/**
+ * `https://host/path?query` → `host`。
+ *
+ * 用在两处：① `[parallel]` 日志里列出候选节点；② 抢跑时判断"第二个候选是不是**不同 host**"
+ * —— 用户在设置里把 CDN 固定成某个主机时，候选全是同一个 host，抢跑就自然不换节点（承诺不打破）。
+ */
+private fun hostOf(url: String): String =
+    runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")

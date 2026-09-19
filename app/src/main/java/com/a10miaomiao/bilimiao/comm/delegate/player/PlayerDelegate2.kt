@@ -755,6 +755,11 @@ class PlayerDelegate2(
                 val baseFactory = createCachedFactory(activity, userAgent, header)
                 val videoCandidates = dataSourceArr[1].split("|").filter { it.isNotBlank() }
                 val audioCandidates = dataSourceArr.getOrNull(2)?.split("|")?.filter { it.isNotBlank() }
+                // ★ 多节点抢跑（vc105）：把候选节点登记进节点池 —— 分段层才知道"除了当前这条 URL 还能问谁"。
+                //   候选来自 App 自己的 CDN 逻辑（竞速排序后的 baseUrl + backupUrl）；
+                //   用户固定了主机时这里全是同一个 host，抢跑会自动退化成不换节点。
+                videoCandidates.firstOrNull()?.let { CdnNodePool.register(it, videoCandidates) }
+                audioCandidates?.firstOrNull()?.let { CdnNodePool.register(it, audioCandidates) }
                 val videoFactory = wrapWithFailover(baseFactory, videoCandidates)
                 val audioFactory = wrapWithFailover(baseFactory, audioCandidates ?: videoCandidates)
                 val videoMedia = MediaItem.Builder().apply {
@@ -795,6 +800,8 @@ class PlayerDelegate2(
                 // Create a DASH media source pointing to a DASH manifest uri.
                 val uri = Uri.parse(dataSourceArr[1])
                 val dashStr = dataSourceArr[2]
+                // ★ 多节点抢跑（vc105）：MPD 里每个 Representation 的多个 <BaseURL> 就是候选节点
+                CdnNodePool.register(dataSourceArr[1], extractMpdBaseUrls(dashStr))
                 val dashManifest =
                     DashManifestParser().parse(uri, dashStr.toByteArray().inputStream())
                 val mediaSource = DashMediaSource.Factory(dataSourceFactory)
@@ -1909,4 +1916,27 @@ class PlayerDelegate2(
             manager.getMediaPlayer()?.setLooping(isLoop)
         }
     }
+}
+
+
+/**
+ * 从我们生成的 MPD 里取出所有 `<BaseURL>`（多 CDN 候选），交给 [CdnNodePool] 做抢跑。
+ *
+ * 转义顺序要和写入时相反：写入是**先转 `&`**，所以这里要**最后**还原 `&amp;`
+ * —— 否则 `&amp;lt;` 会被还原成 `<`（把原本的文本改坏）。
+ */
+private fun extractMpdBaseUrls(mpd: String): List<String> {
+    if (mpd.isBlank()) return emptyList()
+    return Regex("<BaseURL>(.*?)</BaseURL>")
+        .findAll(mpd)
+        .map { m ->
+            m.groupValues[1]
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&apos;", "'")
+                .replace("&amp;", "&")
+        }
+        .filter { it.isNotBlank() }
+        .toList()
 }
