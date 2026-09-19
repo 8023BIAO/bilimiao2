@@ -63,6 +63,11 @@
             android:src="@drawable/ic_close_white_24dp"
             android:contentDescription="退出按钮"/>
 
+        <!--
+          加载页（封面页）的标题：和播放器顶栏一样**不显示**（用户要求：播放器区域不放标题，
+          反正看不全、又压封面；想知道标题去详情页）。控件保留但 invisible：
+          代码里 showLoading() 照旧 setText，右侧"更多"按钮的位置也不会变。
+        -->
         <TextView
             android:id="@+id/loading_title"
             android:layout_width="match_parent"
@@ -72,7 +77,8 @@
             android:maxLines="2"
             android:paddingLeft="10dp"
             android:textColor="@android:color/white"
-            android:textSize="18sp" />
+            android:textSize="18sp"
+            android:visibility="invisible" />
 
 
         <ImageView
