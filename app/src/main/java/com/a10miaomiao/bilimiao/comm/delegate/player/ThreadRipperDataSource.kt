@@ -78,12 +78,14 @@ internal object ThreadRipperSettings {
      * 每条连接**最少**分到的字节数：**64KB**，与上游 Bilibili-thread-ripper 的
      * `minChunkBytes: 64 * 1024`（`range-core.js` / `splitRange`）完全一致。
      *
-     * 上游的切法就是"把这次请求的字节区间**平均分给 N 条连接**"，唯一的下限是它：
-     * 分段不够大就自动少开几条（200KB 的请求只会开 3 条，而不是硬开 8 条）。
+     * 上游的切法就是"把这次请求的字节区间**平均分给 N 条连接**"，唯一的下限是它。
+     * ★ 手机上取 **256KB**（上游 64KB）：实测音频轨的请求只有 130KB 左右，
+     *   按 64KB 切会开 3 条连接拉 130KB —— 三次握手的开销远大于收益（用户："负优化"）。
+     *   256KB/连接意味着：130KB → 1 条；1MB → 4 条；8MB → 8 条（吃满本机上限）。
      * ★ 我 2026-09-19 曾自己发明过"每连接 512KB / 2MB"的规则，那跟上游无关，
      *   已于 vc104 删除：并发度应该由用户设的连接数决定，而不是由我拍一个 KB 数。
      */
-    private const val MIN_CHUNK_BYTES = 64L * 1024L
+    private const val MIN_CHUNK_BYTES = 256L * 1024L
 
     /**
      * 从 DataStore 刷新一份快照。
@@ -156,10 +158,10 @@ internal class ThreadRipperDataSource(
 
         /**
          * 小于这个长度不值得并发（请求本身就没多大，多开连接反而更慢）。
-         * 取 128KB：上游 `range-core.js` 里 `splitRange(..., minChunkBytes = 128 * 1024)`
-         * 的默认值同量级；实际播放中回源请求都是 MB 级，这个值基本不会碰到。
+         * 取 256KB：和"每连接至少 256KB"一致 —— 比这更小的请求单连接就够了，
+         * 开多条连接只会把一次小请求拆成几次握手（实测音频轨请求就在 130KB 量级）。
          */
-        const val MIN_PARALLEL_BYTES = 128L * 1024L
+        const val MIN_PARALLEL_BYTES = 256L * 1024L
 
         /** 线程数硬上限（核数再多也不超过它：连接、校验、重组本身也有开销） */
         const val MAX_WORKERS = 16
@@ -766,7 +768,10 @@ internal class ThreadRipperDataSource(
                 awaitWinner(racers)
             } catch (e: Throwable) {
                 racers.forEach { r ->
-                    if (r.firstBlock == null) CdnNodePool.noteFailure(r.url)  // 9 秒都没首字节，记它一笔
+                    // 9 秒都没首字节 / 直接报错，记它一笔（带上原因，方便下次一眼看出是 416 还是超时）
+                    if (r.firstBlock == null) {
+                        CdnNodePool.noteFailure(r.url, r.failure?.let { "${it.javaClass.simpleName}: ${it.message}" })
+                    }
                     runCatching { r.lose() }
                 }
                 throw e
@@ -859,7 +864,7 @@ internal class ThreadRipperDataSource(
                     // 有多个节点可选时才用上游的 15 秒上限，超时就换节点续传。
                     if (multiNode && SystemClock.uptimeMillis() > deadline) {
                         // 慢到超时的节点要记一笔，否则下一轮还会优先选它
-                        CdnNodePool.noteFailure(url)
+                        CdnNodePool.noteFailure(url, "单次尝试超过 ${ATTEMPT_TIMEOUT_MS / 1000} 秒")
                         throw IOException("单次尝试超过 ${ATTEMPT_TIMEOUT_MS / 1000} 秒 → 换节点续传")
                     }
                     Thread.sleep(20L)
@@ -940,7 +945,10 @@ internal class ThreadRipperDataSource(
                             delivered,
                             SystemClock.uptimeMillis() - (if (dataStartAt > 0) dataStartAt else SystemClock.uptimeMillis()),
                         )
-                        failure != null -> CdnNodePool.noteFailure(url)
+                        failure != null -> CdnNodePool.noteFailure(
+                            url,
+                            failure?.let { "${it.javaClass.simpleName}: ${it.message}" },
+                        )
                     }
                 }
             }

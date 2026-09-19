@@ -57,15 +57,25 @@ internal object CdnNodePool {
 
     fun register(primaryUrl: String, candidates: List<String>) {
         val key = Uri.parse(primaryUrl).path ?: return
-        val list = (listOf(primaryUrl) + candidates)
+        val all = (listOf(primaryUrl) + candidates)
             .filter { it.isNotBlank() }
             .distinct()
+        // ★★ 必须只保留**同一个文件**的候选（2026-09-20 定位到的严重 bug）：
+        //    我们生成的 MPD 里同时有视频和音频的 <BaseURL>，早先没按路径过滤 →
+        //    视频分块抢跑时可能去请求**音频文件**：
+        //      · 大偏移直接 HTTP 416（音频文件小得多）→ 满屏 node-block / chunk-retry；
+        //      · 小偏移则把音频字节塞进视频流 → ParserException: Invalid NAL length → 黑屏。
+        //    日志证据：`[nodes] 登记候选节点 6 条 / 5 个 host`（视频 3 + 音频 3），
+        //    而音频自己的请求反而一条候选都没有。
+        val list = all.filter { Uri.parse(it).path == key }
         if (list.isEmpty()) return
+        val dropped = all.size - list.size
         synchronized(byPath) { byPath[key] = list }
         RipperDiag.log(
             "nodes",
             "登记候选节点 ${list.size} 条 / ${list.map { hostOf(it) }.distinct().size} 个 host：" +
-                list.map { hostOf(it) }.distinct().joinToString(",")
+                list.map { hostOf(it) }.distinct().joinToString(",") +
+                if (dropped > 0) "（已丢弃 $dropped 条路径不同的：另一条轨/别的文件）" else ""
         )
     }
 
@@ -101,7 +111,7 @@ internal object CdnNodePool {
     }
 
     /** 一次尝试真的失败（不是被上层取消）→ 记失败并暂停这个节点，指数退避、60 秒封顶 */
-    fun noteFailure(url: String) {
+    fun noteFailure(url: String, reason: String? = null) {
         val node = nodes.getOrPut(url) { Node() }
         val failures = node.failures + 1
         node.failures = failures
@@ -109,7 +119,8 @@ internal object CdnNodePool {
             (BLOCK_BASE_MS shl minOf(failures - 1, 4)).coerceAtMost(BLOCK_MAX_MS)
         RipperDiag.log(
             "node-block",
-            "${hostOf(url)} 第 $failures 次失败 → 暂停 ${(node.blockedUntil - SystemClock.uptimeMillis()) / 1000} 秒"
+            "${hostOf(url)} 第 $failures 次失败 → 暂停 ${(node.blockedUntil - SystemClock.uptimeMillis()) / 1000} 秒" +
+                if (reason.isNullOrBlank()) "" else "：$reason"
         )
     }
 

@@ -100,30 +100,45 @@ class BangumiPlayerSource(
             //   实测 PGC 的 dash 带完整 SegmentBase（initialization + index_range），MPD 是好的。
             val preferDash = fnval > 2
             if (preferDash && dash != null) {
-                PlayerDiag.log("bangumi-http", "DASH 优先 → 生成 MPD（qn=${res.quality}）")
+                // ★★ vc106：DASH **不再手工拼 MPD**，改成"视频 + 音频两条流"（与普通视频、番剧 gRPC 路径一致）。
+                //
+                // 为什么（2026-09-20 实机日志 + 用户反馈"有些视频黑屏 / 缓冲一次只有几百 KB"）：
+                //  ① 手工 MPD 里我们写的是接口给的 SegmentBase(indexRange)，播放器按它把文件**按 sidx 切成
+                //     2~3MB 一段一段**去请求；而 MP4/merging 一次能读 7~8MB —— 用户感受就是"负优化"；
+                //  ② 只要 sidx 与真正拿到的字节有任何不一致（多 CDN 换节点、镜像），播放器就会按**错误偏移**读：
+                //     轻则 ParserException: Invalid NAL length（黑屏），重则请求越界 → HTTP 416 / EOFException；
+                //     这两种错误在 ripper 关掉、CDN 竞速关掉时同样出现，根因在 MPD 这条路上；
+                //  ③ merging 让播放器顺序读文件、用**文件自带**的索引寻址，天生一致，拖进度条也能秒跳。
+                //  代价：不再有 MPD 的"多 BaseURL 自适应"；我们用 `|` 候选列表 + CdnFailoverDataSource 顶上。
                 it.duration = dash.duration * 1000L
-                val dashVideo = dash.video.firstOrNull() ?: throw Exception("未找到可播放的dash视频")
-                it.height = dashVideo.height
-                it.width = dashVideo.width
-                val mpd = DashSource().getMDPUrl(
-                    dashData = dash,
-                    quality = res.quality
-                )
-                if (mpd.startsWith("[dash-mpd]")) {
-                    it.url = mpd
-                } else {
-                    // MPD 生成/自检没过（比如 XML 非良构）→ 退回"视频+音频两条流"，
-                    // 跟 gRPC 路径一个套路：没有分段索引，但**至少能播**，不会卡死
-                    val v = dash.video.firstOrNull { it.id == res.quality } ?: dash.video.firstOrNull()
-                    val a = dash.audio?.firstOrNull()
-                    val videoUrl = v?.base_url.orEmpty()
-                    it.url = if (a?.base_url.isNullOrBlank()) {
-                        videoUrl
-                    } else {
-                        "[merging]\n$videoUrl\n${a!!.base_url}"
-                    }
-                    PlayerDiag.log("bangumi-http", "MPD 不可用 → 退回 [merging]（qn=${res.quality}）")
+                val v = dash.video.firstOrNull { it.id == res.quality }
+                    ?: dash.video.firstOrNull()
+                    ?: throw Exception("未找到可播放的dash视频")
+                it.height = v.height
+                it.width = v.width
+                val a = dash.audio?.firstOrNull()
+                val videoCandidates = buildCandidates(v.base_url, v.backup_url.orEmpty(), race = true)
+                val audioCandidates = a?.let {
+                    buildCandidates(
+                        it.base_url,
+                        it.backup_url.orEmpty(),
+                        race = !audioIndependentCdn,
+                    )
                 }
+                it.url = if (videoCandidates.isBlank()) {
+                    // 极端兜底：连 base_url 都没有时，才退回手工 MPD（正常情况下走不到这里）
+                    PlayerDiag.log("bangumi-http", "没有可用直链 → 退回手工 MPD（qn=${res.quality}）")
+                    DashSource().getMDPUrl(dashData = dash, quality = res.quality)
+                } else if (audioCandidates.isNullOrBlank()) {
+                    videoCandidates
+                } else {
+                    "[merging]\n$videoCandidates\n$audioCandidates"
+                }
+                PlayerDiag.log(
+                    "bangumi-http",
+                    "DASH → [merging] 视频+音频两条流（qn=${res.quality} 候选 " +
+                        "${videoCandidates.split("|").size} 条）"
+                )
             } else if (durl != null && durl.isNotEmpty()) {
                 PlayerDiag.log(
                     "bangumi-http",
@@ -165,6 +180,35 @@ class BangumiPlayerSource(
                 throw Exception("Missing both durl and dash in bangumi player response")
             }
         }
+    }
+
+    /**
+     * 组装一条轨道的 CDN 候选列表：`base|backup1|backup2…`（竞速开着时按延迟排序，赢家在前）。
+     *
+     * 与 gRPC 路径、普通视频路径同一套规则：
+     *  - 「CDN 固定主机」= uposHost 非空 → 所有候选都换成这个主机（**用户点名就不换节点**）；
+     *  - `uposHost == "backup"` → 优先用接口给的第一个 backup 地址；
+     *  - 竞速开 → [CdnSelector.pickAndRank] 用 1 字节 GET 测延迟排序；关 → 保持原顺序（仍可供运行时故障转移）。
+     */
+    private suspend fun buildCandidates(
+        baseUrl: String,
+        backupUrls: List<String>,
+        race: Boolean,
+    ): String {
+        val urls = buildList {
+            if (uposHost == "backup") {
+                backupUrls.firstOrNull { it.isNotBlank() }?.let { add(it) }
+                if (baseUrl.isNotBlank()) add(baseUrl)
+            } else if (uposHost.isNotBlank()) {
+                if (baseUrl.isNotBlank()) add(UrlUtil.replaceHost(baseUrl, uposHost))
+                backupUrls.forEach { if (it.isNotBlank()) add(UrlUtil.replaceHost(it, uposHost)) }
+            } else {
+                if (baseUrl.isNotBlank()) add(baseUrl)
+                backupUrls.forEach { if (it.isNotBlank()) add(it) }
+            }
+        }.distinct()
+        if (urls.isEmpty()) return ""
+        return if (race && urls.size > 1) CdnSelector.pickAndRank(urls) else urls.joinToString("|")
     }
 
 // TODO AI 原声翻译：暂时关闭。恢复时把这段注释放开。
