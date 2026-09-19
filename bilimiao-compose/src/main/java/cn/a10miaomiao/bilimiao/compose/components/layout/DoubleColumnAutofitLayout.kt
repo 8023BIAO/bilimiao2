@@ -18,6 +18,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
 import cn.a10miaomiao.bilimiao.compose.components.layout.chain_scrollable.ChainScrollableLayout
 import cn.a10miaomiao.bilimiao.compose.components.layout.chain_scrollable.ChainScrollableLayoutState
 import kotlin.math.roundToInt
@@ -35,6 +37,15 @@ fun DoubleColumnAutofitLayout(
     BoxWithConstraints(
         modifier = modifier
     ) {
+        // PaddingValues.Absolute 要求所有值 >= 0，传负数会直接抛
+        // IllegalArgumentException: Padding must be non-negative。
+        // 目前两个调用方传进来的都是已经夹过 0 的 toPaddingValues()，
+        // 这里再兜一次底，避免以后有人传原始 padding 进来把整页搞崩。
+        val innerStart = max(innerPadding.calculateStartPadding(LayoutDirection.Ltr), 0.dp)
+        val innerEnd = max(innerPadding.calculateEndPadding(LayoutDirection.Ltr), 0.dp)
+        val innerTop = max(innerPadding.calculateTopPadding(), 0.dp)
+        val innerBottom = max(innerPadding.calculateBottomPadding(), 0.dp)
+
         if (maxWidth > leftMaxWidth) {
             Row() {
                 Box(
@@ -43,9 +54,9 @@ fun DoubleColumnAutofitLayout(
                     leftContent(
                         Orientation.Horizontal,
                         PaddingValues.Absolute(
-                            left = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
-                            top = innerPadding.calculateTopPadding(),
-                            bottom = innerPadding.calculateBottomPadding(),
+                            left = innerStart,
+                            top = innerTop,
+                            bottom = innerBottom,
                         )
                     )
                 }
@@ -55,9 +66,9 @@ fun DoubleColumnAutofitLayout(
                     content(
                         Orientation.Horizontal,
                         PaddingValues.Absolute(
-                            top = innerPadding.calculateTopPadding(),
-                            bottom = innerPadding.calculateBottomPadding(),
-                            right = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
+                            top = innerTop,
+                            bottom = innerBottom,
+                            right = innerEnd,
                         )
                     )
                 }
@@ -98,9 +109,9 @@ fun DoubleColumnAutofitLayout(
                     leftContent(
                         Orientation.Vertical,
                         PaddingValues.Absolute(
-                            top = innerPadding.calculateTopPadding(),
-                            left = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
-                            right = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
+                            top = innerTop,
+                            left = innerStart,
+                            right = innerEnd,
                         )
                     )
                 }
@@ -116,9 +127,11 @@ fun DoubleColumnAutofitLayout(
                     content(
                         Orientation.Vertical,
                         PaddingValues.Absolute(
-                            bottom = innerPadding.calculateBottomPadding() + chainScrollableLayoutState.minScrollPosition,
-                            left = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
-                            right = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
+                            // minScrollPosition 是状态栏高度（WindowInsets 契约上非负），
+                            // 一起夹一道，避免任何一边为负时这里抛异常
+                            bottom = max(innerBottom + chainScrollableLayoutState.minScrollPosition, 0.dp),
+                            left = innerStart,
+                            right = innerEnd,
 //                            top = density.run { (state.maxPx + state.getOffsetYValue()).toDp() }
                         )
                     )
