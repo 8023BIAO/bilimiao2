@@ -57,9 +57,11 @@ object PlayerDiag {
             val rt = Runtime.getRuntime()
             val used = (rt.totalMemory() - rt.freeMemory()) / 1048576L
             val max = rt.maxMemory() / 1048576L
-            // 占用偏高（>60% 上限）时先强制一次 GC 再测：这样能一眼分清
-            // "只是还没回收的垃圾"（GC 后掉很多）和"真的在涨"（GC 后基本不变）
-            val extra = if (used > max * 6 / 10) {
+            // 占用到「本机堆上限的 1/4」或 128MB（取小的那个）就先强制一次 GC 再测：
+            // 实机（堆上限 512MB）播放中常态 130~210MB，若按 60% 阈值根本不会触发，探针等于没有。
+            // 这样能一眼分清"只是还没回收的垃圾"（GC 后掉很多）和"真的在涨"（GC 后基本不变）
+            val probeAt = (max / 4).coerceAtMost(128L)
+            val extra = if (used >= probeAt) {
                 System.gc()
                 val after = (rt.totalMemory() - rt.freeMemory()) / 1048576L
                 "（GC 后 ${after}MB）"
