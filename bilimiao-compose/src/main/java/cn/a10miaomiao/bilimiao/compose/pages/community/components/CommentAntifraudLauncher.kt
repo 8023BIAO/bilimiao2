@@ -12,7 +12,10 @@ import com.a10miaomiao.bilimiao.comm.antifraud.CommentAntifraud
 import com.a10miaomiao.bilimiao.comm.apis.CommentApi
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
-import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
+import com.a10miaomiao.bilimiao.comm.entity.ResponseData
+import com.a10miaomiao.bilimiao.comm.network.BiliApiService
+import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
+import com.a10miaomiao.bilimiao.comm.network.BiliApiService.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.kongzue.dialogx.dialogs.MessageDialog
@@ -228,6 +231,58 @@ object CommentAntifraudLauncher {
 
     /** 根评论 id：我们只在"发评论"那条路上知道 root；复检时没有就传 0（按根评论处理） */
     private fun rootOf(rpid: Long): Long = 0L
+
+    /**
+     * 只知道 BV 号时的复检入口。
+     *
+     * 为什么需要：老版本（vc124 及以前）的检测记录里**没有存 oid/type**，只有"视频 BVxxxx"这段文字，
+     * 于是点「重新检测」会报"缺少参数"（用户实测撞上）。这里先把 BV 换成 aid 再复检 ——
+     * 老记录也能用，用户不必为了验证再发一条新评论。
+     */
+    fun recheckByBv(bv: String, rpid: Long, message: String) {
+        if (!BvUtils.isValidBvid(bv)) {
+            toast("这条记录的 BV 号不合法，没法复检")
+            return
+        }
+        activeChecks++
+        scope.launch {
+            try {
+                AntifraudDiag.start("手动复检（先用 BV 换 aid）bv=$bv rpid=$rpid")
+                val aid = withContext(Dispatchers.IO) {
+                    val res = MiaoHttp.request {
+                        url = BiliApiService.biliApi("x/web-interface/view", "bvid" to bv)
+                    }.awaitCall().json<ResponseData<com.a10miaomiao.bilimiao.comm.entity.video.VideoIdInfo>>()
+                    res.data?.aid ?: 0L
+                }
+                if (aid <= 0L) {
+                    AntifraudDiag.step("BV 换 aid 失败（aid=$aid）")
+                    AntifraudDiag.finish("FAILED｜拿不到 aid")
+                    activeChecks = (activeChecks - 1).coerceAtLeast(0)
+                    PopTip.show("没查到这条视频（可能已删除）")
+                    return@launch
+                }
+                AntifraudDiag.step("BV=$bv → aid=$aid，开始复检")
+                val r = withContext(Dispatchers.IO) {
+                    CommentAntifraud.check(
+                        oid = aid,
+                        type = 1,
+                        rpid = rpid,
+                        root = 0L,
+                        sentTimeSec = System.currentTimeMillis() / 1000,
+                        hasPictures = false,
+                        skipWait = true,
+                    )
+                }
+                showResult(r, message, aid, 1, rpid, null)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                e.printStackTrace()
+                PopTip.show("复检没跑完：${e.javaClass.simpleName}")
+            } finally {
+                activeChecks = (activeChecks - 1).coerceAtLeast(0)
+            }
+        }
+    }
 
     private suspend fun readSettings(context: Context): Triple<Boolean, Boolean, Int> {
         return runCatching {

@@ -639,14 +639,28 @@ private fun FlagsSettingPageContent(
                                 )
                                 .setOkButton("重新检测") { _, _ ->
                                     // 手动复检：不发新评论也能验证判定（评论常常几分钟后才被限流）
-                                    cn.a10miaomiao.bilimiao.compose.pages.community.components
-                                        .CommentAntifraudLauncher.recheck(
+                                    val launcher = cn.a10miaomiao.bilimiao.compose.pages.community.components.CommentAntifraudLauncher
+                                    if (lastResult.oid > 0L && lastResult.type > 0) {
+                                        launcher.recheck(
                                             oid = lastResult.oid,
                                             type = lastResult.type,
                                             rpid = lastResult.rpid,
                                             root = lastResult.root,
                                             message = lastResult.message,
                                         )
+                                    } else {
+                                        // 老版本（vc124 及以前）的记录里没存 oid/type，只有"视频 BVxxxx"这段文字
+                                        // → 从里面把 BV 抠出来，换成 aid 再复检（用户实测撞上过"缺少参数"）
+                                        val bv = Regex("BV[0-9A-Za-z]{10}")
+                                            .find(lastResult.where)?.value
+                                        if (bv != null) {
+                                            launcher.recheckByBv(bv, lastResult.rpid, lastResult.message)
+                                        } else {
+                                            com.kongzue.dialogx.dialogs.PopTip.show(
+                                                "这条记录是旧版本存的、没带视频信息，没法复检；再发一条评论就有了"
+                                            )
+                                        }
+                                    }
                                     false
                                 }
                                 .setCancelButton("清空记录") { _, _ ->
