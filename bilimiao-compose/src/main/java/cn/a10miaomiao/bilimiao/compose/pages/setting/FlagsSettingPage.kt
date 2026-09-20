@@ -624,7 +624,7 @@ private fun FlagsSettingPageContent(
                         Text(
                             "${lastResult.where} · 评论 ${lastResult.rpid}\n" +
                                 "内容：${lastResult.message.ifBlank { "(无)" }}\n" +
-                                "判定：${lastResult.detail}"
+                                "判定：${lastResult.detail}\n（点这里可「重新检测」）"
                         )
                     },
                     onClick = {
@@ -637,11 +637,23 @@ private fun FlagsSettingPageContent(
                                         "判定依据：${lastResult.detail}\n\n" +
                                         "检测时间：${lastResult.timeText()}"
                                 )
-                                .setOkButton("知道了")
+                                .setOkButton("重新检测") { _, _ ->
+                                    // 手动复检：不发新评论也能验证判定（评论常常几分钟后才被限流）
+                                    cn.a10miaomiao.bilimiao.compose.pages.community.components
+                                        .CommentAntifraudLauncher.recheck(
+                                            oid = lastResult.oid,
+                                            type = lastResult.type,
+                                            rpid = lastResult.rpid,
+                                            root = lastResult.root,
+                                            message = lastResult.message,
+                                        )
+                                    false
+                                }
                                 .setCancelButton("清空记录") { _, _ ->
                                     com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.clear(context)
                                     false
                                 }
+                                .setOtherButton("关闭")
                                 .show()
                         }
                     },

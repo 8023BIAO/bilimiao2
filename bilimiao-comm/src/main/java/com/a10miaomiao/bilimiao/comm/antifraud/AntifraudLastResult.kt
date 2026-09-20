@@ -24,6 +24,10 @@ object AntifraudLastResult {
         val rpid: Long,
         val message: String,
         val isBad: Boolean,
+        /** 复检要用：评论区 id / 类型 / 根评论 id */
+        val oid: Long = 0L,
+        val type: Int = 0,
+        val root: Long = 0L,
     ) {
         fun timeText(): String = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(time))
     }
@@ -38,6 +42,9 @@ object AntifraudLastResult {
                 .putLong("rpid", r.rpid)
                 .putString("message", r.message)
                 .putBoolean("isBad", r.isBad)
+                .putLong("oid", r.oid)
+                .putInt("type", r.type)
+                .putLong("root", r.root)
                 .apply()
         }
     }
@@ -54,6 +61,9 @@ object AntifraudLastResult {
             rpid = sp.getLong("rpid", 0L),
             message = sp.getString("message", "") ?: "",
             isBad = sp.getBoolean("isBad", false),
+            oid = sp.getLong("oid", 0L),
+            type = sp.getInt("type", 0),
+            root = sp.getLong("root", 0L),
         )
     }.getOrNull()
 

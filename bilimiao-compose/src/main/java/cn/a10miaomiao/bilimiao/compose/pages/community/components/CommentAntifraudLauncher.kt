@@ -182,6 +182,53 @@ object CommentAntifraudLauncher {
     }
 
     /** 一次读齐三个设置：总开关、复查开关、复查监控时长（分钟） */
+    /**
+     * **手动复检**一条已经发出去的评论（设置页「上次检测结果」里那个按钮 / 结果弹窗里的"重新检测"）。
+     *
+     * 为什么需要：检测只在"发评论"那一刻自动触发，而评论往往是**几分钟后**才被限流 ——
+     * 用户想验证"它到底被判成什么"，不该被迫再发一条新评论。这里不等 5/20 秒、也不进复查循环，
+     * 立刻查一次就给结论。
+     */
+    fun recheck(oid: Long, type: Int, rpid: Long, root: Long, message: String) {
+        if (oid <= 0L || type <= 0 || rpid <= 0L) {
+            PopTip.show("缺少参数，无法复检")
+            return
+        }
+        if (activeChecks >= MAX_ACTIVE_CHECKS) {
+            PopTip.show("同时在查的评论太多了，稍后再试")
+            return
+        }
+        activeChecks++
+        val app = BilimiaoCommApp.commApp.app
+        scope.launch {
+            try {
+                AntifraudDiag.start("手动复检 oid=$oid type=$type rpid=$rpid root=$root")
+                val r = withContext(Dispatchers.IO) {
+                    CommentAntifraud.check(
+                        oid = oid,
+                        type = type,
+                        rpid = rpid,
+                        root = root,
+                        sentTimeSec = System.currentTimeMillis() / 1000,
+                        hasPictures = false,
+                        skipWait = true,
+                    )
+                }
+                showResult(r, message, oid, type, rpid, null)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                e.printStackTrace()
+                AntifraudDiag.finish("FAILED｜复检异常 ${e.javaClass.simpleName}")
+                PopTip.show("复检没跑完：${e.javaClass.simpleName}")
+            } finally {
+                activeChecks = (activeChecks - 1).coerceAtLeast(0)
+            }
+        }
+    }
+
+    /** 根评论 id：我们只在"发评论"那条路上知道 root；复检时没有就传 0（按根评论处理） */
+    private fun rootOf(rpid: Long): Long = 0L
+
     private suspend fun readSettings(context: Context): Triple<Boolean, Boolean, Int> {
         return runCatching {
             SettingPreferences.mapData(context) {
@@ -189,13 +236,13 @@ object CommentAntifraudLauncher {
                     it[SettingPreferences.AntifraudEnabled] ?: false,
                     it[SettingPreferences.AntifraudRecheckEnabled] ?: true,
                     it[SettingPreferences.AntifraudRecheckMinutes]
-                        ?: DEFAULT_RECHECK_MINUTES,
+                        ?: CommentAntifraud.DEFAULT_RECHECK_MINUTES,
                 )
             }
-        }.getOrDefault(Triple(false, true, DEFAULT_RECHECK_MINUTES))
+        }.getOrDefault(Triple(false, true, CommentAntifraud.DEFAULT_RECHECK_MINUTES))
     }
 
-    private const val DEFAULT_RECHECK_MINUTES = 5
+
 
     private fun showResult(
         result: AntifraudResult,
@@ -222,6 +269,9 @@ object CommentAntifraudLauncher {
                     rpid = rpid,
                     message = message.take(200),
                     isBad = result.isBad,
+                    oid = oid,
+                    type = type,
+                    root = rootOf(rpid),
                 ),
             )
         }

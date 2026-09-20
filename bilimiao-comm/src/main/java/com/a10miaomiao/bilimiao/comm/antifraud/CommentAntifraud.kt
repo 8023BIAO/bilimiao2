@@ -43,6 +43,9 @@ object CommentAntifraud {
     /** 带图评论额外多等：阿瓦隆识别图片内容更慢（上游默认再加 15 秒） */
     const val WAIT_PIC_MS = 15_000L
 
+    /** 复查默认时长（分钟）：实测评论可能发出去 5~10 分钟后才被限流，5 分钟窗口太短 */
+    const val DEFAULT_RECHECK_MINUTES = 15
+
     /** 根评论最多翻几页时间序（每页 20 条）；上游是 30 页，这里够用就行 */
     private const val MAX_PAGES = 6
 
@@ -79,8 +82,10 @@ object CommentAntifraud {
         root: Long,
         sentTimeSec: Long,
         hasPictures: Boolean,
+        /** 手动复检：不等那 5/20 秒，立刻查（评论早发出去了，没有"刚发出去还没处理完"的问题） */
+        skipWait: Boolean = false,
     ): AntifraudResult {
-        val waitMs = if (hasPictures) WAIT_MS + WAIT_PIC_MS else WAIT_MS
+        val waitMs = if (skipWait) 0L else if (hasPictures) WAIT_MS + WAIT_PIC_MS else WAIT_MS
         AntifraudDiag.start("评论反诈检测 oid=$oid type=$type rpid=$rpid root=$root")
         AntifraudDiag.step("等待 ${waitMs}ms（带图=$hasPictures）后开始")
         delay(waitMs)
