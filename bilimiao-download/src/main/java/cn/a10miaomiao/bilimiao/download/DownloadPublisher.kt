@@ -79,7 +79,9 @@ object DownloadPublisher {
                 return false
             }
         }
-        // 最后再确认一次"公共目录里真的能读到 entry.json"：只有确认了，调用方才敢删私有副本
-        return PublicDownloadStore.exists(context, relativeDir, "entry.json")
+        // 最后再确认一次"公共目录里真的能读到 entry.json 的**内容**"：只有读到非空内容，
+        // 调用方才敢删私有副本。老写法只确认"能查到这一行"（findUri 拿到 Uri 就算过），万一那一行在、
+        // 文件却是空的或者读不出来，就会把唯一一份元数据删掉 —— 那一集在列表里和播放时都会失联。
+        return !PublicDownloadStore.readText(context, relativeDir, "entry.json").isNullOrBlank()
     }
 }

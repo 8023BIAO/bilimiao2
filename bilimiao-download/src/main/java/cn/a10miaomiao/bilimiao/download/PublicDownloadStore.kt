@@ -260,33 +260,53 @@ object PublicDownloadStore {
         }
     }
 
-    /** 列出某个相对目录下所有文件名（用于兼容"目录里还有别的文件"的老数据） */
-    fun listNames(context: Context, relativeDir: String): List<String> {
-        return try {
-            if (mediaStoreMode()) {
-                val want = relativePathOf(relativeDir).trimEnd('/')
-                val result = mutableListOf<String>()
-                context.contentResolver.query(
-                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH),
-                    null,
-                    null,
-                    null,
-                )?.use { cursor ->
-                    while (cursor.moveToNext()) {
-                        val name = cursor.getString(0) ?: continue
-                        val rel = (cursor.getString(1) ?: "").trimEnd('/')
-                        if (rel == want) result.add(name)
-                    }
+    /** MediaStore 里的一行：id + 这一行所在目录（RELATIVE_PATH 去掉结尾斜杠）+ 显示名 */
+    private class Row(val id: Long, val rel: String, val name: String)
+
+    /**
+     * 一次查出 Downloads 集合里的所有行。
+     *
+     * 为什么不用 `RELATIVE_PATH = ?` 做 selection：不同 ROM 对它的匹配规则不一致（结尾斜杠、前缀匹配
+     * 都有坑），全查回来在代码里比对最稳。下载目录里的文件数可控（一集几个文件），开销可以接受。
+     */
+    private fun queryRows(context: Context): List<Row> {
+        val rows = mutableListOf<Row>()
+        try {
+            context.contentResolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                arrayOf(android.provider.BaseColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    rows.add(
+                        Row(
+                            id = cursor.getLong(0),
+                            name = cursor.getString(1) ?: "",
+                            rel = (cursor.getString(2) ?: "").trimEnd('/'),
+                        )
+                    )
                 }
-                result
-            } else {
-                legacyDirOf(relativeDir).listFiles()?.map { it.name } ?: emptyList()
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            emptyList()
         }
+        return rows
+    }
+
+    /** 列出某个相对目录下所有文件名（只算直接放在这个目录里的行） */
+    fun listNames(context: Context, relativeDir: String): List<String> {
+        if (!mediaStoreMode()) {
+            return try {
+                legacyDirOf(relativeDir).listFiles()?.map { it.name } ?: emptyList()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                emptyList()
+            }
+        }
+        val want = relativePathOf(relativeDir).trimEnd('/')
+        return queryRows(context).filter { it.rel == want }.map { it.name }
     }
 
     fun delete(context: Context, relativeDir: String, displayName: String): Boolean {
@@ -303,13 +323,91 @@ object PublicDownloadStore {
         }
     }
 
-    /** 删掉一个相对目录下的全部文件（下载项删除）；返回删掉的个数 */
-    fun deleteDir(context: Context, relativeDir: String): Int {
-        var n = 0
-        for (name in listNames(context, relativeDir)) {
-            if (delete(context, relativeDir, name)) n++
+    /** 按行 id 删一条（删不动/没权限都当失败，不抛异常） */
+    private fun deleteRowById(context: Context, id: Long): Boolean {
+        return try {
+            context.contentResolver.delete(
+                ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id),
+                null,
+                null,
+            ) > 0
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
-        return n
+    }
+
+    /**
+     * 删掉一个相对目录及它**下面所有子目录**里的全部文件；返回删掉的条目数。
+     *
+     * ★ 必须递归：一集的媒体文件在下级目录里（`<剧集目录>/<清晰度 tag>/video.m4s`），
+     *   只删"直接放在剧集目录里的文件"会把整集视频留在公共目录里（用户实测："删不干净"）。
+     */
+    fun deleteDir(context: Context, relativeDir: String): Int {
+        val clean = relativeDir.replace('\\', '/').trim('/')
+        if (clean.isEmpty()) return 0 // 根目录永远不删（异常路径进来的兜底）
+        if (!mediaStoreMode()) {
+            val dir = legacyDirOf(clean)
+            val count = dir.listFiles()?.size ?: 0
+            dir.deleteRecursively()
+            return count
+        }
+        val want = relativePathOf(clean)
+        val prefix = "$want/"
+        // MediaStore 目录行的 RELATIVE_PATH 记的是"父目录"、DISPLAY_NAME 才是目录名，所以：
+        //   rel == want       → 直接放在这一集里的文件 + 第一层子目录行（如 "16"）
+        //   rel 以 want/ 开头 → 子目录里的文件 + 更深的目录行
+        // 按目录深度倒序删：先删深层文件、再删它们的目录行 —— 目录非空时 MediaProvider 会拒绝删目录行
+        val targets = queryRows(context)
+            .filter { it.rel == want || it.rel.startsWith(prefix) }
+            .sortedByDescending { row -> row.rel.count { c -> c == '/' } }
+        var count = 0
+        for (row in targets) {
+            if (deleteRowById(context, row.id)) count++
+        }
+        // 剧集目录自己那一行（rel = 页面目录、名字 = 剧集目录名）
+        deleteDirRow(context, clean)
+        // 页面目录里没有别的剧集了 → 一并删掉，别留 "某视频/1-1" 删完还剩 "某视频" 空壳
+        val parent = clean.substringBeforeLast('/', "")
+        if (parent.isNotEmpty() && !hasRowsUnder(context, parent)) deleteDirRow(context, parent)
+        // 兜底：部分 ROM 不许普通 App 删目录行，那就用文件接口把已经是空的目录删掉
+        //（删不动就留个空文件夹，不影响播放；绝不能因为删不干净去动用户别的文件）
+        removeEmptyDirsOnDisk(clean)
+        return count
+    }
+
+    /** 这个目录下还有没有行（含子目录里的文件和子孙目录行） */
+    private fun hasRowsUnder(context: Context, relativeDir: String): Boolean {
+        val want = relativePathOf(relativeDir.trim('/')).trimEnd('/')
+        return queryRows(context).any { it.rel == want || it.rel.startsWith("$want/") }
+    }
+
+    /** 删"目录自己"那一行：它的 RELATIVE_PATH 是父目录、DISPLAY_NAME 是目录名 */
+    private fun deleteDirRow(context: Context, relativeDir: String): Boolean {
+        val clean = relativeDir.replace('\\', '/').trim('/')
+        if (clean.isEmpty()) return false
+        val parentRel = relativePathOf(clean.substringBeforeLast('/', "")).trimEnd('/')
+        val name = clean.substringAfterLast('/')
+        val row = queryRows(context).firstOrNull { it.rel == parentRel && it.name == name } ?: return false
+        return deleteRowById(context, row.id)
+    }
+
+    /** 目录行删不掉时的兜底：把磁盘上已经是空的目录删掉（根目录 Download/BiliMiao 绝不动） */
+    private fun removeEmptyDirsOnDisk(relativeDir: String) {
+        try {
+            val root = legacyDirOf("")
+            val dir = legacyDirOf(relativeDir)
+            if (!dir.exists() || dir.canonicalFile == root.canonicalFile) return
+            dir.walkBottomUp().forEach { file ->
+                if (file.isDirectory && file.listFiles()?.isEmpty() == true) file.delete()
+            }
+            val page = dir.parentFile
+            if (page != null && page.canonicalFile != root.canonicalFile && page.listFiles()?.isEmpty() == true) {
+                page.delete()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     // ───────────────────────── 小工具 ─────────────────────────
