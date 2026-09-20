@@ -480,7 +480,7 @@ class PlayerController(
         //设置弹幕样式
         val ctx = danmakuContext
         if (ctx == null) {
-            android.util.Log.w("PlayerController", "danmakuContext is null, skip danmaku config")
+            miaoLogger().d("danmakuContext is null, skip danmaku config")
             return
         }
         ctx.apply {

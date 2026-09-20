@@ -29,6 +29,9 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 android.os.Environment.DIRECTORY_DOWNLOADS), "BiliMiao/bilimiao_dl.log")
         }
         fun logToFile(msg: String) {
+            // ★ 只 debug 包写日志：以前 release 也会往 /sdcard/Download/BiliMiao/bilimiao_dl.log
+            //   一步步追加（公开目录 + 无条件 IO），属于调试残留；要排查下载问题时用 debug 包即可
+            if (!BuildConfig.DEBUG) return
             try {
                 logFile.parentFile?.mkdirs()
                 logFile.appendText("${java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())} $msg\n")

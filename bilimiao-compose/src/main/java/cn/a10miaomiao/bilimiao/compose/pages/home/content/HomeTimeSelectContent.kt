@@ -58,6 +58,7 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 
 private class HomeTimeSelectContentViewModel(
     override val di: DI,
@@ -127,7 +128,6 @@ private class HomeTimeSelectContentViewModel(
             if (pendingRegionIndex == 0) {
                 pendingRegions = regions
             }
-            // android.util.Log.d("TimeSelect", "regions=${regions.size} startIdx=$pendingRegionIndex")
 
             if (regions.isEmpty()) {
                 list.fail.value = "没有选择分区，请去设置中配置"
@@ -148,7 +148,6 @@ private class HomeTimeSelectContentViewModel(
                         .regionVideoRanking(rid = region.tid)
                         .awaitCall()
                         .json<ResultInfo<RankingV2Response>>()
-                    // android.util.Log.d("TimeSelect", "API rid=${region.tid} code=${res.code} count=${res.data?.list?.size ?: 0}")
 
 
                     if (res.code == 0) {
@@ -169,7 +168,6 @@ private class HomeTimeSelectContentViewModel(
                         }
 
                         if (newVideos.isNotEmpty()) {
-                            // android.util.Log.d("TimeSelect", "rid=${region.tid} newVideos=${newVideos.size}")
                             val existingIds = list.data.value.map { it.id }.toSet()
                             val deduped = newVideos.filter { it.id !in existingIds }
                             if (deduped.isNotEmpty()) {
@@ -181,7 +179,7 @@ private class HomeTimeSelectContentViewModel(
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("TimeSelect", "rid=${region.tid} failed: ${e.message}")
+                    miaoLogger().e("rid=${region.tid} failed: ${e.message}")
                 } finally {
                     list.loading.value = false
                 }
