@@ -25,12 +25,13 @@ open class MenuItemView @JvmOverloads constructor(
     init {
         gravity = Gravity.CENTER
         addView(ui.icon, lParams {
-            // 图标 20 → 24dp、左右留白 5 → 8dp：20dp 的目标落在底栏 50dp 的高度里又小又难点，
-            // 24dp 是 M3 的标准图标尺寸（点击区另有 MenuItemView 自身的内边距撑着），
-            // 一行会少塞一项，但每项都点得中（栏本身可以横向滚动）。
+            // 图标尺寸的来龙去脉：原本 20dp → vc142 提到 24dp（M3 标准尺寸、更好点中）→
+            // 用户实测觉得偏大（他系统字体调得大，内容区那些 16dp 小图标又没跟着长，落差明显），
+            // 于是折中到 22dp（"小一丢丢"），并**不去动内容区的图标**（那要改 9 个文件）。
+            // 想再调就是这一个数字：20 = 完全回到从前，24 = M3 标准。
             horizontalMargin = dip(8)
-            height = dip(24)
-            width =  dip(24)
+            height = dip(22)
+            width =  dip(22)
         })
         addView(ui.root, lParams {
             height = wrapContent
