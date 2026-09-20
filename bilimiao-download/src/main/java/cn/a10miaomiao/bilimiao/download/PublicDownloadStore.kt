@@ -76,10 +76,10 @@ object PublicDownloadStore {
         // 同名文件已存在（重复下载/断点续传重来）→ 先删掉，避免出现 "xxx (1).mp4" 这种副本
         delete(context, relativeDir, displayName)
         val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, displayName)
-            put(MediaStore.Downloads.MIME_TYPE, mime)
-            put(MediaStore.Downloads.RELATIVE_PATH, relativePathOf(relativeDir))
-            put(MediaStore.Downloads.IS_PENDING, 1)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePathOf(relativeDir))
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = resolver.insert(collection, values) ?: return false
         return try {
@@ -87,7 +87,7 @@ object PublicDownloadStore {
                 src.inputStream().use { input -> input.copyTo(out, DEFAULT_BUFFER) }
             } ?: return false
             values.clear()
-            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
             true
         } catch (e: Exception) {
@@ -119,10 +119,10 @@ object PublicDownloadStore {
                 val resolver = context.contentResolver
                 val uri = findUri(context, relativeDir, displayName) ?: run {
                     val values = ContentValues().apply {
-                        put(MediaStore.Downloads.DISPLAY_NAME, displayName)
-                        put(MediaStore.Downloads.MIME_TYPE, mime)
-                        put(MediaStore.Downloads.RELATIVE_PATH, relativePathOf(relativeDir))
-                        put(MediaStore.Downloads.IS_PENDING, 1)
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, relativePathOf(relativeDir))
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
                     }
                     resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 } ?: return null
@@ -181,8 +181,8 @@ object PublicDownloadStore {
         // index.json/danmaku.xml 这些都很少，媒体文件是精确名字（video.m4s 等），量可控。
         context.contentResolver.query(
             collection,
-            arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.RELATIVE_PATH),
-            "${MediaStore.Downloads.DISPLAY_NAME} = ?",
+            arrayOf(android.provider.BaseColumns._ID, MediaStore.MediaColumns.RELATIVE_PATH),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
             arrayOf(displayName),
             null,
         )?.use { cursor ->
@@ -210,8 +210,8 @@ object PublicDownloadStore {
                 val result = mutableListOf<String>()
                 context.contentResolver.query(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.Downloads.RELATIVE_PATH),
-                    "${MediaStore.Downloads.DISPLAY_NAME} = ?",
+                    arrayOf(MediaStore.MediaColumns.RELATIVE_PATH),
+                    "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
                     arrayOf("entry.json"),
                     null,
                 )?.use { cursor ->
@@ -243,7 +243,7 @@ object PublicDownloadStore {
                 val result = mutableListOf<String>()
                 context.contentResolver.query(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.Downloads.DISPLAY_NAME, MediaStore.Downloads.RELATIVE_PATH),
+                    arrayOf(MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH),
                     null,
                     null,
                     null,
