@@ -66,7 +66,6 @@ object PublicDownloadStore {
             if (mediaStoreMode()) publishViaMediaStore(context, src, relativeDir, displayName, mime)
             else publishViaLegacyFile(src, relativeDir, displayName)
         } catch (e: Exception) {
-            e.printStackTrace()
             false
         }
     }
@@ -92,7 +91,6 @@ object PublicDownloadStore {
             resolver.update(uri, values, null, null)
             true
         } catch (e: Exception) {
-            e.printStackTrace()
             // 写失败：把半成品条目删掉，别在用户的下载目录里留垃圾
             runCatching { resolver.delete(uri, null, null) }
             false
@@ -135,7 +133,6 @@ object PublicDownloadStore {
                 FileOutputStream(File(dir, displayName), append)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -148,7 +145,6 @@ object PublicDownloadStore {
             if (mediaStoreMode()) findMediaStoreUri(context, relativeDir, displayName)
             else File(legacyDirOf(relativeDir), displayName).takeIf { it.isFile }?.let { Uri.fromFile(it) }
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -160,7 +156,6 @@ object PublicDownloadStore {
             val uri = findUri(context, relativeDir, displayName) ?: return null
             context.contentResolver.openInputStream(uri)
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -169,7 +164,6 @@ object PublicDownloadStore {
         return try {
             openInput(context, relativeDir, displayName)?.use { it.readBytes().toString(Charsets.UTF_8) }
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -255,7 +249,6 @@ object PublicDownloadStore {
                 } ?: emptyList()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
             emptyList()
         }
     }
@@ -290,7 +283,7 @@ object PublicDownloadStore {
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            // 失败就按"查不到/删不掉"处理：这里是尽力而为的路径，发布版不留日志（要排查用 debug 包）
         }
         return rows
     }
@@ -301,7 +294,6 @@ object PublicDownloadStore {
             return try {
                 legacyDirOf(relativeDir).listFiles()?.map { it.name } ?: emptyList()
             } catch (e: Exception) {
-                e.printStackTrace()
                 emptyList()
             }
         }
@@ -318,7 +310,6 @@ object PublicDownloadStore {
                 File(legacyDirOf(relativeDir), displayName).delete()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
             false
         }
     }
@@ -332,8 +323,7 @@ object PublicDownloadStore {
                 null,
             ) > 0
         } catch (e: Exception) {
-            e.printStackTrace()
-            false
+            // 失败就按"查不到/删不掉"处理：这里是尽力而为的路径，发布版不留日志（要排查用 debug 包）
         }
     }
 
@@ -406,7 +396,7 @@ object PublicDownloadStore {
                 page.delete()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            // 失败就按"查不到/删不掉"处理：这里是尽力而为的路径，发布版不留日志（要排查用 debug 包）
         }
     }
 

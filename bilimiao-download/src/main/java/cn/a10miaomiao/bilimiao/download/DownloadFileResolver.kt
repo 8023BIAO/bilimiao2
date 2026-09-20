@@ -71,7 +71,6 @@ object DownloadFileResolver {
         return try {
             context.contentResolver.openInputStream(fileUri)
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -80,7 +79,6 @@ object DownloadFileResolver {
         return try {
             openInput(context, entryDirPath, name)?.use { it.readBytes().toString(Charsets.UTF_8) }
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }
@@ -136,7 +134,6 @@ object DownloadFileResolver {
             // "../" 开头说明在私有工作目录之外 —— 都不能拿去当公共目录的子路径
             if (rel.isEmpty() || rel.startsWith("/") || rel.startsWith("..")) null else rel
         } catch (e: Exception) {
-            e.printStackTrace()
             null
         }
     }

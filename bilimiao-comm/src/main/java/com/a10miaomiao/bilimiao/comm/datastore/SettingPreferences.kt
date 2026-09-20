@@ -55,8 +55,8 @@ object SettingPreferences {
                     cachedPreferences = prefs
                 }
             } catch (e: Exception) {
-                // 收集失败不影响任何功能：调用方拿不到快照就用自己的默认值
-                e.printStackTrace()
+                // 收集失败不影响任何功能：调用方拿不到快照就用自己的默认值。
+                // 按发布要求这里不留任何日志（要排查就用 debug 包）。
             }
         }
     }
