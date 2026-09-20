@@ -1,5 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -397,7 +399,7 @@ private fun FlagsSettingPageContent(
             }
         }
         // 正在监控的评论（设置页里实时显示进度）
-        val monitors = cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor.sessions
+        val monitors = AntifraudMonitor.sessions
         // 每秒更新一次"当前时间"，进度条与"已盯多久"才会动（页面不可见时不会跑）
         var nowTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
         LaunchedEffect(Unit) {
@@ -611,8 +613,8 @@ private fun FlagsSettingPageContent(
             }
             // 上次检测结果（落盘的那份）：弹窗没弹出来时，这里是他唯一的交代
             // 用可观察状态：清空/复检后界面立刻刷新（原来直接读 SharedPreferences，Compose 不知道数据变了）
-            com.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState.ensureLoaded(context)
-            val lastResult = com.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState.last
+            AntifraudResultState.ensureLoaded(context)
+            val lastResult = AntifraudResultState.last
             if (lastResult != null) {
                 preference(
                     key = "antifraud_last_result",
@@ -666,8 +668,7 @@ private fun FlagsSettingPageContent(
                                     false
                                 }
                                 .setCancelButton("清空记录") { _, _ ->
-                                    com.a10miaomiao.bilimiao.compose.components.antifraud
-                                        .AntifraudResultState.clear(context)
+                                    AntifraudResultState.clear(context)
                                     false
                                 }
                                 .setOtherButton("关闭")
