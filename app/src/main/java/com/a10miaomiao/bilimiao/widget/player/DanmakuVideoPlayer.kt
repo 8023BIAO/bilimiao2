@@ -464,6 +464,8 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         pendingSeekMs = 0L
         // 连 GSY 的"prepare 后定位"一起清掉，否则残留值会漏到下一个视频
         mSeekOnStart = 0L
+        // 弹幕的"准备后再跳"锚点同理：不清的话，上一个视频那次 seek 会把新视频的弹幕起点也拽过去
+        danmakuStartSeekPosition = -1L
         removeCallbacks(restartGuardRunnable)
     }
 
@@ -2587,7 +2589,35 @@ initDanmakuTouchListener()
             // 用户/我们自己刚定的位置就是新意图：显式落点作废，之前挂的兜底检查也撤掉
             pendingSeekMs = 0L
             removeCallbacks(restartGuardRunnable)
+            // ★ 弹幕层也要跟着跳（详见 syncDanmakuSeek）
+            syncDanmakuSeek(position)
         }
+    }
+
+    /**
+     * 把弹幕时间轴显式跳到 [positionMs]。
+     *
+     * 为什么必须显式跳：弹幕引擎拿"当前时间"是靠 [mDanmakuTime] 读播放器位置（见上面的快照那段），
+     * 所以播放器位置一跳，引擎那边是"时间自己跳了" —— 那些**已经飞了一半**的弹幕会被按新时间
+     * 直接摆到屏幕中间，用户看到的就是"唰一下全飘过去 / 闪现"。
+     * 调 `mDanmakuView.seekTo(pos)` 走 DFM 自己的 seek 路径后，它会把渲染窗口的起点
+     * （`mStartRenderTime`）重新锚在 pos 上：**起点之前的弹幕不再补画**（不会半路冒出来），
+     * 起点之后的弹幕照常从右边进场 —— 既没有"闪现"，也不用像别的播放器那样清空整屏硬等。
+     *
+     * 弹幕还没准备好时先记在 [danmakuStartSeekPosition]，等 prepared() 回调里补一次。
+     */
+    private fun syncDanmakuSeek(positionMs: Long) {
+        if (positionMs < 0L) return
+        // ① 时间快照立刻跟到新位置：不然弹幕线程在 seek 完成的这几十毫秒里还按旧位置算坐标
+        danmakuPosMs = positionMs
+        danmakuPosAtUptimeMs = android.os.SystemClock.uptimeMillis()
+        danmakuPosAdvancing = false // 等下一拍采样确认真实位置，避免 seek 期间外推过冲
+        // ② 让 DFM 把渲染窗口重新锚在新位置上
+        if (!mHadPlay || !mDanmakuView.isPrepared) {
+            danmakuStartSeekPosition = positionMs
+            return
+        }
+        resolveDanmakuSeek(this, positionMs)
     }
 
     /**
