@@ -181,7 +181,7 @@ fun VideoItemBox(
                         contentDescription = null,
                     )
                     Text(
-                        modifier = Modifier.padding(start = 2.dp)
+                        modifier = Modifier.padding(start = 4.dp)
                             .semantics {
                                 contentDescription = "up主：$upperName"
                             },
@@ -216,7 +216,7 @@ fun VideoItemBox(
                             contentDescription = null,
                         )
                         Text(
-                            modifier = Modifier.padding(start = 2.dp)
+                            modifier = Modifier.padding(start = 4.dp)
                                 .semantics {
                                     contentDescription = "播放量：$playNum"
                                 },
@@ -236,7 +236,7 @@ fun VideoItemBox(
                             contentDescription = null,
                         )
                         Text(
-                            modifier = Modifier.padding(start = 2.dp)
+                            modifier = Modifier.padding(start = 4.dp)
                                 .semantics {
                                     contentDescription = "弹幕数：$damukuNum"
                                 },

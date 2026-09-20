@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -43,12 +44,22 @@ fun ListStateBox(
                     fontSize = 14.sp,
                 )
             } else if (fail?.isNotBlank() == true) {
+                // ★ 以前是"把错误文字本身做成按钮"：屏幕上只有一行灰字，用户看不出它能点，
+                //   也没有"重试"两个字 —— 这正是用户卡住时唯一看到的东西。
+                //   改成"错误文字（红色）+ 一个明确的重试按钮"，文字最多两行、点不点得着都看得见。
+                Text(
+                    fail,
+                    modifier = Modifier.weight(1f, fill = false),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 TextButton(onClick = loadMore) {
                     Text(
-                        fail,
-                        modifier = Modifier.padding(start = 5.dp),
-                        color = MaterialTheme.colorScheme.outline,
-                        fontSize = 14.sp,
+                        "重试",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge,
                     )
                 }
             } else if (loading) {

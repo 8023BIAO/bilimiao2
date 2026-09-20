@@ -25,9 +25,12 @@ open class MenuItemView @JvmOverloads constructor(
     init {
         gravity = Gravity.CENTER
         addView(ui.icon, lParams {
-            horizontalMargin = dip(5)
-            height = dip(20)
-            width =  dip(20)
+            // 图标 20 → 24dp、左右留白 5 → 8dp：20dp 的目标落在底栏 50dp 的高度里又小又难点，
+            // 24dp 是 M3 的标准图标尺寸（点击区另有 MenuItemView 自身的内边距撑着），
+            // 一行会少塞一项，但每项都点得中（栏本身可以横向滚动）。
+            horizontalMargin = dip(8)
+            height = dip(24)
+            width =  dip(24)
         })
         addView(ui.root, lParams {
             height = wrapContent
