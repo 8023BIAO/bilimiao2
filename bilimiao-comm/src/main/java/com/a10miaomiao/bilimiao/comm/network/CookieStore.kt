@@ -122,7 +122,11 @@ class CookieStore private constructor(context: Context) : CookieJar {
         val cookieManager = try {
             android.webkit.CookieManager.getInstance()
         } catch (e: Exception) { return }
-        val names = listOf("SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid", "buvid3", "buvid4", "b_nut", "bili_ticket")
+        // ★ 只同步**指纹类** cookie；SESSDATA / bili_jct / DedeUserID / sid 这类**身份凭据一律不回写**。
+        //   原因：登出（游客模式）后 CookieManager 是干净的，但本仓库可能还留着旧的 SESSDATA，
+        //   一旦回写，游客模式就变回"已登录"了（用户实测担心的问题）。
+        //   身份 cookie 的正路是登录时由 BilimiaoCommApp.setCookie() 写入，不靠这里补。
+        val names = listOf("buvid3", "buvid4", "b_nut", "bili_ticket")
         val sb = StringBuilder()
         for (name in names) {
             val value = getCookieValue(name) ?: continue

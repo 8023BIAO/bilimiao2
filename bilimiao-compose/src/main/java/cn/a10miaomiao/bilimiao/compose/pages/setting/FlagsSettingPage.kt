@@ -610,7 +610,9 @@ private fun FlagsSettingPageContent(
                 }
             }
             // 上次检测结果（落盘的那份）：弹窗没弹出来时，这里是他唯一的交代
-            val lastResult = com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.load(context)
+            // 用可观察状态：清空/复检后界面立刻刷新（原来直接读 SharedPreferences，Compose 不知道数据变了）
+            com.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState.ensureLoaded(context)
+            val lastResult = com.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState.last
             if (lastResult != null) {
                 preference(
                     key = "antifraud_last_result",
@@ -664,7 +666,8 @@ private fun FlagsSettingPageContent(
                                     false
                                 }
                                 .setCancelButton("清空记录") { _, _ ->
-                                    com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.clear(context)
+                                    com.a10miaomiao.bilimiao.compose.components.antifraud
+                                        .AntifraudResultState.clear(context)
                                     false
                                 }
                                 .setOtherButton("关闭")

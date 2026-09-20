@@ -5,7 +5,9 @@ import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudResult
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudState
 import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor
-import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitorSession
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultStateSession
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudDiag
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult
 import com.a10miaomiao.bilimiao.comm.antifraud.CommentAntifraud
@@ -15,7 +17,7 @@ import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
-import com.a10miaomiao.bilimiao.comm.network.BiliApiService.Companion.json
+import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.kongzue.dialogx.dialogs.MessageDialog
@@ -312,7 +314,7 @@ object CommentAntifraudLauncher {
         // ★ 先落盘再弹窗：复查跑几分钟，用户切走/进程被杀时弹窗弹不出来（实测撞过），
         //   设置页里那份"上次检测结果"就是他唯一的交代。
         runCatching {
-            AntifraudLastResult.save(
+            AntifraudResultState.set(
                 BilimiaoCommApp.commApp.app,
                 AntifraudLastResult.Result(
                     time = System.currentTimeMillis(),

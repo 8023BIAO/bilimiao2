@@ -93,3 +93,38 @@ class AntifraudMonitorSession(
         return (elapsedMs(now).toFloat() / t).coerceIn(0f, 1f)
     }
 }
+
+
+/**
+ * 「上次检测结果」的可观察状态。
+ *
+ * 为什么需要：设置页原来直接读 SharedPreferences（`AntifraudLastResult.load()`），
+ * Compose 不知道数据变了 —— 用户点「清空记录」后界面**不刷新**，得退出设置页再进来才生效
+ * （用户实测报的 bug）。这里用 Compose 状态包一层，清空/复检立刻反映到界面。
+ */
+object AntifraudResultState {
+
+    var last: com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.Result? by mutableStateOf(null)
+        private set
+
+    private var loaded = false
+
+    /** 首次进设置页时从磁盘读一次 */
+    fun ensureLoaded(context: android.content.Context) {
+        if (loaded) return
+        loaded = true
+        last = com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.load(context)
+    }
+
+    fun set(context: android.content.Context, r: com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.Result) {
+        com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.save(context, r)
+        loaded = true
+        last = r
+    }
+
+    fun clear(context: android.content.Context) {
+        com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.clear(context)
+        loaded = true
+        last = null
+    }
+}

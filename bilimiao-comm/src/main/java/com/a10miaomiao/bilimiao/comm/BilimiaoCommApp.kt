@@ -3,6 +3,10 @@ package com.a10miaomiao.bilimiao.comm
 import android.app.Application
 import android.content.Context
 import android.webkit.CookieManager
+import com.a10miaomiao.bilimiao.comm.network.CookieStore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import com.a10miaomiao.bilimiao.comm.entity.auth.LoginInfo
 import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
@@ -53,6 +57,15 @@ class BilimiaoCommApp(
 
         DialogX.init(app)
         DialogX.globalStyle = MaterialYouStyle.style()
+
+        // 未登录（游客模式）：每天补一套**匿名**设备指纹。
+        // 否则一个 buvid3 都没有 → B站 Web 接口全返回 -352 → 游客模式什么都刷不出来；
+        // 而用登录时期留下的指纹又会跟账号关联（用户要求"游客就该什么都不带"）。
+        runCatching {
+            CoroutineScope(Dispatchers.IO).launch {
+                com.a10miaomiao.bilimiao.comm.network.GuestFingerprint.ensureAnonymousOncePerDay()
+            }
+        }
     }
 
     fun setCookie(cookieInfo: LoginInfo.CookieInfo) {
@@ -111,6 +124,11 @@ class BilimiaoCommApp(
         cookieManager.removeSessionCookies(null)//移除
         cookieManager.removeAllCookies(null)
         cookieManager.flush()
+        // ★ 另一个持久化 Cookie 仓库（OkHttp CookieJar，落盘在 bilimiao_cookie_store）也要清。
+        //   它保存过从 WebView 导出的 SESSDATA/bili_jct（发带图评论那条路会导入），
+        //   而评论框在"没有 web 登录态"时会 importFromWebView() + syncToWebView() ——
+        //   只清 CookieManager 的话，旧登录态会被它悄悄写回 WebView，游客模式就名存实亡了。
+        runCatching { CookieStore.getInstance(app).clearAll() }
         this.loginInfo = null
     }
 
