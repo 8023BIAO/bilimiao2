@@ -1,5 +1,8 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import android.content.Context
 import android.content.SharedPreferences
@@ -393,6 +396,16 @@ private fun FlagsSettingPageContent(
                     .getString("login_info_backup", null) != null
             }
         }
+        // 正在监控的评论（设置页里实时显示进度）
+        val monitors = cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor.sessions
+        // 每秒更新一次"当前时间"，进度条与"已盯多久"才会动（页面不可见时不会跑）
+        var nowTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                nowTick = System.currentTimeMillis()
+            }
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -566,6 +579,36 @@ private fun FlagsSettingPageContent(
                     }
                 },
             )
+            // ── 监控中：正在盯的评论 + 实时进度（用户要求：别让人干等一个弹窗）──
+            // 注意：LazyColumn 的 content 不是 @Composable，remember/LaunchedEffect 只能写在它外面
+            if (monitors.isNotEmpty()) {
+                preferenceCategory(
+                    key = "antifraud_monitoring",
+                    title = { Text("正在监控（${monitors.size} 条）") }
+                )
+                monitors.forEach { m ->
+                    preference(
+                        key = "antifraud_mon_${m.key}",
+                        title = { Text("${m.label} · 评论 ${m.rpid}") },
+                        summary = {
+                            val elapsed = m.elapsedMs(nowTick)
+                            val pct = (m.progress(nowTick) * 100).toInt()
+                            androidx.compose.foundation.layout.Column {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { m.progress(nowTick) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "第 ${m.attempt}/${m.planned} 次 · 已盯 ${fmtDuration(elapsed)} / " +
+                                        "共 ${fmtDuration(m.totalMs)}（$pct%）\n" +
+                                        "上次结论：${m.lastDetail.ifBlank { "等待中" }}"
+                                )
+                            }
+                        },
+                    )
+                }
+            }
             preference(
                 key = "antifraud_appeal",
                 title = { Text("B站官方申诉页") },
@@ -755,12 +798,30 @@ private fun FlagsSettingPageContent(
             )
             preference(
                 key = "github_repo",
-                title = { Text("GitHub 仓库") },
-                summary = { Text("8023BIAO/bilimiao2") },
+                title = { Text("我的 GitHub 仓库") },
+                summary = { Text("8023BIAO/bilimiao2（本 App 的源码）") },
                 onClick = {
                     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
                     intent.data = android.net.Uri.parse("https://github.com/8023BIAO/bilimiao2")
                     context.startActivity(intent)
+                },
+            )
+            // 本 App 是上游的 mod，得给原作者留个名（用户要求：别让人先点我的仓库、再点 fork 才能找到上游）
+            preference(
+                key = "github_upstream",
+                title = { Text("原版项目（本 App 的上游）") },
+                summary = { Text("10miaomiao/bilimiao2 · 感谢原作者") },
+                onClick = {
+                    if (ClickGuard.allow("flags:github_upstream")) {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://github.com/10miaomiao/bilimiao2")
+                                )
+                            )
+                        }
+                    }
                 },
             )
 
@@ -934,4 +995,12 @@ private fun FlagsSettingPageContent(
             )
         }
     }
+}
+
+/** 把毫秒格式化成"1 分 05 秒" / "12 秒"，给监控进度显示用 */
+private fun fmtDuration(ms: Long): String {
+    val total = (ms / 1000).coerceAtLeast(0)
+    val m = total / 60
+    val sec = total % 60
+    return if (m > 0) "$m 分 ${sec.toString().padStart(2, '0')} 秒" else "$sec 秒"
 }

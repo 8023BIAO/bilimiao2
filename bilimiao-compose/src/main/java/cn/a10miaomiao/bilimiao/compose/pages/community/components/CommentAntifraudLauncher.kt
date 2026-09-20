@@ -4,6 +4,8 @@ import android.content.Context
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudResult
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudState
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitorSession
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudDiag
 import com.a10miaomiao.bilimiao.comm.antifraud.CommentAntifraud
 import com.a10miaomiao.bilimiao.comm.apis.CommentApi
@@ -93,6 +95,7 @@ object CommentAntifraudLauncher {
         val app = BilimiaoCommApp.commApp.app
         val root = result.root
         val sentTimeSec = System.currentTimeMillis() / 1000
+        var monitor: AntifraudMonitorSession? = null
         scope.launch {
             try {
                 val (enabled, recheckEnabled, recheckMinutes) = readSettings(app)
@@ -103,6 +106,21 @@ object CommentAntifraudLauncher {
                     return@launch
                 }
                 val recheckMs = if (recheckEnabled) recheckMinutes * 60_000L else 0L
+                // 登记到「监控中」列表，设置页里实时显示进度（用户要求：别让他干等）
+                val bvLabel = if (type == 1) {
+                    runCatching { BvUtils.toBvid(oid.toString()) }.getOrNull()?.takeIf { it.isNotBlank() }
+                        ?: "av$oid"
+                } else "oid=$oid"
+                val planned = 1 + (recheckMs / CommentAntifraud.RECHECK_INTERVAL_MS).toInt()
+                monitor = AntifraudMonitor.start(
+                    label = bvLabel,
+                    rpid = rpid,
+                    firstWaitMs = if (hasPictures) CommentAntifraud.WAIT_MS + CommentAntifraud.WAIT_PIC_MS
+                    else CommentAntifraud.WAIT_MS,
+                    recheckEnabled = recheckEnabled,
+                    recheckTotalMs = recheckMs,
+                    planned = planned,
+                )
                 PopTip.show(
                     if (!recheckEnabled) {
                         if (hasPictures) "评论已发出，20 秒后检测一次（没开自动复查）"
@@ -124,6 +142,13 @@ object CommentAntifraudLauncher {
                         recheckEnabled = recheckEnabled,
                         recheckTotalMs = recheckMs,
                         onAttempt = { attempt, total, result ->
+                            // 更新设置页里的进度
+                            monitor?.let {
+                                it.attempt = attempt
+                                it.planned = total
+                                it.lastState = result.state
+                                it.lastDetail = result.detail
+                            }
                             // 只在"首查正常、准备开始盯"的时候提示一次，之后静静盯着，别刷屏。
                             // 注意这个回调是在 IO 上下文里来的，弹窗必须切回主线程。
                             if (attempt == 1 && total > 1 && !result.isBad) {
@@ -149,6 +174,8 @@ object CommentAntifraudLauncher {
                     .show()
             } finally {
                 activeChecks = (activeChecks - 1).coerceAtLeast(0)
+                // 最终结论已经弹过窗了 → 从"监控中"列表移除
+                monitor?.let { m -> scope.launch { AntifraudMonitor.finish(m) } }
             }
         }
     }
