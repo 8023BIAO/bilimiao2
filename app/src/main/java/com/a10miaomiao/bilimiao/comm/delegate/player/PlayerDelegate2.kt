@@ -113,21 +113,21 @@ class PlayerDelegate2(
 ) : BasePlayerDelegate, DIAware, ExoMediaSourceInterceptListener {
 
     companion object {
+        /**
+         * 磁盘缓存上限（字节）。**不做任何阻塞 IO**。
+         *
+         * 以前这里 runBlocking 读 DataStore（带 500ms 超时），而它是被主线程的
+         * `ExoSourceManager.getMediaSource()` 调到的 —— 等于每次开播、每次换清晰度都要赌一次
+         * "设置读得够不够快"。现在读 [SettingPreferences.cachedPreferencesOrNull]
+         * （进程启动时后台维护、设置一改就跟着更新）；快照还没就绪就用默认 512MB，
+         * 和原来"超时 → 512MB"的兜底结果一致，但绝不卡主线程。
+         */
         private fun getCacheMaxSize(context: Context): Long {
-            return try {
-                val sizeMb = kotlinx.coroutines.runBlocking {
-                    // 这条链路会被主线程的 ExoSourceManager.getMediaSource 调到：
-                    // DataStore 首读异常时会无限阻塞主线程，加 500ms 超时兜底（与 ThemeDelegate 一致）
-                    kotlinx.coroutines.withTimeoutOrNull(500L) {
-                        SettingPreferences.mapData(context) { prefs ->
-                            (prefs[SettingPreferences.PlayerDiskCacheSize] ?: 512).coerceIn(100, 10240)
-                        }
-                    }
-                } ?: 512 // 超时/异常 → 用默认值 512MB
-                sizeMb * 1024L * 1024L
-            } catch (e: Exception) {
-                1024L * 1024 * 1024 // fallback
-            }
+            val sizeMb = SettingPreferences.cachedPreferencesOrNull()
+                ?.get(SettingPreferences.PlayerDiskCacheSize)
+                ?.coerceIn(100, 10240)
+                ?: 512
+            return sizeMb * 1024L * 1024L
         }
 
         @Volatile
@@ -185,7 +185,7 @@ class PlayerDelegate2(
             // 音频不跟随 CDN」全部照旧生效 —— 它们决定"用哪个 URL"，这一层只决定
             // "这个 URL 上的字节怎么并发拉"，所以开关本功能**不需要**动任何 CDN 设置。
             // 关闭开关 / 长度未知 / 服务端不认 Range 时，它内部会自动透传单连接（行为与不加这层一致）。
-            ThreadRipperSettings.refreshBlocking(context)
+            ThreadRipperSettings.refresh(context)   // 读设置内存快照（不阻塞主线程）
             val upstreamFactory: DataSource.Factory =
                 if (ThreadRipperSettings.enabled) {
                     ThreadRipperDataSourceFactory(httpFactory)
@@ -294,6 +294,14 @@ class PlayerDelegate2(
     private var showNotification = false // 通知栏控制器开关
     private var lastPosition = 0L
     private val playerCoroutineScope = PlayerCoroutineScope()
+
+    /**
+     * 取流/重载的互斥锁。**必须是实例级**：
+     * 以前它是文件级（整个进程一把锁）—— 旧播放实例的慢加载会把新实例的加载锁在后面，
+     * 表现就是"切了视频/开了新页面，新的半天不起播"。锁要保护的只是"同一个播放器实例里
+     * 上一次 loadPlayerSource 还没跑完"，跨实例本来就该各跑各的。
+     */
+    private val loadMutex = Mutex()
     private var playerClosed = false
 
     private var lastReportProgress = 0L // 最后记录的播放位置
@@ -974,8 +982,6 @@ class PlayerDelegate2(
             compact.contains("高码率") || compact.contains("高帧率") || compact.contains("HDR")
         return if (plus) "$base+" else base
     }
-
-private val loadMutex = Mutex()
 
 // TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
 //     /**

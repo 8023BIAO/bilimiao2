@@ -11,8 +11,6 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.utils.RipperDiag
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.ConcurrentHashMap
@@ -90,32 +88,18 @@ internal object ThreadRipperSettings {
     private const val MIN_CHUNK_BYTES = 256L * 1024L
 
     /**
-     * 从 DataStore 刷新一份快照。
+     * 从**设置内存快照**刷一份值（主线程调用，不阻塞）。
      *
-     * 为什么用 runBlocking + 300ms 超时：这个读取发生在 `getMediaSource()`（GSY 会从主线程调）里，
-     * 与本文件里 [PlayerDelegate2] 读磁盘缓存上限是同一套写法（DataStore 首读异常时不能无限阻塞主线程）。
-     * 读不到就沿用上一次的快照（默认 = 关闭），绝不影响播放。
+     * 以前这里是 `runBlocking` + 300ms 超时读 DataStore，而它被 `getMediaSource()`
+     * （GSY 从主线程调）调到 —— 每次开播/换清晰度都要赌一次"设置读得够不够快"。
+     * 现在只读 [SettingPreferences.cachedPreferencesOrNull]（进程启动时后台维护、设置一改就更新）：
+     * 快照还没就绪就沿用上一次的值（默认 = 关闭），和原来的超时兜底结果一致，但不卡主线程。
      */
-    fun refreshBlocking(context: Context) {
-        val snapshot = try {
-            runBlocking {
-                withTimeoutOrNull(300L) {
-                    SettingPreferences.mapData(context) { prefs ->
-                        // ThreadRipperAutoThreads 这个键保留在 DataStore 里但已不再使用（旧版本的开关）
-                        val enable = prefs[SettingPreferences.ThreadRipperEnable] ?: false
-                        val conn = (prefs[SettingPreferences.ThreadRipperThreads] ?: 4)
-                            .coerceIn(0, maxThreads)
-                        enable to conn
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            null
-        }
-        if (snapshot != null) {
-            enabled = snapshot.first
-            threads = snapshot.second
-        }
+    fun refresh(context: Context) {
+        val prefs = SettingPreferences.cachedPreferencesOrNull() ?: return
+        // ThreadRipperAutoThreads 这个键保留在 DataStore 里但已不再使用（旧版本的开关）
+        enabled = prefs[SettingPreferences.ThreadRipperEnable] ?: false
+        threads = (prefs[SettingPreferences.ThreadRipperThreads] ?: 4).coerceIn(0, maxThreads)
     }
 
     /**

@@ -24,6 +24,43 @@ object SettingPreferences {
     val Context.dataStore: DataStore<Preferences>
             by preferencesDataStore(name = "settings")
 
+    /**
+     * 设置的内存快照（进程级）。
+     *
+     * 为什么要有它：DataStore 只有**挂起**读取（`data.first()`），而播放器的初始化和
+     * `getMediaSource()` 都是**主线程**在调 —— 那些地方以前只能 runBlocking（顶多加个几百毫秒
+     * 超时兜底），于是每次开播、每次换清晰度都有机会卡主线程。
+     * 这里的做法：后台一个协程把 `dataStore.data` 一直收进 @Volatile 快照，主线程随时 O(1) 取。
+     * `dataStore.data` 本身是热的（设置一改就推新值），所以快照不会过期、也不需要手动失效。
+     *
+     * 取不到（进程刚起、还没读完）返回 null，调用方照旧走自己的默认值/兜底，绝不阻塞。
+     */
+    @Volatile
+    private var cachedPreferences: Preferences? = null
+
+    /** 设置的内存快照；还没就绪返回 null */
+    fun cachedPreferencesOrNull(): Preferences? = cachedPreferences
+
+    private val snapshotScope = CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
+    private var snapshotJob: kotlinx.coroutines.Job? = null
+
+    /** 进程启动时调一次（BilimiaoCommApp.onCreate）：开始维护设置内存快照 */
+    fun warmUpCache(context: Context) {
+        if (snapshotJob?.isActive == true) return
+        snapshotJob = snapshotScope.launch {
+            try {
+                context.dataStore.data.collect { prefs ->
+                    cachedPreferences = prefs
+                }
+            } catch (e: Exception) {
+                // 收集失败不影响任何功能：调用方拿不到快照就用自己的默认值
+                e.printStackTrace()
+            }
+        }
+    }
+
     inline fun launch(
         scope: CoroutineScope,
         context: CoroutineContext = EmptyCoroutineContext,

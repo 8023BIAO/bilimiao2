@@ -165,12 +165,19 @@ class PlayerController(
         videoPlayerCallBack = that
         setGSYVideoProgressListener(that)
         updatePlayerMode(activity.resources.configuration)
-        // 同步初始化弹幕过滤器，避免首次启动时因协程延迟导致过滤器未注册
-        // 带超时上限：防止 DataStore 异常/慢 IO 时主线程无限阻塞（超时则保持默认过滤器）
-        kotlinx.coroutines.runBlocking {
-            kotlinx.coroutines.withTimeoutOrNull(500L) {
-                SettingPreferences.getData(activity) {
-                    initDanmakuContext(it)
+        // 初始化弹幕过滤器，避免首次启动时因协程延迟导致过滤器未注册。
+        // ★ 设置值优先走内存快照（进程启动时后台维护，见 SettingPreferences.warmUpCache）：
+        //   这是主线程路径，以前无条件 runBlocking 读 DataStore（500ms 超时）——每次进播放页都阻塞。
+        //   只有"快照还没就绪"（进程刚起就直接进播放页）才退回一次带超时的阻塞读兜底。
+        val cachedSetting = SettingPreferences.cachedPreferencesOrNull()
+        if (cachedSetting != null) {
+            initDanmakuContext(cachedSetting)
+        } else {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(500L) {
+                    SettingPreferences.getData(activity) {
+                        initDanmakuContext(it)
+                    }
                 }
             }
         }

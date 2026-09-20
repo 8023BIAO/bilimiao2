@@ -41,6 +41,9 @@ class BilimiaoCommApp(
     fun onCreate() {
         commApp = this
         readAuthInfo()
+        // 后台维护"设置的内存快照"：播放器初始化 / getMediaSource 那条主线程路径以后直接读快照，
+        // 不再 runBlocking 读 DataStore（详见 SettingPreferences.warmUpCache）
+        SettingPreferences.warmUpCache(app)
         // 同步 WBI 签名开关
         try {
             MiaoHttp.isWbiEnabled = runBlocking {

@@ -259,11 +259,10 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     private val mDanmakuTime = object : DanmakuTimer() {
         private var lastTime = 0L
         override fun currMillisecond(): Long {
-            lastTime = try {
-                gsyVideoManager.currentPosition
-            } catch (e: Exception) {
-                0L
-            }
+            // ★ 只读主线程采样的快照（见 danmakuNowMs 的注释）：
+            //   这个方法会被弹幕渲染线程**逐帧**调用（R2LDanmaku/L2RDanmaku 的横向位置就是
+            //   按它算的），也会被弹幕缓存线程调用 —— 在这里直接读播放器是跨线程访问。
+            lastTime = danmakuNowMs()
             return lastTime
         }
 
@@ -271,6 +270,89 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             lastInterval = curr - lastTime
             return lastInterval
         }
+    }
+
+    // ─────────────── 弹幕时间快照（弹幕线程唯一合法的时间来源）───────────────
+    // 为什么要有这一层：弹幕引擎（DFM）拿"当前时间"的方式是问 DanmakuTimer.currMillisecond()，
+    // 而它问的时机都在**弹幕渲染线程 / 弹幕缓存线程**上。以前这里直接返回
+    // `gsyVideoManager.currentPosition` —— 那是在非主线程调播放器 API：
+    //   · 播放器 API 有线程约束（media3 的 ExoPlayer 遇到跨线程调用会直接抛
+    //     "Player is accessed on the wrong thread"），而这个 catch 把它吞成 0 ——
+    //     弹幕的时间轴从此停在 0：弹幕缓存只准备开头一小段、逐帧算的横向坐标也跟着错，
+    //     "任何时刻接着播"的续播保鲜（原本写在弹幕回调里）更是永远读不到真位置；
+    //   · 就算某些内核（系统 MediaPlayer）容忍跨线程调用，位置也是播放器内部状态，不保证读到一致值。
+    // 所以改成：**位置只在主线程采**（下面这个 250ms 的心跳），弹幕线程只读 @Volatile 快照；
+    // 两次采样之间用单调时钟 + 实测倍速外推，保证逐帧平滑（直接返回粗快照会让弹幕一跳一跳）。
+    @Volatile private var danmakuPosMs = 0L
+    @Volatile private var danmakuPosAtUptimeMs = 0L
+
+    /** 实测倍速（由相邻两次采样的位移/耗时算出，自动包含设置里的倍速和长按倍速） */
+    @Volatile private var danmakuPosSpeed = 1f
+
+    /** 采样时是否在播放：暂停/缓冲时不做外推，时间就冻在快照上 */
+    @Volatile private var danmakuPosAdvancing = false
+
+    /** 播放中 250ms 采一次（够弹幕缓存判定用），空闲时 1s 一次（几乎不耗电） */
+    private val danmakuSnapshotRunnable = Runnable {
+        refreshDanmakuSnapshot()
+        scheduleDanmakuSnapshot()
+    }
+
+    private fun scheduleDanmakuSnapshot() {
+        removeCallbacks(danmakuSnapshotRunnable)
+        postDelayed(danmakuSnapshotRunnable, if (danmakuPosAdvancing) 250L else 1000L)
+    }
+
+    /**
+     * 主线程心跳：采一次真实播放位置灌进快照，顺手做"续播保鲜"记账。
+     *
+     * 记账以前写在弹幕回调 [updateTimer] 里（弹幕线程）：既跨线程读播放器，又跨线程写 GSY 的
+     * 投递槽（mCurrentPosition / mSeekOnStart）。挪到主线程后，这两件事都在正确的线程上做，
+     * "任何时刻被重建都能接着当前位置播"才算真正生效。
+     */
+    private fun refreshDanmakuSnapshot() {
+        val nowUptime = android.os.SystemClock.uptimeMillis()
+        val nowWall = System.currentTimeMillis()
+        val pos = try {
+            gsyVideoManager.currentPosition
+        } catch (e: Exception) {
+            -1L
+        }
+        if (pos < 0L) return
+        val prevPos = danmakuPosMs
+        val prevAt = danmakuPosAtUptimeMs
+        val wall = nowUptime - prevAt
+        val delta = pos - prevPos
+        // 只有"正常往前走"的采样才用来估倍速：seek / 缓冲 / 暂停后的第一拍都跳过（沿用上次的倍率）
+        if (prevAt > 0L && wall in 1L..2000L && delta in 0L..(wall * 8L)) {
+            val measured = delta.toFloat() / wall.toFloat()
+            if (measured > 0.1f) danmakuPosSpeed = measured.coerceIn(0.1f, 8f)
+        }
+        danmakuPosMs = pos
+        danmakuPosAtUptimeMs = nowUptime
+        danmakuPosAdvancing = mCurrentState == CURRENT_STATE_PLAYING
+        // 约 1 秒记一次账就够
+        if (nowWall - lastGoodUpdateAt < 1000L) return
+        lastGoodUpdateAt = nowWall
+        if (mCurrentState == CURRENT_STATE_PLAYING) {
+            if (pos > lastGoodPositionMs) lastGoodPositionMs = pos
+            // 投递槽跟着播放位置走：任何时刻被重建都能接着"当前位置"播。
+            // 两个例外：① prepare 进行中（槽正被 GSY 消费，插进来会把落点写成 0）；
+            //          ② 有显式落点（换清晰度/换语言/重试投递的），盖掉就是"换清晰度从头播"
+            if (pos > 0L && !isPreparing) {
+                mCurrentPosition = pos
+                if (pendingSeekMs <= 0L) mSeekOnStart = pos
+            }
+        }
+    }
+
+    /** 弹幕线程唯一的时间入口：读快照 + 按实测倍速外推，**不碰播放器** */
+    private fun danmakuNowMs(): Long {
+        val base = danmakuPosMs
+        if (!danmakuPosAdvancing) return base
+        val elapsed = android.os.SystemClock.uptimeMillis() - danmakuPosAtUptimeMs
+        if (elapsed <= 0L) return base
+        return base + (elapsed * danmakuPosSpeed).toLong()
     }
 
     private var mDisplayCutout: DisplayCutout? = null
@@ -2453,6 +2535,10 @@ initDanmakuTouchListener()
     override fun onPrepared() {
         super.onPrepared()
         onPrepareDanmaku(this)
+        // 播放位置 → 弹幕时间快照 的主线程心跳，在这里启动：
+        // ① 只在实际开始播时才有必要跑（不在构造函数里白烧电）；
+        // ② 一定在构造完成之后（心跳里用到的字段都已初始化）。
+        scheduleDanmakuSnapshot()
         videoPlayerCallBack?.onPrepared()
     }
     override fun onAutoCompletion() {
@@ -2624,21 +2710,10 @@ initDanmakuTouchListener()
         // 【已移除】V2引擎初始化 — V2引擎已废弃
         mDanmakuView.setCallback(object : DrawHandler.Callback {
             override fun updateTimer(timer: DanmakuTimer) {
-                // 约 1 秒记一次"正常播放到的位置"（这个回调很频繁，别每次都查播放器）
-                val now = System.currentTimeMillis()
-                if (now - lastGoodUpdateAt < 1000L) return
-                lastGoodUpdateAt = now
-                if (mCurrentState == CURRENT_STATE_PLAYING) {
-                    val p = try { currentPosition } catch (_: Exception) { 0L }
-                    if (p > lastGoodPositionMs) lastGoodPositionMs = p
-                    // 投递槽跟着播放位置走：任何时刻被重建都能接着"当前位置"播。
-                    // 两个例外：① prepare 进行中（槽正被 GSY 消费，插进来会把落点写成 0）；
-                    //          ② 有显式落点（换清晰度/换语言/重试投递的），盖掉就是"换清晰度从头播"
-                    if (p > 0L && !isPreparing) {
-                        mCurrentPosition = p
-                        if (pendingSeekMs <= 0L) mSeekOnStart = p
-                    }
-                }
+                // 【已搬走】原来这里每秒记一次"播放到的位置"（读播放器 + 写 GSY 投递槽）。
+                // 这个回调跑在弹幕渲染线程上，跨线程读播放器拿不到真值、跨线程写投递槽也不安全，
+                // 所谓"任何时刻接着播"的保鲜逻辑等于从未生效。
+                // 现在整段搬到了主线程心跳 [refreshDanmakuSnapshot]（弹幕时间快照那个 250ms 循环）。
             }
             override fun drawingFinished() {}
             override fun danmakuShown(danmaku: BaseDanmaku) {}
