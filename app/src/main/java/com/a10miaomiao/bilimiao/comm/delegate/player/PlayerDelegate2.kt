@@ -1072,6 +1072,12 @@ class PlayerDelegate2(
          * 只有"新打开一个看过的视频"（首次加载）才提示。
          */
         isReload: Boolean = false,
+        /**
+         * 明确"从头播"（完成页「重新播放」/ 播完后通知栏点播放）：
+         * 忽略本地账本与云端 `lastPlayTime` 两条续播路径，保证落在 0:00。
+         * 「重试」不要传：那是接着上次位置播的语义。
+         */
+        fromStart: Boolean = false,
     ) {
         loadMutex.withLock {
         // 新视频开始播放，重置退出标志
@@ -1086,7 +1092,7 @@ class PlayerDelegate2(
             // 换视频时账本里还是上一段的位置，拿来用就会"新视频从中间开始播"。
             // 必须放在快速重连判断之前，否则账本有位置也会被当成"没位置"走全量重载。
             val sameVideo = lastLoadedSourceId != null && lastLoadedSourceId == source.id
-            if (!isChangedQuality && sameVideo && lastPosition <= 0L) {
+            if (!fromStart && !isChangedQuality && sameVideo && lastPosition <= 0L) {
                 val ledger = views.videoPlayer?.resumePosition ?: 0L
                 if (ledger > 0L) {
                     lastPosition = ledger
@@ -1172,7 +1178,10 @@ class PlayerDelegate2(
                 showResumeTipIfNeeded(cloudTipMs, isReload, isChangedQuality)
                 lastPosition = 0L
             } else if (
-                sourceInfo.lastPlayCid == source.id
+                // 「重新播放」不走云端续播：刚播完的云端进度可能就是片尾，
+                // 而且用户点重播要的就是从 0:00 开始（下面那条 historyReport(0L) 会把云端进度一起归零）
+                !fromStart
+                && sourceInfo.lastPlayCid == source.id
                 && !source.isLoop // 循环的视频不恢复播放
                 && sourceInfo.lastPlayTime > 0L
                 && (sourceInfo.duration <= 0L || sourceInfo.lastPlayTime < sourceInfo.duration - 10000)
@@ -1431,21 +1440,35 @@ class PlayerDelegate2(
 
     /**
      * 记录播放位置
+     *
+     * @param fromStart 「重新播放」/播放完成后通知栏点播放 = **明确要从头播**。
+     *   这类调用绝不能复用"续播位置"：播完之后 `currentPositionWhenPlaying` 返回 0（GSY 在
+     *   AUTO_COMPLETE 态不读底层），兜底拿到的 `lastReportProgress` 正是刚才
+     *   `onAutoCompletion()` 写进去的**片尾位置** → seek 到片尾 → 立刻 STATE_ENDED →
+     *   又弹一次「播放完成」（实机回归 2026-09-21："点重新播放不播，直接就结束了"）。
+     *   出错框的「重试」不传这个参数：那是"接着上次播"的语义，位置该保留。
      */
-    fun reloadPlayer() {
+    fun reloadPlayer(fromStart: Boolean = false) {
         // 重播/重试都是"我要看"的明确意图：清掉暂停意图，否则 prepare 完 GSY 会把画面按回暂停
         views.videoPlayer?.clearPausedIntent()
-        // 位置兜底顺序：播放器当前位置 → 最后一次上报过的位置 → 上一次的 lastPosition。
-        // 网络失败时播放器往往已经死了，currentPositionWhenPlaying 会返回 0，
-        // 只认它就会出现"点重试 = 从头播"。
-        lastPosition = player?.currentPositionWhenPlaying?.takeIf { it > 0L }
-            ?: lastReportProgress.takeIf { it > 0L }
-            ?: lastPosition
+        if (fromStart) {
+            lastPosition = 0L
+            // 播放器里的续播账本（lastGoodPositionMs / mSeekOnStart / 弹幕锚点）一起清，
+            // 否则 prepare 完成后 startAfterPrepared() 会拿账本把落点填回片尾
+            views.videoPlayer?.resetRestartGuard()
+        } else {
+            // 位置兜底顺序：播放器当前位置 → 最后一次上报过的位置 → 上一次的 lastPosition。
+            // 网络失败时播放器往往已经死了，currentPositionWhenPlaying 会返回 0，
+            // 只认它就会出现"点重试 = 从头播"。
+            lastPosition = player?.currentPositionWhenPlaying?.takeIf { it > 0L }
+                ?: lastReportProgress.takeIf { it > 0L }
+                ?: lastPosition
+        }
         playerCoroutineScope.launch(Dispatchers.Main) {
             // 不要清 lastPlayCid/lastPlayTime：这两个是 playurl 每次响应都带回来的"云端进度"，
             // 留着它们，loadPlayerSource 里的"自动恢复"分支才能在本地位置也丢了的时候接着云端播
             // （清掉就只能从 0 开始，这正是"重试后从头播"的根因）
-            loadPlayerSource(isReload = true)
+            loadPlayerSource(isReload = true, fromStart = fromStart)
         }
     }
 
@@ -1775,7 +1798,7 @@ class PlayerDelegate2(
         if (completionBoxController.completionLayout?.visibility == View.VISIBLE) {
             views.videoPlayer?.onVideoPause() // 阻止 GSY 因 surface 可见而自动 resume
             completionBoxController.hide()
-            reloadPlayer()
+            reloadPlayer(fromStart = true)
             return
         }
         // 用 onVideoResume(false) 防止 GSY seek 回 onVideoPause 时保存的 mCurrentPosition，

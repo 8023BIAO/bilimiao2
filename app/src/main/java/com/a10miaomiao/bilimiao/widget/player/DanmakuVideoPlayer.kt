@@ -513,10 +513,15 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         }
         // 位置已经贴着结尾了就别投递：seek 到末尾会立刻 STATE_ENDED 再走一遍播放完成（连播死循环）
         val totalDuration = try { duration } catch (_: Exception) { 0L }
-        if (totalDuration > 0L && mSeekOnStart >= totalDuration - 2_000L) {
+        val isNearEnd = { pos: Long -> totalDuration > 0L && pos >= totalDuration - 2_000L }
+        if (isNearEnd(mSeekOnStart)) {
             mSeekOnStart = 0L
         }
-        if (mSeekOnStart <= 0L && lastGoodPositionMs > 0L) {
+        // ★ 账本兜底必须跟上面的守卫同一条标准：播完之后账本里记的就是"片尾位置"
+        //   （onAutoCompletion 的 historyReport / seekTo 覆写都会写它），
+        //   这里不加判断地回填，等于把刚清掉的末尾落点又填回去 →
+        //   定位到片尾立刻 STATE_ENDED → 用户看到"点重新播放闪一下就又结束了"（实机回归 2026-09-21）。
+        if (mSeekOnStart <= 0L && lastGoodPositionMs > 0L && !isNearEnd(lastGoodPositionMs)) {
             mSeekOnStart = lastGoodPositionMs
         }
         if (userPaused) {

@@ -38,7 +38,8 @@ class CompletionBoxController(
         }
         completionRetryBtn?.setOnClickListener {
             hide()
-            delegate.reloadPlayer()
+            // 「重新播放」= 明确从头播：不能复用续播位置（否则 seek 到片尾，闪一下就又弹完成框）
+            delegate.reloadPlayer(fromStart = true)
         }
         completionCloseBtn?.setOnClickListener {
             delegate.controller.smallScreen()
