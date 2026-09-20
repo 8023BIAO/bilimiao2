@@ -2,7 +2,7 @@
 
 - [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)
 - [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)
-- [biliSendCommAntifraud](https://github.com/freedom-introvert/biliSendCommAntifraud)（哔哩发评反诈：评论「仅自己可见 / ShadowBan」的检测思路与判定规则来源）
+- [biliSendCommAntifraud](https://github.com/freedom-introvert/biliSendCommAntifraud)
 - [blbl](https://github.com/cat3399/blbl)
 - [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)
