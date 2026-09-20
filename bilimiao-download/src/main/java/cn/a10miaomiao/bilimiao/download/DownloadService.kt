@@ -142,6 +142,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     private var completedSegmentBytes = 0L
     /** 公共目录回退私有目录的提示只弹一次，避免每次下载都打扰 */
     private var warnedPrivateFallback = false
+    /** 正在发布中的剧集目录（绝对路径）：防止"启动补发布"和"刚下完发布"同一集撞车 */
+    // 用 synchronizedSet 而不是 ConcurrentHashMap.newKeySet()：后者要 API 24+，本项目 minSdk 21
+    private val publishingEntries: MutableSet<String> =
+        java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
 
     override fun onCreate() {
@@ -153,6 +157,9 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             readDownloadList()
             logToFile("SERVICE readDownloadList done, items=${downloadList.size}")
             channel.send(this@DownloadService)
+            // 上次没发布成功的（发布失败、当时没有存储权限、发布完删私有失败）在这里补一次；
+            // 放在 channel.send 之后：不拖慢首次打开下载页，也不影响任何已有文件
+            publishPendingEntries()
         }
         launch {
             curDownload.collect { info ->
@@ -215,40 +222,122 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
     }
 
+    /**
+     * 重建下载列表（磁盘即真相，没有数据库）：私有工作目录 + 公共下载目录两边都扫，然后去重。
+     */
     private fun readDownloadList() {
-        val downloadDir = File(getDownloadPath())
         val list = mutableListOf<BiliDownloadEntryAndPathInfo>()
+        // 1) 私有工作目录：下载中/未发布/发布失败/老系统无权限的（路径身份 = 私有绝对路径）
+        val downloadDir = File(getWorkPath())
         downloadDir.listFiles()
             ?.filter { it.isDirectory }
-            ?.forEach {
-                list.addAll(readDownloadDirectory(it))
-            }
-        downloadList = list.reversed().toMutableList()
+            ?.forEach { pageDir -> list.addAll(readPrivatePageEntries(pageDir)) }
+        // 2) 公共目录 Download/BiliMiao：已发布的（路径身份 = 相对路径，例如 "s_123/1-1"）
+        list.addAll(readPublicEntries())
+        // 3) 同一集可能在两边都有（发布成功但删私有失败）→ 去重，优先保留"已发布"那条
+        downloadList = dedupeEntries(list).reversed().toMutableList()
     }
 
-    fun readDownloadDirectory(dir: File): List<BiliDownloadEntryAndPathInfo>{
-        if (!dir.exists() || !dir.isDirectory) {
-            return emptyList()
+    /**
+     * 读一个"页面目录"下的所有剧集。
+     * @param dirPath 可以是私有绝对路径（工作目录下的一级目录），也可以是公共目录的相对一级目录名
+     *                （下载详情页拿到的 `pageDirPath` 就是这两种之一）。
+     */
+    fun readDownloadDirectory(dirPath: String): List<BiliDownloadEntryAndPathInfo> {
+        if (dirPath.isEmpty()) return emptyList()
+        val result = mutableListOf<BiliDownloadEntryAndPathInfo>()
+        // 私有侧：绝对路径直接用；相对路径映射到工作目录下的同名目录（发布中途失败时两边都可能有）
+        result.addAll(readPrivatePageEntries(DownloadFileResolver.privateFile(this, dirPath)))
+        // 公共侧：同一分组里可能混着"已发布（相对路径）"和"未发布（绝对路径）"两种身份的条目，
+        // 所以绝对页面目录也要按"一级目录名"去公共目录里找同名页面目录
+        //（发布时的相对路径就是"页面目录名/剧集目录名"，名字一定对得上）
+        val relPageDir = if (DownloadFileResolver.isPublished(dirPath)) dirPath.trim('/')
+        else DownloadFileResolver.nameOf(dirPath)
+        if (relPageDir.isNotEmpty()) {
+            PublicDownloadStore.listEntryDirs(this)
+                .filter { it.substringBefore('/') == relPageDir }
+                .forEach { relDir -> readPublicEntry(relDir)?.let { result.add(it) } }
         }
-        return dir.listFiles()
-            ?.filter { pageDir -> pageDir.isDirectory }
-            ?.map { File(it.path, "entry.json") }
-            ?.filter { it.exists() }
-            ?.mapNotNull {
-                try {
-                    val entryJson = it.readText()
-                    val entry = MiaoJson.fromJson<BiliDownloadEntryInfo>(entryJson)
-                    BiliDownloadEntryAndPathInfo(
-                        entry = entry,
-                        entryDirPath = it.parent,
-                        pageDirPath = it.parentFile.parent
-                    )
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    null
-                }
-            }
+        return dedupeEntries(result)
+    }
+
+    /** 扫一个私有页面目录里的剧集（绝对路径身份） */
+    private fun readPrivatePageEntries(privatePageDir: File): List<BiliDownloadEntryAndPathInfo> {
+        if (!privatePageDir.isDirectory) return emptyList()
+        return privatePageDir.listFiles()
+            ?.filter { it.isDirectory }
+            ?.mapNotNull { entryDir -> readPrivateEntry(File(entryDir, "entry.json")) }
             ?: emptyList()
+    }
+
+    /** 读私有目录里的 entry.json（绝对路径身份） */
+    private fun readPrivateEntry(entryJsonFile: File): BiliDownloadEntryAndPathInfo? {
+        if (!entryJsonFile.isFile) return null
+        return try {
+            val entry = MiaoJson.fromJson<BiliDownloadEntryInfo>(entryJsonFile.readText())
+            BiliDownloadEntryAndPathInfo(
+                entry = entry,
+                entryDirPath = entryJsonFile.parent,
+                pageDirPath = entryJsonFile.parentFile.parent,
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /** 读公共目录里的 entry.json（相对路径身份） */
+    private fun readPublicEntry(relDir: String): BiliDownloadEntryAndPathInfo? {
+        val entryJson = PublicDownloadStore.readText(this, relDir, "entry.json") ?: return null
+        return try {
+            val entry = MiaoJson.fromJson<BiliDownloadEntryInfo>(entryJson)
+            BiliDownloadEntryAndPathInfo(
+                entry = entry,
+                entryDirPath = relDir,
+                // "s_123/1-1" → 页面目录 "s_123"；没有斜杠时退化成自身（不会崩，只是分组名不理想）
+                pageDirPath = relDir.substringBefore('/'),
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /** 读公共目录里全部已发布剧集（相对路径身份） */
+    private fun readPublicEntries(): List<BiliDownloadEntryAndPathInfo> =
+        PublicDownloadStore.listEntryDirs(this).mapNotNull { readPublicEntry(it) }
+
+    /**
+     * 同一集去重：同一集在私有、公共两边都存在时（发布成功后删私有失败）只留一条，
+     * 优先保留"已发布"（相对路径）那条 —— 它是完整发布过、卸载也不丢的权威副本。
+     */
+    private fun dedupeEntries(list: List<BiliDownloadEntryAndPathInfo>): List<BiliDownloadEntryAndPathInfo> {
+        val result = mutableListOf<BiliDownloadEntryAndPathInfo>()
+        for (item in list) {
+            val index = result.indexOfFirst { isSameEntry(it, item) }
+            if (index < 0) {
+                result.add(item)
+            } else if (DownloadFileResolver.isPublished(item.entryDirPath) &&
+                !DownloadFileResolver.isPublished(result[index].entryDirPath)
+            ) {
+                // 保留先出现的位置（列表顺序更稳定），只把内容换成已发布的那条
+                result[index] = item
+            }
+        }
+        return result
+    }
+
+    /**
+     * 是不是同一集：优先用 entry.key（cid）；万一是 0（老/异常数据）就比目录名。
+     * 不能用 entryDirPath 比 —— 同一集在私有、公共两种身份下路径字符串本来就不一样。
+     */
+    private fun isSameEntry(
+        a: BiliDownloadEntryAndPathInfo,
+        b: BiliDownloadEntryAndPathInfo,
+    ): Boolean = if (a.entry.key != 0L && b.entry.key != 0L) {
+        a.entry.key == b.entry.key
+    } else {
+        DownloadFileResolver.nameOf(a.entryDirPath) == DownloadFileResolver.nameOf(b.entryDirPath)
     }
 
     /**
@@ -265,6 +354,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         biliEntry: BiliDownloadEntryInfo
     ) {
         logToFile("createDownload: season_id=${biliEntry.season_id} avid=${biliEntry.avid} ep_id=${biliEntry.ep?.episode_id} cid=${biliEntry.source?.cid}")
+        // 公共目录不可用时（老系统用户拒绝了存储权限）提醒一次实际保存位置：文件在私有目录，卸载会丢
+        warnPrivateFallbackOnce()
         val entryDir = getDownloadFileDir(biliEntry)
         // 保存视频信息
         val entryJsonFile = File(entryDir, "entry.json")
@@ -314,6 +405,14 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
 //            }
         }
     }
+
+    /**
+     * 下载写入目录：**永远是私有工作目录**里的那一层。
+     * 身份是相对路径（已发布）时映射回私有目录，绝不按相对路径创建字面量目录。
+     */
+    private fun writeEntryDir(entryDirPath: String): File =
+        DownloadFileResolver.privateFile(this, entryDirPath)
+
     /**
      * 开始任务
      */
@@ -329,8 +428,9 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         audioDownloadManager?.cancel()
         downloadManager = null
         audioDownloadManager = null
-        // 开始任务/继续任务
-        val entryDir = File(biliDownInfo.entryDirPath)
+        // 开始任务/继续任务（写私有工作目录：断点续传/分片合并都依赖本地 File）
+        val entryDir = writeEntryDir(biliDownInfo.entryDirPath)
+        if (!entryDir.exists()) entryDir.mkdirs()
         val danmakuXMLFile = File(entryDir, "danmaku.xml")
         val entry = biliDownInfo.entry
         val parentId = entry.season_id ?: entry.avid?.toString() ?: ""
@@ -391,7 +491,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             return
         }
         val entry = biliDownInfo.entry
-        val entryDir = File(biliDownInfo.entryDirPath)
+        val entryDir = writeEntryDir(biliDownInfo.entryDirPath)
         val videoDir = File(entryDir, entry.type_tag)
         if (!videoDir.exists()) {
             videoDir.mkdir()
@@ -589,9 +689,12 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         pageDirPath: String,
         entryDirPath: String,
     ) {
+        // 先按 (页面目录, 剧集目录) 精确匹配；匹配不到再只按剧集目录匹配 ——
+        // 同一分组里可能混着"已发布（相对路径）"和"未发布（绝对路径）"两种身份的条目，
+        // 页面目录字符串不一定对得上，但 entryDirPath 是唯一的，只按它兜底更可靠
         val index = downloadList.indexOfFirst {
             it.pageDirPath == pageDirPath && it.entryDirPath == entryDirPath
-        }
+        }.takeIf { it >= 0 } ?: downloadList.indexOfFirst { it.entryDirPath == entryDirPath }
         if (index != -1) {
             // 如果为当前下载任务则先停止任务
             val entryAndPathInfo = downloadList[index]
@@ -599,15 +702,13 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 cancelDownload(currentTaskId)
             }
         }
-        val downloadDir = File(pageDirPath)
-        if (downloadDir.exists()) {
-            val entryDir = File(entryDirPath)
-            if (entryDir.exists()) {
-                entryDir.deleteRecursively()
-            }
-            if (downloadDir.listFiles()?.isEmpty() == true) {
-                downloadDir.delete()
-            }
+        // 公共（相对身份）和私有（绝对身份）两边都要删：发布成功但删私有失败、发布到一半失败
+        // 都会让同一集在两边各留一份，用户点删除就是"这一集不要了"
+        DownloadFileResolver.deleteDir(this, entryDirPath)
+        // 页面目录空了顺手删掉（公共目录那边空目录会自动消失，MediaStore 不记录空目录）
+        val pageDir = DownloadFileResolver.privateFile(this, pageDirPath)
+        if (pageDir.isDirectory && pageDir.listFiles()?.isEmpty() == true) {
+            pageDir.delete()
         }
         if (index != -1) {
             // 从列表移除
@@ -620,18 +721,100 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
      * 完成下载
      */
     private fun completeDownload() {
-        val (_, entryDirPath, entry) = curBiliDownloadEntryAndPathInfo ?: return
+        val info = curBiliDownloadEntryAndPathInfo ?: return
+        val entry = info.entry
         entry.downloaded_bytes = entry.total_bytes
         entry.is_completed = true
         entry.total_time_milli = (curDownload.value?.length ?: 0L) * 1000
-        updateBiliDownloadEntryJson(entryDirPath, entry)
+        updateBiliDownloadEntryJson(info.entryDirPath, entry)
         downloadListVersion.value++
+        // ★ 一集全部下完：整目录发布到公共目录 Download/BiliMiao/（Android 10+ 不需要任何权限）。
+        //   发布成功才删私有副本、身份换成相对路径；任何一个文件失败就保留私有副本、下次启动再试。
+        //   放在 nextDownload() 之前同步做：发布是本地 IO，串行执行不会和下一个任务的写入抢文件。
+        publishEntryToPublic(info)
+        // 顺带把之前发布失败/当时没存储权限的条目再试一次（"下次完成时再试"）；
+        // 它跑在独立协程里，不阻塞当前任务的收尾和队列里的下一个任务
+        publishPendingEntries()
         curDownload.value = null
         curMediaFile = null
         curMediaFileInfo = null
         downloadManager = null
         audioDownloadManager = null
         nextDownload()
+    }
+
+    /**
+     * 把一集的私有目录整目录发布到公共目录；成功则删私有副本、把记录身份改成相对路径。
+     *
+     * 失败（或公共目录不可用）时**什么都不动**：私有副本还在、身份还是绝对路径，
+     * 下次启动/下次完成时 [publishPendingEntries] 会再试一次 —— 绝不能因为发布失败让用户文件消失。
+     */
+    private fun publishEntryToPublic(info: BiliDownloadEntryAndPathInfo?) {
+        if (info == null) return
+        val entryDirPath = info.entryDirPath
+        // 只有私有目录存在才需要发布（发布成功后会把它删掉，下次进来这里直接跳过）
+        val entryDir = DownloadFileResolver.privateFile(this, entryDirPath)
+        if (!entryDir.isDirectory) return
+        if (!DownloadStoragePolicy.canUsePublicStorage(this)) {
+            logToFile("publish SKIP: 公共目录不可用（老系统未授权存储权限），保留私有副本 $entryDirPath")
+            return
+        }
+        val relDir = DownloadFileResolver.relativeDirOf(this, entryDirPath)
+        if (relDir == null) {
+            logToFile("publish SKIP: 目录不在私有工作目录内，无法映射公共相对路径 $entryDirPath")
+            return
+        }
+        if (!publishingEntries.add(entryDirPath)) return // 同一集已在发布中
+        try {
+            val ok = DownloadPublisher.publishEntryDir(this, entryDir, relDir)
+            logToFile("publish ${if (ok) "OK" else "FAILED"}: $entryDirPath -> ${PublicDownloadStore.relativePathOf(relDir)}")
+            if (!ok) return
+            // 发布成功（entry.json 已确认可读）才删私有副本；删失败也只是留一份冗余，不会丢文件
+            val pageDir = entryDir.parentFile
+            if (!entryDir.deleteRecursively()) {
+                logToFile("publish: 私有副本删除失败，保留 ${entryDir.absolutePath}")
+            }
+            if (pageDir != null && pageDir.listFiles()?.isEmpty() == true) {
+                pageDir.delete()
+            }
+            changeEntryIdentity(info, relDir)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            logToFile("publish EXCEPTION: ${e.message}")
+        } finally {
+            publishingEntries.remove(entryDirPath)
+        }
+    }
+
+    /** 发布成功：把记录身份从"私有绝对路径"换成"公共相对路径"（下次启动就是从公共目录重建出来的相对身份） */
+    private fun changeEntryIdentity(info: BiliDownloadEntryAndPathInfo, relDir: String) {
+        val index = downloadList.indexOfFirst {
+            it.entryDirPath == info.entryDirPath && it.entry.key == info.entry.key
+        }
+        if (index < 0) return
+        downloadList[index] = info.copy(
+            entryDirPath = relDir,
+            // "s_123/1-1" → 页面目录 "s_123"
+            pageDirPath = relDir.substringBefore('/'),
+        )
+        // 同一集万一列表里有两条（重复点下载），发布完成后合并成一条
+        downloadList = dedupeEntries(downloadList).toMutableList()
+        downloadListVersion.value++
+    }
+
+    /**
+     * 服务启动时补发布：上次发布失败、当时没有存储权限、发布成功但删私有失败的，
+     * 在这里重试一次（只重试 `is_completed` 的，正在下载的那条绝不动）。
+     */
+    private fun publishPendingEntries() = launch {
+        val pending = downloadList.filter { it.entry.is_completed }
+        if (pending.isEmpty()) return@launch
+        logToFile("publishPending: 检查 ${pending.size} 条已完成记录")
+        pending.forEach { info ->
+            // 正在下载的那条不能发布（文件还在写）
+            if (curDownload.value?.id == info.entry.key) return@forEach
+            publishEntryToPublic(info)
+        }
     }
 
     /**
@@ -704,14 +887,14 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                 startNextSegment(
                     info,
                     mediaInfo,
-                    File(entryInfo.entryDirPath, entryInfo.entry.type_tag),
+                    writeVideoDir(entryInfo),
                     mediaInfo.httpHeader(),
                 )
                 return
             }
             if (entryInfo != null) {
                 mergeSegments(
-                    File(entryInfo.entryDirPath, entryInfo.entry.type_tag),
+                    writeVideoDir(entryInfo),
                     curMediaFileInfo as BiliDownloadMediaFileInfo.Type1,
                 )
             }
@@ -760,49 +943,73 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         entryDirPath: String,
         entry: BiliDownloadEntryInfo,
     ) {
-        // 保存视频信息
-        val entryJsonFile = File(entryDirPath, "entry.json")
+        // 保存视频信息（entry.json 永远写私有工作目录：相对身份也映射回私有目录，
+        // 绝不按相对路径在当前进程工作目录下创建字面量文件）
+        val entryDir = writeEntryDir(entryDirPath)
+        if (!entryDir.exists()) entryDir.mkdirs()
+        val entryJsonFile = File(entryDir, "entry.json")
         val entryJsonStr = MiaoJson.toJson(entry)
         entryJsonFile.writeText(entryJsonStr)
     }
 
+    /** 写分片/合并用的视频目录（私有工作目录里的 `<entryDir>/<type_tag>`） */
+    private fun writeVideoDir(entryInfo: BiliDownloadEntryAndPathInfo): File =
+        File(writeEntryDir(entryInfo.entryDirPath), entryInfo.entry.type_tag ?: "")
+
+    /**
+     * 下载工作目录：**永远是应用私有目录**（`.../files/BiliMiao`）。
+     * 下载过程（断点续传、多分片临时文件、合并）全部写这里，一集下完后再整目录发布到公共目录。
+     * 为什么不让下载器直接写公共目录：MediaStore 的流不支持可靠的随机写/续传/rename，
+     * 而且发布失败时私有副本是用户文件的最后安全网。
+     */
+    fun getWorkPath(): String {
+        val privateDir = DownloadFileResolver.workDir(this)
+        if (!privateDir.exists()) {
+            privateDir.mkdirs()
+        }
+        // .nomedia：防止系统图库/媒体扫描把下载的视频、弹幕也算进去
+        val nomedia = File(privateDir, ".nomedia")
+        if (!nomedia.exists()) {
+            runCatching { nomedia.createNewFile() }
+        }
+        return privateDir.absolutePath
+    }
+
+    /**
+     * UI 展示用的"下载保存位置"（人类可读路径）。
+     * 与 [getWorkPath] 严格区分：这里只回答"文件最终会放在哪"，**不创建目录、不写测试文件**
+     * （以前每次打开下载页都 mkdir + 写探针文件，纯属多余 IO）。
+     * 公共目录可用 → `/sdcard/Download/BiliMiao`（Android 10+ 真实存在且无需权限）；
+     * 老系统用户拒绝存储权限 / 环境不支持 → 退回私有目录（提示用户卸载会丢）。
+     */
     fun getDownloadPath(): String {
-        // 优先公共目录，写入失败静默回退私有目录
-        val publicDir = File(android.os.Environment.getExternalStoragePublicDirectory(
-            android.os.Environment.DIRECTORY_DOWNLOADS
-        ), "BiliMiao")
-        try {
-            if (!publicDir.exists() && !publicDir.mkdirs()) {
-                throw IOException()
-            }
-            val testFile = File(publicDir, ".write_test")
-            testFile.createNewFile()
-            testFile.delete()
-            // 创建 .nomedia 防止系统图库扫描下载的视频/音频/弹幕/字幕
-            val nomedia = File(publicDir, ".nomedia")
-            if (!nomedia.exists()) nomedia.createNewFile()
-            logToFile("getDownloadPath: PUBLIC ${publicDir.canonicalPath}")
-            return publicDir.canonicalPath
-        } catch (e: Exception) {
-            val privateDir = File(getExternalFilesDir(null), "BiliMiao")
-            if (!privateDir.exists()) {
-                privateDir.mkdirs()
-            }
-            val nomedia = File(privateDir, ".nomedia")
-            if (!nomedia.exists()) nomedia.createNewFile()
-            logToFile("getDownloadPath: FALLBACK PRIVATE ${privateDir.canonicalPath}")
-            // 提示用户实际保存位置（仅一次）：无存储权限时公共目录不可写，文件在应用私有目录
-            if (!warnedPrivateFallback) {
-                warnedPrivateFallback = true
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(
-                        this,
-                        "无存储权限，视频已保存到应用私有目录：${privateDir.path}（卸载应用会丢失）",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-            return privateDir.canonicalPath
+        return if (DownloadStoragePolicy.canUsePublicStorage(this)) {
+            DownloadStoragePolicy.publicDirPath()
+        } else {
+            // 纯路径计算，不创建目录（展示而已）
+            DownloadFileResolver.workDir(this).absolutePath
+        }
+    }
+
+    /**
+     * 公共目录不可用（老系统用户明确拒绝了存储权限）时提示一次实际保存位置。
+     * 以前这段提示在 getDownloadPath() 里，改造后工作目录永远是私有目录，
+     * 只有"真的发布不了"才需要提醒用户"卸载会丢"。
+     */
+    private fun warnPrivateFallbackOnce() {
+        if (DownloadStoragePolicy.canUsePublicStorage(this)) return
+        // 还没问过用户（没有拒绝记录）就先不提示：授权弹窗马上会来，授权成功后
+        // 之前下好的也会补发布到公共目录，提前吓唬用户没必要
+        if (!DownloadStoragePolicy.isLegacyPermissionDenied(this)) return
+        if (warnedPrivateFallback) return
+        warnedPrivateFallback = true
+        val privatePath = DownloadFileResolver.workDir(this).absolutePath
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(
+                this,
+                "无存储权限，视频只能保存到应用私有目录：${privatePath}（卸载应用会丢失）",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -825,7 +1032,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             dirName = biliEntry.avid?.toString() ?: ""
             pageDirName = "c_" + page.cid
         }
-        val downloadDir = File(getDownloadPath(), dirName)
+        // 新任务一律建在私有工作目录（下完再整目录发布公共目录），公共目录在 Android 10+ 不能用文件路径写
+        val downloadDir = File(getWorkPath(), dirName)
         // 创建文件夹
         if (!downloadDir.exists()) {
             downloadDir.mkdir()

@@ -38,6 +38,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadListItem
+import cn.a10miaomiao.bilimiao.compose.pages.download.components.LegacyStoragePermissionEffect
 import cn.a10miaomiao.bilimiao.download.DownloadService
 import cn.a10miaomiao.bilimiao.download.entry.BiliDownloadEntryAndPathInfo
 import cn.a10miaomiao.bilimiao.download.entry.CurrentDownloadInfo
@@ -237,6 +238,8 @@ internal class DownloadListPageViewModel(
 internal fun DownloadListPageContent(
     viewModel: DownloadListPageViewModel
 ) {
+    // 打开下载页时请求一次老系统（API 23~28）的存储权限：授权后才能把下载好的视频发布到公共目录
+    LegacyStoragePermissionEffect()
     var isEditMode by remember { mutableStateOf(false) }
     val selectedDirs = remember { mutableStateListOf<String>() }
 
@@ -303,11 +306,11 @@ internal fun DownloadListPageContent(
         val downloadPath = viewModel.downloadPath
         AlertDialog(
             onDismissRequest = { showHelpDialog = false },
-            title = { Text(text = "下载路径") },
+            title = { Text(text = "下载保存位置") },
             text = {
                 Column() {
-                    Text(text = "下载路径：${downloadPath}")
-                   // Text(text = "文件已保存到公共下载目录，无需额外工具导出")
+                    // 这里是"文件最终保存在哪"（已发布的在公共目录 Download/BiliMiao，公共目录不可用时是应用私有目录）
+                    Text(text = "保存位置：${downloadPath}")
                 }
             },
             confirmButton = {

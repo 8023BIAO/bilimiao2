@@ -2,7 +2,6 @@ package cn.a10miaomiao.bilimiao.download
 
 import android.app.Activity
 import android.content.Context
-import android.net.Uri
 import cn.a10miaomiao.bilimiao.download.entry.BiliDownloadEntryInfo
 import cn.a10miaomiao.bilimiao.download.entry.BiliDownloadMediaFileInfo
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
@@ -17,7 +16,6 @@ import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import master.flame.danmaku.danmaku.loader.android.DanmakuLoaderFactory
 import master.flame.danmaku.danmaku.parser.BaseDanmakuParser
 import master.flame.danmaku.danmaku.parser.BiliDanmukuParser
-import java.io.File
 import java.io.InputStream
 
 class LocalPlayerSource(
@@ -81,16 +79,12 @@ class LocalPlayerSource(
             it.lastPlayTime = savedProgress
         }
 
-        val videoDirPath = entryDirPath + "/" + entry.type_tag
-        val videoDir = File(videoDirPath)
-        if (!videoDir.exists() || !videoDir.isDirectory) {
-            return emptyPlayerSourceInfo
-        }
-        val videoIndexJsonFile = File(videoDirPath, "index.json")
-        if (!videoIndexJsonFile.exists()) {
-            return emptyPlayerSourceInfo
-        }
-        val videoIndexJson = videoIndexJsonFile.readText()
+        // 清晰度目录名（老数据可能只有 video_quality，两者都没有就没法定位文件）
+        val typeTag = entry.type_tag ?: entry.video_quality?.toString() ?: return emptyPlayerSourceInfo
+        // ★ 读取全部走 DownloadFileResolver：相对路径身份（已发布到公共目录）时从 MediaStore 拿 content://，
+        //   绝对路径身份（还在私有目录/老数据）时直接用 File；以前这里 File(entryDirPath, ...) 拼相对路径读不到文件
+        val videoIndexJson = DownloadFileResolver.readText(activity, entryDirPath, "$typeTag/index.json")
+            ?: return emptyPlayerSourceInfo
         // 不能用 entry.media_type 判定：所有创建点都写 media_type = 2，
         // Type1(durl 多分片) 会被当成 Type2 解析出空 video 列表，随后 video[0] 越界崩溃。
         // 改为按 index.json 内容判定（Type1 一定带 segment_list）；旧数据 media_type = 1 也认。
@@ -101,30 +95,29 @@ class LocalPlayerSource(
         }
         if (type1MediaInfo != null && (type1MediaInfo.segment_list.isNotEmpty() || entry.media_type == 1)) {
             // 优先合并后的 0.<format>；format 对不上时退回目录里实际存在的 0.* 文件
-            val videoFile = File(videoDir, "0." + type1MediaInfo.format).takeIf { it.exists() }
-                ?: videoDir.listFiles()?.firstOrNull { it.isFile && it.name.startsWith("0.") }
-            if (videoFile != null && videoFile.exists()) {
-                val url = Uri.fromFile(videoFile).toString()
-                return PlayerSourceInfo().also {
-                    it.url = url
-                    it.quality = 0
-                    it.acceptList = acceptList
-                    it.duration = duration
-                    it.lastPlayCid = id
-                    it.lastPlayTime = savedProgress
-                }
-            } else {
-                return emptyPlayerSourceInfo
+            val names = DownloadFileResolver.listNames(activity, entryDirPath, typeTag)
+            val videoName = names.firstOrNull { it == "0." + type1MediaInfo.format }
+                ?: names.firstOrNull { it.startsWith("0.") }
+                ?: return emptyPlayerSourceInfo
+            val url = DownloadFileResolver.uri(activity, entryDirPath, "$typeTag/$videoName")?.toString()
+                ?: return emptyPlayerSourceInfo
+            return PlayerSourceInfo().also {
+                it.url = url
+                it.quality = 0
+                it.acceptList = acceptList
+                it.duration = duration
+                it.lastPlayCid = id
+                it.lastPlayTime = savedProgress
             }
         } else {
             val mediaInfo = parseType2(videoIndexJson)
             // 空 video 列表（index.json 损坏/类型识别失败）时返回空源，避免下面的 video[0] 越界崩溃
             val videoStream = mediaInfo.video.firstOrNull() ?: return emptyPlayerSourceInfo
-            val videoFile = File(videoDir, "video.m4s")
-            val audioFile = File(videoDir, "audio.m4s")
-            val url = Uri.fromFile(videoFile).toString()
-            if (audioFile.exists()) {
-                val audioUrl = Uri.fromFile(audioFile).toString()
+            val url = DownloadFileResolver.uri(activity, entryDirPath, "$typeTag/video.m4s")?.toString()
+                ?: return emptyPlayerSourceInfo
+            // 音频缺失时只播视频（老数据/单流下载），不硬拼一个不存在的音轨
+            val audioUrl = DownloadFileResolver.uri(activity, entryDirPath, "$typeTag/audio.m4s")?.toString()
+            if (audioUrl != null) {
                 val mergingUrl = "[local-merging]\n$url\n$audioUrl"
                 return PlayerSourceInfo().also {
                     it.height = videoStream.height
@@ -210,15 +203,14 @@ class LocalPlayerSource(
     }
 
     private fun getEntryFileInfo(): BiliDownloadEntryInfo {
-        val entryJsonFile = File(entryDirPath, "entry.json")
-        return MiaoJson.fromJson(entryJsonFile.readText())
+        // entry.json 同样走 resolver：已发布的一集在公共目录里，私有目录已经没有了
+        val entryJson = DownloadFileResolver.readText(activity, entryDirPath, "entry.json")
+            ?: throw java.io.FileNotFoundException("entry.json 读取失败：$entryDirPath")
+        return MiaoJson.fromJson(entryJson)
     }
 
-    private fun getBiliDanmukuStream(): InputStream? {
-        val danmakuXMLFile = File(entryDirPath, "danmaku.xml")
-        if (!danmakuXMLFile.exists()) return null
-        return danmakuXMLFile.inputStream()
-    }
+    private fun getBiliDanmukuStream(): InputStream? =
+        DownloadFileResolver.openInput(activity, entryDirPath, "danmaku.xml")
 
     override suspend fun getSubtitles(): List<SubtitleSourceInfo> = emptyList()
 }

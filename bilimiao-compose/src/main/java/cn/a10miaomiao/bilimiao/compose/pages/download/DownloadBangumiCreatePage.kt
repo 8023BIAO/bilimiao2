@@ -24,6 +24,7 @@ import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.entity.FlowPaginationInfo
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
+import cn.a10miaomiao.bilimiao.compose.pages.download.components.LegacyStoragePermissionEffect
 import cn.a10miaomiao.bilimiao.download.DownloadService
 import cn.a10miaomiao.bilimiao.download.entry.BiliDownloadEntryInfo
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -430,6 +431,8 @@ internal fun EpisodeItem(
 internal fun DownloadBangumiCreatePageContent(
     viewModel: DownloadBangumiCreatePageViewModel,
 ) {
+    // "创建下载任务"页：下载真正的触发点，老系统（API 23~28）在这里弹一次存储权限
+    LegacyStoragePermissionEffect()
     val userStore: UserStore by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsState().value

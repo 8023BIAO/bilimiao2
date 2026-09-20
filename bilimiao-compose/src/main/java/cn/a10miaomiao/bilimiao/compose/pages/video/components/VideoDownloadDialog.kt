@@ -54,6 +54,7 @@ import bilibili.app.view.v1.ViewReq
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
 import cn.a10miaomiao.bilimiao.compose.pages.download.DownloadBangumiCreatePageViewModel.QualityInfo
 import cn.a10miaomiao.bilimiao.compose.pages.download.EpisodeItem
+import cn.a10miaomiao.bilimiao.compose.pages.download.components.LegacyStoragePermissionEffect
 import cn.a10miaomiao.bilimiao.download.DownloadService
 import cn.a10miaomiao.bilimiao.download.entry.BiliDownloadEntryInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
@@ -603,6 +604,9 @@ fun VideoDownloadDialog(
     state: VideoDownloadDialogState,
 ) {
     if (state.visible) {
+        // 这是视频页里真正触发下载的入口：老系统（API 23~28）在这里弹一次存储权限，
+        // 授权后下载完成的剧集才能整目录发布到公共目录 Download/BiliMiao（拒绝则一直用私有目录）
+        LegacyStoragePermissionEffect()
         var expandedQualityMenu by remember {
             mutableStateOf(false)
         }

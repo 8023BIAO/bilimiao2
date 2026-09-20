@@ -8,6 +8,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <!--
+      下载写公共目录 Download/BiliMiao 用的权限：
+      Android 10（API 29）及以上走 MediaStore，**不需要**这个权限（也不弹框）；
+      只有 Android 9 及以下才需要，所以用 maxSdkVersion=28 把它限制在老系统上。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- 下载服务以 dataSync 类型常驻前台，Android 14+ 需要单独声明该类型的权限 -->

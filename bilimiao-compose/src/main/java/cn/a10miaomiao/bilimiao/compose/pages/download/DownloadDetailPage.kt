@@ -34,6 +34,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadDetailItem
 import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadListItem
+import cn.a10miaomiao.bilimiao.compose.pages.download.components.LegacyStoragePermissionEffect
 import cn.a10miaomiao.bilimiao.download.DownloadService
 import cn.a10miaomiao.bilimiao.download.LocalPlayerSource
 import cn.a10miaomiao.bilimiao.download.entry.CurrentDownloadInfo
@@ -47,7 +48,6 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
-import java.io.File
 
 @Serializable
 data class DownloadDetailPage(
@@ -97,7 +97,8 @@ internal class DownloadDetailPageViewModel(
         service: DownloadService,
         dirPath: String,
     ) {
-        val list = service.readDownloadDirectory(File(dirPath))
+        // dirPath 可能是私有绝对路径，也可能是公共目录的相对页面目录名 —— 服务里两种都认
+        val list = service.readDownloadDirectory(dirPath)
         val items = mutableListOf<DownloadItemInfo>()
         var isCompleted = true
         list.forEach {
@@ -214,6 +215,8 @@ internal fun DownloadDetailPageContent(
     dirPath: String,
     viewModel: DownloadDetailPageViewModel,
 ) {
+    // 详情页也可能直接触发"继续下载"，这里同样保证老系统只弹一次存储权限
+    LegacyStoragePermissionEffect()
     PageConfig(
         title = "下载详情"
     )
