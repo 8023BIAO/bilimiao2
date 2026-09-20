@@ -207,11 +207,28 @@ object CommentAntifraud {
             findReplyAsGuest(oid, type, rpid, root, buvid)
         }
         if (found != null) {
-            return if (found.invisible) {
-                AntifraudResult(AntifraudState.INVISIBLE, "评论被标记为不可见（invisible），别人看不到")
-            } else {
-                AntifraudResult(AntifraudState.NORMAL, "评论正常显示，游客也能看到")
+            if (found.invisible) {
+                return AntifraudResult(AntifraudState.INVISIBLE, "评论被标记为不可见（invisible），别人看不到")
             }
+            // ★ 交叉验证：列表里能看到，**再**用"游客取这条评论的回复页"确认一次。
+            //   原因（实测撞到过）：阿瓦隆在不同接口上的状态**会不一致** —— 时间序列表里还能翻到，
+            //   但游客取该评论的回复页已经回"没有该评论"。只信列表会把这类判成"正常"，
+            //   而用户切到游客模式/换号就是看不到（用户反复质疑的正是这个）。
+            //   上游 biliSendCommAntifraud 也把"回复页"当作更权威的信号。
+            //   只对根评论做（楼中楼没有这个特性）。
+            if (root == 0L) {
+                val cross = replyPage(oid, type, rpid, asGuest = true, buvid = buvid)
+                AntifraudDiag.step("①b 交叉验证：游客取该评论回复页 code=${cross.code} ${cross.message}")
+                if (cross.code == CODE_COMMENT_DELETED || cross.code == CODE_COMMENT_NOT_EXIST) {
+                    return AntifraudResult(
+                        AntifraudState.SHADOW_BAN,
+                        "仅自己可见（ShadowBan）：游客翻列表还能看到这条，但游客取它的回复页已是『没有该评论』" +
+                            "（接口间不一致，按更严格的那个算）",
+                        cross.code, cross.message,
+                    )
+                }
+            }
+            return AntifraudResult(AntifraudState.NORMAL, "评论正常显示，游客也能看到")
         }
 
         // ===== 2. 游客看不到：区分 秒删 / ShadowBan / 疑似审核 =====
