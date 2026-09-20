@@ -5,9 +5,6 @@
     <item android:title="播放设置"
         android:id="@+id/video_setting" />
 
-    <item android:title="弹幕设置"
-        android:id="@+id/danmuku_setting" />
-
     <item android:title="空降助手片段"
         android:id="@+id/sponsor_block_detail" />
 

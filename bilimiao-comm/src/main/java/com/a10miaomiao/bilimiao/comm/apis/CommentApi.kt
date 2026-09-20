@@ -13,8 +13,80 @@ import java.io.File
 class CommentApi() {
 
     /**
-     * 视频评论
+     * 评论列表（REST，仅按时间排序）—— 评论反诈检测用（见 [CommentAntifraud]）。
+     *
+     * 与原 [mainList] 的区别：这个走的是"时间倒序 + 游标翻页"，
+     * 因为检测要判断的是"刚发的评论在时间序里排第几、有没有被吞"。
+     *
+     * @param offset  翻页游标：首次传 null（等价 {"offset":""}），之后取响应里的
+     *                data.cursor.pagination_reply.next_offset
+     * @param seekRpid 定位评论：传楼中楼的 rpid 时，B站会把该评论塞进预览域（replies）里
+     * @param asGuest  游客模式（不带登录 Cookie）。**必须带 buvid3**，否则 -352 风控校验失败
      */
+    fun mainListByTime(
+        oid: String,
+        type: Int,
+        offset: String? = null,
+        seekRpid: Long? = null,
+        asGuest: Boolean = false,
+        guestBuvid3: String? = null,
+    ) = MiaoHttp.request {
+        val params = mutableListOf<Pair<String, String?>>(
+            "oid" to oid,
+            "type" to type.toString(),
+            // mode=2：仅按时间（0/3 热度、1 热度+时间、2 时间）
+            "mode" to "2",
+            "plat" to "2",
+            "ps" to "20",
+            "pagination_str" to """{"offset":"${offset ?: ""}"}""",
+        )
+        if (seekRpid != null && seekRpid > 0) {
+            params.add("seek_rpid" to seekRpid.toString())
+        }
+        url = BiliApiService.biliApi("x/v2/reply/main", *params.toTypedArray())
+        asGuestMode(asGuest, guestBuvid3)
+    }
+
+    /**
+     * 取某条**根评论**的回复页（REST）。
+     *
+     * 反诈检测的关键特性（biliSendCommAntifraud 的实测结论）：
+     *  - 登录账号来查：评论被系统秒删 → 12022；ShadowBan / 正常 → 0
+     *  - 游客身份来查：ShadowBan → 12022/12006；正常 → 0
+     * 所以"登录查得到 + 游客查不到"就是 ShadowBan。
+     */
+    fun replyPage(
+        oid: String,
+        type: Int,
+        root: Long,
+        pageNum: Int = 1,
+        pageSize: Int = 20,
+        asGuest: Boolean = false,
+        guestBuvid3: String? = null,
+    ) = MiaoHttp.request {
+        url = BiliApiService.biliApi(
+            "x/v2/reply/reply",
+            "oid" to oid,
+            "type" to type.toString(),
+            "root" to root.toString(),
+            "pn" to pageNum.toString(),
+            "ps" to pageSize.toString(),
+            "sort" to "0",
+        )
+        asGuestMode(asGuest, guestBuvid3)
+    }
+
+    /** 把"游客模式 + buvid3"塞进请求（游客不能带 app-key/Authorization/登录 Cookie） */
+    private fun MiaoHttp.asGuestMode(asGuest: Boolean, guestBuvid3: String?) {
+        if (!asGuest) return
+        this.asGuest = true
+        this.isWebApi = true
+        if (!guestBuvid3.isNullOrBlank()) {
+            this.guestCookie = "buvid3=$guestBuvid3"
+        }
+    }
+
+    /** 视频评论 */
     fun mainList(
         aid: String,
         sort: Int,

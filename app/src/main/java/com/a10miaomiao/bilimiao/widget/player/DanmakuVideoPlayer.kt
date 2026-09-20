@@ -39,6 +39,7 @@ import android.widget.RelativeLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.annotation.RequiresApi
+import com.a10miaomiao.bilimiao.comm.utils.PreviewDiag
 import com.a10miaomiao.bilimiao.comm.utils.SponsorDiag
 import com.a10miaomiao.bilimiao.R
 import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
@@ -116,7 +117,10 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     private val mHoldUpBtn: View by lazy { findViewById(R.id.hold_up) }
 
     // 顶栏更多按钮
-    private val mMoreBtn: View by lazy { findViewById(R.id.more) }
+    // 播放设置（顶栏齿轮按钮；原来的 ⋮ 菜单按钮已去掉）
+    private val mVideoSettingSwitch: ViewGroup by lazy { findViewById(R.id.video_setting_switch) }
+    // 画面比例（底栏）
+    private val mScreenScaleSwitch: ViewGroup by lazy { findViewById(R.id.screen_scale_switch) }
 
     // 投屏按钮
     private val mCastBtnLayout: ViewGroup by lazy { findViewById(R.id.cast_btn_layout) }
@@ -182,6 +186,12 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     // 截图
     private val mScreenshotSwitch: ViewGroup by lazy { findViewById(R.id.screenshot_switch) }
 
+    // 弹幕设置（底栏，挨着弹幕开关）
+    private val mDanmakuSettingSwitch: ViewGroup by lazy { findViewById(R.id.danmaku_setting_switch) }
+
+    // 小窗播放（顶栏图标按钮）
+    private val mPipSwitch: ViewGroup by lazy { findViewById(R.id.pip_switch) }
+
     // 弹幕开关
     private val mDanmakuSwitch: ViewGroup by lazy { findViewById(R.id.danmaku_switch) }
 
@@ -197,8 +207,11 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     // 清晰度
     private val mQuality: ViewGroup by lazy { findViewById(R.id.quality) }
 
-    // 清晰度文字
+    // 清晰度标签（下面那行小字「清晰度」）
     private val mQualityTV: TextView by lazy { findViewById(R.id.quality_text) }
+
+    // 清晰度**当前值**（上面那行，直接显示 1080P 这种文字，不再是图标）
+    private val mQualityValueTV: TextView by lazy { findViewById(R.id.quality_value) }
 
     // 倍速
     private val mPlaySpeed: ViewGroup by lazy { findViewById(R.id.play_speed) }
@@ -644,8 +657,6 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     val qualityView: View get() = mQuality
     val speedView: View get() = mPlaySpeed
     val speedValueTextView: View get() = mPlaySpeedValue
-    val moreBtn: View get() = mMoreBtn
-
     // 是否处于锁定状态
     var isLock: Boolean = false
         set(value) {
@@ -835,6 +846,10 @@ initDanmakuTouchListener()
 //             pm.show()
 //         }
         // 听视频：只黑掉画面，音频继续（播放器/surface 都不动）
+        mDanmakuSettingSwitch.setOnClickListener { onOpenDanmakuSetting?.invoke() }
+        mVideoSettingSwitch.setOnClickListener { onOpenVideoSetting?.invoke() }
+        mScreenScaleSwitch.setOnClickListener { v -> onOpenScreenScale?.invoke(v) }
+        mPipSwitch.setOnClickListener { onEnterPip?.invoke() }
         mAudioOnlySwitch.setOnClickListener {
             setAudioOnly(!isAudioOnly)
         }
@@ -1013,6 +1028,9 @@ initDanmakuTouchListener()
     /** 当前是否正在拖动进度（只有拖动中才允许预览图出现） */
     private var seekPreviewActive = false
 
+    /** 诊断用：上一次记录的"为什么没预览图"原因（只在变化时写一行，避免拖动刷屏） */
+    private var previewDiagReason: String? = null
+
     /**
      * 显示某个时间点的预览图（由进度 HUD 的显示回调驱动）。
      *
@@ -1020,12 +1038,24 @@ initDanmakuTouchListener()
      */
     private fun updateSeekPreview(timeMs: Long) {
         val data = videoShotData
-        if (!showSeekPreview || data == null) return
+        if (!showSeekPreview || data == null) {
+            previewDiag("跳过: show=$showSeekPreview data=${data != null}")
+            return
+        }
         val total = data.totalPerImage
-        if (total <= 0 || data.index.isEmpty() || data.image.isEmpty()) return
+        if (total <= 0 || data.image.isEmpty()) {
+            previewDiag("跳过: totalPerImage=$total image=${data.image.size}")
+            return
+        }
+        val index = effectivePreviewIndex(data)
+        if (index.isEmpty()) {
+            previewDiag("跳过: index 为空且兜底也生不出来（duration=$duration image=${data.image.size}）")
+            return
+        }
+        previewDiag(null)   // 正常了，清掉"上次的原因"
         seekPreviewActive = true
 
-        val cell = previewCellIndex(data, (timeMs / 1000L).toInt())
+        val cell = previewCellIndex(index, (timeMs / 1000L).toInt())
         val page = (cell / total).coerceIn(0, data.image.size - 1)
         val align = cell % total
         val url = data.image[page]
@@ -1048,8 +1078,29 @@ initDanmakuTouchListener()
      * B 站 index 数组存的是每格的**结束时刻**，且开头有占位项，减 2 才对得上画面。
      * 个数用二分求（拖动一次可能跳几分钟，逐条数会白跑几百上千次）。
      */
-    private fun previewCellIndex(data: PlayerAPI.VideoShotData, seconds: Int): Int {
-        val index = data.index
+    /**
+     * 每格的结束时刻表。
+     *
+     * B 站偶尔返回"空壳"数据（image 有、index 是空数组，实测约 1/6 概率）——
+     * 以前这种情况整段预览就没了。这里做兜底：按**总时长均分**合成一份 index，
+     * 位置精度差一点（B 站实际是按时长/帧均匀切的，误差很小），但至少拖动有图。
+     */
+    /** 诊断节流：同样的原因只写一次 */
+    private fun previewDiag(reason: String?) {
+        if (reason == previewDiagReason) return
+        previewDiagReason = reason
+        PreviewDiag.log("updateSeekPreview " + (reason ?: "正常（数据/索引/图片都齐，准备画）"))
+    }
+
+    private fun effectivePreviewIndex(data: PlayerAPI.VideoShotData): List<Int> {
+        if (data.index.isNotEmpty()) return data.index
+        val cells = data.image.size * data.totalPerImage
+        val durSec = (duration / 1000L).toInt()
+        if (cells <= 0 || durSec <= 0) return emptyList()
+        return List(cells) { i -> ((i + 1).toLong() * durSec / cells).toInt() }
+    }
+
+    private fun previewCellIndex(index: List<Int>, seconds: Int): Int {
         // 二分找"最后一个 <= seconds 的位置"，个数 = 位置 + 1（index 是升序的）
         var lo = 0
         var hi = index.size - 1
@@ -1147,6 +1198,7 @@ initDanmakuTouchListener()
                 try {
                     val res = MiaoHttp.request { this.url = url }.awaitCall()
                     val bytes = res.body?.bytes() ?: return@withContext null
+                    PreviewDiag.log("雪碧图下载: http=${res.code} bytes=${bytes.size} url=$url")
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
                     var sample = 1
@@ -1160,6 +1212,7 @@ initDanmakuTouchListener()
                         }
                     )
                 } catch (e: Exception) {
+                    PreviewDiag.log("雪碧图下载异常: ${e.javaClass.simpleName}: ${e.message} url=$url")
                     null
                 }
             } ?: return@launch
@@ -1167,6 +1220,7 @@ initDanmakuTouchListener()
                 // 期间换了视频/清晰度：这张图已经没用了
                 return@launch
             }
+            PreviewDiag.log("雪碧图解出来: ${bitmap.width}x${bitmap.height} url=$url")
             previewSheets[url] = bitmap
             // 超过 3 张丢最早的（不手动 recycle：可能正被 onDraw 用着）
             while (previewSheets.size > 3) {
@@ -1178,7 +1232,9 @@ initDanmakuTouchListener()
                 val data = videoShotData ?: return@launch
                 val total = data.totalPerImage
                 if (total <= 0) return@launch
-                val cell = previewCellIndex(data, (mSeekTimePosition / 1000L).toInt())
+                val index = effectivePreviewIndex(data)
+                if (index.isEmpty()) return@launch
+                val cell = previewCellIndex(index, (mSeekTimePosition / 1000L).toInt())
                 val page = (cell / total).coerceIn(0, data.image.size - 1)
                 if (data.image[page] == url) showPreviewCell(bitmap, data, cell % total)
             }
@@ -1641,6 +1697,18 @@ initDanmakuTouchListener()
 
     /** 打开"片段列表/投票"界面（UI 在 SponsorBlockUi，免得播放器文件继续膨胀） */
     var onShowSponsorSegments: (() -> Unit)? = null
+
+    /** 底栏「弹幕设置」按钮（和「更多」菜单里那项同一个入口） */
+    var onOpenDanmakuSetting: (() -> Unit)? = null
+
+    /** 顶栏「小窗播放」按钮（和「更多」菜单里那项同一个入口） */
+    var onEnterPip: (() -> Unit)? = null
+
+    /** 顶栏「播放设置」按钮（原「更多」菜单里那项） */
+    var onOpenVideoSetting: (() -> Unit)? = null
+
+    /** 底栏「画面比例」按钮（原「更多」菜单里那项）；参数是锚点 View，弹窗贴着它弹 */
+    var onOpenScreenScale: ((View) -> Unit)? = null
 
     /** 打开"提交片段"界面 */
     var onSubmitSponsorSegment: (() -> Unit)? = null
@@ -2994,6 +3062,16 @@ initDanmakuTouchListener()
     override fun setSpeed(speed: Float, soundTouch: Boolean) {
         super.setSpeed(speed, soundTouch)
         mPlaySpeedValue.text = "x$speed"
+    }
+
+    /**
+     * 底栏「清晰度」显示的当前值（如 1080P / 720P / 4K / 自动）。
+     *
+     * 用户要求：这一格不要图标，直接显示当前选的是什么 —— 画质用任何图标都得靠猜，
+     * 而「1080P」是一眼就懂的。取流成功后由 PlayerDelegate2 调进来。
+     */
+    fun setQualityValue(text: String) {
+        mQualityValueTV.text = text
     }
 
 

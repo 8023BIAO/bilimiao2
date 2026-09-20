@@ -65,6 +65,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
+import cn.a10miaomiao.bilimiao.compose.pages.web.WebPage
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.community.ReplyItemBox
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.MessageDialogState
@@ -74,6 +75,7 @@ import cn.a10miaomiao.bilimiao.compose.components.miao.MiaoTitleBar
 import cn.a10miaomiao.bilimiao.compose.pages.community.ReplyEditParams
 import cn.a10miaomiao.bilimiao.compose.pages.community.components.ReplyEditDialog
 import cn.a10miaomiao.bilimiao.compose.pages.community.components.ReplyEditDialogState
+import cn.a10miaomiao.bilimiao.compose.pages.community.components.CommentAntifraudLauncher
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.video.VideoCommentReplyInfo
@@ -112,6 +114,10 @@ private class ReplyDetailContentViewModel(
     val editDialogState = ReplyEditDialogState(
         scope = viewModelScope,
         onAddReply = ::addNewReply,
+        // 评论反诈：判定"仅自己可见"后点「去申诉」→ 内置浏览器打开官方申诉页（带着 App 的登录态）
+        onOpenAppeal = { _, _, _ ->
+            pageNavigation.navigate(WebPage(CommentAntifraudLauncher.APPEAL_URL))
+        },
     )
 
     private var _sortOrder = MutableStateFlow(2)

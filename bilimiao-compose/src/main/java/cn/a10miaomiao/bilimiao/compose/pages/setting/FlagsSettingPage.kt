@@ -35,6 +35,7 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.preference.glidePreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
+import cn.a10miaomiao.bilimiao.compose.components.preference.sliderIntPreference
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -441,8 +442,7 @@ private fun FlagsSettingPageContent(
                     Text("导出设置")
                 },
                 summary = {
-                    // 说清楚"全都导"，以及里面含身份：导出文件别随手发人
-                    Text("导出全部设置 + 屏蔽库 + 空降助手匿名身份（含私人ID，别外发）")
+                    Text("导出全部设置（含私人 ID，别外发）")
                 },
                 onClick = {
                     exportLauncher.launch("bilimiao_settings_${System.currentTimeMillis()}.json")
@@ -506,6 +506,82 @@ private fun FlagsSettingPageContent(
                 summary = { Text("在视频详情页「简介」上方显示，调用B站官方接口生成视频摘要") },
             )
 
+            // ===== 评论反诈（发评后自动检测是否被限流）=====
+            // 判定规则照搬开源项目 biliSendCommAntifraud：
+            // ShadowBan 的评论"带 Cookie 能找到、游客找不到"。
+            preferenceCategory(
+                key = "antifraud",
+                title = { Text("评论反诈") }
+            )
+            switchPreference(
+                key = SettingPreferences.AntifraudEnabled.name,
+                defaultValue = false,
+                title = { Text("发评论后自动检测是否被限流") },
+                summary = {
+                    Text(
+                        if (it) "已开启：查出被限流会弹窗，可删除或去申诉"
+                        else "判断评论是否只有你自己看得见"
+                    )
+                },
+            )
+            // 复查开关 + 监控时长滑条：只查一次会漏掉"先正常、过一会儿才被限流"的情况
+            switchPreference(
+                key = SettingPreferences.AntifraudRecheckEnabled.name,
+                defaultValue = true,
+                title = { Text("自动复查（推荐开）") },
+                summary = {
+                    Text(
+                        if (it) "已开启：正常也会继续盯，直到状态变化或盯满时长"
+                        else "只查一次（评论可能先正常、过一会儿才被限流）"
+                    )
+                },
+            )
+            sliderIntPreference(
+                key = SettingPreferences.AntifraudRecheckMinutes.name,
+                defaultValue = 5,
+                valueRange = 1..30,
+                // steps = 两端点之间的档位数 = 28（每分钟一档）
+                valueSteps = 28,
+                title = { Text("复查监控时长") },
+                valueText = { v -> Text("$v 分钟") },
+                summary = { v -> Text("首查 5 秒后开始，之后每 30 秒查一次，共盯 $v 分钟") },
+            )
+            preference(
+                key = "antifraud_about",
+                title = { Text("参考项目：biliSendCommAntifraud") },
+                summary = { Text("哔哩发评反诈（点开 GitHub）") },
+                onClick = {
+                    // 防连点：连点 N 次不该拉起 N 个浏览器
+                    if (ClickGuard.allow("flags:antifraud_about")) {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(
+                                        "https://github.com/freedom-introvert/biliSendCommAntifraud"
+                                    )
+                                )
+                            )
+                        }
+                    }
+                },
+            )
+            preference(
+                key = "antifraud_appeal",
+                title = { Text("B站官方申诉页") },
+                summary = { Text("评论被限流时来这里申诉") },
+                onClick = {
+                    if (ClickGuard.allow("flags:antifraud_appeal")) {
+                        context.startActivity(
+                            android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://www.bilibili.com/h5/comment/appeal")
+                            )
+                        )
+                    }
+                },
+            )
+
             // ===== 空降助手（原在「播放设置」里，用户反馈藏得太深 → 移到这里）=====
             preferenceCategory(
                 key = "sponsor_block",
@@ -514,7 +590,7 @@ private fun FlagsSettingPageContent(
             preference(
                 key = "sponsor_block_entry",
                 title = { Text("空降助手") },
-                summary = { Text("自动跳过赞助/恰饭/片头片尾等片段；点这里进入完整设置") },
+                summary = { Text("自动跳过赞助/恰饭/片头片尾片段") },
                 onClick = viewModel::toSponsorBlockSettingPage,
             )
 
@@ -532,13 +608,13 @@ private fun FlagsSettingPageContent(
                 enabled = { !mp4Selected },
                 title = { Text("启用分段并发下载") },
                 summary = {
-                    if (mp4Selected) {
-                        Text("已停用：当前「视频格式选择」是 MP4。MP4 是整段顺序下载、没有分段可切，分段并发下载对它无效；想用请先把视频格式改成 DASH")
-                    } else if (it) {
-                        Text("已开启：把一个分段的字节范围切成多块、用多条连接并发下载，并在多个 CDN 节点之间抢跑（谁先回用谁；只对 DASH 分段流有效）。海外建议开、国内不建议，自行测试；播放异常就关掉")
-                    } else {
-                        Text("建议海外用户开启，国内不建议开启，自行测试（多连接并发下载，默认关闭；仅对 DASH 分段流有效）")
-                    }
+                    Text(
+                        when {
+                            mp4Selected -> "当前是 MP4 源，改了没用（先改成 DASH）"
+                            it -> "已开启：分段切成多块并发下载（仅 DASH 有效）"
+                            else -> "分段切成多块并发下载，海外建议开"
+                        }
+                    )
                 },
             )
             preference(
@@ -547,16 +623,16 @@ private fun FlagsSettingPageContent(
                 enabled = !mp4Selected,
                 summary = {
                     Text(
-                        if (mp4Selected) "当前是 MP4 源，改了也没用；先把「视频格式选择」改成 DASH"
-                        else "并发连接数（默认 4；1 ~ 本机 $maxThreads 条，或不限）"
+                        if (mp4Selected) "当前是 MP4 源，改了没用"
+                        else "并发连接数（默认 4，最多 $maxThreads 条）"
                     )
                 },
                 onClick = viewModel::toThreadRipperSettingPage,
             )
             preference(
                 key = "thread_ripper_about",
-                title = { Text("关于上游项目（Bilibili-thread-ripper）") },
-                summary = { Text("本功能的思路来自上游开源项目：MrTangLuyao/Bilibili-thread-ripper") },
+                title = { Text("参考项目：Bilibili-thread-ripper") },
+                summary = { Text("本功能思路来源（点开 GitHub）") },
                 onClick = {
                     // 防连点：连点 N 次不该拉起 N 个浏览器
                     if (ClickGuard.allow("flags:thread_ripper_about")) {

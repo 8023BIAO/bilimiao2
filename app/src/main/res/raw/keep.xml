@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  资源收缩的"白名单"。
+
+  为什么要这个文件：App 的菜单/底栏图标是**按名字在运行时取**的 ——
+  `MenuItemView` 用 `resources.getIdentifier(prop.iconFileName, "drawable", packageName)`
+  去拿图标，R8/资源收缩**看不到**这种引用，于是会把它们当"没人用的资源"删掉
+  （AGP 9 的 optimized resource shrinking 更狠，直接就是这次"底部图标全不见"的原因）。
+
+  这里列出代码里所有通过 iconFileName 引用的图标（新加菜单图标时记得同步加进来）。
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_add_white_24dp,@drawable/ic_baseline_check_24,@drawable/ic_baseline_clear_all_24,@drawable/ic_baseline_content_copy_24,@drawable/ic_baseline_delete_24,@drawable/ic_baseline_delete_outline_24,@drawable/ic_baseline_done_24,@drawable/ic_baseline_edit_24,@drawable/ic_baseline_edit_note_24,@drawable/ic_baseline_favorite_24,@drawable/ic_baseline_filter_list_alt_24,@drawable/ic_baseline_filter_list_grey_24,@drawable/ic_baseline_home_24,@drawable/ic_baseline_icecream_24,@drawable/ic_baseline_lightbulb_24,@drawable/ic_baseline_open_in_browser_24,@drawable/ic_baseline_save_24,@drawable/ic_baseline_search_24,@drawable/ic_baseline_send_24,@drawable/ic_download_grey_24dp,@drawable/ic_link_black_24dp,@drawable/ic_more_vert_grey_24dp,@drawable/ic_outline_favorite_border_24,@drawable/ic_search_gray,@drawable/bili_anim_tv_chan_1,@drawable/bili_anim_tv_chan_3,@drawable/bili_anim_tv_chan_5,@drawable/bili_anim_tv_chan_7,@drawable/bili_anim_tv_chan_9" />

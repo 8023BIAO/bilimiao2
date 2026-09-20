@@ -285,6 +285,44 @@
             </LinearLayout>
 
 
+            <!--
+              弹幕设置：从「更多」菜单搬到这里（用户要求：挨着弹幕开关，少点两步）。
+              图标用底栏那套官方规格（60x40 画布 / strokeWidth 3），和邻居一致。
+            -->
+            <LinearLayout
+                android:id="@+id/danmaku_setting_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:id="@+id/danmaku_setting_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/ic_player_danmaku_setting" />
+
+                <TextView
+                    android:id="@+id/danmaku_setting_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="弹幕设置"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
+            </LinearLayout>
+
+            <!--
+              清晰度：★ 不放图标了，直接显示**当前清晰度的文字**（用户要求："不要图标了，
+              直接显示目前选择的是什么文字"）。
+              理由：画质这东西任何图标都要靠猜（清/HD/钻石/竖条/马赛克都试过），
+              而"1080P"三个字是一眼就懂、不用翻译的。
+              做法对齐顶栏的倍速（play_speed_value 直接显示 x1.0）：
+              上面一行 = 当前清晰度（代码里 setQualityValue 写入），下面一行 = 「清晰度」标签。
+              高度仍占 20dp + 3dp 间距，和左右邻居的图标完全对齐。
+            -->
             <LinearLayout
                 android:id="@+id/quality"
                 android:layout_width="wrap_content"
@@ -294,11 +332,17 @@
                 android:gravity="center"
                 android:orientation="vertical">
 
-                <ImageView
+                <TextView
+                    android:id="@+id/quality_value"
                     android:layout_width="wrap_content"
                     android:layout_height="20dp"
                     android:layout_marginBottom="3dp"
-                    android:src="@drawable/ic_player_media_quality_medium" />
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:text="—"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp" />
 
                 <TextView
                     android:id="@+id/quality_text"
@@ -307,6 +351,35 @@
                     android:text="清晰度"
                     android:textColor="@android:color/white"
                     android:textSize="@dimen/default_tiny_text_size" />
+            </LinearLayout>
+
+            <!--
+              画面比例（原「更多」菜单 → 画面比例）：不常用，但仍然放进底栏（只有全屏才出现，
+              竖屏不会占地方）。规格同底栏其它图标。
+            -->
+            <LinearLayout
+                android:id="@+id/screen_scale_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:id="@+id/screen_scale_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/ic_player_screen_scale" />
+
+                <TextView
+                    android:id="@+id/screen_scale_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="画面比例"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
             </LinearLayout>
 
             <LinearLayout
@@ -505,6 +578,29 @@
 
         </LinearLayout>
 
+        <!--
+          小窗播放：原来只藏在「更多」菜单里（要点两下），这里给一个直接按钮。
+          样式跟邻居一致：24dp 实心图标 + 10dp 内边距（和听视频、空降盾牌同款）。
+          位置：紧跟在听视频之后 → 实际顺序 [听视频][盾·提交][ADS][小窗][倍速][⋮]。
+        -->
+        <LinearLayout
+            android:id="@+id/pip_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/pip_switch_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:src="@drawable/ic_player_pip"
+                android:contentDescription="小窗播放" />
+
+        </LinearLayout>
+
         <LinearLayout
             android:id="@+id/play_speed"
             android:layout_width="wrap_content"
@@ -533,13 +629,28 @@
 
         </LinearLayout>
 
-        <ImageView
-            android:id="@+id/more"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:paddingRight="10dp"
-            android:src="@drawable/ic_more_vert_white_24dp"
-            android:contentDescription="播放器菜单"/>
+        <!--
+          播放设置：原来藏在 ⋮ 菜单里，这里直接给个按钮（更常用，所以放顶栏）。
+          样式与邻居一致（24dp 图标 + 10dp 内边距）。
+          ★ 原来的 ⋮（更多）按钮已按用户要求去掉：菜单里的项都搬到按钮上了。
+        -->
+        <LinearLayout
+            android:id="@+id/video_setting_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/video_setting_switch_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:src="@drawable/ic_player_video_setting"
+                android:contentDescription="播放设置" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 清晰度：三条递增竖条＝画质档位。
+     没有文字（原来的「清」要读一眼才知道是什么，费脑子）；三条递增的块一眼就是"档位高低"。
+     规格：24 网格 / 描边 2 / 圆头（胶囊形竖条）/ 底对齐，与顶栏那套（听视频·空降盾牌·小窗）同一规格。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:pathData="M5.4,19.6 L5.4,15.6" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M12,19.6 L12,11.4" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M18.6,19.6 L18.6,7.2" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

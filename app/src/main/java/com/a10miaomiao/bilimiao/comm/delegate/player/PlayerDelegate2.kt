@@ -381,6 +381,11 @@ class PlayerDelegate2(
         vp.subtitleSourceSelector = controller::getDefaultSubtitle
         // 空降助手：把"已跳过"上报给服务端（统计省下多少时间），失败静默
         vp.sponsorReporter = { uuid -> reportSponsorViewed(uuid) }
+        // 底栏「弹幕设置」按钮 / 顶栏「小窗播放」按钮 → 都复用 PlayerController 里那份逻辑
+        vp.onOpenDanmakuSetting = { controller.openDanmakuSetting() }
+        vp.onOpenVideoSetting = { controller.openVideoSetting() }
+        vp.onOpenScreenScale = { anchor -> controller.openScreenScale(anchor) }
+        vp.onEnterPip = { controller.enterPip() }
         // 底栏两个空降按钮 → 片段列表 / 提交片段
         vp.onShowSponsorSegments = { SponsorBlockUi.showSegments(activity, vp) }
         vp.onSubmitSponsorSegment = {
@@ -700,6 +705,8 @@ class PlayerDelegate2(
         playerCoroutineScope.onDestroy()
         playerSource = null
         playerSourceInfo = null
+        // 底栏清晰度回到占位符（下次取流成功会立刻填上）
+        vp?.setQualityValue("—")
         // 用户主动关闭播放器 → 清掉进程级缓存，避免 Activity 重建后"复活"已关闭的播放源
         keptSource = null
         keptSourceInfo = null
@@ -943,7 +950,32 @@ class PlayerDelegate2(
         }
     }
 
-    private val loadMutex = Mutex()
+    /**
+     * 把 B站的清晰度长名缩成底栏那一格放得下的短标签（对齐全站账号实际能拿到的档位）。
+     *
+     * 规则（用户定的）：能认出是哪一档就行，**比基础档更高的加一个「+」**：
+     *   "1080P 高清"    → "1080P"
+     *   "1080P 60帧"    → "1080P+"   ← 官方那档高帧率，不写 60 更干净
+     *   "1080P 高码率"  → "1080P+"
+     *   "720P 高清"     → "720P"      "480P 清晰" → "480P"      "360P 流畅" → "360P"
+     *   "4K 超清"       → "4K"        "自动" → "自动"
+     * 全名在点开的清晰度菜单里，底栏只要能一眼认出档位。
+     */
+    private fun qualityLabelOf(description: String): String {
+        val d = description.trim()
+        if (d.isEmpty()) return "—"
+        // 先把空格去掉，"1080P 60帧" → "1080P60帧"，再抠出分辨率记号
+        val compact = d.replace(" ", "")
+        val m = Regex("([0-9]{3,4}[PpKk]|[0-9][Kk])").find(compact)
+        if (m == null) return d.take(6)   // "自动""未知清晰度" 之类原样显示
+        val base = m.value.uppercase()
+        // 同一分辨率下的"加强版"：高帧率(60帧/120帧)、高码率、HDR —— 统一标一个 +
+        val plus = compact.contains("60") || compact.contains("120") ||
+            compact.contains("高码率") || compact.contains("高帧率") || compact.contains("HDR")
+        return if (plus) "$base+" else base
+    }
+
+private val loadMutex = Mutex()
 
 // TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
 //     /**
@@ -1075,6 +1107,10 @@ class PlayerDelegate2(
             quality = sourceInfo.quality
             playerSourceInfo = sourceInfo
             keptSourceInfo = sourceInfo
+            // ★ 底栏「清晰度」不放图标了，直接显示当前值（1080P / 720P / 4K / 自动）——
+            //   画质这类东西任何图标都得靠猜，文字才是"一眼就懂"。这里涵盖首次取流、
+            //   换清晰度重载、网络重连三条路径（它们都走这一段）。
+            player?.setQualityValue(qualityLabelOf(sourceInfo.description))
 // TODO AI 原声翻译：暂时关闭（切到 AI 音轨后播放器进 ERROR/黑屏）。恢复时把这段注释放开。
 //             // AI 原声翻译：把语言列表和当前语言同步给播放器的字幕菜单
 //             if (sourceInfo.languages.isNotEmpty()) {
@@ -1264,11 +1300,20 @@ class PlayerDelegate2(
         player?.videoShotData = null
         if (player?.showSeekPreview == false) return
         playerCoroutineScope.launch(Dispatchers.IO) {
+            com.a10miaomiao.bilimiao.comm.utils.PreviewDiag.log("loadVideoShot 开始: ${source.javaClass.simpleName}")
             val data = try {
                 source.getVideoShot()
             } catch (e: Exception) {
+                com.a10miaomiao.bilimiao.comm.utils.PreviewDiag.log("loadVideoShot 异常: ${e.javaClass.simpleName}: ${e.message}")
                 null
-            } ?: return@launch
+            } ?: run {
+                com.a10miaomiao.bilimiao.comm.utils.PreviewDiag.log("loadVideoShot 拿不到数据（null）→ 这个视频没有预览图")
+                return@launch
+            }
+            com.a10miaomiao.bilimiao.comm.utils.PreviewDiag.log(
+                "loadVideoShot 拿到: image=${data.image.size} index=${data.index.size} " +
+                    "img=${data.img_x_len}x${data.img_y_len} 首图=${data.image.firstOrNull()}"
+            )
             withContext(Dispatchers.Main) {
                 if (token != videoShotToken) return@withContext
                 player?.videoShotData = data

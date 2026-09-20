@@ -955,54 +955,32 @@ class VideoDetailViewModel(
         }
     }
 
-    private val aiLogFile by lazy {
-        java.io.File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "bilimiao/ai_VDM.log"
-        ).also { it.parentFile?.mkdirs() }
-    }
-
-    private fun aiLog(msg: String) {
-        try {
-            val ts = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault())
-                .format(java.util.Date())
-            aiLogFile.appendText("[$ts] $msg\n")
-        } catch (_: Exception) {}
-    }
-
     fun requestAiConclusion(silent: Boolean = false) = viewModelScope.launch(Dispatchers.IO) {
-        // aiLog("========== AI 总结 请求开始 ==========")
         if (!userStore.isLogin()) {
-            // aiLog("❌ 未登录，终止")
             if (!silent) withContext(Dispatchers.Main) { toast("请先登录后使用 AI 总结") }
             return@launch
         }
-        // aiLog("✓ 已登录")
         val detail = detailData.value
-        if (detail == null) { aiLog("❌ detailData 为空"); return@launch }
+        if (detail == null) { miaoLogger().e("AI总结：detailData 为空"); return@launch }
         val arc = detail.getArcData()
-        if (arc == null) { aiLog("❌ arcData 为空"); return@launch }
+        if (arc == null) { miaoLogger().e("AI总结：arcData 为空"); return@launch }
         val bvid = detail.getBvid()
-        if (bvid == null) { aiLog("❌ bvid 为空"); return@launch }
+        if (bvid == null) { miaoLogger().e("AI总结：bvid 为空"); return@launch }
         val pages = detail.getPages()
         val pageCid = detail.history?.let { h -> pages.find { it.cid == h.cid } }?.cid
             ?: pages.firstOrNull()?.cid
-        if (pageCid == null) { aiLog("❌ cid 为空（无分P数据）"); return@launch }
+        if (pageCid == null) { miaoLogger().e("AI总结：cid 为空（无分P数据）"); return@launch }
         val cid = pageCid.toString()
         val upMid = arc.author?.mid?.toString()
-        if (upMid == null) { aiLog("❌ upMid 为空"); return@launch }
+        if (upMid == null) { miaoLogger().e("AI总结：upMid 为空"); return@launch }
 
-        // aiLog("参数: bvid=$bvid, cid=$cid, upMid=$upMid")
 
         // 步骤 1：同步获取 WBI mix_key
-        // aiLog("→ 获取 WBI mix_key...")
-        val mixKey = fetchMixKeySync(::aiLog)
+        val mixKey = fetchMixKeySync { miaoLogger().d("AI总结：$it") }
         if (mixKey.isEmpty()) {
-            // aiLog("❌ 获取 mix_key 失败")
             if (!silent) withContext(Dispatchers.Main) { toast("WBI 密钥获取失败，请检查网络") }
             return@launch
         }
-        // aiLog("✓ mix_key: ${mixKey.take(6)}... (len=${mixKey.length})")
 
         // 步骤 2：构建并签名 URL
         val rawUrl = "https://api.bilibili.com/x/web-interface/view/conclusion/get?" +
@@ -1010,23 +988,18 @@ class VideoDetailViewModel(
             "&cid=${URLEncoder.encode(cid, "UTF-8")}" +
             "&up_mid=${URLEncoder.encode(upMid, "UTF-8")}"
         val signedUrl = signUrl(rawUrl, mixKey)
-        // aiLog("签名后 URL: $signedUrl")
 
         // 步骤 3：发起 AI 总结请求
         try {
-            // aiLog("→ 发起 API 请求...")
             val res = MiaoHttp.request {
                 isWebApi = true
                 url = signedUrl
             }.awaitCall()
             val resBody = res.body?.string() ?: ""
-            // aiLog("← 响应: code=${res.code}")
-            // aiLog("响应体: ${resBody.take(500)}")
             // 直接用 JSONObject 解析（ResponseResult 的 result 字段对不上 B站 web API 的 "data" 键）
             val root = org.json.JSONObject(resBody)
             val code = root.optInt("code", -1)
             if (code != 0) {
-                // aiLog("❌ API 返回失败: code=$code, message=${root.optString("message")}")
                 if (!silent) withContext(Dispatchers.Main) {
                     toast(root.optString("message", "AI 总结获取失败"))
                 }
@@ -1034,13 +1007,11 @@ class VideoDetailViewModel(
             }
             val data = root.optJSONObject("data")
             if (data == null) {
-                // aiLog("❌ data 为空")
                 if (!silent) withContext(Dispatchers.Main) { toast("AI 总结数据为空") }
                 return@launch
             }
             val mr = data.optJSONObject("model_result")
             if (mr == null) {
-                // aiLog("❌ model_result 为空")
                 if (!silent) withContext(Dispatchers.Main) { toast("AI 总结内容为空") }
                 return@launch
             }
@@ -1074,19 +1045,16 @@ class VideoDetailViewModel(
                 summary = summary,
                 outline = outlineList.ifEmpty { null }
             )
-            // aiLog("✓ AI 总结: summary长度=${summary.length}, outline数=${outlineList.size}")
             withContext(Dispatchers.Main) {
                 _aiConclusionData.value = aiResult
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            // aiLog("❌ 异常: ${e.javaClass.simpleName}: ${e.message}")
             e.printStackTrace()
             withContext(Dispatchers.Main) {
                 if (!silent) toast("AI 总结请求失败: ${e.message}")
             }
         } finally {
-            // aiLog("========== AI 总结 请求结束 ==========")
         }
     }
 

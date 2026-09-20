@@ -145,7 +145,7 @@ class PlayerController(
 
         qualityView.setOnClickListener(that::showQualityPopupMenu)
         speedView.setOnClickListener(that::showSpeedPopupMenu)
-        moreBtn.setOnClickListener(that::showMoreMenu)
+        // ⋮ 按钮已去掉：播放设置/画面比例都搬到了播放器按钮上（空降两项在顶栏有图标）
         setDanmakuSwitchOnClickListener(that::danmakuSwitchClick)
         setExpandButtonOnClickListener(that::showPagesOrEpisodes)
         setSendDanmakuButtonOnClickListener(that::showSendDanmakuPage)
@@ -776,6 +776,72 @@ class PlayerController(
         scaffoldApp.holdUpPlayer()
     }
 
+    /** 打开播放设置（顶栏齿轮按钮与「更多」菜单共用） */
+    fun openVideoSetting() {
+        activity.openBottomSheet(VideoSettingPage())
+    }
+
+    /** 弹出「画面比例」选择（底栏按钮与「更多」菜单共用；anchor 决定弹窗位置） */
+    fun openScreenScale(anchor: View) {
+        val popup = ScalePopupMenu(
+            activity = activity,
+            anchor = anchor,
+            value = GSYVideoType.getShowType(),
+            themeColor = player?.themeColor ?: 0,
+        )
+        popup.setOnChangedScaleListener { type ->
+            GSYVideoType.setShowType(type)
+            player?.updateTextureViewShowType()
+            scope.launch {
+                SettingPreferences.edit(activity) {
+                    it[PlayerScreenType] = type
+                }
+            }
+        }
+        popup.show()
+    }
+
+    /**
+     * 进小窗（画中画）。
+     *
+     * 顶栏那个「小窗播放」图标按钮和「更多」菜单里的小窗播放都走这里，逻辑只留一份。
+     */
+    fun enterPip() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val height = playerSourceInfo?.height
+            val width = playerSourceInfo?.width
+            // 设置宽高比例值
+            val aspectRatio = if (height == null || width == null || height <= 0 || width <= 0) {
+                // 宽高缺失或接口返回 0 时兜底：Rational 分母为 0 会抛 IllegalArgumentException
+                Rational(16, 9)
+            } else {
+                Rational(width, height)
+            }
+            try {
+                delegate.picInPicHelper?.enterPictureInPictureMode(aspectRatio)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                toast("此设备不支持小窗播放")
+            }
+        } else {
+            toast("小窗播放功能需要安卓8.0及以上版本")
+        }
+    }
+
+    /**
+     * 打开弹幕显示设置。
+     *
+     * 底栏那个「弹幕设置」按钮和（原来的）「更多」菜单都走这里；全屏/小窗分别对应两套弹幕设置。
+     */
+    fun openDanmakuSetting() {
+        val tabName = if (scaffoldApp.fullScreenPlayer) {
+            SettingPreferences.DanmakuFullMode.name
+        } else {
+            SettingPreferences.DanmakuSmallMode.name
+        }
+        activity.openBottomSheet(DanmakuDisplaySettingPage(tabName))
+    }
+
     private fun moreMenuItemClick(item: MenuItem): Boolean {
         when (item.itemId) {
             R.id.sponsor_block_detail -> {
@@ -798,58 +864,14 @@ class PlayerController(
                 }
                 return true
             }
-            R.id.mini_window -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val height = playerSourceInfo?.height
-                    val width = playerSourceInfo?.width
-                    // 设置宽高比例值
-                    var aspectRatio = if (height == null || width == null || height <= 0 || width <= 0) {
-                        // 宽高缺失或接口返回 0 时兜底：Rational 分母为 0 会抛 IllegalArgumentException
-                        Rational(16, 9)
-                    } else {
-                        Rational(width, height)
-                    }
-                    try {
-                        delegate.picInPicHelper?.enterPictureInPictureMode(aspectRatio)
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        toast("此设备不支持小窗播放")
-                    }
-                } else {
-                    toast("小窗播放功能需要安卓8.0及以上版本")
-                }
-            }
-
             R.id.video_setting -> {
-                activity.openBottomSheet(VideoSettingPage())
+                openVideoSetting()
             }
 
-            R.id.danmuku_setting -> {
-                val tabName = if (scaffoldApp.fullScreenPlayer){
-                    SettingPreferences.DanmakuFullMode.name
-                } else {
-                    SettingPreferences.DanmakuSmallMode.name
-                }
-                activity.openBottomSheet(DanmakuDisplaySettingPage(tabName))
-            }
+
             R.id.player_scale -> {
                 val anchor = moreMenuAnchor ?: return@moreMenuItemClick true
-                val popup = ScalePopupMenu(
-                    activity = activity,
-                    anchor = anchor,
-                    value = GSYVideoType.getShowType(),
-                    themeColor = player?.themeColor ?: 0,
-                )
-                popup.setOnChangedScaleListener { type ->
-                    GSYVideoType.setShowType(type)
-                    player?.updateTextureViewShowType()
-                    scope.launch {
-                        SettingPreferences.edit(activity) {
-                            it[PlayerScreenType] = type
-                        }
-                    }
-                }
-                popup.show()
+                openScreenScale(anchor)
             }
         }
         return true

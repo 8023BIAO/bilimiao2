@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放设置：六角形（设置）+ 实心播放三角（与顶栏「空降盾牌」同一套语法） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:pathData="M21.90,12.00 L16.95,20.57 L7.05,20.57 L2.10,12.00 L7.05,3.43 L16.95,3.43 Z" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M15.97,11.00 Q17.70,12.00 15.97,13.00 L10.88,15.94 Q9.15,16.94 9.15,14.94 L9.15,9.06 Q9.15,7.06 10.88,8.06 L15.97,11.00 Z" android:fillColor="#FFFFFF" />
+</vector>

@@ -8,10 +8,13 @@ import com.a10miaomiao.bilimiao.comm.exception.AreaLimitException
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
+import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.proxy.ProxyServerInfo
 import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
+import com.a10miaomiao.bilimiao.comm.utils.PreviewDiag
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 
 class PlayerAPI {
@@ -238,22 +241,54 @@ class PlayerAPI {
      * 没有预览图的情况很常见：视频太短、番剧部分剧集、风控拦截 —— 一律返回 null，
      * 调用方按"这个视频没有预览图"降级（拖动时只显示时间气泡）。
      */
-    suspend fun getVideoShot(aid: String, cid: String): VideoShotData? {
-        if (aid.isBlank() || cid.isBlank()) return null
-        val res = MiaoHttp.request {
-            // web 语义：不加 app-key/env/Authorization，只带 Cookie + WBI 签名
-            isWebApi = true
-            url = "https://api.bilibili.com/x/player/videoshot?" + ApiHelper.urlencode(
-                mapOf(
-                    "aid" to aid,
-                    "cid" to cid,
-                    "index" to "1",
-                )
+    suspend fun getVideoShot(aid: String, cid: String, bvid: String? = null): VideoShotData? {
+        if (cid.isBlank()) return null
+        // ★ 这个接口的 `aid` 只认**纯数字 av 号**：塞 BV 号进去会直接被拒
+        //   （2026-09 起 B 站收紧了参数校验，实测 `aid=BV1Ba4y137M7` → {"code":-400,"message":"请求错误"}，
+        //    而 `bvid=BV1Ba4y137M7` 正常返回）。以前把 BV 塞 aid 也能过，所以一直没暴露 ——
+        //   结果就是**所有以 BV 号打开的普通视频都没有拖动预览图**。这里改成：有数字 av 号用 aid，否则退回 bvid 参数。
+        val rawAid = aid.removePrefix("av").trim()
+        val numericAid = rawAid.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+        // 两个字段都可能装"错"东西（aid 里放 BV、bvid 里放 av 号），所以两个都试一遍，谁能当 BV 用谁
+        val bv = listOfNotNull(bvid?.trim(), rawAid).firstOrNull() {
+            it.isNotEmpty() && BvUtils.isValidBvid(it)
+        }
+        PreviewDiag.log("getVideoShot in: aid=$aid bvid=$bvid -> numericAid=$numericAid bv=$bv cid=$cid")
+        if (numericAid == null && bv == null) {
+            PreviewDiag.log("getVideoShot 放弃：aid/bvid 都不是可用形态")
+            return null
+        }
+
+        // 另外这接口偶尔返回"空壳"（image 有、index 是空数组，实测约 1/6 概率），
+        // 而 index（每格结束时刻）没有就一格都取不出来 → 表现为"这次拖动没预览图"。
+        // 所以最多试 3 次；重试时加个时间戳参数，岔开可能存在的中间缓存。
+        repeat(3) { attempt ->
+            val params = mutableMapOf(
+                "cid" to cid,
+                "index" to "1",
             )
-            headers["Referer"] = "https://www.bilibili.com/video/av$aid"
-        }.awaitCall().json<ResponseData<VideoShotData>>()
-        if (!res.isSuccess) return null
-        return res.data?.takeIf { it.index.isNotEmpty() && it.image.isNotEmpty() }
+            if (numericAid != null) params["aid"] = numericAid else params["bvid"] = bv!!
+            if (attempt > 0) params["_"] = System.currentTimeMillis().toString()
+            val res = try {
+                MiaoHttp.request {
+                    // web 语义：不加 app-key/env/Authorization，只带 Cookie + WBI 签名
+                    isWebApi = true
+                    url = "https://api.bilibili.com/x/player/videoshot?" + ApiHelper.urlencode(params)
+                    headers["Referer"] = "https://www.bilibili.com/video/av${numericAid ?: bv}"
+                }.awaitCall().json<ResponseData<VideoShotData>>()
+            } catch (e: Exception) {
+                PreviewDiag.log("getVideoShot 异常: ${e.javaClass.simpleName}: ${e.message}")
+                null
+            }
+            val data = res?.takeIf { it.isSuccess }?.data
+            PreviewDiag.log(
+                "getVideoShot 第${attempt + 1}次: code=${res?.code} msg=${res?.message} " +
+                    "image=${data?.image?.size ?: -1} index=${data?.index?.size ?: -1}"
+            )
+            if (data != null && data.index.isNotEmpty() && data.image.isNotEmpty()) return data
+            if (attempt < 2) delay(350L)
+        }
+        return null
     }
 
     /**

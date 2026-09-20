@@ -40,6 +40,22 @@ class MiaoHttp(var url: String? = null) {
     /** 纯 WEB API 模式：跳过 app-key/Authorization 等 APP 头部，仅依赖 Cookie + WBI 签名 */
     var isWebApi = false
 
+    /**
+     * 游客模式：**不带登录 Cookie**，用来复现"没登录的人看到什么"。
+     *
+     * 评论反诈检测就靠这个：同一条评论，带 Cookie 查得到、游客查不到 = 仅自己可见（ShadowBan）。
+     * Cookie 头是本类手工加的（sharedClient 没挂 CookieJar），所以跳过那一段就是真游客。
+     */
+    var asGuest = false
+
+    /**
+     * 游客模式下唯一要带的 Cookie。
+     *
+     * B站 x/v2/reply/main 没有 buvid3 会直接回 -352 风控校验失败（实测），
+     * 但带上完整登录 Cookie 就不是游客了 —— 所以只带 buvid3 这一条。
+     */
+    var guestCookie: String? = null
+
     private fun buildRequest(): Request {
         val requestBuilder = Request.Builder()
         requestBuilder.addHeader("User-Agent", ApiHelper.USER_AGENT)
@@ -47,8 +63,8 @@ class MiaoHttp(var url: String? = null) {
         requestBuilder.addHeader("buvid", BilimiaoCommApp.commApp.getBilibiliBuvid())
         val isBiliHost = url?.let { "bilibili.com" in it } == true
         if (isBiliHost) {
-            if (!isWebApi) {
-                // APP API 头部（仅非 WEB API 模式添加）
+            if (!isWebApi && !asGuest) {
+                // APP API 头部（仅非 WEB API 模式添加；游客模式也不能带账号身份）
                 requestBuilder.addHeader("env", "prod")
                 requestBuilder.addHeader("app-key", "android_hd")
                 BilimiaoCommApp.commApp.loginInfo?.token_info?.let{
@@ -77,7 +93,8 @@ class MiaoHttp(var url: String? = null) {
                 }
             }
         }
-        val cookie = getCookie(url)
+        // 游客模式只带 buvid3；正常模式带 CookieManager 里的登录态
+        val cookie = if (asGuest) guestCookie else getCookie(url)
         if (!cookie.isNullOrBlank()) {
             requestBuilder.addHeader("Cookie", cookie)
         }

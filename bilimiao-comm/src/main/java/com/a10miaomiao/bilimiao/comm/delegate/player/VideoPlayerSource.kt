@@ -395,9 +395,17 @@ class VideoPlayerSource(
 
     override suspend fun getVideoShot(): PlayerAPI.VideoShotData? {
         return try {
-            // 优先 bvid（接口原生字段），没有就退回 av 号；两者都没有就放弃
-            val videoId = bvid.ifBlank { aid }.removePrefix("av")
-            BiliApiService.playerAPI.getVideoShot(aid = videoId, cid = this.id)?.toHttps()
+            // ★ 别再自己挑"BV 还是 av"塞进 aid：这个接口的 aid 只认纯数字 av 号，
+            //   塞 BV 会被 -400 拒掉（2026-09 起 B 站收紧了校验）→ 预览图全没。
+            //   这里把 raw aid 和有效的 bvid 都给过去，由 PlayerAPI 决定用 aid= 还是 bvid=。
+            com.a10miaomiao.bilimiao.comm.utils.PreviewDiag.log(
+                "VideoPlayerSource: aid=$aid bvid=$bvid effectiveBvid=$effectiveBvid cid=${this.id}"
+            )
+            BiliApiService.playerAPI.getVideoShot(
+                aid = aid,
+                cid = this.id,
+                bvid = effectiveBvid,
+            )?.toHttps()
         } catch (e: Exception) {
             // 预览图是"锦上添花"，任何失败都静默降级，绝不弹错
             null

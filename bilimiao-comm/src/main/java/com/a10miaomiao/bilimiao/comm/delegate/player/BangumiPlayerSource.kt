@@ -569,7 +569,9 @@ class BangumiPlayerSource(
     override suspend fun getVideoShot(): PlayerAPI.VideoShotData? {
         return try {
             // 番剧同样用 aid + cid 取缩略图；部分剧集没有这数据 → 返回 null 走降级
-            BiliApiService.playerAPI.getVideoShot(aid = aid.removePrefix("av"), cid = id)?.toHttps()
+            // （aid 必须是纯数字，PlayerAPI 里会归一化；不是数字就返回 null 降级）
+            com.a10miaomiao.bilimiao.comm.utils.PreviewDiag.log("BangumiPlayerSource: aid=$aid cid=$id")
+            BiliApiService.playerAPI.getVideoShot(aid = aid, cid = id)?.toHttps()
         } catch (e: Exception) {
             null
         }

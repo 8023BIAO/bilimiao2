@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 锁定：挂锁（锁体略高于宽、锁梁约占 2/3，和官方那只窄锁外形对齐）。
+     规格同顶栏那套：24 网格 / 描边 2 / 圆头圆角。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:pathData="M9,10.4 L9,9.2 A3,3 0 0 1 15,9.2 L15,10.4" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M7.6,10.4 L16.4,10.4 Q18,10.4 18,12 L18,19 Q18,20.6 16.4,20.6 L7.6,20.6 Q6,20.6 6,19 L6,12 Q6,10.4 7.6,10.4 Z" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

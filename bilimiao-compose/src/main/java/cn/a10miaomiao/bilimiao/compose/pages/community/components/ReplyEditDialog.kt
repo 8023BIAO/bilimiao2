@@ -125,6 +125,8 @@ import kotlinx.coroutines.withContext
 class ReplyEditDialogState(
     val scope: CoroutineScope,
     val onAddReply: (VideoCommentReplyInfo) -> Unit,
+    /** 评论反诈：检测出"仅自己可见"时点"去申诉"的去处（由页面提供，跳内置浏览器申诉页） */
+    val onOpenAppeal: ((oid: Long, type: Int, rpid: Long) -> Unit)? = null,
 ) {
 
     private var replyParams: ReplyEditParams? = null
@@ -462,6 +464,13 @@ class ReplyEditDialogState(
                     imageList.clear()
                     delay(1000L)
                     onAddReply(result.reply)
+                    // 评论反诈：发完等几秒自动查这条评论是不是"仅自己可见"（开关在实验性功能里，默认关）
+                    CommentAntifraudLauncher.start(
+                        result = result,
+                        message = finalMessage,
+                        hasPictures = !pictures.isNullOrEmpty(),
+                        onOpenAppeal = onOpenAppeal,
+                    )
                 } else {
                     snackbar.showSnackbar(res.message)
                 }

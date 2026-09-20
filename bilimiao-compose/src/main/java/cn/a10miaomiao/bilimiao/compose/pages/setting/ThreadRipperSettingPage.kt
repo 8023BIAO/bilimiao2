@@ -102,15 +102,9 @@ private fun ThreadRipperSettingPageContent() {
                 // 说明性条目：不可点，只解释为什么这里的开关都灰了
                 preference(
                     key = "tr_mp4_notice",
-                    title = { Text("当前是 MP4 源，分段并发下载对它无效") },
+                    title = { Text("当前是 MP4 源，本功能无效") },
                     enabled = false,
-                    summary = {
-                        Text(
-                            "MP4（含 durl 直链、[merging]/[concatenating] 源）在 ExoPlayer 里是「整段顺序下载」，" +
-                                "没有字节分段可以切，所以并发连接也帮不上忙；\n" +
-                                "想用它请到 播放设置 → 视频格式选择 改成 DASH（DASH 的分段流才有 Range 可并发）。"
-                        )
-                    },
+                    summary = { Text("MP4 是整段顺序下载，没有分段可切；改成 DASH 才能用") },
                 )
             }
             preferenceCategory(key = "tr_threads", title = { Text("并发") })
@@ -127,50 +121,28 @@ private fun ThreadRipperSettingPageContent() {
                 summary = { value ->
                     // 把"这个档位实际会发生什么"直接算给用户看（上游的算法：区间平均等分，每份至少 64KB）
                     val n = if (value <= 0) maxThreads else value
-                    Text(
-                        "当前：${labelOf(value)}。把一个分段的字节区间平均分给 $n 条连接" +
-                            "（每份至少 64KB，分段小就自动少开）；" +
-                            "默认 4 条，缓冲跟不上再往上加；连接不是越多越快，手机一般 4~8 就够"
-                    )
+                    Text("当前：${labelOf(value)}（把一个分段分给 $n 条连接，默认 4）")
                 },
             )
 
             preferenceCategory(key = "tr_help", title = { Text("说明") })
             preference(
                 key = "tr_help_when",
-                title = { Text("什么时候该调这里") },
+                title = { Text("什么时候该调大") },
                 enabled = false,
-                summary = {
-                    Text(
-                        "这个数字就是**最多同时开几条连接**（和上游 Bilibili-thread-ripper 的「并发线程」是同一个意思）。\n" +
-                            "海外/冷门视频、4K 缓冲跟不上 → 往大调（8~16）；设备较老或网络本身就抖 → 往小调。\n" +
-                            "连接不是越多越快：连接、加密、调度和重组的开销会一起增加。"
-                    )
-                },
+                summary = { Text("卡顿、4K 缓冲跟不上就调大；手机一般 4~8 够用，越多开销越大") },
             )
             preference(
                 key = "tr_help_nodes",
-                title = { Text("为什么要填多个节点/多 CDN") },
+                title = { Text("为什么要多个节点") },
                 enabled = false,
-                summary = {
-                    Text(
-                        "本功能会**同时向多个 CDN 节点要同一段数据**：哪个先回来用哪个，另一条立刻掐掉；\n" +
-                            "某个节点卡住或失败就被暂停一会儿（指数退避），重试时自动换别的节点。\n" +
-                            "所以「CDN 竞速」开着时它才有多个节点可用；你把 CDN 固定成某个主机时，它**不会**换节点。"
-                    )
-                },
+                summary = { Text("同时向多个节点要同一段，谁先回用谁；CDN 固定成单一主机时就不会换节点") },
             )
             preference(
                 key = "tr_help_cdn",
                 title = { Text("和 CDN 设置的关系") },
                 enabled = false,
-                summary = {
-                    Text(
-                        "互不干扰：上面的「CDN 竞速 / CDN 固定主机 / 音频不跟随 CDN」照旧生效，" +
-                            "它们决定用哪个节点，本功能只决定节点上的字节怎么并发拉。\n" +
-                            "所以开不开分段并发下载，都**不需要**改你的 CDN 选择。"
-                    )
-                },
+                summary = { Text("互不影响：CDN 决定用哪个节点，本功能只管节点上的字节怎么拉") },
             )
 
             item("bottom") {

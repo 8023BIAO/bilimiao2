@@ -129,6 +129,32 @@ object SettingPreferences {
     /** AI 视频总结开关（实验性） */
     val AiSummaryEnabled = booleanPreferencesKey("ai_summary_enabled")
 
+    /**
+     * 评论反诈：发完评论自动检测是否被"仅自己可见"（ShadowBan）。
+     *
+     * 思路来自开源项目 biliSendCommAntifraud
+     * https://github.com/freedom-introvert/biliSendCommAntifraud
+     * **默认关**：每发一条评论都会多打几个接口，用不上的人不必背这个开销。
+     */
+    val AntifraudEnabled = booleanPreferencesKey("antifraud_enabled")
+
+    /**
+     * 评论反诈 · 自动复查开关。
+     *
+     * 为什么要复查：评论发出去**先短暂可见、过一会儿才被限流**（B站那套"秋后算账"）是真实现象，
+     * 实测就撞上了 —— 发出后 8 秒游客还能看到，之后才只有自己可见。只查一次必然误判成"正常"。
+     * 默认**开**。
+     */
+    val AntifraudRecheckEnabled = booleanPreferencesKey("antifraud_recheck_enabled")
+
+    /**
+     * 评论反诈 · 复查监控时长（分钟）。
+     *
+     * 首查 5 秒后开始，之后每 30 秒复查一次，一直查到这条评论"状态变化"或者跑满这个时长。
+     * 上游 biliSendCommAntifraud 的监控是"每分钟一次、最多 30 分钟"，这里默认 5 分钟。
+     */
+    val AntifraudRecheckMinutes = intPreferencesKey("antifraud_recheck_minutes")
+
     /** CDN 竞速开关（实验性）：播放前并发测试各CDN延迟，选最快节点 */
     val CdnRaceEnabled = booleanPreferencesKey("cdn_race_enabled")
 
