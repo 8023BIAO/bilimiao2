@@ -108,7 +108,6 @@ private fun SettingPageContent(
     val windowInsets = windowState.getContentInsets(localContainerView())
     val context = LocalContext.current
     // 远程设置列表已禁用 - 不收集远程数据
-    // val moreSettingList by viewModel.moreSettingList.collectAsStateWithLifecycle()
 
     val dataStore = remember {
         SettingPreferences.run { context.dataStore }

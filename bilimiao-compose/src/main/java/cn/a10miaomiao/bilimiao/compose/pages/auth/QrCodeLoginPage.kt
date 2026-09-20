@@ -196,7 +196,6 @@ private fun QrCodeLoginPageContent(
     val error = viewModel.error.collectAsStateWithLifecycle().value
     val qrCodeData = viewModel.qrCodeData.collectAsStateWithLifecycle().value
     val isScaned = viewModel.isScaned.collectAsStateWithLifecycle().value
-//    val isFullScreenQrcode by viewModel.isScaned.collectAsStateWithLifecycle()
 
     var isFullScreenQrcode by remember {
         mutableStateOf(false)

@@ -82,8 +82,16 @@ class PlayerStore(override val di: DI) :
         }
     }
 
+    /**
+     * 当前播放项在播放列表里的下标。
+     *
+     * ★ 不要读 [listPositionFlow] 的 `.value`：那是个 `WhileSubscribed()` 共享流，
+     *   而它的订阅者只有 Compose 页面（换成 collectAsStateWithLifecycle 之后，退到后台就停止收集）
+     *   → 后台时 `.value` 会**冻结在最后一次收集到的值**。而"后台自动连播"这条逻辑路径正是读它来选下一个，
+     *   冻结值会让它选到列表里靠前的项（重播），而不是正常推进。这里直接用活的 state 现算。
+     */
     fun getPlayListCurrentPosition(): Int {
-        return listPositionFlow.value
+        return getPlayListCurrentPosition(state, playListStore.state)
     }
 
     fun setPlayerSource(source: BasePlayerSource) {
@@ -131,7 +139,8 @@ class PlayerStore(override val di: DI) :
     ): PlayListItemInfo? {
         val playList = playListStore.state
         if (!playList.isEmpty()) {
-            val currentPosition = getPlayListCurrentPosition()
+            // 同上：用活的 state 现算，别吃共享流的冻结值
+            val currentPosition = getPlayListCurrentPosition(state, playListStore.state)
             val listSize = playList.items.size
             if (isRandom && listSize > 1) {
                 var randomPosition = (0 until listSize).random()

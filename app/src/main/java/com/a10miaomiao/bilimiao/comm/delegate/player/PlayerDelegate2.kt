@@ -123,10 +123,23 @@ class PlayerDelegate2(
          * 和原来"超时 → 512MB"的兜底结果一致，但绝不卡主线程。
          */
         private fun getCacheMaxSize(context: Context): Long {
-            val sizeMb = SettingPreferences.cachedPreferencesOrNull()
+            val fromSnapshot = SettingPreferences.cachedPreferencesOrNull()
                 ?.get(SettingPreferences.PlayerDiskCacheSize)
                 ?.coerceIn(100, 10240)
-                ?: 512
+            val sizeMb = fromSnapshot ?: run {
+                // 快照还没就绪（进程刚起就直接播本地/下载视频这种情况）→ 退回一次**有上限**的阻塞读。
+                // 为什么这里破例：SimpleCache 的上限是在本次调用里首次创建时定型的，用错值会错一整个进程。
+                // 正常路径（联网取流）里 DataStore 快照早就绪，走不到这儿。
+                runCatching {
+                    kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withTimeoutOrNull(500L) {
+                            SettingPreferences.mapData(context) { prefs ->
+                                (prefs[SettingPreferences.PlayerDiskCacheSize] ?: 512).coerceIn(100, 10240)
+                            }
+                        }
+                    }
+                }.getOrNull() ?: 512
+            }
             return sizeMb * 1024L * 1024L
         }
 

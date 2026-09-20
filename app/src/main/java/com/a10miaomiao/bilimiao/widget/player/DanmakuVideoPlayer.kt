@@ -324,13 +324,18 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         val wall = nowUptime - prevAt
         val delta = pos - prevPos
         // 只有"正常往前走"的采样才用来估倍速：seek / 缓冲 / 暂停后的第一拍都跳过（沿用上次的倍率）
-        if (prevAt > 0L && wall in 1L..2000L && delta in 0L..(wall * 8L)) {
+        if (prevAt > 0L && wall in 1L..2000L && delta in 0L..(wall * 4L)) {
             val measured = delta.toFloat() / wall.toFloat()
-            if (measured > 0.1f) danmakuPosSpeed = measured.coerceIn(0.1f, 8f)
+            // 限幅 0.25~4×：正常倍速最多 3×（长按 3×），超过这个范围的采样一定是跳变，
+            // 不能被当成倍速去外推（否则时间轴会先冲出去再被下一拍拉回来）。
+            if (measured > 0.1f) danmakuPosSpeed = measured.coerceIn(0.25f, 4f)
         }
         danmakuPosMs = pos
         danmakuPosAtUptimeMs = nowUptime
-        danmakuPosAdvancing = mCurrentState == CURRENT_STATE_PLAYING
+        // 只有"状态是播放中"**且**"这一拍真的往前走了"才外推：GSY 在缓冲结束时会把视图状态恢复成
+        // 缓冲开始前保存的那个（缓冲中按了暂停 → 状态又被拨回 PLAYING，底层其实还停着），
+        // 只看状态会让"画面停着、弹幕还在飘"。
+        danmakuPosAdvancing = mCurrentState == CURRENT_STATE_PLAYING && delta > 0L
         // 约 1 秒记一次账就够
         if (nowWall - lastGoodUpdateAt < 1000L) return
         lastGoodUpdateAt = nowWall
@@ -518,10 +523,20 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             mPauseBeforePrepared = true
         }
         isPreparing = true
+        // GSY 会在 super 里消费掉 mSeekOnStart（内部走 getGSYVideoManager().seekTo(...)），先记下来
+        val seekOnPrepare = mSeekOnStart
         try {
             super.startAfterPrepared()
         } finally {
             isPreparing = false
+        }
+        // ★ 补一次"快照 + 弹幕重锚"：GSY 这条路上是 `getGSYVideoManager().seekTo(mSeekOnStart)` —— 走**管理器**、
+        //   不经过我们的 seekTo 覆写，所以"续播 / 换清晰度 / 网络重试"时 syncDanmakuSeek 一次都不会跑：
+        //   弹幕层既不重锚定（渲染起点还停在 0），又要等下一拍心跳（非播放态间隔 1000ms）快照才追上 →
+        //   这 ≤1 秒里弹幕按错的时间画，随后一次性补画一片（"唰一下"在续播时照旧）。
+        refreshDanmakuSnapshot()
+        if (seekOnPrepare > 0L) {
+            syncDanmakuSeek(seekOnPrepare)
         }
         // GSY 在 mPauseBeforePrepared 分支里会紧接着 onVideoPause()，而此时 seek 可能还没落地，
         // 它读到的 0 会被写进 mCurrentPosition（= 下一次续播位置）→ 用账本补回来
@@ -697,6 +712,9 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         }
 
     // 弹幕开始位置
+    // @Volatile：主线程写（seekTo 覆写 → syncDanmakuSeek），弹幕引擎线程读并清零（DFM prepared() 回调），
+    // 不加的话理论上可能看不到刚落点 → 这次 seek 在弹幕层丢失（而且字段已被置 -1，不会再补）。
+    @Volatile
     var danmakuStartSeekPosition: Long = -1
     var danmakuParser: BaseDanmakuParser? = null
         set(value) {
@@ -2725,6 +2743,9 @@ initDanmakuTouchListener()
     }
 
     fun releaseDanmaku() {
+        // 心跳停掉：关播放器/播完之后不该继续每 250ms~1s 去读一次播放器位置
+        //（下次 onPrepared() 会重新启动）
+        removeCallbacks(danmakuSnapshotRunnable)
         mDanmakuView.release()
         // 【已移除】V2引擎释放 — V2引擎已废弃
     }
