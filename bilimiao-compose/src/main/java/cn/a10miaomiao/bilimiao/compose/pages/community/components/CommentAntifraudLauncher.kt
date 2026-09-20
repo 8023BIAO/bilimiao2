@@ -7,6 +7,7 @@ import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudState
 import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor
 import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitorSession
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudDiag
+import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult
 import com.a10miaomiao.bilimiao.comm.antifraud.CommentAntifraud
 import com.a10miaomiao.bilimiao.comm.apis.CommentApi
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -206,6 +207,24 @@ object CommentAntifraudLauncher {
     ) {
         // ★ 不管结果是好是坏，**一律弹窗**（用户要求：等了好几分钟，不能只闪个提示就完了）。
         //   内容固定四段：状态 / 哪条视频下的哪条评论 / 判定依据 / 免责说明。
+        // ★ 先落盘再弹窗：复查跑几分钟，用户切走/进程被杀时弹窗弹不出来（实测撞过），
+        //   设置页里那份"上次检测结果"就是他唯一的交代。
+        runCatching {
+            AntifraudLastResult.save(
+                BilimiaoCommApp.commApp.app,
+                AntifraudLastResult.Result(
+                    time = System.currentTimeMillis(),
+                    title = result.title,
+                    detail = result.detail,
+                    where = if (type == 1) {
+                        runCatching { BvUtils.toBvid(oid.toString()) }.getOrNull()?.let { "视频 $it" } ?: "av$oid"
+                    } else "oid=$oid",
+                    rpid = rpid,
+                    message = message.take(200),
+                    isBad = result.isBad,
+                ),
+            )
+        }
         val mark = if (result.isBad) "⚠️ " else "✅ "
         val where = buildString {
             if (type == 1) {

@@ -609,6 +609,44 @@ private fun FlagsSettingPageContent(
                     )
                 }
             }
+            // 上次检测结果（落盘的那份）：弹窗没弹出来时，这里是他唯一的交代
+            val lastResult = com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.load(context)
+            if (lastResult != null) {
+                preference(
+                    key = "antifraud_last_result",
+                    title = {
+                        Text(
+                            (if (lastResult.isBad) "⚠️ 上次检测：" else "✅ 上次检测：") +
+                                "${lastResult.title}（${lastResult.timeText()}）"
+                        )
+                    },
+                    summary = {
+                        Text(
+                            "${lastResult.where} · 评论 ${lastResult.rpid}\n" +
+                                "内容：${lastResult.message.ifBlank { "(无)" }}\n" +
+                                "判定：${lastResult.detail}"
+                        )
+                    },
+                    onClick = {
+                        if (ClickGuard.allow("flags:antifraud_last")) {
+                            com.kongzue.dialogx.dialogs.MessageDialog.build()
+                                .setTitle((if (lastResult.isBad) "⚠️ " else "✅ ") + lastResult.title)
+                                .setMessage(
+                                    "${lastResult.where}\n评论 ID：${lastResult.rpid}\n\n" +
+                                        "评论内容：${lastResult.message.ifBlank { "(无)" }}\n\n" +
+                                        "判定依据：${lastResult.detail}\n\n" +
+                                        "检测时间：${lastResult.timeText()}"
+                                )
+                                .setOkButton("知道了")
+                                .setCancelButton("清空记录") { _, _ ->
+                                    com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.clear(context)
+                                    false
+                                }
+                                .show()
+                        }
+                    },
+                )
+            }
             preference(
                 key = "antifraud_appeal",
                 title = { Text("B站官方申诉页") },

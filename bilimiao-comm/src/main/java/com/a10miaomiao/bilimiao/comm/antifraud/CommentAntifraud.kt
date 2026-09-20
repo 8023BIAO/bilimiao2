@@ -177,7 +177,10 @@ object CommentAntifraud {
         sentTimeSec: Long,
     ): AntifraudResult {
         val buvid = guestBuvid3()
-        AntifraudDiag.step("游客 Cookie：buvid3=${if (buvid.isNullOrBlank()) "(无)" else "有"}")
+        AntifraudDiag.step(
+            "游客 Cookie：buvid3=${if (buvid.isNullOrBlank()) "(无)" else "有"}" +
+                "，前缀 ${buvid?.take(8) ?: "-"}（匿名、非本机设备指纹）"
+        )
         AntifraudDiag.info("App 当前 Cookie 名字：${AntifraudDiag.cookieNames(appCookieNames())}")
 
         // ===== 1. 先按游客视角找这条评论 =====
@@ -382,17 +385,13 @@ object CommentAntifraud {
      */
     private suspend fun guestBuvid3(): String? {
         cachedBuvid3?.let { return it }
-        // 1) App 自己 Cookie 里的（WebView CookieManager）
-        runCatching {
-            val cookie = CookieManager.getInstance().getCookie("https://api.bilibili.com") ?: ""
-            cookie.split(";").map { it.trim() }.firstOrNull { it.startsWith("buvid3=") }
-                ?.substringAfter('=')
-                ?.takeIf { it.isNotBlank() }
-        }.getOrNull()?.let {
-            cachedBuvid3 = it
-            return it
-        }
-        // 2) 现要一个：x/frontend/finger/spi（公开接口，返回 b_3 就是 buvid3）
+        // ★★ 绝对不要用本机 Cookie 里那个 buvid3 ★★
+        //    实测（2026-09-20）：B站把 buvid3 和设备/账号**绑定**了。同一条被 shadow ban 的评论，
+        //    带上本机 buvid3（哪怕完全不带登录 Cookie）请求，服务端照样把它当"本人"返回 →
+        //    "游客能看到" = 假阳性，检测直接失效。
+        //    证据：本机 App 侧列表 2 条（含该评论），我从外部用全新匿名 buvid3 查只有 1 条（不含）。
+        //    所以这里只用一个**与账号无关**的匿名 buvid3。
+        // 1) 现要一个：x/frontend/finger/spi（公开接口，返回 b_3 就是 buvid3）
         runCatching {
             val res = MiaoHttp.request {
                 url = BiliApiService.biliApi("x/frontend/finger/spi")
@@ -404,9 +403,8 @@ object CommentAntifraud {
             cachedBuvid3 = it
             return it
         }
-        // 3) 实在没有就用 App 自己的 buvid 顶一下（格式对不上时服务端多半也认）
-        return runCatching { BilimiaoCommApp.commApp.getBilibiliBuvid() }.getOrNull()
-            ?: ApiHelper.generateBuvid()
+        // 2) 兜底：本机随机生成一个（同样与账号无关；只是格式对得上、服务端认）
+        return runCatching { ApiHelper.generateBuvid() }.getOrNull()
     }
 }
 
