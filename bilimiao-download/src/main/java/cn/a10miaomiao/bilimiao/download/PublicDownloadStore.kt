@@ -8,11 +8,12 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 
 /**
- * 公共下载目录 **Download/BiliMiao/** 的读写层。
+ * 公共下载目录 **Download/BiliMiao** 的读写层。
  *
  * 为什么要它：Android 10 起系统不允许 App 用文件路径直接往 `/sdcard/Download/` 写东西
  * （旧的 `Environment.getExternalStoragePublicDirectory()` + `File` 写法在 Android 10+ 必然失败，
@@ -131,7 +132,7 @@ object PublicDownloadStore {
                 val dir = legacyDirOf(relativeDir)
                 if (!dir.exists() && !dir.mkdirs()) return null
                 writeNoMedia(dir)
-                File(dir, displayName).outputStream(append = append)
+                FileOutputStream(File(dir, displayName), append)
             }
         } catch (e: Exception) {
             e.printStackTrace()
