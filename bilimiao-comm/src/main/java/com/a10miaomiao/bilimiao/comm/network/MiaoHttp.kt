@@ -98,6 +98,9 @@ class MiaoHttp(var url: String? = null) {
         if (!cookie.isNullOrBlank()) {
             requestBuilder.addHeader("Cookie", cookie)
         }
+        // 评论反诈排查用：把"这次到底发了哪些 Cookie"记进诊断日志（只记名字，不记值）。
+        // 只有一轮反诈检测进行中才记录，平时完全不写。
+        com.a10miaomiao.bilimiao.comm.antifraud.AntifraudDiag.traceRequest(url, cookie, asGuest)
         for ((key, value) in headers) {
             requestBuilder.addHeader(key, value)
         }

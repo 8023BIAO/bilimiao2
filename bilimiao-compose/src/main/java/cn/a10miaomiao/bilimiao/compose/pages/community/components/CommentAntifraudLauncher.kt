@@ -11,6 +11,7 @@ import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
+import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import com.kongzue.dialogx.dialogs.MessageDialog
 import com.kongzue.dialogx.dialogs.PopTip
 import kotlinx.coroutines.CoroutineScope
@@ -176,29 +177,33 @@ object CommentAntifraudLauncher {
         rpid: Long,
         onOpenAppeal: ((oid: Long, type: Int, rpid: Long) -> Unit)?,
     ) {
-        // 正常就别打扰用户了（弹窗只留给"有问题"和"没查成"两种情况）
-        if (result.state == AntifraudState.NORMAL) {
-            // 说清判据：是"没登录的游客也能看到这条评论"，不是"我自己能看到"；
-            // 复查过的把"查了几次、盯了多久"也带上（不然只说"正常"看不出盯了多久）
-            val extra = result.detail.substringAfter("\n（", "").removeSuffix("）")
-            PopTip.show(
-                if (extra.isBlank()) "反诈：游客视角能看到这条评论（正常）"
-                else "反诈：正常（$extra）"
-            )
-            return
+        // ★ 不管结果是好是坏，**一律弹窗**（用户要求：等了好几分钟，不能只闪个提示就完了）。
+        //   内容固定四段：状态 / 哪条视频下的哪条评论 / 判定依据 / 免责说明。
+        val mark = if (result.isBad) "⚠️ " else "✅ "
+        val where = buildString {
+            if (type == 1) {
+                // 视频：把 aid 换成 BV 号显示，用户认得出来
+                val bv = runCatching { BvUtils.toBvid(oid.toString()) }.getOrNull()
+                append(if (bv.isNullOrBlank()) "视频 av$oid" else "视频 $bv")
+            } else {
+                append("评论区 oid=$oid（type=$type）")
+            }
+            append("\n评论 ID：$rpid")
         }
         val body = buildString {
-            append(result.detail)
-            if (result.code != 0) {
-                append("\n\n接口返回：${result.code} ${result.rawMessage}")
-            }
+            append(where)
             append("\n\n评论内容：")
             append(message.take(200))
             if (message.length > 200) append("…")
-            append("\n\n（结果仅供参考：阿瓦隆会按账号/评论区/内容分别控评，不代表账号被封）")
+            append("\n\n判定依据：")
+            append(result.detail)
+            if (result.code != 0) {
+                append("\n（接口返回 ${result.code} ${result.rawMessage}）")
+            }
+            append("\n\n结果仅供参考：阿瓦隆会按账号/评论区/内容分别控评，不代表账号被封。")
         }
         val dialog = MessageDialog.build()
-            .setTitle(result.title)
+            .setTitle(mark + result.title)
             .setMessage(body)
             .setCancelButton("关闭")
         if (result.isBad) {

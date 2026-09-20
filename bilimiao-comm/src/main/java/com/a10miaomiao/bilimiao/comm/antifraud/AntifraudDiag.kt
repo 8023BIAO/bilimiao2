@@ -46,11 +46,27 @@ object AntifraudDiag {
     private var sessionStart = 0L
     private var stepNo = 0
 
+    /**
+     * 追踪"这一次检测实际发出去的 Cookie"。开关只在一轮检测期间为 true，
+     * 免得整个 App 的 B站请求都往日志里灌。MiaoHttp 里读它。
+     */
+    @Volatile
+    var traceRequests: Boolean = false
+
+    /** 由 MiaoHttp 在拼好请求头之后调用（只记名字，绝不记值） */
+    fun traceRequest(url: String?, cookie: String?, asGuest: Boolean) {
+        if (!traceRequests) return
+        if (url == null || "reply" !in url) return
+        val mode = if (asGuest) "游客模式" else "登录态"
+        info("→ 实发请求[$mode] Cookie=【${cookieNames(cookie)}】")
+    }
+
     /** 一次检测开始：写分隔线，重置步骤号 */
     fun start(title: String) {
         if (!enabled) return
         sessionStart = System.currentTimeMillis()
         stepNo = 0
+        traceRequests = true
         write("")
         write("========== $title ==========")
     }
@@ -70,6 +86,7 @@ object AntifraudDiag {
 
     /** 收尾：整段同时进「错误日志」页，方便在手机上直接看/复制 */
     fun finish(resultLine: String) {
+        traceRequests = false
         if (!enabled) return
         write("===== 结论：$resultLine =====")
         runCatching {
