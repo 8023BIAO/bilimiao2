@@ -850,6 +850,10 @@ internal class ThreadRipperDataSource(
             @Volatile
             var finished = false
 
+            /** 判决超时退出：是我们自己的等待/调度问题，不算节点失败（别把账记到 CDN 头上） */
+            @Volatile
+            private var undecidedExit = false
+
             private var ds: DataSource? = null
 
             /** 本次尝试已经交付的字节数（[awaitFinish] 用它算速度） */
@@ -876,6 +880,11 @@ internal class ThreadRipperDataSource(
                 var windowStart = SystemClock.uptimeMillis()
                 var windowBytes = 0L
                 while (!finished && failure == null && !lost && !closed) {
+                    // ★ 活性兜底：万一尝试线程已经退出却没留下 finished/failure（上面那条判决超时
+                    //   路径就是这么漏的），继续等下去就是死循环 —— 宁可报错让它换节点续传。
+                    if (!thread.isAlive) {
+                        throw IOException("抢跑线程已退出但未完成（已续传 ${pushed / 1024}KB）")
+                    }
                     if (multiNode) {
                         val now = SystemClock.uptimeMillis()
                         if (queue.remainingCapacity() > 0) {
@@ -949,7 +958,20 @@ internal class ThreadRipperDataSource(
                     while (!won && !lost && !closed && SystemClock.uptimeMillis() < judgeDeadline) {
                         Thread.sleep(10L)
                     }
-                    if (!won || lost || closed) return
+                    if (!won || lost || closed) {
+                        // ★ 判决超时（没选我、也没被取消）时线程直接退出：以前既不设 failure 也不设
+                        //   finished，而判决方只看 firstBlock != null 仍可能选中它 —— 于是 awaitFinish
+                        //   的循环条件（!finished && failure == null && !lost && !closed）永远不再变化
+                        //   → 永久自旋，read() 既拿不到数据也拿不到错误，播放器永久转圈，这个线程池
+                        //   线程也永远回不来。这里留下"我已退出"的证据，让等待方立刻拿到异常去重试。
+                        if (!won && !lost && !closed) {
+                            undecidedExit = true
+                            failure = IOException(
+                                "抢跑线程未在 ${DECISION_WAIT_MS}ms 内等到判决（已续传 ${pushed / 1024}KB）"
+                            )
+                        }
+                        return
+                    }
 
                     // ③ 赢家：首块 + 剩下的全部按顺序交付
                     deliver(first)
@@ -979,7 +1001,7 @@ internal class ThreadRipperDataSource(
                             delivered,
                             SystemClock.uptimeMillis() - (if (dataStartAt > 0) dataStartAt else SystemClock.uptimeMillis()),
                         )
-                        failure != null -> CdnNodePool.noteFailure(
+                        failure != null && !undecidedExit -> CdnNodePool.noteFailure(
                             url,
                             failure?.let { "${it.javaClass.simpleName}: ${it.message}" },
                         )

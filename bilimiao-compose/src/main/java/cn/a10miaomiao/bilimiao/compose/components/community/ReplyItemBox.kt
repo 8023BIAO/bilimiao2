@@ -113,6 +113,22 @@ class ReplyItemBoxContentInfo(
         // 是评论列表滑动卡顿的大头；现在只按 atNameToMid 缓存一次。
         // 另外原来结尾固定带一个 `|`，@列表为空时会退化成"匹配空串"，节点数会爆炸，这里一并修掉。
         val regex = remember(atNameToMid) { buildReplyTextRegex(atNameToMid.keys) }
+        // ★ 连"扫一遍正则 + 建出节点列表"的结果也要缓存，光缓存正则不够：
+        //   ReplyItemBox 的参数是 protobuf 对象（unstable），列表父级每次重组（下拉刷新、
+        //   loading/finished 变化、屏蔽词重算、滚动回收重建）都会让每条可见评论**重新全量扫一遍**，
+        //   中文长评论尤其明显。节点列表只跟 message/@映射/表情表有关。
+        return remember(message, atNameToMid, emote, regex) {
+            buildAnnotatedTextNodes(message, emote, atNameToMid, regex)
+        }
+    }
+
+
+    private fun buildAnnotatedTextNodes(
+        message: String,
+        emote: List<EmoteInfo>,
+        atNameToMid: Map<String, Long>,
+        regex: Regex,
+    ): List<AnnotatedTextNode> {
         val nodes = mutableListOf<AnnotatedTextNode>()
         var lastEnd = 0
         regex.findAll(message).forEach {
@@ -172,7 +188,7 @@ class ReplyItemBoxContentInfo(
     }
 
 
-    @Composable
+    // 纯字符串处理，不需要 composition（原来标了 @Composable，挪出 @Composable 上下文后要去掉）
     private fun getLinkUrl(text: String): String {
         val url = if (text.startsWith("http")) {
             text

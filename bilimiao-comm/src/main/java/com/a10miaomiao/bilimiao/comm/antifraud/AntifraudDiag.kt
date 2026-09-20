@@ -27,7 +27,17 @@ object AntifraudDiag {
     @Volatile
     var enabled: Boolean = true
 
-    private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+    // SimpleDateFormat 不是线程安全的：日志会被"最多 3 路检测 + OkHttp 线程 + 主线程"同时写
+    // （ErrorLogCollector 早就为同样的问题加了锁，这里是漏改）→ ThreadLocal + 全局锁
+    private val timeFormat = ThreadLocal.withInitial {
+        SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+    }
+    private val lock = Any()
+
+    /** 文件写入统一丢到这条单线程队列：调用方大多在主线程，不能在那里做 IO */
+    private val ioExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "antifraud-diag").apply { isDaemon = true }
+    }
 
     private val logFile: File? by lazy {
         try {
@@ -53,6 +63,11 @@ object AntifraudDiag {
     @Volatile
     var traceRequests: Boolean = false
 
+    /** 一轮检测结束时务必复位（协程被取消也走这里），否则后续所有 reply 请求都会写日志 */
+    fun resetTrace() {
+        traceRequests = false
+    }
+
     /** 由 MiaoHttp 在拼好请求头之后调用（只记名字，绝不记值） */
     fun traceRequest(url: String?, cookie: String?, asGuest: Boolean) {
         if (!traceRequests) return
@@ -62,6 +77,7 @@ object AntifraudDiag {
     }
 
     /** 一次检测开始：写分隔线，重置步骤号 */
+    @Synchronized
     fun start(title: String) {
         if (!enabled) return
         sessionStart = System.currentTimeMillis()
@@ -72,6 +88,7 @@ object AntifraudDiag {
     }
 
     /** 记一步 */
+    @Synchronized
     fun step(msg: String) {
         if (!enabled) return
         stepNo++
@@ -79,6 +96,7 @@ object AntifraudDiag {
     }
 
     /** 记一条补充信息（不占步骤号） */
+    @Synchronized
     fun info(msg: String) {
         if (!enabled) return
         write("    · $msg")
@@ -91,19 +109,23 @@ object AntifraudDiag {
      *   复查一轮会查 10~30 次，**每次**都往错误日志塞一条的话，那一页会被刷爆（而且它没有条数上限）
      *   —— 所以只有"整轮检测的最终结论"才 mirror，中间每次只进日志文件（文件每次进程启动会清空）。
      */
+    @Synchronized
     fun finish(resultLine: String, mirror: Boolean = true) {
         traceRequests = false
         if (!enabled) return
         write("===== 结论：$resultLine =====")
         if (mirror) {
             runCatching {
-                // 进「错误日志」页时带上**日志文件尾部**（整轮检测的完整过程）：
-                // 只给 buffer 的话，那只是"收尾那一次"的几行，前后文全丢了 —— 而这一页
-                // 往往是用户唯一能截图/复制给我的东西。截到 4000 字，避免一条日志撑爆那一页。
-                val tail = runCatching { logFile?.readText()?.takeLast(4000).orEmpty() }.getOrDefault("")
+                // ★ 用内存 buffer，不要重读日志文件：
+                //   ① 文件写入是丢到单线程队列上**异步**做的，在主线程读文件可能读不到刚排队的行
+                //      （结论那一行正好缺失，这正是我们最想看的）；
+                //   ② SKIPPED 早退分支是在主线程调 finish()，读整份文件会直接卡 UI。
+                //   buffer 里就是"本次进程写过的全部内容"，和文件语义一致。截到 4000 字，
+                //   避免一条日志把「错误日志」页撑爆。
+                val tail = synchronized(lock) { buffer.toString().takeLast(4000) }
                 ErrorLogCollector.logError(
                     error = "[评论反诈] $resultLine",
-                    stackTrace = tail.ifBlank { buffer.toString() },
+                    stackTrace = tail,
                 )
             }
         }
@@ -113,9 +135,12 @@ object AntifraudDiag {
     private val buffer = StringBuilder()
 
     private fun write(line: String) {
-        val stamped = "${timeFormat.format(Date())} $line"
-        buffer.append(stamped).append('\n')
-        runCatching { logFile?.appendText(stamped + "\n") }
+        val stamped = "${timeFormat.get()?.format(Date()) ?: "-"} $line"
+        synchronized(lock) {
+            buffer.append(stamped).append('\n')
+            // 文件 IO 交给单线程队列：调用方（含主线程的 SKIPPED 分支）不做磁盘写
+            ioExecutor.execute { runCatching { logFile?.appendText(stamped + "\n") } }
+        }
     }
 
     /** 只回 Cookie 的名字列表（绝不回值——SESSDATA 是凭据） */

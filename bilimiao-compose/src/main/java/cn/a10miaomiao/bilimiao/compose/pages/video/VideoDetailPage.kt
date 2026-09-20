@@ -212,11 +212,16 @@ private fun VideoDetailPageContent(
         mainReplyViewModel.clearCurrentReply()
     }
     
-    val seekCallback: ((Int) -> Unit) = { seconds ->
-        val currentAid = playerState.aid
-        val pageAid = arcData.aid.toString()
-        if (currentAid.isBlank() || currentAid == pageAid) {
-            viewModel.seekToPosition(seconds * 1000L)
+    // ★ 必须是稳定的 lambda：它既通过 LocalOnSeekTime 下发给评论正文，又被 annotatedText 当作
+    //   remember 的 key —— 每次重组新建一个实例会让"评论正文构建结果"的缓存永远失效。
+    //   闭包里读的是 playerState.aid / arcData.aid 的**当前值**，语义与原来一致。
+    val seekCallback: ((Int) -> Unit) = remember(playerState, arcData.aid, viewModel) {
+        { seconds ->
+            val currentAid = playerState.aid
+            val pageAid = arcData.aid.toString()
+            if (currentAid.isBlank() || currentAid == pageAid) {
+                viewModel.seekToPosition(seconds * 1000L)
+            }
         }
     }
     DoubleColumnAutofitLayout(
@@ -290,6 +295,13 @@ private fun VideoDetailPageContent(
             }
         }
         val pagerState = rememberPagerState(pageCount = { tabs.size })
+        // ★ 安全页号：竖屏是「详情+评论」2 页，横屏只有「评论」1 页。旋转/折叠/分屏时 tabs 从 2 项缩到
+        //   1 项，而 pagerState 还是同一个对象、currentPage 仍停在旧值 1 上 —— PagerScrollPosition 只在
+        //   measure 阶段写回页号，**读取时不做任何 clamp**（已核对 foundation 1.11.2 字节码）。
+        //   AndroidManifest 里声明了 configChanges=orientation|screenSize，Activity 不重建，这段
+        //   composition 原样活着：竖屏停在「评论」页再转横屏 → tabs[currentPage] 直接 IndexOutOfBounds 崩。
+        //   所有读页号的地方（TabRow 选中项、Tab 高亮、返回手势、Pager key）统一用这个归位后的值。
+        val safePage = pagerState.currentPage.coerceIn(0, tabs.lastIndex)
         DataDrivenNavigator(
             modifier = Modifier.fillMaxSize(),
             data = currentReply,
@@ -325,7 +337,7 @@ private fun VideoDetailPageContent(
                             )
                             .background(MaterialTheme.colorScheme.surface)
                             .nestedScroll(chainScrollableLayoutState.nestedScroll),
-                        selectedTabIndex = pagerState.currentPage,
+                        selectedTabIndex = safePage,
                         indicator = { positions ->
                             TabRowDefaults.PrimaryIndicator(
                                 Modifier.pagerTabIndicatorOffset(pagerState, positions),
@@ -333,7 +345,7 @@ private fun VideoDetailPageContent(
                         },
                     ) {
                         tabs.forEachIndexed { index, tab ->
-                            val selected = tabs[pagerState.currentPage].first == tab.first
+                            val selected = tabs[safePage].first == tab.first
                             Tab(
                                 modifier = Modifier.height(38.dp),
                                 text = {
@@ -386,7 +398,7 @@ private fun VideoDetailPageContent(
                     )
                 }
                 BackHandler(
-                    enabled = pagerState.currentPage > 0
+                    enabled = safePage > 0
                 ) {
                     scope.launch {
                         pagerState.animateScrollToPage(0)
@@ -397,7 +409,9 @@ private fun VideoDetailPageContent(
                         .fillMaxWidth()
                         .weight(1f),
                     state = pagerState,
-                    key = { index -> tabs[index].first },
+                    // 旋转瞬间 Pager 可能仍以旧页号（1）组合一帧，而 tabs 已经只剩 1 项 →
+                    // 直接用 tabs[index] 会越界。key 也必须保持唯一，不能退化成同一个字符串。
+                    key = { index -> tabs.getOrNull(index)?.first ?: "overflow-$index" },
                 ) { index ->
                     val tab = tabs[index]
                     when (tab.first) {

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+（API 31）的备份/迁移规则（android:dataExtractionRules）。
+
+  Android 12 起系统**不再读** fullBackupContent，只认这个文件，所以必须单独写一份。
+  排除项与 backup_rules.xml 完全一致：凭据、指纹、日志不参与云备份和换机迁移，
+  其余设置照常备份。改这里时记得同步改 backup_rules.xml。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="auth_hd" />
+        <exclude domain="sharedpref" path="bilimiao_cookie_store.xml" />
+        <exclude domain="sharedpref" path="bilimiao_web_cookie.xml" />
+        <exclude domain="sharedpref" path="bilimiao.xml" />
+        <exclude domain="sharedpref" path="bilimiao_guest_backup.xml" />
+        <exclude domain="sharedpref" path="bilimiao_guest_fingerprint.xml" />
+        <exclude domain="sharedpref" path="antifraud_last_result.xml" />
+        <exclude domain="file" path="antifraud_diag.log" />
+        <exclude domain="file" path="error_logs" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="auth_hd" />
+        <exclude domain="sharedpref" path="bilimiao_cookie_store.xml" />
+        <exclude domain="sharedpref" path="bilimiao_web_cookie.xml" />
+        <exclude domain="sharedpref" path="bilimiao.xml" />
+        <exclude domain="sharedpref" path="bilimiao_guest_backup.xml" />
+        <exclude domain="sharedpref" path="bilimiao_guest_fingerprint.xml" />
+        <exclude domain="sharedpref" path="antifraud_last_result.xml" />
+        <exclude domain="file" path="antifraud_diag.log" />
+        <exclude domain="file" path="error_logs" />
+    </device-transfer>
+</data-extraction-rules>

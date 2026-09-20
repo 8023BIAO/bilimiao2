@@ -119,7 +119,9 @@ private class ReplyDetailListPageViewModel(
                 val isLike = item.replyControl?.action == 1L
                 val newAction = if (isLike) 0 else 1
                 val res = BiliApiService.commentApi
-                    .action(1, item.oid.toString(), item.id.toString(), newAction)
+                    // ★ 原来写死 1（视频评论区）：动态(17)/专栏(12)等评论区点赞必然失败。
+                    //   用这条评论自己的 type（就是它所属的评论区类型）
+                    .action(item.type.toInt(), item.oid.toString(), item.id.toString(), newAction)
                     .awaitCall()
                     .json<MessageInfo>()
                 if (res.isSuccess) {

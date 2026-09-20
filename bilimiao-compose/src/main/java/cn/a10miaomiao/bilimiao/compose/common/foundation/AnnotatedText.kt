@@ -5,6 +5,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.LinkInteractionListener
@@ -82,54 +83,60 @@ fun annotatedText(
 ): AnnotatedString {
     val onSeekTime = LocalOnSeekTime.current
     val seekEnabled = LocalSeekEnabled.current
-    return buildAnnotatedString {
-        nodes.forEach {
-            when (it) {
-                is AnnotatedTextNode.Text -> append(it.text)
-                is AnnotatedTextNode.Emote -> {
-                    appendInlineContent(it.text)
-                }
-                is AnnotatedTextNode.Link -> {
-                    if (it.withLineBreak) {
-                        append("\n")
+    val primary = MaterialTheme.colorScheme.primary
+    // ★ 缓存：buildAnnotatedString + 每个链接一个 LinkAnnotation 对象，在评论列表里
+    //   父级每次重组（加载状态/滚动/屏蔽词变化）都会把所有可见评论重建一遍。
+    //   结果只跟 nodes、是否允许空降、颜色、回调有关。
+    return remember(nodes, seekEnabled, onSeekTime, primary) {
+        buildAnnotatedString {
+            nodes.forEach {
+                when (it) {
+                    is AnnotatedTextNode.Text -> append(it.text)
+                    is AnnotatedTextNode.Emote -> {
+                        appendInlineContent(it.text)
                     }
-                    // 时间戳链接（专栏禁用空降 → 渲染为纯文本）
-                    if (it.url.startsWith("bilimiao://seek/")) {
-                        if (!seekEnabled) {
-                            append(it.text)
-                            return@forEach
+                    is AnnotatedTextNode.Link -> {
+                        if (it.withLineBreak) {
+                            append("\n")
                         }
-                        val seconds = it.url.substringAfter("//seek/").toIntOrNull() ?: 0
-                        withLink(
-                            LinkAnnotation.Clickable(
-                                tag = "seek",
-                                styles = TextLinkStyles(
-                                    style = SpanStyle(
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                ),
-                                linkInteractionListener = LinkInteractionListener {
-                                    // 优先用 CompositionLocal（详情页可做视频匹配检查）
-                                    onSeekTime?.invoke(seconds)
-                                        // 再用全局bus（弹幕时间戳等）
-                                        ?: PlayerSeekBus.onSeek?.invoke(seconds * 1000L)
-                                }
-                            )
-                        ) {
-                            append(it.text)
-                        }
-                    } else {
-                        withLink(
-                            LinkAnnotation.Url(
-                                it.url,
-                                TextLinkStyles(
-                                    style = SpanStyle(
-                                        color = MaterialTheme.colorScheme.primary
+                        // 时间戳链接（专栏禁用空降 → 渲染为纯文本）
+                        if (it.url.startsWith("bilimiao://seek/")) {
+                            if (!seekEnabled) {
+                                append(it.text)
+                                return@forEach
+                            }
+                            val seconds = it.url.substringAfter("//seek/").toIntOrNull() ?: 0
+                            withLink(
+                                LinkAnnotation.Clickable(
+                                    tag = "seek",
+                                    styles = TextLinkStyles(
+                                        style = SpanStyle(
+                                            color = primary
+                                        )
+                                    ),
+                                    linkInteractionListener = LinkInteractionListener {
+                                        // 优先用 CompositionLocal（详情页可做视频匹配检查）
+                                        onSeekTime?.invoke(seconds)
+                                            // 再用全局bus（弹幕时间戳等）
+                                            ?: PlayerSeekBus.onSeek?.invoke(seconds * 1000L)
+                                    }
+                                )
+                            ) {
+                                append(it.text)
+                            }
+                        } else {
+                            withLink(
+                                LinkAnnotation.Url(
+                                    it.url,
+                                    TextLinkStyles(
+                                        style = SpanStyle(
+                                            color = primary
+                                        )
                                     )
                                 )
-                            )
-                        ) {
-                            append(it.text)
+                            ) {
+                                append(it.text)
+                            }
                         }
                     }
                 }

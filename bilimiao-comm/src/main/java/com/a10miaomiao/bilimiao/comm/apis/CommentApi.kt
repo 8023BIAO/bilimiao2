@@ -38,11 +38,16 @@ class CommentApi() {
             "mode" to "2",
             "plat" to "2",
             "ps" to "20",
-            "pagination_str" to """{"offset":"${offset ?: ""}"}""",
+            // ★ 必须做 JSON 转义：next_offset 是"套着字符串皮的 JSON Object"，
+            //   里面本来就带双引号（如 {"type":3,"direction":1,...}），直接插值会拼出非法 JSON
+            //   → 第 2 页起请求 400 / 退回第 1 页 → 多页扫描等于不存在（审查发现）
+            "pagination_str" to MiaoJson.toJson(mapOf("offset" to (offset ?: ""))),
         )
         if (seekRpid != null && seekRpid > 0) {
             params.add("seek_rpid" to seekRpid.toString())
         }
+        // 游客模式：显式 notoken，禁止 createParams 注入 access_key/mid（否则服务端仍认成本人）
+        if (asGuest) params.add("notoken" to "1")
         url = BiliApiService.biliApi("x/v2/reply/main", *params.toTypedArray())
         asGuestMode(asGuest, guestBuvid3)
     }
@@ -64,8 +69,7 @@ class CommentApi() {
         asGuest: Boolean = false,
         guestBuvid3: String? = null,
     ) = MiaoHttp.request {
-        url = BiliApiService.biliApi(
-            "x/v2/reply/reply",
+        val params = mutableListOf<Pair<String, String?>>(
             "oid" to oid,
             "type" to type.toString(),
             "root" to root.toString(),
@@ -73,10 +77,22 @@ class CommentApi() {
             "ps" to pageSize.toString(),
             "sort" to "0",
         )
+        // 同上：游客模式必须显式 notoken
+        if (asGuest) params.add("notoken" to "1")
+        url = BiliApiService.biliApi("x/v2/reply/reply", *params.toTypedArray())
         asGuestMode(asGuest, guestBuvid3)
     }
 
-    /** 把"游客模式 + buvid3"塞进请求（游客不能带 app-key/Authorization/登录 Cookie） */
+    /**
+     * 把"游客模式 + buvid3"塞进请求。
+     *
+     * ★★ 关键（P0，2026-09-20 审查发现）：光设 `asGuest`/`isWebApi` **不够**！
+     *    它们只影响 **header 和 Cookie**；而 URL 是 `BiliApiService.biliApi()` →
+     *    `ApiHelper.createParams()` 拼出来的，那里在登录状态下会**往 query 里塞
+     *    `access_key`（登录 Token）+ `mid`**。于是所谓"游客请求"在服务端眼里仍然是**本人**，
+     *    shadow ban 的评论照样返回 → 反诈检测永远判"正常"。
+     *    这里显式带 `notoken=1`：createParams 看到它就跳过 access_key/mid（且 sign 照常算，校验通过）。
+     */
     private fun MiaoHttp.asGuestMode(asGuest: Boolean, guestBuvid3: String?) {
         if (!asGuest) return
         this.asGuest = true

@@ -176,6 +176,9 @@ class VideoDetailViewModel(
 
     private var loadJob: kotlinx.coroutines.Job? = null
 
+    /** 当前在途的 AI 总结请求：切视频/重复点按要取消旧的 */
+    private var aiJob: kotlinx.coroutines.Job? = null
+
     fun changeVideo(id: String) {
         _id = id
         loadData()
@@ -577,7 +580,10 @@ class VideoDetailViewModel(
         // ★ 防连点：点赞是 toggle，但连点两次时第二次读到的还是**没更新的旧状态**，
         //   于是同一个 like=1 被发两遍 —— 既白刷服务端，回来还会把本地状态改乱。
         //   同一 aid 同一时刻只放一个请求进去（请求结束即释放，不影响正常单点）。
-        val likeKey = "video:like:${'$'}{arc.aid}"
+        // ★ 这里以前写的是 "${'$'}{arc.aid}"，${'$'} 转义产出的是**字面量 $**，
+        //   key 恒等于 "video:like:${arc.aid}"（跟 aid 无关）。于是 A 视频的点赞请求还在飞时
+        //   给 B 视频点赞，会被 ClickGuard 当成连点**静默丢掉**（没有任何提示，用户以为点了没反应）。
+        val likeKey = "video:like:${arc.aid}"
         if (!ClickGuard.enter(likeKey)) return@launch
         try {
             val res = BiliApiService.videoAPI
@@ -955,7 +961,12 @@ class VideoDetailViewModel(
         }
     }
 
-    fun requestAiConclusion(silent: Boolean = false) = viewModelScope.launch(Dispatchers.IO) {
+    fun requestAiConclusion(silent: Boolean = false) = run {
+        // ★ 先取消在途的旧请求。自动拉取（loadData 里）和菜单点按可以并发，切视频之后旧视频的
+        //   WBI 签名 + 请求还在飞，回来照样写 _aiConclusionData —— 用户看到的是"B 视频页面
+        //   显示 A 视频的 AI 总结"。
+        aiJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
         if (!userStore.isLogin()) {
             if (!silent) withContext(Dispatchers.Main) { toast("请先登录后使用 AI 总结") }
             return@launch
@@ -1046,7 +1057,15 @@ class VideoDetailViewModel(
                 outline = outlineList.ifEmpty { null }
             )
             withContext(Dispatchers.Main) {
-                _aiConclusionData.value = aiResult
+                // 写回前再确认一次"还是同一个视频、同一个分P"：取消是异步的，万一旧请求刚好
+                // 走到这里，也不能把新视频的总结覆盖掉
+                val nowDetail = detailData.value
+                val nowPages = nowDetail?.getPages()
+                val nowCid = nowDetail?.history?.let { h -> nowPages?.find { it.cid == h.cid }?.cid }
+                    ?: nowPages?.firstOrNull()?.cid
+                if (nowDetail?.getBvid() == bvid && nowCid?.toString() == cid) {
+                    _aiConclusionData.value = aiResult
+                }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -1056,6 +1075,7 @@ class VideoDetailViewModel(
             }
         } finally {
         }
+        }.also { aiJob = it }
     }
 
 }

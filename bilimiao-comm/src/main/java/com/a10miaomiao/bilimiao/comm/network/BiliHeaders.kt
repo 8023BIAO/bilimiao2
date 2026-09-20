@@ -19,7 +19,10 @@ object BiliHeaders {
     const val BiliFawkes = "x-bili-fawkes-req-bin";
     const val BiliMid = "x-bili-mid";
     const val GRPCAcceptEncodingKey = "grpc-accept-encoding";
-    const val GRPCAcceptEncodingValue = "identity,deflate,gzip";
+    // 只声明 identity 和 gzip：响应解析（BiliGRPCHttp.parseResponse）只会解 gzip。
+    // 原来还写着 deflate，服务端真按 deflate 回一次，解析端就会把压缩字节当成 protobuf 解 →
+    // 报一堆莫名其妙的解析异常（而不是"不支持的编码"）。
+    const val GRPCAcceptEncodingValue = "identity,gzip";
     const val GRPCTimeOutKey = "grpc-timeout";
     const val GRPCTimeOutValue = "20100m";
     const val Envoriment = "env";

@@ -76,15 +76,19 @@ fun ReplyListContent(
         Pair(matcher, regexes)
     }
     val allList by viewModel.list.data.collectAsState()
-    val list = if (blockedWords.isEmpty()) allList else allList.filter { reply ->
-        val text = reply.content?.message ?: return@filter true
-        // Aho-Corasick 子串命中
-        commentPlainMatcher?.let { if (it.containsAny(text)) return@filter false }
-        // 正则匹配
-        for (regex in commentRegexList) {
-            if (regex.containsMatchIn(text)) return@filter false
+    // ★ 屏蔽词过滤要 remember：blockedWords 非空时，父级每次重组（下拉刷新、loading/finished
+    //   变化、滚动回收）都会把**全部评论**在主线程上重新过一遍 AC 自动机 + 正则并生成新 List。
+    val list = remember(allList, blockedWords, commentPlainMatcher, commentRegexList) {
+        if (blockedWords.isEmpty()) allList else allList.filter { reply ->
+            val text = reply.content?.message ?: return@filter true
+            // Aho-Corasick 子串命中
+            commentPlainMatcher?.let { if (it.containsAny(text)) return@filter false }
+            // 正则匹配
+            for (regex in commentRegexList) {
+                if (regex.containsMatchIn(text)) return@filter false
+            }
+            true
         }
-        true
     }
     val listLoading by viewModel.list.loading.collectAsState()
     val listFinished by viewModel.list.finished.collectAsState()

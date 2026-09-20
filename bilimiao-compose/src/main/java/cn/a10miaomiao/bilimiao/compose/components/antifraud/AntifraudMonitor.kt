@@ -107,9 +107,11 @@ object AntifraudResultState {
     var last: com.a10miaomiao.bilimiao.comm.antifraud.AntifraudLastResult.Result? by mutableStateOf(null)
         private set
 
+    // @Volatile：ensureLoaded 现在会在 IO 线程调用（见 FlagsSettingPage），读取方在主线程
+    @Volatile
     private var loaded = false
 
-    /** 首次进设置页时从磁盘读一次 */
+    /** 首次进设置页时从磁盘读一次（调用方负责放到 IO 线程：这是磁盘读） */
     fun ensureLoaded(context: android.content.Context) {
         if (loaded) return
         loaded = true

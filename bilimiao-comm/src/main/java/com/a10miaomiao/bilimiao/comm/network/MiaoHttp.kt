@@ -140,9 +140,18 @@ class MiaoHttp(var url: String? = null) {
             }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isCancelled) return
                     continuation.resumeWithException(e)
                 }
+
                 override fun onResponse(call: Call, response: Response) {
+                    // ★ 取消和"响应到达"是竞态：continuation 取消后再 resume 是空操作，
+                    //   但 response 的 body 已经打开 —— 不关就是连接泄漏（OkHttp 连接池被占满，
+                    //   表现为"切视频/退页面几次之后所有请求都超时"）
+                    if (continuation.isCancelled) {
+                        response.close()
+                        return
+                    }
                     continuation.resume(response)
                 }
             })

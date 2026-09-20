@@ -31,14 +31,24 @@ class CookieStore private constructor(context: Context) : CookieJar {
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         if (cookies.isEmpty()) return
-        for (cookie in cookies) {
-            val key = cookie.domain
-            val list = (store[key] ?: mutableListOf()).toMutableList()
+        for (cookie in cookies) upsertInternal(cookie)
+        persistToDisk()
+    }
+
+    /**
+     * 读-改-写必须原子。
+     *
+     * 原来是 `store[key] ?: mutableListOf()` 取出来复制、改完再 put 回去：两个线程（比如
+     * 并发的两个请求同时回 Set-Cookie）会各自读到同一份旧列表，后写的把先写的覆盖掉，
+     * 表现为"cookie 偶尔丢一个"。ConcurrentHashMap.compute 把整段更新锁在同一个桶上。
+     */
+    private fun upsertInternal(cookie: Cookie) {
+        store.compute(cookie.domain) { _, existing ->
+            val list = existing?.toMutableList() ?: mutableListOf()
             list.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
             list.add(cookie)
-            store[key] = list
+            list
         }
-        persistToDisk()
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
@@ -69,23 +79,13 @@ class CookieStore private constructor(context: Context) : CookieJar {
     }
 
     fun upsert(cookie: Cookie) {
-        val key = cookie.domain
-        val list = (store[key] ?: mutableListOf()).toMutableList()
-        list.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
-        list.add(cookie)
-        store[key] = list
+        upsertInternal(cookie)
         persistToDisk()
     }
 
     fun upsertAll(cookies: List<Cookie>) {
         if (cookies.isEmpty()) return
-        for (cookie in cookies) {
-            val key = cookie.domain
-            val list = (store[key] ?: mutableListOf()).toMutableList()
-            list.removeAll { it.name == cookie.name && it.domain == cookie.domain && it.path == cookie.path }
-            list.add(cookie)
-            store[key] = list
-        }
+        for (cookie in cookies) upsertInternal(cookie)
         persistToDisk()
     }
 
@@ -127,16 +127,17 @@ class CookieStore private constructor(context: Context) : CookieJar {
         //   一旦回写，游客模式就变回"已登录"了（用户实测担心的问题）。
         //   身份 cookie 的正路是登录时由 BilimiaoCommApp.setCookie() 写入，不靠这里补。
         val names = listOf("buvid3", "buvid4", "b_nut", "bili_ticket")
-        val sb = StringBuilder()
+        var wrote = false
+        // 逐个 setCookie：以前把 4 个拼成一条 "a=1; b=2" 整体写入，只要其中一个 value 里带了
+        // 分号/逗号（bili_ticket 是 JWT，历史上出现过含特殊字符的版本），WebView 会把整条判为
+        // 非法而**全部丢掉**，表现就是"指纹 cookie 莫名没了 → 风控 -352"。分开写互不牵连。
         for (name in names) {
             val value = getCookieValue(name) ?: continue
-            if (sb.isNotEmpty()) sb.append("; ")
-            sb.append("$name=$value")
+            if (value.isEmpty()) continue
+            cookieManager.setCookie(".bilibili.com", "$name=$value")
+            wrote = true
         }
-        if (sb.isNotEmpty()) {
-            cookieManager.setCookie(".bilibili.com", sb.toString())
-            cookieManager.flush()
-        }
+        if (wrote) cookieManager.flush()
     }
 
     private fun persistToDisk(sync: Boolean = false) {

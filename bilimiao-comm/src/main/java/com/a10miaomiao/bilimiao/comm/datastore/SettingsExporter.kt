@@ -189,7 +189,9 @@ object SettingsExporter {
         if (rootObj == null || looksLikeAuthExport || (!isEmptyExport && !looksLikeSettingsExport)) {
             ErrorLogCollector.logError(
                 error = "设置导入被拒绝: 不是设置导出文件",
-                stackTrace = cleanJson.take(200)
+                // ★ 只记结构，不记内容：身份导出文件的前 200 字符里就有 SESSDATA/bili_jct，
+                //   而错误日志页能"复制全部"并外发（审查发现）
+                stackTrace = "keys=[${rootObj?.keys?.joinToString(",")}] len=${cleanJson.length}"
             )
             throw Exception("这不是设置导出文件，请选择用「导出设置」生成的文件")
         }
@@ -198,7 +200,9 @@ object SettingsExporter {
             // 把屏蔽词/UP主/标签库全部 deleteAll 之后又没内容可插 → 用户数据永久丢失
             ErrorLogCollector.logError(
                 error = "设置导入: 空导出文件",
-                stackTrace = cleanJson.take(200)
+                // ★ 只记结构，不记内容：身份导出文件的前 200 字符里就有 SESSDATA/bili_jct，
+                //   而错误日志页能"复制全部"并外发（审查发现）
+                stackTrace = "keys=[${rootObj?.keys?.joinToString(",")}] len=${cleanJson.length}"
             )
             return 0
         }
@@ -207,7 +211,7 @@ object SettingsExporter {
         } catch (e: Exception) {
             ErrorLogCollector.logError(
                 error = "设置导入失败: JSON解析错误",
-                stackTrace = e.toString() + "\nJSON前100字符: " + cleanJson.take(100)
+                stackTrace = e.toString() + "\nJSON长度: ${cleanJson.length}（内容已脱敏，不记原文）"
             )
             throw e
         }

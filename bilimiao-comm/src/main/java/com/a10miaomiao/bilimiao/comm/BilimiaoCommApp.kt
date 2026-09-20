@@ -133,8 +133,27 @@ class BilimiaoCommApp(
     }
 
 
+    /**
+     * 设置 buvid（**导入身份信息时必须走这里**）。
+     *
+     * 为什么：`getBilibiliBuvid()` 有内存缓存，而 auth 文件的 AES 密钥是用 buvid 派生的。
+     * 导入时若只写 SharedPreferences、缓存不更新，就会"用旧 buvid 的密钥加密 + 重启后用新 buvid 解密"
+     * → 解密失败 → **静默登出**，且原 auth 文件已被覆盖、登不回去（审查发现的 S2）。
+     */
+    fun setBilibiliBuvid(buvid: String) {
+        _bilibiliBuvid = buvid
+        app.getSharedPreferences(APP_NAME, Context.MODE_PRIVATE)
+            .edit().putString("buvid", buvid).apply()
+    }
+
     fun getBilibiliBuvid(): String {
         if (_bilibiliBuvid.isNotBlank()) {
+            // 兜底：SharedPreferences 里的值被外部改过（导入）时以文件为准
+            val spBuvid = app.getSharedPreferences(APP_NAME, Context.MODE_PRIVATE)
+                .getString("buvid", "")!!
+            if (spBuvid.isNotBlank() && spBuvid != _bilibiliBuvid) {
+                _bilibiliBuvid = spBuvid
+            }
             return _bilibiliBuvid
         }
         val sp = app.getSharedPreferences(APP_NAME, Context.MODE_PRIVATE)

@@ -51,7 +51,24 @@ internal class MutableDataStorePreferences(
         if (map[key] == value) {
             return
         }
-        map[key] = value as Any
+        if (value == null) {
+            // ★ 删除某个 key（value == null）时原来是 `map[key] = value as Any`，
+            //   而 `null as Any` 会直接抛 NullPointerException；DataStore 侧也要一起删，
+            //   否则这次"删除"在下次读盘后又回来了。旧值的类型从本地 map 里取。
+            val old = map.remove(key)
+            preferences?.let {
+                when (old) {
+                    is Boolean -> it.remove(booleanPreferencesKey(key))
+                    is Int -> it.remove(intPreferencesKey(key))
+                    is Long -> it.remove(longPreferencesKey(key))
+                    is Float -> it.remove(floatPreferencesKey(key))
+                    is String -> it.remove(stringPreferencesKey(key))
+                    is Set<*> -> it.remove(stringSetPreferencesKey(key))
+                }
+            }
+            return
+        }
+        map[key] = value
         preferences?.let {
             when (value) {
                 is Boolean -> it[booleanPreferencesKey(key)] = value
@@ -67,6 +84,8 @@ internal class MutableDataStorePreferences(
     }
 
     override fun clear() {
+        // 本地 map 也要清：只清 DataStore 的话，同一次会话里 asMap()/get() 还能读到旧值
+        map.clear()
         preferences?.clear()
     }
 }

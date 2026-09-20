@@ -86,11 +86,15 @@ import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.UserStore
+import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.toast
 import com.kongzue.dialogx.dialogs.TipDialog
 import com.kongzue.dialogx.dialogs.WaitDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -134,8 +138,11 @@ private class ReplyDetailContentViewModel(
     val upMid: StateFlow<Long> get() = _upMid
     private var _cursor: CursorReply? = null
 
+    /** 当前在途的列表请求：刷新/切排序时先把它取消掉 */
+    private var loadJob: Job? = null
+
     init {
-        loadData()
+        loadJob = loadData()
     }
 
     private fun addNewReply(reply: VideoCommentReplyInfo) {
@@ -175,29 +182,47 @@ private class ReplyDetailContentViewModel(
                 list.finished.value = true
             }
         } catch (e: Exception) {
+            // ★ 取消异常必须原样抛出：以前这里把 JobCancellationException 当成"加载失败"写进 fail，
+            //   列表会显示一个莫名其妙的失败提示
+            if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
             if (e !is java.io.IOException || (e.message?.contains("gRPC") != true)) {
                 list.fail.value = e.message ?: e.toString()
             }
         } finally {
-            list.loading.value = false
-            _isRefreshing.value = false
+            // 被取消的旧请求不要复位标志位，否则会把新请求的 loading 状态清掉
+            if (isActive) {
+                list.loading.value = false
+                _isRefreshing.value = false
+            }
         }
     }
 
     fun loadMore() {
         if (!this.list.finished.value && !this.list.loading.value) {
-            loadData()
+            loadJob = loadData()
         }
     }
 
     fun refreshList(
         refreshing: Boolean = true,
     ) {
+        // ★ 先取消在途请求：否则切排序/下拉刷新会和上一次请求并发，旧响应回来照样写 _cursor/finished
+        loadJob?.cancel()
         list.reset()
         _cursor = null
         _isRefreshing.value = refreshing
-        loadData()
+        loadJob = loadData()
+    }
+
+    /** 按 rpid 点赞：不要用 LazyColumn 传下来的 index（列表刷新/删除后会错位，轻则点错评论、重则越界） */
+    fun likeReply(reply: ReplyInfo) {
+        val index = list.data.value.indexOfFirst { it.id == reply.id }
+        if (index == -1) {
+            toast("这条评论已经不在列表里了")
+            return
+        }
+        likeReplyAt(index)
     }
 
     fun likeReplyAt(index: Int) = viewModelScope.launch(Dispatchers.IO) {
@@ -205,12 +230,19 @@ private class ReplyDetailContentViewModel(
             toast("请先登录")
             return@launch
         }
+        // 取的时候再判一次越界：等待期间列表可能已经被刷新/删除过
+        val item = list.data.value.getOrNull(index) ?: return@launch
+        // ★ 防连点：连点两次时第二次读到的还是没更新的旧 action，会把同一个点赞请求发两遍。
+        //   同一楼层同一时刻只放一个请求进去（请求结束即释放）。
+        val likeKey = "reply-detail:like:${item.id}"
+        if (!ClickGuard.enter(likeKey)) return@launch
         try {
-            val item = list.data.value[index]
             val isLike = item.replyControl?.action == 1L
             val newAction = if (isLike) 0 else 1
             val res = BiliApiService.commentApi
-                .action(1, item.oid.toString(), item.id.toString(), newAction)
+                // ★ 原来写死 1（视频评论区）。动态(17)/专栏(12)等评论区点赞必然失败，
+                //   这里必须用当前评论区类型（和上面 DetailListReq 用的是同一个值）
+                .action(currentReply.type.toInt(), item.oid.toString(), item.id.toString(), newAction)
                 .awaitCall()
                 .json<MessageInfo>()
             if (res.isSuccess) {
@@ -221,15 +253,22 @@ private class ReplyDetailContentViewModel(
                     ),
                     like = likeNum,
                 )
+                // 写回时也按 id 找位置，不按旧 index
                 val newList = list.data.value.toMutableList()
-                newList[index] = newItem
-                list.data.value = newList
+                val pos = newList.indexOfFirst { it.id == newItem.id }
+                if (pos != -1) {
+                    newList[pos] = newItem
+                    list.data.value = newList
+                }
             } else {
                 toast(res.message)
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
             toast("加载失败:" + (e.message ?: e.toString()))
+        } finally {
+            ClickGuard.leave(likeKey)
         }
     }
 
@@ -293,6 +332,18 @@ private class ReplyDetailContentViewModel(
                 }
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) {
+                // ★ 页面销毁/退出时协程被取消，必须把"正在删除"全屏遮罩关掉：
+                //   MessageDialogState 是 Fragment 级单例、弹窗挂在 NavHost 之外，遮罩残留会盖住
+                //   整个 App（onDismissRequest 空实现 + 全屏 Spacer 吞点击）→ 用户只能杀进程。
+                //   NonCancellable：scope 已在取消中，普通 withContext 会立刻再抛异常。
+                withContext(NonCancellable) {
+                    withContext(Dispatchers.Main) {
+                        runCatching { messageDialog.close() }
+                    }
+                }
+                throw e
+            }
             e.printStackTrace()
             withContext(Dispatchers.Main) {
                 messageDialog.alert(
@@ -572,7 +623,7 @@ fun ReplyDetailContent(
                             viewModel.toUserPage(replyItem.mid.toString())
                         },
                         onLikeClick = {
-                            viewModel.likeReplyAt(it)
+                            viewModel.likeReply(replyItem)
                         },
                         onReplyClick = {
                             viewModel.openReplyDialog(replyItem)

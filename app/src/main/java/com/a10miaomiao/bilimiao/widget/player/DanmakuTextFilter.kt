@@ -11,10 +11,22 @@ import master.flame.danmaku.danmaku.model.android.DanmakuContext
  */
 class DanmakuTextFilter : DanmakuFilters.BaseDanmakuFilter<Set<String>>() {
 
-    // Aho-Corasick: 纯文本关键词一次扫遍
-    private var plainMatcher: DanmakuAcMatcher? = null
-    // 缓存的正则列表
-    private val regexPatterns = mutableListOf<Regex>()
+    /**
+     * 不可变快照：plainMatcher / regexPatterns 一旦建好就不再改动。
+     *
+     * 为什么必须这样：filter() 是在 **DFM 的缓存构建线程**上被调用的，而 setData()/reset()
+     * 由主线程调用（每次 DataStore 发射、每次全屏切换都会走一遍）。原来是对同一个 ArrayList
+     * 做 clear()/add()，后台线程正在 for 遍历时主线程 clear → ConcurrentModificationException；
+     * 而 DFM 里那段遍历没有 try/catch，异常抛到缓存线程上没人接 → **整个进程崩溃**。
+     * 换成"整对象替换 + @Volatile 发布"后，读线程只会看到某个完整快照。
+     */
+    private class Snapshot(
+        val plainMatcher: DanmakuAcMatcher?,
+        val regexPatterns: List<Regex>,
+    )
+
+    @Volatile
+    private var snapshot: Snapshot? = null
 
     override fun filter(
         danmaku: BaseDanmaku,
@@ -24,19 +36,17 @@ class DanmakuTextFilter : DanmakuFilters.BaseDanmakuFilter<Set<String>>() {
         fromCachingTask: Boolean,
         config: DanmakuContext?
     ): Boolean {
-        if (plainMatcher == null && regexPatterns.isEmpty()) return false
+        val snap = snapshot ?: return false
         val text = danmaku.text?.toString() ?: return false
 
         // 1. Aho-Corasick 纯文本匹配 O(文本长度)
-        plainMatcher?.let { matcher ->
-            if (matcher.containsAny(text)) {
-                danmaku.mFilterParam = danmaku.mFilterParam or (1 shl 20)
-                return true
-            }
+        if (snap.plainMatcher?.containsAny(text) == true) {
+            danmaku.mFilterParam = danmaku.mFilterParam or (1 shl 20)
+            return true
         }
 
         // 2. 缓存的正则匹配
-        for (pattern in regexPatterns) {
+        for (pattern in snap.regexPatterns) {
             if (pattern.containsMatchIn(text)) {
                 danmaku.mFilterParam = danmaku.mFilterParam or (1 shl 20)
                 return true
@@ -47,34 +57,36 @@ class DanmakuTextFilter : DanmakuFilters.BaseDanmakuFilter<Set<String>>() {
     }
 
     override fun setData(data: Set<String>?) {
-        reset()
-        if (data != null && data.isNotEmpty()) {
-            val plainWords = mutableListOf<String>()
-            for (item in data) {
-                if (item.startsWith("/") && item.endsWith("/") && item.length > 2) {
-                    val pattern = item.substring(1, item.length - 1)
-                    try {
-                        regexPatterns.add(Regex(pattern))
-                    } catch (_: Exception) {
-                        plainWords.add(item)
-                    }
-                } else if (item.isNotEmpty()) {
-                    plainWords.add(item)
-                }
-            }
-            if (plainWords.isNotEmpty()) {
-                plainMatcher = DanmakuAcMatcher(plainWords)
-            }
-        }
+        snapshot = buildSnapshot(data)
     }
 
     override fun reset() {
-        plainMatcher = null
-        regexPatterns.clear()
+        snapshot = null
     }
 
     override fun clear() {
         reset()
+    }
+
+    private fun buildSnapshot(data: Set<String>?): Snapshot? {
+        if (data.isNullOrEmpty()) return null
+        val plainWords = mutableListOf<String>()
+        val regexes = mutableListOf<Regex>()
+        for (item in data) {
+            if (item.startsWith("/") && item.endsWith("/") && item.length > 2) {
+                val pattern = item.substring(1, item.length - 1)
+                try {
+                    regexes.add(Regex(pattern))
+                } catch (_: Exception) {
+                    plainWords.add(item)
+                }
+            } else if (item.isNotEmpty()) {
+                plainWords.add(item)
+            }
+        }
+        val matcher = if (plainWords.isNotEmpty()) DanmakuAcMatcher(plainWords) else null
+        if (matcher == null && regexes.isEmpty()) return null
+        return Snapshot(matcher, regexes)
     }
 }
 

@@ -763,7 +763,8 @@ fun VideoDownloadDialog(
                             }
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(state.list.size, { it }) { index ->
+                                // key 用 cid，不要用 index：列表内容变化时按位置复用会串状态
+                                items(state.list.size, { state.list[it].cid }) { index ->
                                     val item = state.list[index]
                                     val isEnabled = !state.downloadedSet.contains(item.cid)
                                     val isChecked = if (isEnabled) {

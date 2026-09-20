@@ -227,7 +227,9 @@ private fun HomeSettingPageContent(
                     Text("每行卡片数")
                 },
                 valueRange = 0..5,
-                valueSteps = 5,
+                // steps = 两端点之间的档位数。0..5 共 7 个整数，中间还有 4 个 → 必须写 4。
+                // 原来写 5 会得到 6 档小数，再被取整压回整数，导致有档位取不到/重复（审查发现）
+                valueSteps = 4,
                 defaultValue = 0,
                 valueText = {
                     Text(if (it == 0) "自适应" else "${it}列")

@@ -34,13 +34,15 @@ class AppCrashHandler private constructor(
     companion object {
         @Volatile
         private var instance: AppCrashHandler? = null
-        fun getInstance(context: Context): AppCrashHandler? {
-            if (instance == null) {
-                synchronized(AppCrashHandler::class) {
-                    instance = AppCrashHandler(context)
-                }
+
+        @JvmStatic
+        fun getInstance(context: Context): AppCrashHandler {
+            // ★ 原实现的双重检查是坏的：synchronized 块里没有再判一次 null，
+            //   两个线程同时进来会各建一个实例，并且都会把自己设成默认处理器（后设的覆盖先设的）。
+            //   同时只用 applicationContext，避免持有 Activity 造成泄漏。
+            return instance ?: synchronized(AppCrashHandler::class) {
+                instance ?: AppCrashHandler(context.applicationContext).also { instance = it }
             }
-            return instance
         }
     }
 

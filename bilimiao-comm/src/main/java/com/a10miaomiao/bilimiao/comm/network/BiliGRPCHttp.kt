@@ -174,15 +174,23 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    // 已经取消（页面退出/切视频）时继续 resume 没有意义
+                    if (continuation.isCancelled) return
                     continuation.resumeWithException(e)
                 }
                 override fun onResponse(call: Call, response: Response) {
+                    // ★ 取消与响应到达是竞态：continuation 已取消时 resume() 是空操作，
+                    //   但 response 的 body 已经被打开，不关就是连接+字节流泄漏（连接池被占满）
+                    if (continuation.isCancelled) {
+                        response.close()
+                        return
+                    }
                     try {
                         val respMessage = parseResponse(response)
                         continuation.resume(respMessage)
                     } catch (e: Exception) {
                         response.close()
-                        continuation.resumeWithException(e)
+                        if (!continuation.isCancelled) continuation.resumeWithException(e)
                     }
                 }
             })

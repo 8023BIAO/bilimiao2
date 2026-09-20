@@ -90,7 +90,13 @@ object CommentAntifraud {
         val waitMs = if (skipWait) 0L else if (hasPictures) WAIT_MS + WAIT_PIC_MS else WAIT_MS
         AntifraudDiag.start("评论反诈检测 oid=$oid type=$type rpid=$rpid root=$root")
         AntifraudDiag.step("等待 ${waitMs}ms（带图=$hasPictures）后开始")
-        delay(waitMs)
+        try {
+            delay(waitMs)
+        } catch (e: Exception) {
+            // 等待期间被取消：必须复位请求追踪，否则之后所有 reply 请求都会往日志里灌
+            AntifraudDiag.resetTrace()
+            throw e
+        }
         return try {
             val r = doCheck(oid, type, rpid, root, sentTimeSec)
             AntifraudDiag.finish("${r.state}｜${r.detail}｜code=${r.code} ${r.rawMessage}", mirror = mirrorConclusion)
@@ -142,6 +148,7 @@ object CommentAntifraud {
         var attempt = 1
         var elapsed = 0L
         var last = first
+        var failed = 0
         // 首查已经等过 5/20 秒了，复查从这会儿开始计时
         AntifraudDiag.info("进入自动复查：每 ${RECHECK_INTERVAL_MS / 1000} 秒一次，共 ${recheckTotalMs / 60000} 分钟")
         while (elapsed < recheckTotalMs) {
@@ -153,9 +160,15 @@ object CommentAntifraud {
                 doCheck(oid, type, rpid, root, sentTimeSec)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                failed++
                 AntifraudDiag.step("复查抛异常：${e.javaClass.simpleName} ${e.message ?: ""}")
                 AntifraudDiag.finish("FAILED｜复查异常", mirror = false)
-                onAttempt?.invoke(attempt, plannedAttempts(true, recheckTotalMs), last)
+                // ★ 以前这里只 continue：失败的那几次不计数，最后还会写"共复查 N 次都是正常"——
+                //   一次都没成功却报"正常"（审查发现）。现在如实回调 FAILED 并计数。
+                onAttempt?.invoke(
+                    attempt, plannedAttempts(true, recheckTotalMs),
+                    AntifraudResult(AntifraudState.FAILED, "第 $attempt 次复查失败：${e.javaClass.simpleName}")
+                )
                 continue
             }
             AntifraudDiag.finish("${r.state}｜${r.detail}", mirror = false)
@@ -172,9 +185,19 @@ object CommentAntifraud {
             }
             last = r
         }
-        // 全程正常：把"查了几次、盯了多久"写进结论，别让人以为只查了一下
+        // 全程跑完：按"成功了几次"给结论，别把失败也算成"正常"
+        val okCount = attempt - failed
+        if (okCount <= 0) {
+            val r = AntifraudResult(
+                AntifraudState.FAILED,
+                "复查 $attempt 次全部失败，没能确认这条评论的状态（${last.detail}）",
+            )
+            AntifraudDiag.finish("FAILED｜${r.detail}")
+            return r
+        }
         val finalNormal = last.copy(
-            detail = last.detail + "\n（共复查 $attempt 次、持续 ${recheckTotalMs / 60000} 分钟都是正常）"
+            detail = last.detail +
+                "\n（共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟都正常）"
         )
         AntifraudDiag.finish("${finalNormal.state}｜${finalNormal.detail}")
         return finalNormal
@@ -219,6 +242,12 @@ object CommentAntifraud {
             if (root == 0L) {
                 val cross = replyPage(oid, type, rpid, asGuest = true, buvid = buvid)
                 AntifraudDiag.step("①b 交叉验证：游客取该评论回复页 code=${cross.code} ${cross.message}")
+                if (cross.code != CODE_OK &&
+                    cross.code != CODE_COMMENT_DELETED && cross.code != CODE_COMMENT_NOT_EXIST
+                ) {
+                    // -352 风控 / -412 等：交叉验证拿不到结论，如实记一笔（别静默当成"没问题"）
+                    AntifraudDiag.info("①b 交叉验证没结论（code=${cross.code} ${cross.message}）→ 维持列表结论")
+                }
                 if (cross.code == CODE_COMMENT_DELETED || cross.code == CODE_COMMENT_NOT_EXIST) {
                     return AntifraudResult(
                         AntifraudState.SHADOW_BAN,
@@ -324,8 +353,13 @@ object CommentAntifraud {
                 AntifraudDiag.info("★ 游客列表里找到了 rpid=$rpid（ctime=${it.ctime}）")
                 return it
             }
-            // 已经翻到比发送时间更早的评论 → 我这条不在时间序里
-            if (list.any { it.ctime in 1 until (sentTimeSec - CTIME_EPS) }) {
+            // 已经翻到比发送时间更早的评论 → 我这条不在时间序里。
+            // ★ 两个坑：① 只看 data.replies——置顶评论(top_replies)的 ctime 往往很旧，
+            //   混进来会让有置顶的视频第 1 页就误判"翻过头了"；
+            //   ② sentTimeSec<=0 表示"不知道发送时间"（手动复检那条路），此时不能早停。
+            if (sentTimeSec > 0L &&
+                (data?.replies ?: emptyList()).any { it.ctime in 1 until (sentTimeSec - CTIME_EPS) }
+            ) {
                 AntifraudDiag.info("翻到比发送时间($sentTimeSec)更早的评论 → 停止翻页（游客列表里没有这条）")
                 return null
             }
@@ -428,7 +462,9 @@ object CommentAntifraud {
         // 1) 现要一个：x/frontend/finger/spi（公开接口，返回 b_3 就是 buvid3）
         runCatching {
             val res = MiaoHttp.request {
-                url = BiliApiService.biliApi("x/frontend/finger/spi")
+                // ★ notoken：否则 createParams 会往 query 里塞 access_key/mid，
+                //   取回来的 b_3 就可能又是"账号绑定"的 buvid3（P0 审查结论）
+                url = BiliApiService.biliApi("x/frontend/finger/spi", "notoken" to "1")
                 isWebApi = true
                 asGuest = true
             }.awaitCall().json<ResponseData<Map<String, String>>>(isLog = false)

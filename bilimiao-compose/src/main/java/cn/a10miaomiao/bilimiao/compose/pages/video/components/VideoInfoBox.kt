@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -46,8 +47,9 @@ import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import cn.a10miaomiao.bilimiao.compose.common.foundation.LocalOnSeekTime
 import androidx.compose.foundation.clickable
 
-@Composable
-private fun String.toLinkUrl(): LinkAnnotation.Url {
+// 去掉 @Composable：这里只有纯字符串拼接 + 颜色取值，颜色改由参数传入，
+// 这样它才能在 remember {} 里被调用（remember 的 lambda 不是 @Composable 上下文）
+private fun String.toLinkUrl(primary: Color): LinkAnnotation.Url {
     val url = if (startsWith("http")) {
         this
     } else if (startsWith("av") || startsWith("AV")){
@@ -67,7 +69,7 @@ private fun String.toLinkUrl(): LinkAnnotation.Url {
         url,
         TextLinkStyles(
             style = SpanStyle(
-                color = MaterialTheme.colorScheme.primary
+                color = primary
             )
         )
     )
@@ -88,16 +90,21 @@ private val INFO_TEXT_REGEX = Regex(
 private fun parseText(
     text: String
 ): AnnotatedString {
-    val regex = INFO_TEXT_REGEX
-    return buildAnnotatedString {
-        append(text) // 添加原始文本
-        // 为每个匹配的URL添加样式
-        regex.findAll(text).forEach { result ->
-            addLink(
-                result.value.toLinkUrl(),
-                start = result.range.first,
-                end = result.range.last + 1,
-            )
+    // ★ 正则只编译一次还不够：扫描 + 建 AnnotatedString 本身也不便宜，而这个组件在 grid item 里、
+    //   参数不稳定，父级任何重组（DataStore 三个 flow、播放器状态）都会重跑一遍。
+    val primary = MaterialTheme.colorScheme.primary
+    return remember(text, primary) {
+        val regex = INFO_TEXT_REGEX
+        buildAnnotatedString {
+            append(text) // 添加原始文本
+            // 为每个匹配的URL添加样式
+            regex.findAll(text).forEach { result ->
+                addLink(
+                    result.value.toLinkUrl(primary),
+                    start = result.range.first,
+                    end = result.range.last + 1,
+                )
+            }
         }
     }
 }

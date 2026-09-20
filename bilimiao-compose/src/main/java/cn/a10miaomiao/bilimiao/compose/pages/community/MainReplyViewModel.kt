@@ -33,12 +33,15 @@ import com.a10miaomiao.bilimiao.comm.toast
 import com.kongzue.dialogx.dialogs.TipDialog
 import com.kongzue.dialogx.dialogs.WaitDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.instance
@@ -84,8 +87,11 @@ class MainReplyViewModel(
     private val _replyCount = MutableStateFlow(0L)
     val replyCount: StateFlow<Long> get() = _replyCount
 
+    /** 当前在途的列表请求：刷新/切排序时先把它取消掉 */
+    private var loadJob: Job? = null
+
     init {
-        loadData()
+        loadJob = loadData()
     }
 
     private fun addNewReply(reply: VideoCommentReplyInfo) {
@@ -155,24 +161,31 @@ class MainReplyViewModel(
                 list.fail.value = e.message ?: e.toString()
             }
         } finally {
-            list.loading.value = false
-            _isRefreshing.value = false
+            // 被取消的旧请求不要复位标志位：否则会把新请求刚设上的 loading 清掉，
+            // 用户又能触发一次 loadMore（并发叠加）
+            if (isActive) {
+                list.loading.value = false
+                _isRefreshing.value = false
+            }
         }
     }
 
     fun loadMore() {
         if (!this.list.finished.value && !this.list.loading.value) {
-            loadData()
+            loadJob = loadData()
         }
     }
 
     fun refreshList(
         refreshing: Boolean = true,
     ) {
+        // ★ 先取消在途请求。以前不取消：切排序/下拉刷新会和上一次请求并发，旧响应回来照样写
+        //   _cursor / list.data / finished —— 表现是"排序混杂""下面没有了提前出现"。
+        loadJob?.cancel()
         list.reset()
         _cursor = null
         _isRefreshing.value = refreshing
-        loadData()
+        loadJob = loadData()
     }
 
     fun likeReply(reply: ReplyInfo) {
@@ -328,7 +341,20 @@ class MainReplyViewModel(
                 }
             }
         } catch (e: Exception) {
-            if (e is CancellationException) throw e
+            if (e is CancellationException) {
+                // ★ 页面被销毁（返回/退出）时协程会被取消，走到这里。如果不关掉"正在删除"这个
+                //   全屏遮罩：MessageDialogState 是 Fragment 级单例、MessageDialog 挂在 NavHost 之外，
+                //   遮罩会一直盖在整个 App 上，而它的 onDismissRequest 是空实现、全屏 Spacer 又会吞掉
+                //   所有点击 —— 用户看到的就是"整个 App 卡死，只能杀进程"。
+                //   NonCancellable：此时 scope 已在取消中，普通 withContext 会立刻再抛异常，
+                //   下面这行根本执行不到。
+                withContext(NonCancellable) {
+                    withContext(Dispatchers.Main) {
+                        runCatching { messageDialog.close() }
+                    }
+                }
+                throw e
+            }
             e.printStackTrace()
             withContext(Dispatchers.Main) {
                 messageDialog.alert(

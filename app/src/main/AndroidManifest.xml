@@ -17,6 +17,8 @@
     <application
         android:name=".Bilimiao"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:allowNativeHeapPointerTagging="false"
         android:icon="@mipmap/ic_bilimiao_33"
         android:label="@string/app_name"

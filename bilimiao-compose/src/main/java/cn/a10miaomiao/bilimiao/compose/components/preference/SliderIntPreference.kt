@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import me.zhanghai.compose.preference.SliderPreference
 import me.zhanghai.compose.preference.rememberPreferenceState
+import kotlin.math.roundToInt
 
 inline fun LazyListScope.sliderIntPreference(
     key: String,
@@ -67,9 +68,11 @@ fun SliderIntPreference(
     var sliderValue by sliderState
     SliderPreference(
         value = value.toFloat(),
-        onValueChange = { value = it.toInt() },
+        // roundToInt 而不是 toInt：M3 滑块的值是 lerp 算出来的，可能得到 15.999999，
+        // 截断会变成 15 → 第 16/22 档这种位置永远取不到（审查发现）
+        onValueChange = { value = it.roundToInt() },
         sliderValue = sliderValue.toFloat(),
-        onSliderValueChange = { sliderValue = it.toInt() },
+        onSliderValueChange = { sliderValue = it.roundToInt() },
         title = title,
         modifier = modifier,
         valueRange = valueRange.start.toFloat()..valueRange.endInclusive.toFloat(),

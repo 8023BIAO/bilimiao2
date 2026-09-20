@@ -1265,8 +1265,11 @@ private val loadMutex = Mutex()
                         content = it.content,
                     )
                 }
-                subtitleCache.put(subtitleUrl, list)
                 withContext(Dispatchers.Main) {
+                    // ★ 缓存写入也放主线程：android.util.LruCache 内部是普通 LinkedHashMap，
+                    //   不是线程安全的；get 在主线程（选字幕时），put 原来在 IO 线程 →
+                    //   并发读写可能读到坏条目。放一起就只有一个线程碰它。
+                    subtitleCache.put(subtitleUrl, list)
                     // 过期结果直接丢：期间用户可能已经关了字幕、换了轨道、甚至换了视频
                     if (token != subtitleRequestToken) return@withContext
                     if (player?.currentSubtitleSource?.subtitle_url != subtitleUrl) return@withContext

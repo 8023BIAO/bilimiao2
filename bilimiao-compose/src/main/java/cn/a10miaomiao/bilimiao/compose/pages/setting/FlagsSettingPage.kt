@@ -54,10 +54,14 @@ import com.a10miaomiao.bilimiao.comm.utils.WbiSigner
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.intOrNull
@@ -74,6 +78,16 @@ import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
 import java.io.BufferedReader
 import java.io.InputStreamReader
+
+// 从 Compose 的 context 往上找宿主的 LifecycleOwner（可能被 ContextWrapper 包着，直接 as 会失败）。
+// 注意返回的是 LifecycleOwner 而不是 Activity：Activity 本身没有 lifecycle 属性（那是 ComponentActivity 的）
+private fun Context.findHostLifecycleOwner(): androidx.lifecycle.LifecycleOwner? {
+    var ctx: Context? = this
+    while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) {
+        ctx = ctx.baseContext
+    }
+    return ctx as? androidx.lifecycle.LifecycleOwner
+}
 
 @Serializable
 class FlagsSettingPage : ComposePage() {
@@ -266,10 +280,13 @@ private fun FlagsSettingPageContent(
                         ))
                     }
 
-                    // 保存设备指纹到 SharedPreferences
+                    // 保存设备指纹：必须走 setBilibiliBuvid（同步失效内存缓存），
+                    // 否则 auth 文件会用"旧 buvid 的密钥"加密 → 重启后解不开 → 静默登出（审查发现的 S2）
                     if (buvid.isNotBlank()) {
-                        context.getSharedPreferences(BilimiaoCommApp.APP_NAME, Context.MODE_PRIVATE)
-                            .edit().putString("buvid", buvid).apply()
+                        if (buvid.length < 12) {
+                            throw Exception("buvid 长度不足（至少 12 位），导入会解不开登录信息")
+                        }
+                        BilimiaoCommApp.commApp.setBilibiliBuvid(buvid)
                     }
 
                     val cookies = cookieStr.split(";").map { pair ->
@@ -398,14 +415,35 @@ private fun FlagsSettingPageContent(
                     .getString("login_info_backup", null) != null
             }
         }
+        // 上次检测结果：从磁盘读一次（IO 线程；不能放在 LazyColumn 的 content 里，见下面的说明）
+        LaunchedEffect(Unit) {
+            withContext(Dispatchers.IO) { AntifraudResultState.ensureLoaded(context) }
+        }
         // 正在监控的评论（设置页里实时显示进度）
         val monitors = AntifraudMonitor.sessions
-        // 每秒更新一次"当前时间"，进度条与"已盯多久"才会动（页面不可见时不会跑）
+        // 每秒更新一次"当前时间"，进度条与"已盯多久"才会动。
+        // ★ 以前是裸的 while(true)：注释里写"页面不可见时不会跑"并不成立 —— 它只在**离开组合**
+        //   时才取消，App 退到后台/息屏时组合仍然活着，于是每秒写一次状态、驱动监控条目重组。
+        //   现在挂在宿主的 RESUMED 生命周期上（repeatOnLifecycle），后台就停。
         var nowTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
-        LaunchedEffect(Unit) {
-            while (true) {
-                kotlinx.coroutines.delay(1000)
-                nowTick = System.currentTimeMillis()
+        val hostLifecycleOwner = remember(context) { context.findHostLifecycleOwner() }
+        // 再门控一层"有没有在监控的评论"：没监控时这个每秒 tick 纯属白醒（列表里没人读它）
+        LaunchedEffect(hostLifecycleOwner, monitors.isNotEmpty()) {
+            if (monitors.isEmpty()) return@LaunchedEffect
+            val lifecycle = hostLifecycleOwner?.lifecycle
+            if (lifecycle == null) {
+                // 拿不到宿主的 LifecycleOwner 时退回原行为，别让计时器直接失效
+                while (true) {
+                    delay(1000)
+                    nowTick = System.currentTimeMillis()
+                }
+            } else {
+                lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    while (true) {
+                        nowTick = System.currentTimeMillis()
+                        delay(1000)
+                    }
+                }
             }
         }
         LazyColumn(
@@ -553,7 +591,8 @@ private fun FlagsSettingPageContent(
             )
             sliderIntPreference(
                 key = SettingPreferences.AntifraudRecheckMinutes.name,
-                defaultValue = 5,
+                // 必须与代码里的默认值一致：否则界面显示 5 分钟、实际按 15 分钟跑（审查发现）
+                defaultValue = com.a10miaomiao.bilimiao.comm.antifraud.CommentAntifraud.DEFAULT_RECHECK_MINUTES,
                 valueRange = 1..30,
                 // steps = 两端点之间的档位数 = 28（每分钟一档）
                 valueSteps = 28,
@@ -590,7 +629,8 @@ private fun FlagsSettingPageContent(
                 )
                 monitors.forEach { m ->
                     preference(
-                        key = "antifraud_mon_${m.key}",
+                        // key 要唯一：同一 rpid 万一被登记两次（重试/手快）会直接崩 "Key was already used"
+                        key = "antifraud_mon_${m.key}_${System.identityHashCode(m)}",
                         title = { Text("${m.label} · 评论 ${m.rpid}") },
                         summary = {
                             val elapsed = m.elapsedMs(nowTick)
@@ -612,8 +652,10 @@ private fun FlagsSettingPageContent(
                 }
             }
             // 上次检测结果（落盘的那份）：弹窗没弹出来时，这里是他唯一的交代
-            // 用可观察状态：清空/复检后界面立刻刷新（原来直接读 SharedPreferences，Compose 不知道数据变了）
-            AntifraudResultState.ensureLoaded(context)
+            // 用可观察状态：清空/复检后界面立刻刷新（原来直接读 SharedPreferences，Compose 不知道数据变了）。
+            // ★ 只读，不做副作用：LazyColumn 的 content 会被包进 derivedStateOf 计算，在那里读盘
+            //   （ensureLoaded）等于"measure 阶段在主线程读 SharedPreferences"，而且 derivedStateOf
+            //   要求计算无副作用。读盘统一放到上面的 LaunchedEffect 里（IO 线程）。
             val lastResult = AntifraudResultState.last
             if (lastResult != null) {
                 preference(
@@ -651,6 +693,8 @@ private fun FlagsSettingPageContent(
                                             rpid = lastResult.rpid,
                                             root = lastResult.root,
                                             message = lastResult.message,
+                                            // 记录里有发送时间就带上（早停才准）；老记录是 0 = 不早停
+                                            sentTimeSec = lastResult.sentTimeSec,
                                         )
                                     } else {
                                         // 老版本（vc124 及以前）的记录里没存 oid/type，只有"视频 BVxxxx"这段文字
@@ -658,7 +702,12 @@ private fun FlagsSettingPageContent(
                                         val bv = Regex("BV[0-9A-Za-z]{10}")
                                             .find(lastResult.where)?.value
                                         if (bv != null) {
-                                            launcher.recheckByBv(bv, lastResult.rpid, lastResult.message)
+                                            launcher.recheckByBv(
+                                                bv = bv,
+                                                rpid = lastResult.rpid,
+                                                message = lastResult.message,
+                                                sentTimeSec = lastResult.sentTimeSec,
+                                            )
                                         } else {
                                             com.kongzue.dialogx.dialogs.PopTip.show(
                                                 "这条记录是旧版本存的、没带视频信息，没法复检；再发一条评论就有了"

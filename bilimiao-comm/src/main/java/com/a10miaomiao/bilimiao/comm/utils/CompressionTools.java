@@ -76,9 +76,16 @@ public class CompressionTools
             decompressor.setInput(value);
 
             final byte[] buf = new byte[1024];
-            while (!decompressor.finished())
+            // ★ 原来只判 !finished()：数据被截断/损坏时 inflate() 会一直返回 0，
+            //   而 finished() 永远不为 true → 死循环 + 无限空转（CPU 打满）。
+            //   加上"没有输入可读/需要字典"就退出，保证循环一定前进。
+            while (!decompressor.finished() && !decompressor.needsInput() && !decompressor.needsDictionary())
             {
                 int count = decompressor.inflate(buf);
+                if (count == 0)
+                {
+                    break;
+                }
                 bos.write(buf, 0, count);
             }
         } finally
@@ -104,15 +111,20 @@ public class CompressionTools
         ByteArrayOutputStream baos = new ByteArrayOutputStream(1024);
         try
         {
-            int i = 1;
-            while (i != 0)
+            while (true)
             {
-                i = decompresser.inflate(bufferArray);
+                int i = decompresser.inflate(bufferArray);
+                // 0 表示"需要更多输入 / 需要字典"，再调也是 0 → 必须跳出，否则空转
+                if (i <= 0)
+                {
+                    break;
+                }
                 baos.write(bufferArray, 0, i);
             }
             data = baos.toByteArray();
         } catch (Exception e)
         {
+            // 解析失败时保持原来的兜底行为：把已解出的部分返回（调用方会当成 XML 解析失败处理）
             e.printStackTrace();
         } finally
         {

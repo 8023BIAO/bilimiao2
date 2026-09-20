@@ -145,16 +145,25 @@ class RegionStore(override val di: DI) :
 
     /**
      * 分区图标
+     *
+     * ★ 用 getOrNull：以前是 `数组[index]`。数组长度 15 是照着 assets/region.json 现在这 15 个
+     * 顶级分区写死的，只要以后 JSON 里多一个（或服务端下发多一个走到这条路），这里就
+     * IndexOutOfBoundsException —— 异常被 loadRegionData 的 catch 吞掉，表现是"分区列表整个读不出来"，
+     * 而不是少一个图标。宁可缺图标也不能整页崩。
      */
     private fun regionIcon(index: Int, item: RegionInfo) {
         if (item.logo == null) {
-            item.icon = intArrayOf(
-                R.drawable.ic_region_fj, R.drawable.ic_region_fj_domestic, R.drawable.ic_region_dh,
-                R.drawable.ic_region_yy, R.drawable.ic_region_wd, R.drawable.ic_region_yx,
-                R.drawable.ic_region_kj, R.drawable.ic_region_sh, R.drawable.ic_region_gc,
-                R.drawable.ic_region_ss, R.drawable.ic_region_ad, R.drawable.ic_region_yl,
-                R.drawable.ic_region_ys, R.drawable.ic_region_dy, R.drawable.ic_region_dsj
-            )[index]
+            item.icon = REGION_ICONS.getOrNull(index)
         }
+    }
+
+    companion object {
+        private val REGION_ICONS = intArrayOf(
+            R.drawable.ic_region_fj, R.drawable.ic_region_fj_domestic, R.drawable.ic_region_dh,
+            R.drawable.ic_region_yy, R.drawable.ic_region_wd, R.drawable.ic_region_yx,
+            R.drawable.ic_region_kj, R.drawable.ic_region_sh, R.drawable.ic_region_gc,
+            R.drawable.ic_region_ss, R.drawable.ic_region_ad, R.drawable.ic_region_yl,
+            R.drawable.ic_region_ys, R.drawable.ic_region_dy, R.drawable.ic_region_dsj
+        )
     }
 }

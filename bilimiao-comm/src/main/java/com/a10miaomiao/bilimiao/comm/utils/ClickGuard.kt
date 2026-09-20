@@ -40,6 +40,12 @@ object ClickGuard {
         synchronized(lastAllowedAt) {
             val last = lastAllowedAt[key]
             if (last != null && now - last < windowMs) return false
+            // ★ 只增不减会一直涨：调用方会拿 rpid / aid 拼 key（如 "reply:like:$rpid"），
+            //   刷一晚上评论就是上万个再也用不到的条目。超过窗口期的记录留着毫无作用，
+            //   攒到一定量就顺手清一次（60 秒前的记录不可能再拦住任何点击）。
+            if (lastAllowedAt.size > 256) {
+                lastAllowedAt.values.removeAll { now - it > 60_000L }
+            }
             lastAllowedAt[key] = now
             return true
         }

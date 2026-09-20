@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,7 +35,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -81,6 +81,7 @@ import com.a10miaomiao.bilimiao.comm.store.PlayListStore
 import com.a10miaomiao.bilimiao.comm.store.PlayerStore
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import org.kodein.di.compose.rememberInstance
+import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -267,18 +268,23 @@ fun VideoDetailContent(
                             // 内边距固定 16dp 改不动，所以用 Surface 自己搭，尺寸完全可控（涟漪照旧有）。
                             Surface(
                                 onClick = { viewModel.toSearchPage(tag.name) },
-                                modifier = Modifier.height(30.dp),
+                                // ★ heightIn 而不是 height：这是硬高度 + 圆角裁剪，而本 App 允许把
+                                //   字体缩放到 3.0（bodySmall 单行能到 ~48dp），两个字的标签还可能换行
+                                //   —— 写死 30dp 会把字上下裁掉。给最小高度，字号大时让它自己长高。
+                                modifier = Modifier.heightIn(min = 30.dp),
                                 shape = RoundedCornerShape(9.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant,
                             ) {
                                 Box(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
                                         text = tag.name,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }

@@ -176,7 +176,13 @@ private class MyImagePreviewerController(
 
     fun menuItemClick(view: View, menuItem: MenuItemPropInfo) {
         val page = imagePreviewerState.previewerState.currentPage
-        val model = imagePreviewerState.imageModels[page]
+        // ★ imageModels 是点开预览那一刻捕获的**旧列表**，而页数来自新列表（ImagesGrid 用 count
+        //   当 pageCount）—— 评论刷新/图片数变化后两者会错位，直接 [page] 会越界崩溃。
+        //   ImagesGrid 那边早就为同一场景写了 getOrNull 兜底，这里漏了。
+        val model = imagePreviewerState.imageModels.getOrNull(page) ?: run {
+            toast("图片列表已刷新，请重新打开预览")
+            return
+        }
         when (menuItem.key) {
             MenuKeys.save -> {
                 saveImageFile(model.originalUrl)
@@ -233,8 +239,10 @@ fun MyImagePreviewer(
         contentPadding = contentPadding,
         state = imagePreviewerState.previewerState,
         imageLoader = { page ->
-            val model = imagePreviewerState.imageModels[page]
-            val imageUrl = model.originalUrl
+            // 同上：预览状态持有的是旧列表，越界时按空图处理（Glide 加载空 URL 只会走失败回调），
+            // 而不是抛 IndexOutOfBounds 崩在组合期
+            val model = imagePreviewerState.imageModels.getOrNull(page)
+            val imageUrl = model?.originalUrl ?: ""
             // 超大图限制：图床 URL 加最长边 4096px 后缀（图床只缩不放，普通图无损），
             // 防止原图 bitmap 超限导致 Canvas 崩溃 (upstream #245: 175MB bitmap)
             // 4096x4096 ≈ 67MB，远低于崩溃线，同时保留放大查看的清晰度
@@ -262,7 +270,7 @@ fun MyImagePreviewer(
             val loadedDrawable = drawableState.value
             return@ImagePreviewer Pair(
                 if (loadedDrawable != null) rememberDrawablePainter(loadedDrawable) else null,
-                Size(model.width, model.height)
+                Size(model?.width ?: 0f, model?.height ?: 0f)
             )
         }
     )

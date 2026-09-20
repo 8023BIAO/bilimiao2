@@ -103,7 +103,10 @@ fun CustomSetsPreference(
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                value.sortedBy { it.toDouble() }.forEach { text ->
+                // ★ 必须用 toDoubleOrNull：这里的 value 来自 DataStore，而「导入设置」会把外部 JSON
+                //   原样写进去。元素不是数字时 toDouble() 会在**组合期**抛 NumberFormatException
+                //   → 整个设置页打不开（而不是少显示一个标签）。
+                value.sortedBy { it.toDoubleOrNull() ?: Double.MAX_VALUE }.forEach { text ->
                     SuggestionChip(
                         onClick = {
                             if (valueCanEdit(text)) {
@@ -150,7 +153,7 @@ fun CustomSetsPreference(
                             errorMessage.value = "请输入有效值"
                         } else if(v > 10) {
                             errorMessage.value = "最高10倍速"
-                        } else if(v in value.map { it.toDouble() }) {
+                        } else if(v in value.mapNotNull { it.toDoubleOrNull() }) {
                             errorMessage.value = "已存在$v"
                         } else {
                             onValueChange(setOf(
@@ -221,7 +224,7 @@ fun CustomSetsPreference(
                             errorMessage.value = "最高10倍速"
                         } else if (v.toString() != editDialogStateValue.value
                             && v in value.filter { it != editDialogStateValue.value }
-                                .map { it.toDouble() }
+                                .mapNotNull { it.toDoubleOrNull() }
                         ) {
                             errorMessage.value = "已存在$v"
                         } else {

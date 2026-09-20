@@ -110,7 +110,9 @@ object CommentAntifraudLauncher {
                     AntifraudDiag.finish("SKIPPED｜设置里没打开「发评论后自动检测是否被限流」")
                     return@launch
                 }
-                val recheckMs = if (recheckEnabled) recheckMinutes * 60_000L else 0L
+                // 上限兜底：设置导入没有范围校验，被写成天文数字会真盯那么久（审查发现）
+                val minutes = recheckMinutes.coerceIn(1, CommentAntifraud.RECHECK_MAX_MINUTES)
+                val recheckMs = if (recheckEnabled) minutes * 60_000L else 0L
                 // 登记到「监控中」列表，设置页里实时显示进度（用户要求：别让他干等）
                 val bvLabel = if (type == 1) {
                     runCatching { BvUtils.toBvid(oid.toString()) }.getOrNull()?.takeIf { it.isNotBlank() }
@@ -133,7 +135,7 @@ object CommentAntifraudLauncher {
                     } else {
                         val first = if (hasPictures) "20 秒" else "5 秒"
                         val times = 1 + recheckMs / CommentAntifraud.RECHECK_INTERVAL_MS
-                        "评论已发出：${first}后首查，之后每 30 秒复查一次，共盯 $recheckMinutes 分钟（最多 $times 次）"
+                        "评论已发出：${first}后首查，之后每 30 秒复查一次，共盯 $minutes 分钟（最多 $times 次）"
                     }
                 )
                 val r = withContext(Dispatchers.IO) {
@@ -147,24 +149,23 @@ object CommentAntifraudLauncher {
                         recheckEnabled = recheckEnabled,
                         recheckTotalMs = recheckMs,
                         onAttempt = { attempt, total, result ->
-                            // 更新设置页里的进度
-                            monitor?.let {
-                                it.attempt = attempt
-                                it.planned = total
-                                it.lastState = result.state
-                                it.lastDetail = result.detail
-                            }
-                            // 只在"首查正常、准备开始盯"的时候提示一次，之后静静盯着，别刷屏。
-                            // 注意这个回调是在 IO 上下文里来的，弹窗必须切回主线程。
-                            if (attempt == 1 && total > 1 && !result.isBad) {
-                                scope.launch {
-                                    PopTip.show("首查正常，开始复查（每 30 秒一次 / 共 $recheckMinutes 分钟）")
+                            // 回调来自 IO 上下文 → 统一切主线程再改 Compose 状态 / 弹提示
+                            scope.launch {
+                                monitor?.let {
+                                    it.attempt = attempt
+                                    it.planned = total
+                                    it.lastState = result.state
+                                    it.lastDetail = result.detail
+                                }
+                                // 只在"首查正常、准备开始盯"时提示一次，之后静静盯着，别刷屏
+                                if (attempt == 1 && total > 1 && !result.isBad) {
+                                    PopTip.show("首查正常，开始复查（每 30 秒一次 / 共 $minutes 分钟）")
                                 }
                             }
                         },
                     )
                 }
-                showResult(r, message, oid, type, rpid, onOpenAppeal)
+                showResult(r, message, oid, type, rpid, root, onOpenAppeal, sentTimeSec = sentTimeSec)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
@@ -193,7 +194,15 @@ object CommentAntifraudLauncher {
      * 用户想验证"它到底被判成什么"，不该被迫再发一条新评论。这里不等 5/20 秒、也不进复查循环，
      * 立刻查一次就给结论。
      */
-    fun recheck(oid: Long, type: Int, rpid: Long, root: Long, message: String) {
+    fun recheck(
+        oid: Long,
+        type: Int,
+        rpid: Long,
+        root: Long,
+        message: String,
+        /** 这条评论的发送时间（秒），0 = 不知道（不早停）。设置页复检时会带上记录里的值 */
+        sentTimeSec: Long = 0L,
+    ) {
         if (oid <= 0L || type <= 0 || rpid <= 0L) {
             PopTip.show("缺少参数，无法复检")
             return
@@ -213,12 +222,15 @@ object CommentAntifraudLauncher {
                         type = type,
                         rpid = rpid,
                         root = root,
-                        sentTimeSec = System.currentTimeMillis() / 1000,
+                        // ★ 0 = 不知道发送时间（老记录），此时不能早停；传 now 会让"翻到更早的评论就停"
+                        //   在第 1 页立刻命中 → 正常评论被误报"疑似审核中"。
+                        //   新记录（vc130 起）会把真实发送时间存下来，复检时带过来更准。
+                        sentTimeSec = sentTimeSec,
                         hasPictures = false,
                         skipWait = true,
                     )
                 }
-                showResult(r, message, oid, type, rpid, null)
+                showResult(r, message, oid, type, rpid, root, null, sentTimeSec = sentTimeSec)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
@@ -230,9 +242,6 @@ object CommentAntifraudLauncher {
         }
     }
 
-    /** 根评论 id：我们只在"发评论"那条路上知道 root；复检时没有就传 0（按根评论处理） */
-    private fun rootOf(rpid: Long): Long = 0L
-
     /**
      * 只知道 BV 号时的复检入口。
      *
@@ -240,9 +249,20 @@ object CommentAntifraudLauncher {
      * 于是点「重新检测」会报"缺少参数"（用户实测撞上）。这里先把 BV 换成 aid 再复检 ——
      * 老记录也能用，用户不必为了验证再发一条新评论。
      */
-    fun recheckByBv(bv: String, rpid: Long, message: String) {
+    fun recheckByBv(
+        bv: String,
+        rpid: Long,
+        message: String,
+        /** 同 recheck：0 = 不知道发送时间（不早停） */
+        sentTimeSec: Long = 0L,
+    ) {
         if (!BvUtils.isValidBvid(bv)) {
             toast("这条记录的 BV 号不合法，没法复检")
+            return
+        }
+        if (rpid <= 0L) {
+            // 老/坏记录里 rpid=0 时，去查 rpid 0 会拿到 12022 → 误报"评论已被删除"
+            toast("这条记录的评论 ID 无效，没法复检")
             return
         }
         activeChecks++
@@ -258,9 +278,8 @@ object CommentAntifraudLauncher {
                 if (aid <= 0L) {
                     AntifraudDiag.step("BV 换 aid 失败（aid=$aid）")
                     AntifraudDiag.finish("FAILED｜拿不到 aid")
-                    activeChecks = (activeChecks - 1).coerceAtLeast(0)
                     PopTip.show("没查到这条视频（可能已删除）")
-                    return@launch
+                    return@launch          // 计数由 finally 归还（以前这里手动还了一次，变成"多还"）
                 }
                 AntifraudDiag.step("BV=$bv → aid=$aid，开始复检")
                 val r = withContext(Dispatchers.IO) {
@@ -269,12 +288,14 @@ object CommentAntifraudLauncher {
                         type = 1,
                         rpid = rpid,
                         root = 0L,
-                        sentTimeSec = System.currentTimeMillis() / 1000,
+                        // ★ 这里原来是 now —— 会让"翻到更早的评论就停"在第 1 页立刻命中，
+                        //   正常评论被误报成"仅自己可见/审核中"（老记录复检唯一通路，必现）
+                        sentTimeSec = sentTimeSec,
                         hasPictures = false,
                         skipWait = true,
                     )
                 }
-                showResult(r, message, aid, 1, rpid, null)
+                showResult(r, message, aid, 1, rpid, 0L, null, sentTimeSec = sentTimeSec)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
@@ -295,7 +316,13 @@ object CommentAntifraudLauncher {
                         ?: CommentAntifraud.DEFAULT_RECHECK_MINUTES,
                 )
             }
-        }.getOrDefault(Triple(false, true, CommentAntifraud.DEFAULT_RECHECK_MINUTES))
+        }.getOrElse { e ->
+            // 读设置失败 ≠ 用户关了开关：记一笔，免得排查时被"设置里没打开"误导
+            AntifraudDiag.start("评论反诈：读设置失败")
+            AntifraudDiag.step("SettingPreferences 读取异常：${e.javaClass.simpleName} ${e.message}")
+            AntifraudDiag.finish("SKIPPED｜读设置失败", mirror = false)
+            Triple(false, true, CommentAntifraud.DEFAULT_RECHECK_MINUTES)
+        }
     }
 
 
@@ -306,7 +333,14 @@ object CommentAntifraudLauncher {
         oid: Long,
         type: Int,
         rpid: Long,
+        /** 根评论 id：楼中楼复检要用它，否则会把二级评论当根评论查（审查发现的误判） */
+        root: Long,
         onOpenAppeal: ((oid: Long, type: Int, rpid: Long) -> Unit)?,
+        /**
+         * 这条评论的发送时间（秒）。0 = 不知道（手动复检老记录时）。
+         * 存下来是为了让设置页的「重新检测」能用上正确的早停时间，见 AntifraudLastResult.Result.sentTimeSec。
+         */
+        sentTimeSec: Long = 0L,
     ) {
         // ★ 不管结果是好是坏，**一律弹窗**（用户要求：等了好几分钟，不能只闪个提示就完了）。
         //   内容固定四段：状态 / 哪条视频下的哪条评论 / 判定依据 / 免责说明。
@@ -327,7 +361,8 @@ object CommentAntifraudLauncher {
                     isBad = result.isBad,
                     oid = oid,
                     type = type,
-                    root = rootOf(rpid),
+                    root = root,
+                    sentTimeSec = sentTimeSec,
                 ),
             )
         }

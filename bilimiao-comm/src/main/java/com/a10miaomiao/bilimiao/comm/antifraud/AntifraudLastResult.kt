@@ -28,6 +28,14 @@ object AntifraudLastResult {
         val oid: Long = 0L,
         val type: Int = 0,
         val root: Long = 0L,
+        /**
+         * 这条评论的发送时间（秒）。
+         *
+         * 手动复检时要用它做"翻到比我更早的评论就停止翻页"的早停判断（CommentAntifraud.findRootAsGuest）。
+         * 0 = 不知道发送时间，此时**不能**早停 —— 传 now 会让时间序第一页立刻命中早停，
+         * 正常评论被误判成"仅自己可见"。
+         */
+        val sentTimeSec: Long = 0L,
     ) {
         fun timeText(): String = SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(time))
     }
@@ -45,6 +53,7 @@ object AntifraudLastResult {
                 .putLong("oid", r.oid)
                 .putInt("type", r.type)
                 .putLong("root", r.root)
+                .putLong("sentTimeSec", r.sentTimeSec)
                 .apply()
         }
     }
@@ -64,6 +73,7 @@ object AntifraudLastResult {
             oid = sp.getLong("oid", 0L),
             type = sp.getInt("type", 0),
             root = sp.getLong("root", 0L),
+            sentTimeSec = sp.getLong("sentTimeSec", 0L),
         )
     }.getOrNull()
 

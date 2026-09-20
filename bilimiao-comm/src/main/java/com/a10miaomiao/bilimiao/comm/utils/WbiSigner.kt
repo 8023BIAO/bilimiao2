@@ -112,7 +112,11 @@ object WbiSigner {
                 sb.append(raw[i])
             }
         }
-        return sb.toString().substring(0, 32)
+        // nav 返回的 key 不是预期长度时（接口改版/被风控返回空壳），凑不满 32 位就返回空串，
+        // 让调用方按"没拿到签名"处理；原来的 substring(0, 32) 会抛 StringIndexOutOfBoundsException
+        // （虽然被上层 catch 兜住，但那是靠异常控流程）
+        if (sb.length < 32) return ""
+        return sb.substring(0, 32)
     }
 
     /** 对 URL 追加 WBI 签名参数（w_rid + wts） */
@@ -123,31 +127,8 @@ object WbiSigner {
         val qIndex = rawUrl.indexOf('?')
         if (qIndex < 0) return rawUrl
 
-        val params = linkedMapOf<String, String>()
-        val queryPart = rawUrl.substring(qIndex + 1)
-        for (pair in queryPart.split("&")) {
-            val eq = pair.indexOf('=')
-            if (eq < 0) continue
-            val key = URLDecoder.decode(pair.substring(0, eq), "UTF-8")
-            val value = URLDecoder.decode(pair.substring(eq + 1), "UTF-8")
-            params[key] = value
-        }
-
-        val wts = (System.currentTimeMillis() / 1000).toString()
-        params["wts"] = wts
-
-        val sortedKeys = params.keys.sorted()
-        val queryString = sortedKeys.joinToString("&") { key ->
-            val encodedKey = URLEncoder.encode(key, "UTF-8")
-            val encodedValue = URLEncoder.encode(params[key] ?: "", "UTF-8").replace("+", "%20")
-            "$encodedKey=$encodedValue"
-        }
-
-        val rawSign = queryString + mixKey
-        val wRid = MessageDigest.getInstance("MD5").digest(rawSign.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-
-        return rawUrl.substring(0, qIndex + 1) + queryString + "&w_rid=$wRid"
+        val params = parseQuery(rawUrl.substring(qIndex + 1))
+        return rawUrl.substring(0, qIndex + 1) + buildSignedQuery(params, mixKey)
     }
 
     /**
@@ -164,30 +145,58 @@ object WbiSigner {
         val qIndex = rawUrl.indexOf('?')
         if (qIndex < 0) return rawUrl
 
+        val params = parseQuery(rawUrl.substring(qIndex + 1))
+        return rawUrl.substring(0, qIndex + 1) + buildSignedQuery(params, mixKey)
+    }
+
+    private fun parseQuery(queryPart: String): LinkedHashMap<String, String> {
         val params = linkedMapOf<String, String>()
-        val queryPart = rawUrl.substring(qIndex + 1)
         for (pair in queryPart.split("&")) {
+            if (pair.isEmpty()) continue
             val eq = pair.indexOf('=')
-            if (eq < 0) continue
-            val key = URLDecoder.decode(pair.substring(0, eq), "UTF-8")
-            val value = URLDecoder.decode(pair.substring(eq + 1), "UTF-8")
+            // 没有 '=' 的参数原来是**整条丢掉**（?foo&bar=1 里 foo 不见了）——
+            // 保留成 foo= 更接近原意，也不会让服务端少收一个参数
+            val rawKey = if (eq < 0) pair else pair.substring(0, eq)
+            val rawValue = if (eq < 0) "" else pair.substring(eq + 1)
+            // 值里带裸 '%'（比如搜索词里手打了百分号）时 URLDecoder 会抛 IllegalArgumentException，
+            // 以前这个异常会一路冒到调用方 → 崩溃。解不开就按原样用。
+            val key = runCatching { URLDecoder.decode(rawKey, "UTF-8") }.getOrDefault(rawKey)
+            val value = runCatching { URLDecoder.decode(rawValue, "UTF-8") }.getOrDefault(rawValue)
             params[key] = value
         }
+        return params
+    }
 
-        val wts = (System.currentTimeMillis() / 1000).toString()
-        params["wts"] = wts
+    /**
+     * WBI 签名串。
+     *
+     * ★ 参与签名的 key/value 必须先剔除 `!'()*` 五个字符 —— 这是 B 站服务端的算法约定
+     * （Python 参考实现：`''.join(filter(lambda c: c not in "!'()*", v))`）。
+     * 不剔除的后果：搜索词/动态文案里出现 `!`、`'`、`(`、`)` 时，服务端算出的串与本地不同，
+     * 签名校验失败 → `-403 签名错误`，而且是"只有特定关键词才复现"的偶发 bug。
+     */
+    private fun buildSignedQuery(params: Map<String, String>, mixKey: String): String {
+        val all = LinkedHashMap(params)
+        all["wts"] = (System.currentTimeMillis() / 1000).toString()
 
-        val sortedKeys = params.keys.sorted()
-        val queryString = sortedKeys.joinToString("&") { key ->
-            val encodedKey = URLEncoder.encode(key, "UTF-8")
-            val encodedValue = URLEncoder.encode(params[key] ?: "", "UTF-8").replace("+", "%20")
+        val queryString = all.keys.sorted().joinToString("&") { key ->
+            val encodedKey = URLEncoder.encode(stripWbiChars(key), "UTF-8")
+            val encodedValue = URLEncoder.encode(stripWbiChars(all[key] ?: ""), "UTF-8").replace("+", "%20")
             "$encodedKey=$encodedValue"
         }
 
-        val rawSign = queryString + mixKey
-        val wRid = MessageDigest.getInstance("MD5").digest(rawSign.toByteArray(Charsets.UTF_8))
+        val wRid = MessageDigest.getInstance("MD5").digest((queryString + mixKey).toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
 
-        return rawUrl.substring(0, qIndex + 1) + queryString + "&w_rid=$wRid"
+        return "$queryString&w_rid=$wRid"
+    }
+
+    private fun stripWbiChars(s: String): String {
+        var needStrip = false
+        for (c in s) {
+            if (c == '!' || c == '\'' || c == '(' || c == ')' || c == '*') { needStrip = true; break }
+        }
+        if (!needStrip) return s
+        return s.filterNot { it == '!' || it == '\'' || it == '(' || it == ')' || it == '*' }
     }
 }

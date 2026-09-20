@@ -79,6 +79,14 @@ internal class CdnFailoverDataSource(
             } catch (e: IOException) {
                 runCatching { ds.close() }
                 lastException = e
+            } catch (e: Throwable) {
+                // ★ 只 catch IOException 是不够的：ds.open() 还可能抛运行时异常
+                //   （畸形 URI 的 IllegalArgumentException、SecurityException 等）。
+                //   那种情况下既没 close 这个 ds、也不会去试下一个候选，直接整段失败 ——
+                //   而候选列表存在的意义就是"这个 CDN 不行就换下一个"。
+                //   包成 IOException 继续循环（真的全挂了，最后会抛出来）。
+                runCatching { ds.close() }
+                lastException = IOException("CDN candidate $idx failed: ${e.javaClass.simpleName}: ${e.message}", e)
             }
         }
         throw lastException ?: IOException("Failed to open any CDN candidate")
