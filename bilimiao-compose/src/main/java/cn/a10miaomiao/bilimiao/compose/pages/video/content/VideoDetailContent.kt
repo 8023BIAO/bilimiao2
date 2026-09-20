@@ -1,5 +1,8 @@
 package cn.a10miaomiao.bilimiao.compose.pages.video.content
 
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import android.net.Uri
@@ -32,7 +35,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -261,23 +263,25 @@ fun VideoDetailContent(
                             // 标签样式对齐**官方国际版**（用户给的截图量的）：
                             //   无边框、底色只比背景亮一点点、文字用灰色而不是纯白 ——
                             //   原来是"1.14dp 描边 + 纯白字 + 31dp 高"，一排框框太抢眼（用户说"突出、沉重"）。
-                            AssistChip(
+                            // 这里不用 AssistChip：当前 Material3 的 chip 去掉了 contentPadding 参数、
+                            // 内边距固定 16dp 改不动，所以用 Surface 自己搭，尺寸完全可控（涟漪照旧有）。
+                            Surface(
                                 onClick = { viewModel.toSearchPage(tag.name) },
                                 modifier = Modifier.height(30.dp),
-                                label = {
+                                shape = RoundedCornerShape(9.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
                                     Text(
                                         text = tag.name,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                },
-                                shape = RoundedCornerShape(9.dp),
-                                border = null,
-                                colors = AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                ),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                            )
+                                }
+                            }
                         }
                     }
                 }
