@@ -87,6 +87,13 @@ class DownloadManager(
         }
         downloadLength += downloadedLength
         for (keys in info.header.keys) {
+            // ★★ 绝对不要发 Referer —— 这是"下载秒失败"的根因（2026-09-20 实测）：
+            //   B站取流 CDN（尤其 PCDN 节点）对带 Referer 的请求直接回 403，同一个 URL：
+            //     UA + Referer            → HTTP 403（老代码就是这个组合）
+            //     只发 UA（不带 Referer） → HTTP 206，正常下载
+            //   播放器的媒体请求也是**只设 User-Agent、不设 Referer**，所以播放一直没事。
+            //   另注：完全不带头也不行（curl 默认 UA 会被拒），UA 必须保留。
+            if (keys.equals("Referer", ignoreCase = true)) continue
             request.addHeader(keys, info.header[keys] ?: "")
         }
         val call = mClient.newCall(request.build())
