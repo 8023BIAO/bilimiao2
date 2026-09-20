@@ -25,13 +25,13 @@ open class MenuItemView @JvmOverloads constructor(
     init {
         gravity = Gravity.CENTER
         addView(ui.icon, lParams {
-            // 图标尺寸的来龙去脉：原本 20dp → vc142 提到 24dp（M3 标准尺寸、更好点中）→
-            // 用户实测觉得偏大（他系统字体调得大，内容区那些 16dp 小图标又没跟着长，落差明显），
-            // 于是折中到 22dp（"小一丢丢"），并**不去动内容区的图标**（那要改 9 个文件）。
-            // 想再调就是这一个数字：20 = 完全回到从前，24 = M3 标准。
+            // 图标尺寸的来龙去脉：原本 20dp → vc142 提到 24dp（想更好点中）→ 用户实测"偏大"，
+            // vc143 折中 22dp 仍觉得大 → vc144 定回 **20dp**（= 原来的观感；他系统字体调得大，
+            // 上面播放器那两条栏就是"顶栏 24 / 底栏 20"，App 这条栏跟播放器底栏对齐）。
+            // 想再调就是这一个数字（播放器顶栏那批是 24dp）。
             horizontalMargin = dip(8)
-            height = dip(22)
-            width =  dip(22)
+            height = dip(20)
+            width =  dip(20)
         })
         addView(ui.root, lParams {
             height = wrapContent
