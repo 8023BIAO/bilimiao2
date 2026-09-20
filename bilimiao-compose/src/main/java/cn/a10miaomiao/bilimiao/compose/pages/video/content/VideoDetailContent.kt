@@ -1,5 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose.pages.video.content
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.platform.LocalContext
@@ -241,24 +243,33 @@ fun VideoDetailContent(
                     modifier = Modifier.height(5.dp)
                 )
                 val tags = detailData.tag
-                FlowRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    tags.forEach { tag ->
-                        AssistChip(
-                            onClick = { viewModel.toSearchPage(tag.name) },
-                            label = {
-                                Text(
-                                    text = tag.name,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            },
-                            shape = RoundedCornerShape(6.dp),
-                        )
+                // ★ 标签间距：代码里明明写的是"行列都 5dp"，实测出来却是**列 6dp、行 21dp**（差 3.5 倍），
+                //   看着"横着挤、竖着散"就是这么来的 ——
+                //   Material3 的 chip 强制 48dp 最小触控区：可见框只有 31dp 高，却在布局里占 48dp，
+                //   多出来的 16.6dp 空白把每一行顶开了（56dp 宽的标签超过 48dp，所以列距没被撑）。
+                //   这里把最小触控区置 0，行距列距才能真的相等。
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        tags.forEach { tag ->
+                            AssistChip(
+                                onClick = { viewModel.toSearchPage(tag.name) },
+                                modifier = Modifier.height(32.dp),
+                                label = {
+                                    Text(
+                                        text = tag.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                },
+                                shape = RoundedCornerShape(9.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            )
+                        }
                     }
                 }
                 Spacer(
