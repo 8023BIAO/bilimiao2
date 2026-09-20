@@ -527,8 +527,11 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                     startNextSegment(currentDownloadInfo, mediaFileInfo, videoDir, httpHeader)
                 }
                 is BiliDownloadMediaFileInfo.Type2 -> {
+                    val videoStream = mediaFileInfo.video.firstOrNull() ?: throw Exception("video流为空")
                     val dlInfo = currentDownloadInfo.copy(
-                        url = mediaFileInfo.video.firstOrNull()?.base_url ?: throw Exception("video流为空"),
+                        url = videoStream.base_url,
+                        // ★ 系统给的备用地址也一起带着（base 不通时自动换 backup，见 DownloadManager）
+                        candidateUrls = listOf(videoStream.base_url) + videoStream.backup_url,
                         header = httpHeader,
                         size = entry.total_bytes,
                         length = mediaFileInfo.duration
@@ -545,6 +548,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
                             id = currentDownloadInfo.id,
                             name = entry.name,
                             url = audio[0].base_url,
+                            // ★ 音频最容易踩到"base 是连不上的 mcdn PCDN 节点"，备用地址必须带上
+                            candidateUrls = listOf(audio[0].base_url) + audio[0].backup_url,
                             header = httpHeader,
                             size = audio[0].size,
                             length = mediaFileInfo.duration

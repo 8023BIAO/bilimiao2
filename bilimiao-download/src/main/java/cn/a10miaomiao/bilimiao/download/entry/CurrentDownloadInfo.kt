@@ -13,7 +13,15 @@ data class CurrentDownloadInfo(
     var size: Long = 0,
     var progress: Long = 0L,
     var status: Int = STATUS_WAIT,
-    var header: Map<String, String> = mapOf()
+    var header: Map<String, String> = mapOf(),
+    /**
+     * 备用下载地址（B站 playurl 一次会给 base_url + 若干 backup_url）。
+     *
+     * 为什么要它：这些是**系统给的**多个 CDN 候选，实测经常出现
+     * "base_url 是连不上的 PCDN 节点（HTTP 000），backup_url 反而可用"的情况 ——
+     * 只试第一个就会"下载失败 / 下到一半不通"。这里按顺序都试一遍，谁通用谁。
+     */
+    val candidateUrls: List<String> = emptyList(),
 ) {
     val statusText get() = when (status) {
         STATUS_FAIL_DOWNLOAD -> "下载失败"
