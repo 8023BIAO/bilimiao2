@@ -4,17 +4,17 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingViewMode
 
 @Composable
 internal fun CurrentTime(
     viewModel: TimeSettingViewMode
 ) {
-    val currentTime = viewModel.currentTime.collectAsState()
+    val currentTime = viewModel.currentTime.collectAsStateWithLifecycle()
     val timeFrom = currentTime.value.timeFrom
     val timeTo = currentTime.value.timeTo
 

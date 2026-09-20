@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingViewMode
 
 @Composable
@@ -44,7 +45,7 @@ internal fun TextBox(
 internal fun MonthTime(
     viewModel: TimeSettingViewMode,
 ) {
-    val monthTime = viewModel.monthTime.collectAsState()
+    val monthTime = viewModel.monthTime.collectAsStateWithLifecycle()
     val timeFrom = monthTime.value.timeFrom
     val timeTo = monthTime.value.timeTo
 

@@ -24,13 +24,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import bilibili.app.card.v1.Card
 import bilibili.app.card.v1.SmallCoverV5
@@ -246,7 +246,7 @@ private class HomePopularContentViewModel(
 private fun EntranceListBox(
     viewModel: HomePopularContentViewModel
 ) {
-    val topEntranceList by viewModel.topEntranceList.collectAsState()
+    val topEntranceList by viewModel.topEntranceList.collectAsStateWithLifecycle()
     LazyRow {
         items(topEntranceList, { it.uri }) {
             Column(
@@ -278,14 +278,14 @@ private fun EntranceListBox(
 internal fun HomePopularContent() {
     val viewModel: HomePopularContentViewModel = diViewModel()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val list by viewModel.list.data.collectAsState()
-    val listLoading by viewModel.list.loading.collectAsState()
-    val listFinished by viewModel.list.finished.collectAsState()
-    val listFail by viewModel.list.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val list by viewModel.list.data.collectAsStateWithLifecycle()
+    val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
+    val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
+    val listFail by viewModel.list.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     val listState = rememberLazyGridState()
     val emitter = localEmitter()

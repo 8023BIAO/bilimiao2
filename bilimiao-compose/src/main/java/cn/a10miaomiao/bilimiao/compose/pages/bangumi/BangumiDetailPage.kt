@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.common.foundation.LocalOnSeekTime
 import cn.a10miaomiao.bilimiao.compose.common.foundation.pagerTabIndicatorOffset
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -700,18 +701,18 @@ private fun BangumiDetailPageContent(
 ) {
     val playerStore: PlayerStore by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
-    val playerState = playerStore.stateFlow.collectAsState().value
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val playerState = playerStore.stateFlow.collectAsStateWithLifecycle().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val detailInfo = viewModel.detailInfo.collectAsState().value
-    val isFollow = viewModel.isFollow.collectAsState().value
-    val seasons = viewModel.seasons.collectAsState().value
-    val loading = viewModel.loading.collectAsState().value
+    val detailInfo = viewModel.detailInfo.collectAsStateWithLifecycle().value
+    val isFollow = viewModel.isFollow.collectAsStateWithLifecycle().value
+    val seasons = viewModel.seasons.collectAsStateWithLifecycle().value
+    val loading = viewModel.loading.collectAsStateWithLifecycle().value
 
-    val sectionList = viewModel.sectionList.collectAsState().value
-    val sectionId = viewModel.sectionId.collectAsState().value
-    val sectionLoading = viewModel.sectionLoading.collectAsState().value
+    val sectionList = viewModel.sectionList.collectAsStateWithLifecycle().value
+    val sectionId = viewModel.sectionId.collectAsStateWithLifecycle().value
+    val sectionLoading = viewModel.sectionLoading.collectAsStateWithLifecycle().value
     val episodes = remember(sectionId, sectionList) {
         sectionList.find {
             it.id == sectionId
@@ -879,7 +880,7 @@ private fun BangumiDetailPageContent(
         )
     }
 
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     SwipeToRefresh(
         modifier = Modifier
@@ -910,7 +911,7 @@ private fun BangumiDetailPageContent(
         ) { _, innerPadding ->
             val scope = rememberCoroutineScope()
     BackHandler(onBack = viewModel::onBackPressed)
-            val replyCount by (replyViewModel?.replyCount ?: MutableStateFlow(0L)).collectAsState()
+            val replyCount by (replyViewModel?.replyCount ?: MutableStateFlow(0L)).collectAsStateWithLifecycle()
             val replyTabText = if (replyCount > 0) "评论($replyCount)" else "评论"
             val tabs = remember(replyTabText) { listOf("detail" to "详情", "reply" to replyTabText) }
             val pagerState = rememberPagerState(pageCount = { tabs.size })
@@ -1114,7 +1115,7 @@ private fun BangumiDetailPageContent(
                             }
                             CompositionLocalProvider(LocalOnSeekTime provides seekCallback) {
                                 replyViewModel?.let { vm ->
-                                val currentReply by vm.currentReply.collectAsState()
+                                val currentReply by vm.currentReply.collectAsStateWithLifecycle()
                                 BackHandler(enabled = currentReply != null) {
                                     vm.clearCurrentReply()
                                 }
@@ -1242,9 +1243,9 @@ private fun BangumiDetailPageContent(
             }
 
         // 下载弹窗（直接渲染在页面内，主题切换不会丢）
-        val showDownload by viewModel.showDownload.collectAsState()
+        val showDownload by viewModel.showDownload.collectAsStateWithLifecycle()
         if (showDownload) {
-            val dlSeasonId = viewModel.downloadSeasonId.collectAsState().value
+            val dlSeasonId = viewModel.downloadSeasonId.collectAsStateWithLifecycle().value
             val dlViewModel: DownloadBangumiCreatePageViewModel = diViewModel()
             LaunchedEffect(dlSeasonId) {
                 dlViewModel.loadEpisodeList(dlSeasonId)

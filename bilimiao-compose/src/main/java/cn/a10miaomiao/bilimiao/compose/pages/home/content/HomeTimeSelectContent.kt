@@ -15,7 +15,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -24,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import cn.a10miaomiao.bilimiao.compose.common.constant.PageTabIds
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -330,14 +330,14 @@ internal fun HomeTimeSelectContent(
 ) {
     val viewModel: HomeTimeSelectContentViewModel = diViewModel()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val list by viewModel.list.data.collectAsState()
-    val listLoading by viewModel.list.loading.collectAsState()
-    val listFinished by viewModel.list.finished.collectAsState()
-    val listFail by viewModel.list.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val list by viewModel.list.data.collectAsStateWithLifecycle()
+    val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
+    val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
+    val listFail by viewModel.list.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     val emitter = localEmitter()
     LaunchedEffect(Unit) {

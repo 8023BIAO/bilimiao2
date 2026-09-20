@@ -27,7 +27,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +39,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -133,7 +133,7 @@ private fun DanmakuDisplaySettingPageContent(
         title = "弹幕显示设置"
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
@@ -252,10 +252,10 @@ private fun DanmakuFilterTabContent(
     var showFilterDialog by remember { mutableStateOf(false) }
     val filterEnabled by dataStore.data.map {
         it[SettingPreferences.DanmakuFilterEnabled] ?: false
-    }.collectAsState(initial = false)
+    }.collectAsStateWithLifecycle(initialValue = false)
     val keywords by dataStore.data.map {
         it[SettingPreferences.DanmakuFilterKeywords] ?: emptySet()
-    }.collectAsState(initial = emptySet())
+    }.collectAsStateWithLifecycle(initialValue = emptySet())
 
     ProvidePreferenceLocals(
         flow = rememberPreferenceFlow(dataStore)

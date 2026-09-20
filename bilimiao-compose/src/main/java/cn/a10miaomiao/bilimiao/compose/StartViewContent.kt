@@ -39,8 +39,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -100,6 +98,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.addPaddingValues
 import cn.a10miaomiao.bilimiao.compose.common.foundation.ScaleIndication
@@ -263,9 +262,9 @@ private fun StartIndexList(
 ) {
     val context = LocalContext.current
     val userStore by rememberInstance<UserStore>()
-    val userState by userStore.stateFlow.collectAsState()
+    val userState by userStore.stateFlow.collectAsStateWithLifecycle()
     val playerStore by rememberInstance<PlayerStore>()
-    val playerState by playerStore.stateFlow.collectAsState()
+    val playerState by playerStore.stateFlow.collectAsStateWithLifecycle()
     val playerDelegate by rememberInstance<BasePlayerDelegate>()
 
     LazyColumn(

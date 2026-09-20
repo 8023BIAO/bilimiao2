@@ -30,7 +30,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +44,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.foundation.pagerTabIndicatorOffset
@@ -100,14 +100,14 @@ private fun MyFollowPageContent() {
     val viewModel: MyFollowViewModel by rememberInstance()
     val userStore: UserStore by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(LocalView.current)
 
-    val tagList by viewModel.tagList.data.collectAsState()
-    val tagListLoading by viewModel.tagList.loading.collectAsState()
-    val tagListFail by viewModel.tagList.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val orderType by viewModel.orderType.collectAsState()
+    val tagList by viewModel.tagList.data.collectAsStateWithLifecycle()
+    val tagListLoading by viewModel.tagList.loading.collectAsStateWithLifecycle()
+    val tagListFail by viewModel.tagList.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val orderType by viewModel.orderType.collectAsStateWithLifecycle()
     val orderTypeToNameMap = viewModel.orderTypeToNameMap
     val isLogin = userStore.isLogin()
 
@@ -282,8 +282,8 @@ private fun MyFollowPageContent() {
 
     }
 
-    val tagEditDialogState = viewModel.tagEditDialogState.collectAsState().value
-    val userTagSetDialogState = viewModel.userTagSetDialogState.collectAsState().value
+    val tagEditDialogState = viewModel.tagEditDialogState.collectAsStateWithLifecycle().value
+    val userTagSetDialogState = viewModel.userTagSetDialogState.collectAsStateWithLifecycle().value
     if (userTagSetDialogState != null) {
         val selectedUser = userTagSetDialogState.user
         val selectedTag = remember(selectedUser) {

@@ -12,7 +12,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
@@ -43,7 +43,7 @@ class RegionSelectPage : ComposePage() {
     @Composable
     override fun Content() {
         val regionStore: RegionStore by rememberInstance()
-        val regionList = regionStore.stateFlow.collectAsState().value.regions
+        val regionList = regionStore.stateFlow.collectAsStateWithLifecycle().value.regions
         val context = LocalContext.current
         val bottomSheetState: BottomSheetState by rememberInstance()
 
@@ -74,7 +74,7 @@ class RegionSelectPage : ComposePage() {
         }
 
         val windowStore: WindowStore by rememberInstance()
-        val windowState = windowStore.stateFlow.collectAsState().value
+        val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
         val windowInsets = windowState.getContentInsets(localContainerView())
 
         Column(

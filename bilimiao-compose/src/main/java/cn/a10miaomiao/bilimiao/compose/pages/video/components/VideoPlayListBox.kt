@@ -18,7 +18,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -27,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.video.VideoDetailViewModel
 import com.a10miaomiao.bilimiao.comm.entity.player.PlayListFrom
 import com.a10miaomiao.bilimiao.comm.store.PlayListStore
@@ -46,7 +46,7 @@ fun VideoPlayListBox(
     onChangeExpand: (Boolean) -> Unit = {},
 ) {
     val playerStore by rememberInstance<PlayerStore>()
-    val playerState by playerStore.stateFlow.collectAsState()
+    val playerState by playerStore.stateFlow.collectAsStateWithLifecycle()
     val position by remember(playListState, arc.aid) {
         // 不把 playListState 当 key 的话，换一个播单实例后这里仍读旧状态 → "在列表中 X/N" 不刷新
         derivedStateOf {

@@ -26,7 +26,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -35,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
@@ -236,14 +236,14 @@ internal fun SendDanmakuPageContent(
         title = "发送弹幕"
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val loading = viewModel.loading.collectAsState().value
-    val danmakuType = viewModel.danmakuType.collectAsState().value
-    val danmakuText = viewModel.danmakuText.collectAsState().value
-    val danmakuColor = viewModel.danmakuColor.collectAsState().value
-    val danmakuTextSize = viewModel.danmakuTextSize.collectAsState().value
+    val loading = viewModel.loading.collectAsStateWithLifecycle().value
+    val danmakuType = viewModel.danmakuType.collectAsStateWithLifecycle().value
+    val danmakuText = viewModel.danmakuText.collectAsStateWithLifecycle().value
+    val danmakuColor = viewModel.danmakuColor.collectAsStateWithLifecycle().value
+    val danmakuTextSize = viewModel.danmakuTextSize.collectAsStateWithLifecycle().value
 
     val scrollState = rememberScrollState()
 

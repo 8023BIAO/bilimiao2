@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -258,13 +259,13 @@ internal fun DownloadListPageContent(
         }
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
     val bottomAppBarHeight = windowStore.bottomAppBarHeightDp
 
     var status by remember { mutableStateOf(0) }
-    val downloadList by viewModel.downloadList.collectAsState()
-    val curDownload by viewModel.curDownload.collectAsState()
+    val downloadList by viewModel.downloadList.collectAsStateWithLifecycle()
+    val curDownload by viewModel.curDownload.collectAsStateWithLifecycle()
     val list = remember(downloadList, status) {
         viewModel.filterDownloadList(downloadList, status)
     }

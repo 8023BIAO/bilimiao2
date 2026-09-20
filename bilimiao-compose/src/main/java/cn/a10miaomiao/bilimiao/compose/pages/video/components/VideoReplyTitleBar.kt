@@ -8,10 +8,10 @@ import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.components.miao.MiaoTitleBar
 import cn.a10miaomiao.bilimiao.compose.pages.community.MainReplyViewModel
 
@@ -22,7 +22,7 @@ fun VideoReplyTitleBar(
     viewModel: MainReplyViewModel,
     count: Int = -1,
 ) {
-    val sortOrder by viewModel.sortOrder.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
     val currentLabel = viewModel.sortOrderList.find { it.first == sortOrder }?.second ?: "排序"
 
     MiaoTitleBar(

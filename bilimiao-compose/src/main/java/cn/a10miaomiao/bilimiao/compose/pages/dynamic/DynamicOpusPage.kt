@@ -21,7 +21,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +29,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -245,10 +245,10 @@ private fun DynamicOpusPageContent(
     viewModel: DynamicOpusPageViewModel
 ) {
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val detailData = viewModel.detailData.collectAsState().value
+    val detailData = viewModel.detailData.collectAsStateWithLifecycle().value
 
     AnimatedContent(
         modifier = Modifier.fillMaxSize(),
@@ -265,8 +265,8 @@ private fun DynamicOpusPageContent(
     ) {
         if (it || detailData == null) {
             DynamicDetailPageLoadingContent(
-                loading = viewModel.loading.collectAsState().value,
-                fail = viewModel.fail.collectAsState().value,
+                loading = viewModel.loading.collectAsStateWithLifecycle().value,
+                fail = viewModel.fail.collectAsStateWithLifecycle().value,
                 innerPadding = windowInsets.toPaddingValues()
             )
         } else {
@@ -311,10 +311,10 @@ private fun DynamicDetailPageDetailContent(
     ) {
         MainReplyViewModel(it, commentId, type = 11)
     }
-    val replyList by replyViewModel.list.data.collectAsState()
-    val replyListLoading by replyViewModel.list.loading.collectAsState()
-    val replyListFinished by replyViewModel.list.finished.collectAsState()
-    val replyListFail by replyViewModel.list.fail.collectAsState()
+    val replyList by replyViewModel.list.data.collectAsStateWithLifecycle()
+    val replyListLoading by replyViewModel.list.loading.collectAsStateWithLifecycle()
+    val replyListFinished by replyViewModel.list.finished.collectAsStateWithLifecycle()
+    val replyListFail by replyViewModel.list.fail.collectAsStateWithLifecycle()
 
     val pageTitle = detailData.title.ifBlank { "动态详情" }
     PageConfig(title = pageTitle)

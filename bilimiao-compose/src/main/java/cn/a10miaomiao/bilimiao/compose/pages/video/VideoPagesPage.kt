@@ -23,7 +23,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -34,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import bilibili.app.archive.v1.Page
 import bilibili.app.view.v1.ViewGRPC
@@ -162,13 +162,13 @@ private fun VideoPagesPageContent(
         title = "视频分P"
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val pages by viewModel.pages.collectAsState()
-    val loading by viewModel.loading.collectAsState()
-    val failMessage by viewModel.fail.collectAsState()
-    val currentPlay by viewModel.currentPlay.collectAsState()
+    val pages by viewModel.pages.collectAsStateWithLifecycle()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
+    val failMessage by viewModel.fail.collectAsStateWithLifecycle()
+    val currentPlay by viewModel.currentPlay.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()

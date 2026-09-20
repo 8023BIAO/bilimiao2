@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -435,19 +436,19 @@ internal fun DownloadBangumiCreatePageContent(
     LegacyStoragePermissionEffect()
     val userStore: UserStore by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val bottomAppBarHeight = windowStore.bottomAppBarHeightDp
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val list by viewModel.list.data.collectAsState()
-    val listLoading by viewModel.list.loading.collectAsState()
-    val listFinished by viewModel.list.finished.collectAsState()
-    val listFail by viewModel.list.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val list by viewModel.list.data.collectAsStateWithLifecycle()
+    val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
+    val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
+    val listFail by viewModel.list.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
-    val acceptQuality by viewModel.acceptQuality.collectAsState()
-    val checkedSet by viewModel.checkedSet.collectAsState()
-    val downloadedSet by viewModel.downloadedSet.collectAsState()
+    val acceptQuality by viewModel.acceptQuality.collectAsStateWithLifecycle()
+    val checkedSet by viewModel.checkedSet.collectAsStateWithLifecycle()
+    val downloadedSet by viewModel.downloadedSet.collectAsStateWithLifecycle()
 
     var expandedQualityMenu by remember { mutableStateOf(false) }
 

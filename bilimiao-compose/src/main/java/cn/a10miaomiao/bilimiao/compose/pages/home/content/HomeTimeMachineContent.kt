@@ -35,13 +35,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.BilimiaoPageRoute
 import cn.a10miaomiao.bilimiao.compose.R
 import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
@@ -130,12 +130,12 @@ internal fun HomeTimeMachineContent(
 ) {
     val viewModel: HomeTimeMachineContentViewModel = diViewModel()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val regionList by viewModel.regionList.collectAsState()
-    val timeText by viewModel.timeText.collectAsState()
-    val timeSeason by viewModel.timeSeason.collectAsState()
+    val regionList by viewModel.regionList.collectAsStateWithLifecycle()
+    val timeText by viewModel.timeText.collectAsStateWithLifecycle()
+    val timeSeason by viewModel.timeSeason.collectAsStateWithLifecycle()
 
     val listState = rememberLazyStaggeredGridState()
     val emitter = localEmitter()

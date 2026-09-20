@@ -14,13 +14,13 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.constant.PageTabIds
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -130,7 +130,7 @@ private fun UserSpaceSearchPageContent(
     mid: Long,
     keyword: String
 ) {
-    val rankOrder by viewModel.rankOrder.collectAsState()
+    val rankOrder by viewModel.rankOrder.collectAsStateWithLifecycle()
 
     val pageConfigId = PageConfig(
         title = "搜索投稿\n-\n${keyword}",
@@ -194,7 +194,7 @@ private fun UserSpaceSearchPageContent(
         onSearchSelfPage = { kw -> viewModel.searchAgain(mid, kw) }
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val scope = rememberCoroutineScope()

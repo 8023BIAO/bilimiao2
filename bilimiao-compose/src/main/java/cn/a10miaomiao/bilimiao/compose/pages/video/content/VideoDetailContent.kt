@@ -8,6 +8,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.map
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import androidx.compose.foundation.background
@@ -40,7 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,8 +95,8 @@ fun VideoDetailContent(
 ) {
     val playerStore by rememberInstance<PlayerStore>()
     val playListStore by rememberInstance<PlayListStore>()
-    val playListState by playListStore.stateFlow.collectAsState()
-    val listPosition by playerStore.listPositionFlow.collectAsState()
+    val playListState by playListStore.stateFlow.collectAsStateWithLifecycle()
+    val listPosition by playerStore.listPositionFlow.collectAsStateWithLifecycle()
     var isExpandPlayList by remember {
         mutableStateOf(false)
     }
@@ -104,13 +104,13 @@ fun VideoDetailContent(
     val dataStore = remember { SettingPreferences.run { context.dataStore } }
     val minDuration by remember {
         dataStore.data.map { it[SettingPreferences.VideoMinDuration] ?: 0 }
-    }.collectAsState(0)
+    }.collectAsStateWithLifecycle(0)
     val minPlayCount by remember {
         dataStore.data.map { it[SettingPreferences.VideoMinPlayCount] ?: 0 }
-    }.collectAsState(0)
+    }.collectAsStateWithLifecycle(0)
     val hideRelates by remember {
         dataStore.data.map { it[SettingPreferences.VideoHideRelates] ?: false }
-    }.collectAsState(false)
+    }.collectAsStateWithLifecycle(false)
 
     val relatesFiltered = remember(detailData.relates, minDuration, minPlayCount, hideRelates) {
         var relates = detailData.relates
@@ -130,7 +130,7 @@ fun VideoDetailContent(
     val videoPages = remember(detailData) {
         viewModel.run { detailData.getPages() }
     }
-    val aiConclusionData by viewModel.aiConclusionData.collectAsState()
+    val aiConclusionData by viewModel.aiConclusionData.collectAsStateWithLifecycle()
     val videoHistory = detailData.history
     val videoReqUser = detailData.activitySeason?.reqUser
         ?: detailData.reqUser ?: bilibili.app.view.v1.ReqUser()

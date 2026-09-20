@@ -31,6 +31,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -378,10 +379,10 @@ private fun ChatPageContent(
         ChatViewModel(di = it, talkerId = talkerId)
     }
     val windowStore by rememberInstance<WindowStore>()
-    val windowState by windowStore.stateFlow.collectAsState()
+    val windowState by windowStore.stateFlow.collectAsStateWithLifecycle()
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val list by viewModel.list.data.collectAsState()
+    val list by viewModel.list.data.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing
     val listState = rememberLazyListState()
 

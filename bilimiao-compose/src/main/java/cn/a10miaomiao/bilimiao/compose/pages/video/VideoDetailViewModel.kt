@@ -184,6 +184,23 @@ class VideoDetailViewModel(
         loadData()
     }
 
+    /**
+     * 页面被复用（nav entry 不变、只有参数变了）时切换目标视频。
+     *
+     * 为什么要它：[VideoDetailPage] 的 ViewModel 以前用 `key = id` 创建 —— 自动连播/切集时
+     * 同一个页面会换 id，于是每换一次就新建一个 ViewModel，旧的全部留在 ViewModelStore 里
+     * 直到这一页真正退出（连播 50 集 = 50 个 VM，各自攥着一份详情/评论状态）。
+     * 现在整页只用一个 VM，id 变了就调这里换目标重新加载。
+     *
+     * 首次组合时也会走到这里（id 与构造时相同）→ 直接返回，**不会**重复请求。
+     */
+    fun changeVideoIfNeeded(id: String, seekPosition: Long? = null) {
+        if (_id == id) return
+        // 新参数带来的起始位置：只消费一次（与构造参数 pendingSeekPosition 的语义一致）
+        pendingSeekPosition = seekPosition
+        changeVideo(id)
+    }
+
     fun loadData() {
         // 取消上一未完成的加载：快速切换视频时避免乱序响应覆盖新视频数据
         loadJob?.cancel()

@@ -10,7 +10,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
@@ -55,7 +55,7 @@ object TimeSelectSettingPage : ComposePage() {
 private fun TimeSelectSettingPageContent() {
     PageConfig(title = "时光精选设置")
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
@@ -79,7 +79,7 @@ private fun TimeSelectSettingPageContent() {
     }
 
     // 监听 bottom sheet 关闭事件，刷新已选分区数量（首次进入时 bottomSheetPage 为 null 也会执行）
-    val bottomSheetPage by bottomSheetState.page.collectAsState()
+    val bottomSheetPage by bottomSheetState.page.collectAsStateWithLifecycle()
     LaunchedEffect(bottomSheetPage) {
         if (bottomSheetPage == null) {
             selectedRegionIds = SettingPreferences.mapData(context) { prefs ->
@@ -105,7 +105,7 @@ private fun TimeSelectSettingPageContent() {
         val allRegionsFlow = remember(dataStore) {
             dataStore.data.map { it[SettingPreferences.TimeSelectAllRegions] ?: true }
         }
-        val allRegionsValue by allRegionsFlow.collectAsState(initial = true)
+        val allRegionsValue by allRegionsFlow.collectAsStateWithLifecycle(initialValue = true)
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()

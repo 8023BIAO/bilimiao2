@@ -40,7 +40,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +50,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import bilibili.main.community.reply.v1.CursorReply
 import bilibili.main.community.reply.v1.CursorReq
@@ -430,7 +430,7 @@ fun ReplyDetailContent(
     onLikeReply: (ReplyInfo) -> Unit = {},
 ) {
     val userStore by rememberInstance<UserStore>()
-    val userState by userStore.stateFlow.collectAsState()
+    val userState by userStore.stateFlow.collectAsStateWithLifecycle()
     val viewModel = diViewModel(
         key = "reply-detail-${reply.id}"
     ) {
@@ -441,13 +441,13 @@ fun ReplyDetailContent(
         )
     }
 
-    val list by viewModel.list.data.collectAsState()
-    val listLoading by viewModel.list.loading.collectAsState()
-    val listFinished by viewModel.list.finished.collectAsState()
-    val listFail by viewModel.list.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val upMid by viewModel.upMid.collectAsState()
-    val sortOrder by viewModel.sortOrder.collectAsState()
+    val list by viewModel.list.data.collectAsStateWithLifecycle()
+    val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
+    val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
+    val listFail by viewModel.list.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val upMid by viewModel.upMid.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
     val sortOrderList = viewModel.sortOrderList
 
     if (usePageConfig) {

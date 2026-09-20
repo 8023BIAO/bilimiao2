@@ -10,12 +10,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
@@ -70,7 +70,7 @@ private fun SponsorBlockSettingPageContent() {
     }
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
@@ -80,7 +80,7 @@ private fun SponsorBlockSettingPageContent() {
     val prefFlow = rememberPreferenceFlow(dataStore)
 
     ProvidePreferenceLocals(flow = prefFlow) {
-        val preferences = prefFlow.collectAsState().value
+        val preferences = prefFlow.collectAsStateWithLifecycle().value
         // 总开关（默认开，与播放器侧 PlayerController 的读取默认值保持一致）
         val sponsorEnabled =
             (preferences[SettingPreferences.SponsorBlockEnable.name] as? Boolean) ?: true

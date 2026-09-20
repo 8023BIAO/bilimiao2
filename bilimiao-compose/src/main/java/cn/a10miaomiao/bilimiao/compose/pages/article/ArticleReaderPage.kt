@@ -13,13 +13,13 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import androidx.activity.compose.BackHandler
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -46,11 +46,11 @@ class ArticleReaderPage(
         ) { ArticleReaderViewModel(it, id) }
 
         val windowStore: WindowStore by rememberInstance()
-        val windowState by windowStore.stateFlow.collectAsState()
+        val windowState by windowStore.stateFlow.collectAsStateWithLifecycle()
         val contentInsets = windowState.getContentInsets(localContainerView())
         val innerPadding = contentInsets.toPaddingValues()
 
-        val article by articleVM.article.collectAsState()
+        val article by articleVM.article.collectAsStateWithLifecycle()
         val replyCount = article?.replyCount ?: 0
         val tabs = remember(replyCount) {
             listOf("article" to "专栏", "reply" to "评论($replyCount)")

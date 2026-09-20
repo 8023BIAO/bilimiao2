@@ -13,12 +13,12 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
@@ -49,14 +49,14 @@ fun ReplyListContent(
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
 ) {
     val userStore by rememberInstance<UserStore>()
-    val userState by userStore.stateFlow.collectAsState()
+    val userState by userStore.stateFlow.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val dataStore = androidx.compose.runtime.remember {
         SettingPreferences.run { context.dataStore }
     }
     val blockedWords by dataStore.data.map {
         it[SettingPreferences.CommentBlockedWords] ?: emptySet()
-    }.collectAsState(initial = emptySet())
+    }.collectAsStateWithLifecycle(initialValue = emptySet())
     // 解析屏蔽词为 AC + 正则（同 FilterStore 逻辑）
     val (commentPlainMatcher, commentRegexList) = remember(blockedWords) {
         val plainWords = mutableListOf<String>()
@@ -75,7 +75,7 @@ fun ReplyListContent(
         val matcher = if (plainWords.isNotEmpty()) AhoCorasickMatcher(plainWords) else null
         Pair(matcher, regexes)
     }
-    val allList by viewModel.list.data.collectAsState()
+    val allList by viewModel.list.data.collectAsStateWithLifecycle()
     // ★ 屏蔽词过滤要 remember：blockedWords 非空时，父级每次重组（下拉刷新、loading/finished
     //   变化、滚动回收）都会把**全部评论**在主线程上重新过一遍 AC 自动机 + 正则并生成新 List。
     val list = remember(allList, blockedWords, commentPlainMatcher, commentRegexList) {
@@ -90,12 +90,12 @@ fun ReplyListContent(
             true
         }
     }
-    val listLoading by viewModel.list.loading.collectAsState()
-    val listFinished by viewModel.list.finished.collectAsState()
-    val listFail by viewModel.list.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val upMid by viewModel.upMid.collectAsState()
-    val sortOrder by viewModel.sortOrder.collectAsState()
+    val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
+    val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
+    val listFail by viewModel.list.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val upMid by viewModel.upMid.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
 
     if (usePageConfig) {
         val grayIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f).toArgb()

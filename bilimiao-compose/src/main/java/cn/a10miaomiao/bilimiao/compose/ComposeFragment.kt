@@ -43,7 +43,6 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -68,6 +67,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -193,8 +193,8 @@ class ComposeFragment : Fragment(), MyPage, DIAware, OnBackPressedDispatcherOwne
                 ) {
                     withDI(di = di) {
                         val currentDark = isSystemInDarkTheme()
-                        val appState = appStore.stateFlow.collectAsState().value
-                        val windowState = windowStore.stateFlow.collectAsState().value
+                        val appState = appStore.stateFlow.collectAsStateWithLifecycle().value
+                        val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
                         val windowInsets = windowState.getContentInsets(localContainerView())
                         BilimiaoTheme(
                             appState = appState,
@@ -216,7 +216,7 @@ class ComposeFragment : Fragment(), MyPage, DIAware, OnBackPressedDispatcherOwne
                                     val startRoute = HomePage
                                     MyNavHost(composeNav, startRoute)
                                 }
-                                val bottomSheetPage = bottomSheetState.page.collectAsState().value
+                                val bottomSheetPage = bottomSheetState.page.collectAsStateWithLifecycle().value
                                 if (bottomSheetPage != null) {
                                     MyBottomSheet(
                                         bottomSheetView,
@@ -433,7 +433,7 @@ fun MyStartView(
     if (startViewWrapper.shouldCreateCompositionOnAttachedToWindow) {
         val composition = rememberCompositionContext()
         startViewWrapper.setContent(composition) {
-            val appState = appStore.stateFlow.collectAsState().value
+            val appState = appStore.stateFlow.collectAsStateWithLifecycle().value
             BilimiaoTheme(appState, isSystemInDarkTheme()) {
                 StartViewContent(
                     startTopHeight = startViewWrapper.touchStart.dp,

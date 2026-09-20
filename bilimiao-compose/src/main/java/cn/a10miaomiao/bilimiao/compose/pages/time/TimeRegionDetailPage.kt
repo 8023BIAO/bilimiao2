@@ -16,7 +16,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -25,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.BilimiaoPageRoute
 import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -124,8 +124,8 @@ private class TimeRegionDetailPageViewModel(
 private fun TimeRegionDetailPageContent(
     viewModel: TimeRegionDetailPageViewModel
 ) {
-    val timeText by viewModel.timeText.collectAsState()
-    val rankOrder by viewModel.rankOrder.collectAsState()
+    val timeText by viewModel.timeText.collectAsStateWithLifecycle()
+    val rankOrder by viewModel.rankOrder.collectAsStateWithLifecycle()
     val pageConfigId = PageConfig(
         title = "时光姬\n-\n${viewModel.name}",
         menu = rememberMyMenu(timeText, rankOrder) {
@@ -171,7 +171,7 @@ private fun TimeRegionDetailPageContent(
     )
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val pagerState = viewModel.pagerState

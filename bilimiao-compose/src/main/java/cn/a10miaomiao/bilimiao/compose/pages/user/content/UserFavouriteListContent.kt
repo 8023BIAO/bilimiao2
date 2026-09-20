@@ -22,7 +22,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +35,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.R
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
@@ -61,19 +61,19 @@ internal fun UserFavouriteListContent(
     folderType: UserFavouriteFolderType,
 ) {
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val (listFlow, isRefreshingFlow) = remember(viewModel, folderType) {
         viewModel.getListAndIsRefreshingFlow(folderType)
     }
-    val list by listFlow.data.collectAsState()
-    val listLoading by listFlow.loading.collectAsState()
-    val listFinished by listFlow.finished.collectAsState()
-    val listFail by listFlow.fail.collectAsState()
-    val isRefreshing by isRefreshingFlow.collectAsState()
+    val list by listFlow.data.collectAsStateWithLifecycle()
+    val listLoading by listFlow.loading.collectAsStateWithLifecycle()
+    val listFinished by listFlow.finished.collectAsStateWithLifecycle()
+    val listFail by listFlow.fail.collectAsStateWithLifecycle()
+    val isRefreshing by isRefreshingFlow.collectAsStateWithLifecycle()
 
-    val openedMedia by viewModel.openedMedia.collectAsState()
+    val openedMedia by viewModel.openedMedia.collectAsStateWithLifecycle()
 
     // TODO: 跨文件夹深度搜索 — 搜索时对每个文件夹异步调 mediaDetail API，
     // 筛选出含匹配视频的文件夹并在列表中标示或展开。当前仅搜索文件夹名。

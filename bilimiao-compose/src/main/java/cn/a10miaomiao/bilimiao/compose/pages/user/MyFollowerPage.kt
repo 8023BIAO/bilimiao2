@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import cn.a10miaomiao.bilimiao.compose.R
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -187,14 +188,14 @@ data class FollowerListResult(
 private fun MyFollowerContent(viewModel: MyFollowerViewModel) {
     PageConfig(title = if (viewModel.isOwner) "我的粉丝" else "TA的粉丝")
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val listData by viewModel.list.data.collectAsState()
-    val loading by viewModel.list.loading.collectAsState()
-    val finished by viewModel.list.finished.collectAsState()
-    val fail by viewModel.list.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val listData by viewModel.list.data.collectAsStateWithLifecycle()
+    val loading by viewModel.list.loading.collectAsStateWithLifecycle()
+    val finished by viewModel.list.finished.collectAsStateWithLifecycle()
+    val fail by viewModel.list.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     // FollowerUserInfo 既不是 Parcelable 也不是 java.io.Serializable，
     // 用 rememberSaveable 会在旋屏/进程重建保存状态时抛 IllegalStateException
     var showRemoveDialog by remember { mutableStateOf<FollowerUserInfo?>(null) }

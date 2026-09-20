@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -59,7 +59,7 @@ private fun ThreadRipperSettingPageContent() {
     PageConfig(title = "分段并发下载")
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
@@ -73,7 +73,7 @@ private fun ThreadRipperSettingPageContent() {
     }
 
     ProvidePreferenceLocals(flow = prefFlow) {
-        val preferences = prefFlow.collectAsState().value
+        val preferences = prefFlow.collectAsStateWithLifecycle().value
         // 视频格式是 MP4 时，分段并发下载对它无效（MP4 整段顺序下载、没有分段可切）→ 这里整页置灰
         val fnvalValue = (preferences[SettingPreferences.PlayerFnval.name] as? Int)
             ?: SettingConstants.PLAYER_FNVAL_DASH

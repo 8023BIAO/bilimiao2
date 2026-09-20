@@ -27,8 +27,17 @@ object ClickGuard {
     /** 默认节流窗口：600ms 足够挡住"手抖连点"，又不会让人感觉迟钝 */
     const val DEFAULT_WINDOW_MS = 600L
 
+    /**
+     * 独占闸门的兜底超时：正常流程（弹窗/选择）都是秒级结束、由 [leave] 精确释放；
+     * 万一某条异常路径忘了 leave，超过这个时间也当成"已释放"，那个入口不会永久点不动。
+     * 取 15 秒：比任何正常交互都长（不会误把第二个流程放进来），又能让卡死的入口自愈。
+     */
+    const val BUSY_TIMEOUT_MS = 15_000L
+
     private val lastAllowedAt = HashMap<String, Long>()
-    private val busyKeys = HashSet<String>()
+
+    /** key → 进入时间（uptimeMs）。带时间戳是为了让"忘了 leave"的入口能超时自愈 */
+    private val busyKeys = HashMap<String, Long>()
 
     /**
      * 时间窗节流：同一 [key] 在 [windowMs] 毫秒内只放行一次。
@@ -53,9 +62,24 @@ object ClickGuard {
 
     /**
      * 独占闸门：拿不到说明同名流程正在进行中。
-     * 拿到后**必须**在流程结束时 [leave]（忘了 leave 会导致这个入口永久点不动）。
+     * 拿到后**必须**在流程结束时 [leave]；万一忘了（异常路径），[BUSY_TIMEOUT_MS] 之后自动失效。
      */
-    fun enter(key: String): Boolean = synchronized(busyKeys) { busyKeys.add(key) }
+    fun enter(key: String): Boolean {
+        val now = SystemClock.uptimeMillis()
+        return synchronized(busyKeys) {
+            val enteredAt = busyKeys[key]
+            if (enteredAt != null && now - enteredAt < BUSY_TIMEOUT_MS) {
+                false
+            } else {
+                // 顺手清理过期的（key 里可能带 rpid/aid，不清也会慢慢涨）
+                if (busyKeys.size > 64) {
+                    busyKeys.values.removeAll { at -> now - at > BUSY_TIMEOUT_MS }
+                }
+                busyKeys[key] = now
+                true
+            }
+        }
+    }
 
     /** 释放独占闸门；重复调用是无害的。 */
     fun leave(key: String) {
@@ -63,5 +87,11 @@ object ClickGuard {
     }
 
     /** 同名流程是否进行中（用于 UI 判断，一般不用直接调） */
-    fun isBusy(key: String): Boolean = synchronized(busyKeys) { key in busyKeys }
+    fun isBusy(key: String): Boolean {
+        val now = SystemClock.uptimeMillis()
+        return synchronized(busyKeys) {
+            val enteredAt = busyKeys[key]
+            enteredAt != null && now - enteredAt < BUSY_TIMEOUT_MS
+        }
+    }
 }

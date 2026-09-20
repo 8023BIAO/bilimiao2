@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -22,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.navOptions
 import cn.a10miaomiao.bilimiao.compose.common.constant.PageTabIds
@@ -317,19 +317,19 @@ internal fun HomeBangumiContent(
         initializer = { di -> HomeBangumiContentViewModel(di = di, seasonType = seasonType, tabId = tabId, context = context) }
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     // 读取卡片列数设置
     val dataStore = remember { SettingPreferences.run { context.dataStore } }
     val gridSpan by dataStore.data
         .map { it[SettingPreferences.HomeBangumiGridSpan] ?: 0 }
-        .collectAsState(initial = 0)
+        .collectAsStateWithLifecycle(initialValue = 0)
 
-    val list by viewModel.list.data.collectAsState()
-    val listLoading by viewModel.list.loading.collectAsState()
-    val listFinished by viewModel.list.finished.collectAsState()
-    val listFail by viewModel.list.fail.collectAsState()
+    val list by viewModel.list.data.collectAsStateWithLifecycle()
+    val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
+    val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
+    val listFail by viewModel.list.fail.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing
     val showFilter by viewModel.showFilter
     val conditionData by viewModel.conditionData

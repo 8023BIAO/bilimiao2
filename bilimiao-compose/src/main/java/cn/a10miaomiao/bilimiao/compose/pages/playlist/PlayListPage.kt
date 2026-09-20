@@ -27,7 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions
@@ -106,10 +106,10 @@ private fun PlayListPageContent(
     val playerStore: PlayerStore by rememberInstance()
     val playListStore: PlayListStore by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
-    val windowState by windowStore.stateFlow.collectAsState()
+    val windowState by windowStore.stateFlow.collectAsStateWithLifecycle()
     val windowInsets = windowState.getContentInsets(localContainerView())
-    val playListState by playListStore.stateFlow.collectAsState()
-    val playerState by playerStore.stateFlow.collectAsState()
+    val playListState by playListStore.stateFlow.collectAsStateWithLifecycle()
+    val playerState by playerStore.stateFlow.collectAsStateWithLifecycle()
 
     val showClearTipsDialog = remember {
         mutableStateOf(false)

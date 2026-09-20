@@ -22,7 +22,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -36,6 +35,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import bilibili.app.interfaces.v1.CursorItem
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -450,15 +450,15 @@ private fun WatchLaterPageContent(
     )
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val listFlow = viewModel.list
-    val list by listFlow.data.collectAsState()
-    val listLoading by listFlow.loading.collectAsState()
-    val listFinished by listFlow.finished.collectAsState()
-    val listFail by listFlow.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val list by listFlow.data.collectAsStateWithLifecycle()
+    val listLoading by listFlow.loading.collectAsStateWithLifecycle()
+    val listFinished by listFlow.finished.collectAsStateWithLifecycle()
+    val listFail by listFlow.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier.fillMaxSize(),

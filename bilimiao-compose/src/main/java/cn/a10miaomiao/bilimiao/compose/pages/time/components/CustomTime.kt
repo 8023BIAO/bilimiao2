@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingViewMode
 import com.a10miaomiao.bilimiao.comm.store.model.DateModel
 import kotlin.math.abs
@@ -228,7 +229,7 @@ fun Header(
 internal fun CustomTime(
     viewModel: TimeSettingViewMode
 ) {
-    val customTime = viewModel.customTime.collectAsState()
+    val customTime = viewModel.customTime.collectAsStateWithLifecycle()
     val timeFrom = customTime.value.timeFrom
     val timeTo = customTime.value.timeTo
     val maxDate = viewModel.maxDate

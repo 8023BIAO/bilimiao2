@@ -10,10 +10,10 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavBackStackEntry
 import bilibili.app.view.v1.ViewReply
@@ -157,12 +157,12 @@ private fun ReplyDetailListPageContent(
 ) {
     val pageNavigation: PageNavigation by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val detailData = viewModel.detailData.collectAsState().value
-    val loading = viewModel.loading.collectAsState().value
-    val fail = viewModel.fail.collectAsState().value
+    val detailData = viewModel.detailData.collectAsStateWithLifecycle().value
+    val loading = viewModel.loading.collectAsStateWithLifecycle().value
+    val fail = viewModel.fail.collectAsStateWithLifecycle().value
 
     val parentId = detailData?.parent ?: 0L
 

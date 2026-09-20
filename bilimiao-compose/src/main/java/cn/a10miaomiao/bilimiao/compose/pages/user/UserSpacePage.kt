@@ -37,7 +37,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,6 +50,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.emitter.EmitterAction
@@ -105,10 +105,10 @@ private fun UserSpacePageContent(
     archiveViewModel: UserArchiveViewModel,
 ) {
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val detailData = viewModel.detailData.collectAsState().value
+    val detailData = viewModel.detailData.collectAsStateWithLifecycle().value
 //    val slideDistance = LocalDensity.current.run {
 //        100.dp.toPx()
 //    }
@@ -127,8 +127,8 @@ private fun UserSpacePageContent(
     ) {
         if (it || detailData == null) {
             UserSpacePageLoadingContent(
-                loading = viewModel.loading.collectAsState().value,
-                fail = viewModel.fail.collectAsState().value,
+                loading = viewModel.loading.collectAsStateWithLifecycle().value,
+                fail = viewModel.fail.collectAsStateWithLifecycle().value,
                 innerPadding = windowInsets.toPaddingValues()
             )
         } else {
@@ -168,8 +168,8 @@ private fun UserSpacePageDetailContent(
     windowInsets: Insets,
     detailData: SpaceInfo,
 ) {
-    val isFollow = viewModel.isFollow.collectAsState().value
-    val rankOrder = archiveViewModel.rankOrder.collectAsState().value
+    val isFollow = viewModel.isFollow.collectAsStateWithLifecycle().value
+    val rankOrder = archiveViewModel.rankOrder.collectAsStateWithLifecycle().value
     val primaryColor = MaterialTheme.colorScheme.primary.toArgb()
     val grayIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f).toArgb()
     val pageConfigId = PageConfig(

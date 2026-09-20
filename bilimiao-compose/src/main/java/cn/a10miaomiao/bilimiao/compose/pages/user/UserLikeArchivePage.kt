@@ -13,12 +13,12 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -154,15 +154,15 @@ private fun UserLikeArchivePageContent(
         title = "最近点赞\n的\n视频",
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val listFlow = viewModel.list
-    val list by listFlow.data.collectAsState()
-    val listLoading by listFlow.loading.collectAsState()
-    val listFinished by listFlow.finished.collectAsState()
-    val listFail by listFlow.fail.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val list by listFlow.data.collectAsStateWithLifecycle()
+    val listLoading by listFlow.loading.collectAsStateWithLifecycle()
+    val listFinished by listFlow.finished.collectAsStateWithLifecycle()
+    val listFail by listFlow.fail.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     SwipeToRefresh(
         refreshing = isRefreshing,

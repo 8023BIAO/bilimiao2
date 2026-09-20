@@ -23,9 +23,9 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -58,7 +58,7 @@ class MessagePage : ComposePage() {
     @Composable
     override fun Content() {
         val userStore: UserStore by rememberInstance()
-        val userState by userStore.stateFlow.collectAsState()
+        val userState by userStore.stateFlow.collectAsStateWithLifecycle()
         val isLogin = userState.info != null
         val viewModel: MessagePageViewModel = diViewModel()
         if (isLogin) {
@@ -154,10 +154,10 @@ private fun MessagePageContent(
     val scope = rememberCoroutineScope()
 
     val messageStore: MessageStore by rememberInstance()
-    val messageState = messageStore.stateFlow.collectAsState().value
+    val messageState = messageStore.stateFlow.collectAsStateWithLifecycle().value
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val pagerState = rememberPagerState(pageCount = { viewModel.tabs.size })

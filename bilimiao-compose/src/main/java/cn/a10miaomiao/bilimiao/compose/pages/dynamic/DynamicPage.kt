@@ -25,7 +25,6 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -33,6 +32,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.constant.PageTabIds
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -64,7 +64,7 @@ object DynamicPage : ComposePage() {
     @Composable
     override fun Content() {
         val userStore: UserStore by rememberInstance()
-        val userState by userStore.stateFlow.collectAsState()
+        val userState by userStore.stateFlow.collectAsStateWithLifecycle()
         val isLogin = userState.info != null
         val viewModel: DynamicViewModel = diViewModel()
         if (isLogin) {
@@ -106,11 +106,11 @@ private fun DynamicPageContent(
 
     val scope = rememberCoroutineScope()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val upperList by viewModel.upList.collectAsState()
-    val selectedUpper by viewModel.selectedUpper.collectAsState()
+    val upperList by viewModel.upList.collectAsStateWithLifecycle()
+    val selectedUpper by viewModel.selectedUpper.collectAsStateWithLifecycle()
     val saveableStateHolder = rememberSaveableStateHolder()
 
     val tabs = listOf(TAB_VIDEO, TAB_UP)

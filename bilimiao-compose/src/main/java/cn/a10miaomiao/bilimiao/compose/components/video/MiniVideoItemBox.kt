@@ -28,9 +28,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.layout.ContentScale
@@ -71,7 +71,7 @@ fun MiniVideoItemBox(
     val dataStore = remember { SettingPreferences.run { context.dataStore } }
     val hideCover by remember {
         dataStore.data.map { it[SettingPreferences.VideoHideCover] ?: false }
-    }.collectAsState(false)
+    }.collectAsStateWithLifecycle(false)
 
     MiaoCard(
         modifier = modifier,

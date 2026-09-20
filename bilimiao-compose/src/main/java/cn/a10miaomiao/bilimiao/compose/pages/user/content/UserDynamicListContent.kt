@@ -11,13 +11,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import bilibili.app.dynamic.v2.DynamicGRPC
 import cn.a10miaomiao.bilimiao.compose.common.addPaddingValues
@@ -130,14 +130,14 @@ fun UserDynamicListContent(
         UserDynamicListContentViewModel(it, vmid)
     }
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val listFlow = viewModel.list
-    val list by listFlow.data.collectAsState()
-    val listLoading by listFlow.loading.collectAsState()
-    val listFinished by listFlow.finished.collectAsState()
-    val listFail by listFlow.fail.collectAsState()
+    val list by listFlow.data.collectAsStateWithLifecycle()
+    val listLoading by listFlow.loading.collectAsStateWithLifecycle()
+    val listFinished by listFlow.finished.collectAsStateWithLifecycle()
+    val listFail by listFlow.fail.collectAsStateWithLifecycle()
 
     val listState = rememberLazyListState()
     val emitter = localEmitter()

@@ -31,7 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.R
 import cn.a10miaomiao.bilimiao.compose.components.image.previewer.ImagePreviewer
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
@@ -200,15 +200,15 @@ fun UserSpaceHeader(
     viewModel: UserSpaceViewModel,
     archiveViewModel: UserArchiveViewModel,
 ) {
-    val detailData = viewModel.detailData.collectAsState().value ?: return Box {}
+    val detailData = viewModel.detailData.collectAsStateWithLifecycle().value ?: return Box {}
     val cardData = detailData.card
     val location = cardData.space_tag?.firstOrNull {
         it.type == "location"
     }?.title ?: ""
     val officialVerify = cardData.official_verify
 
-    val seriesList = archiveViewModel.seriesList.collectAsState().value
-    val seriesTotal = archiveViewModel.seriesTotal.collectAsState().value
+    val seriesList = archiveViewModel.seriesList.collectAsStateWithLifecycle().value
+    val seriesTotal = archiveViewModel.seriesTotal.collectAsStateWithLifecycle().value
 
     Box(
         modifier = modifier,

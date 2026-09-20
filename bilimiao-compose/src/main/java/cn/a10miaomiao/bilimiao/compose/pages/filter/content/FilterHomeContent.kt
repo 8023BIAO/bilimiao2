@@ -16,7 +16,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
@@ -44,7 +44,7 @@ import org.kodein.di.compose.rememberInstance
 @Composable
 fun FilterHomeContent() {
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -53,7 +53,7 @@ fun FilterHomeContent() {
     var showCommentFilterDialog by remember { mutableStateOf(false) }
     val commentBlockedWords by dataStore.data.map {
         it[SettingPreferences.CommentBlockedWords] ?: emptySet()
-    }.collectAsState(initial = emptySet())
+    }.collectAsStateWithLifecycle(initialValue = emptySet())
 
     ProvidePreferenceLocals(
         flow = rememberPreferenceFlow(dataStore)

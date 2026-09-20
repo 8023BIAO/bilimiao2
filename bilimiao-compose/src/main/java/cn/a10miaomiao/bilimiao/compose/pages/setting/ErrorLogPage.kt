@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.nio.charset.StandardCharsets
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -74,7 +75,7 @@ class ErrorLogPage : ComposePage() {
             color = MaterialTheme.colorScheme.surface,
         ) {
         val windowStore: WindowStore by rememberInstance()
-        val windowState = windowStore.stateFlow.collectAsState().value
+        val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
         val windowInsets = windowState.getContentInsets(localContainerView())
 
         val context = LocalContext.current

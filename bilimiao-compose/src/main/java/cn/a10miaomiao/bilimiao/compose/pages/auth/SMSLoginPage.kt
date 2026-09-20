@@ -28,7 +28,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -307,15 +307,15 @@ private fun SMSLoginPageCompose(
     PageConfig(title = "手机号登录")
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(LocalView.current)
     val bottomAppBarHeight = windowStore.bottomAppBarHeightDp
 
-    val selectedCid by viewModel.selectedCid.collectAsState()
-    val telNumber by viewModel.telNumber.collectAsState()
-    val countdown by viewModel.countdown.collectAsState()
-    val verifyCode by viewModel.verifyCode.collectAsState()
-    val loading by viewModel.loading.collectAsState()
+    val selectedCid by viewModel.selectedCid.collectAsStateWithLifecycle()
+    val telNumber by viewModel.telNumber.collectAsStateWithLifecycle()
+    val countdown by viewModel.countdown.collectAsStateWithLifecycle()
+    val verifyCode by viewModel.verifyCode.collectAsStateWithLifecycle()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
 
     val verifyCodeFocusRequester = remember { FocusRequester() }
 

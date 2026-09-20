@@ -14,7 +14,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
@@ -69,10 +69,10 @@ private fun AutoStopTimerPageContent(
     )
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val autoStopDuration by viewModel.autoStopDurationFlow.collectAsState()
+    val autoStopDuration by viewModel.autoStopDurationFlow.collectAsStateWithLifecycle()
     // 不要用 autoStopDuration 当 remember 的 key：播放中它每秒递减，
     // 会让滑块在拖动过程中被重建覆盖，根本拖不到想要的值（进页面时的初值取一次即可）
     var sliderValue by remember { mutableFloatStateOf(autoStopDuration.toFloat()) }

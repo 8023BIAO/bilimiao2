@@ -49,7 +49,6 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -66,6 +65,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.window.core.layout.WindowWidthSizeClass
 import cn.a10miaomiao.bilimiao.compose.base.PageSearchMethod
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -211,8 +211,8 @@ fun SearchInputInline(
                 },
             enabled = false,
         ) {
-            val historySuggestList by viewModel.historyListFlow.collectAsState()
-            val suggestList by viewModel.suggestListFlow.collectAsState()
+            val historySuggestList by viewModel.historyListFlow.collectAsStateWithLifecycle()
+            val suggestList by viewModel.suggestListFlow.collectAsStateWithLifecycle()
             val scrollState = rememberScrollState()
             LaunchedEffect(historySuggestList) {
                 if (historySuggestList.isEmpty()) {

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -344,15 +345,15 @@ private fun TelVerifyPageCompose(
     PageConfig(title = "帐号验证")
 
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(LocalView.current)
     val bottomAppBarHeight = windowStore.bottomAppBarHeightDp
 
-    val verifyType by viewModel.verifyType.collectAsState()
-    val tmpAccountInfo by viewModel.tmpAccountInfo.collectAsState()
-    val countdown by viewModel.countdown.collectAsState()
-    val verifyCode by viewModel.verifyCode.collectAsState()
-    val loading by viewModel.loading.collectAsState()
+    val verifyType by viewModel.verifyType.collectAsStateWithLifecycle()
+    val tmpAccountInfo by viewModel.tmpAccountInfo.collectAsStateWithLifecycle()
+    val countdown by viewModel.countdown.collectAsStateWithLifecycle()
+    val verifyCode by viewModel.verifyCode.collectAsStateWithLifecycle()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
 
     val verifyCodeKeyboardActions = remember(viewModel) {
         KeyboardActions {

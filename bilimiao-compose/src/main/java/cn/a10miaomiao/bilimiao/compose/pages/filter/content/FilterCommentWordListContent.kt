@@ -24,7 +24,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +40,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.edit
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import kotlinx.coroutines.flow.first
@@ -56,7 +56,7 @@ internal fun FilterCommentWordListContent() {
     val scope = rememberCoroutineScope()
     val allWords by dataStore.data.map { prefs ->
         prefs[SettingPreferences.CommentBlockedWords] ?: emptySet()
-    }.collectAsState(initial = emptySet())
+    }.collectAsStateWithLifecycle(initialValue = emptySet())
 
     val selectedMap = remember {
         mutableStateMapOf<String, Int>()

@@ -24,7 +24,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -43,6 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
@@ -89,7 +89,7 @@ internal class FilterTagListContentModel(
 internal fun FilterTagListContent() {
     val viewModel: FilterTagListContentModel = diViewModel()
 
-    val state by viewModel.stateFlow.collectAsState()
+    val state by viewModel.stateFlow.collectAsStateWithLifecycle()
     val filterTagList = state.filterTagList
 
     val selectedMap = remember {

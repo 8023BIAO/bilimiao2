@@ -3,6 +3,7 @@ package cn.a10miaomiao.bilimiao.compose.common.mypage
 import android.content.Context
 import android.view.View
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MyPage
 import com.a10miaomiao.bilimiao.comm.mypage.MyPageMenu
@@ -48,7 +49,7 @@ class PageConfigState {
 
     @Composable
     fun collectConfigAsState(): State<Cofing> {
-        return configFlow.collectAsState()
+        return configFlow.collectAsStateWithLifecycle()
     }
 
     fun putMyPageListener(id: Int, listener: OnMyPageListener) {

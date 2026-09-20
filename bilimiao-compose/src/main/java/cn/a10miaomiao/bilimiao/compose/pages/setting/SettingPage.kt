@@ -12,7 +12,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +22,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.navOptions
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -103,12 +103,12 @@ private fun SettingPageContent(
     )
     val windowStore: WindowStore by rememberInstance()
     val userStore: UserStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
-    val userState = userStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
+    val userState = userStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
     val context = LocalContext.current
     // 远程设置列表已禁用 - 不收集远程数据
-    // val moreSettingList by viewModel.moreSettingList.collectAsState()
+    // val moreSettingList by viewModel.moreSettingList.collectAsStateWithLifecycle()
 
     val dataStore = remember {
         SettingPreferences.run { context.dataStore }

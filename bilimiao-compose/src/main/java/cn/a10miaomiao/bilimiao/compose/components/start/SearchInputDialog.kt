@@ -35,7 +35,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +48,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.pages.search.SearchInputViewModel
@@ -90,7 +90,7 @@ fun SearchInputDialog(
         }
     }
 
-    val suggestList by viewModel.suggestListFlow.collectAsState()
+    val suggestList by viewModel.suggestListFlow.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<String?>(null) }
     var showClearAll by remember { mutableStateOf(false) }

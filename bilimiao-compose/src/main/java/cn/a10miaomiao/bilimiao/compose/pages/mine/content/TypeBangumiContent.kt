@@ -20,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
@@ -29,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import cn.a10miaomiao.bilimiao.compose.common.constant.PageTabIds
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -213,7 +213,7 @@ fun TypeBangumiContent(
         TypeBangumiContentViewModel(it, type)
     }
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     if (isActive) {
@@ -232,7 +232,7 @@ fun TypeBangumiContent(
                 )
             )
     ) {
-        val currentStatus = viewModel.currentStatus.collectAsState().value
+        val currentStatus = viewModel.currentStatus.collectAsStateWithLifecycle().value
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -253,11 +253,11 @@ fun TypeBangumiContent(
             }
         }
 
-        val list by viewModel.list.data.collectAsState()
-        val listLoading by viewModel.list.loading.collectAsState()
-        val listFinished by viewModel.list.finished.collectAsState()
-        val listFail by viewModel.list.fail.collectAsState()
-        val isRefreshing by viewModel.isRefreshing.collectAsState()
+        val list by viewModel.list.data.collectAsStateWithLifecycle()
+        val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
+        val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
+        val listFail by viewModel.list.fail.collectAsStateWithLifecycle()
+        val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
         val moreMenu = remember(currentStatus) {
             if (currentStatus == 0) {
                 listOf(0 to "取消${viewModel.typeName}")

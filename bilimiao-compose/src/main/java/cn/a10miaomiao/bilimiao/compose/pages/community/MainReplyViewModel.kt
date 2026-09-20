@@ -48,10 +48,12 @@ import org.kodein.di.instance
 
 class MainReplyViewModel(
     override val di: DI,
-    val oid: String,
-    val type: Int,
-    val extra: String = "",
-    val filterTagName: String = "",
+    /** 当前评论区对象 id（视频 aid / 动态 id / 专栏 cid…）。可被 [switchTarget] 换掉 */
+    var oid: String,
+    /** 评论区类型（1=视频，11=动态，12=专栏…）。可被 [switchTarget] 换掉 */
+    var type: Int,
+    var extra: String = "",
+    var filterTagName: String = "",
 ) : ViewModel(), DIAware {
 
     private val pageNavigation: PageNavigation by instance()
@@ -174,6 +176,34 @@ class MainReplyViewModel(
         if (!this.list.finished.value && !this.list.loading.value) {
             loadJob = loadData()
         }
+    }
+
+    /**
+     * 换评论区目标（同一个页面被复用来显示另一个视频/动态的评论）：**复用同一个 VM**，不新建。
+     *
+     * 为什么要它：列表页以前用 `diViewModel(key = oid)` 建 VM —— 页面（nav entry）被复用、
+     * 只有 oid 变时，每换一个目标就建一个新 VM，旧的全部留在 ViewModelStore 里到页面退出，
+     * 而且每个 VM 的 init 都会立刻发一次评论请求（连播 50 集 = 50 个 VM + 50 次请求）。
+     *
+     * 这里把"上一目标"的页面级状态全部清掉再重新加载：
+     * 分页与列表（[refreshList] 里 reset）、置顶/UP 主/总数、当前展开的楼中楼。
+     * 排序选择（sortOrder）保留 —— 那是用户的阅读偏好，换视频不该被重置。
+     */
+    fun switchTarget(oid: String, type: Int, extra: String = "", filterTagName: String = "") {
+        if (this.oid == oid && this.type == type &&
+            this.extra == extra && this.filterTagName == filterTagName
+        ) {
+            return   // 首次组合也会调到这里：目标没变就别重复请求
+        }
+        this.oid = oid
+        this.type = type
+        this.extra = extra
+        this.filterTagName = filterTagName
+        _upMid.value = -1L
+        _replyCount.value = 0L
+        _currentReply.value = null
+        // refreshing = false：换目标走普通首屏加载，不显示"下拉刷新"转圈
+        refreshList(refreshing = false)
     }
 
     fun refreshList(

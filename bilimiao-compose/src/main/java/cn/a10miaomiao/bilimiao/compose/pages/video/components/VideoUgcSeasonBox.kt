@@ -23,7 +23,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -34,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.video.VideoDetailViewModel
 import com.a10miaomiao.bilimiao.comm.store.PlayListStore
 import com.a10miaomiao.bilimiao.comm.store.PlayerStore
@@ -51,7 +51,7 @@ fun VideoUgcSeasonBox(
     onChangeExpand: (Boolean) -> Unit = {},
 ) {
     val playerStore by rememberInstance<PlayerStore>()
-    val playerState by playerStore.stateFlow.collectAsState()
+    val playerState by playerStore.stateFlow.collectAsStateWithLifecycle()
     val listState = rememberLazyGridState()
     Box(modifier) {
         Column(

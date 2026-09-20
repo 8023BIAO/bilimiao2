@@ -20,7 +20,6 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -80,11 +80,11 @@ private fun UserFavouritePageContent(
     val userStore: UserStore by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
     val playerStore: PlayerStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
     val saveableStateHolder = rememberSaveableStateHolder()
-    val listData = viewModel.createdList.data.collectAsState().value
-    val openMediaDetail = viewModel.openedMedia.collectAsState().value
+    val listData = viewModel.createdList.data.collectAsStateWithLifecycle().value
+    val openMediaDetail = viewModel.openedMedia.collectAsStateWithLifecycle().value
 
     var showAddDialog by remember {
         mutableStateOf(false)

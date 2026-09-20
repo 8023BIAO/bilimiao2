@@ -18,12 +18,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.common.constant.PageTabIds
 import cn.a10miaomiao.bilimiao.compose.common.emitter.EmitterAction
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
@@ -41,7 +41,7 @@ fun UserArchiveListContent(
     viewModel: UserArchiveViewModel,
 ) {
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     LaunchedEffect(true) {
@@ -49,11 +49,11 @@ fun UserArchiveListContent(
     }
 
     val listFlow = viewModel.list
-    val list by listFlow.data.collectAsState()
-    val listLoading by listFlow.loading.collectAsState()
-    val listFinished by listFlow.finished.collectAsState()
-    val listFail by listFlow.fail.collectAsState()
-    val rankOrder by viewModel.rankOrder.collectAsState()
+    val list by listFlow.data.collectAsStateWithLifecycle()
+    val listLoading by listFlow.loading.collectAsStateWithLifecycle()
+    val listFinished by listFlow.finished.collectAsStateWithLifecycle()
+    val listFail by listFlow.fail.collectAsStateWithLifecycle()
+    val rankOrder by viewModel.rankOrder.collectAsStateWithLifecycle()
 
     val emitter = localEmitter()
     val listState = rememberLazyGridState()

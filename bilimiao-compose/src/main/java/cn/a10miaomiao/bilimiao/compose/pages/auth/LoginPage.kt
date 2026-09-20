@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import cn.a10miaomiao.bilimiao.compose.R
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -274,13 +275,13 @@ private fun LoginPageContent(
     PageConfig(title = "登录BILIBILI")
     val userStore: UserStore by rememberInstance()
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(LocalView.current)
     val bottomAppBarHeight = windowStore.bottomAppBarHeightDp
 
-    val loading by viewModel.loading.collectAsState()
-    val userName by viewModel.userName.collectAsState()
-    val password by viewModel.password.collectAsState()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
+    val userName by viewModel.userName.collectAsStateWithLifecycle()
+    val password by viewModel.password.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
     val passwordFocusRequester = remember { FocusRequester() }

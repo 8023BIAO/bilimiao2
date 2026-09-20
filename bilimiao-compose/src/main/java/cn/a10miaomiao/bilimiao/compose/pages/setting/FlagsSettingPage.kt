@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor
 import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState
 import androidx.compose.runtime.setValue
@@ -177,7 +178,7 @@ private fun FlagsSettingPageContent(
         title = "实验性功能"
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
@@ -387,7 +388,7 @@ private fun FlagsSettingPageContent(
         // 视频格式：MP4(2) 时分段并发下载**对它无效**（MP4 是整段顺序下载、没有分段可切，
         // ThreadRipperDataSource 的并发条件要求"请求长度已知"，渐进式请求 length=UNSET → 直接单连接透传）
         // → 按用户要求：置灰不可点，并且如果原本开着就自动关掉，同时把原因写在说明里。
-        val prefValues = prefFlow.collectAsState().value
+        val prefValues = prefFlow.collectAsStateWithLifecycle().value
         val fnvalValue = (prefValues[SettingPreferences.PlayerFnval.name] as? Int)
             ?: SettingConstants.PLAYER_FNVAL_DASH
         val mp4Selected = fnvalValue == SettingConstants.PLAYER_FNVAL_MP4
@@ -406,7 +407,7 @@ private fun FlagsSettingPageContent(
             }
         }
         // 游客模式状态（必须在 Composable 作用域内）
-        val loginInfoState by userStore.stateFlow.collectAsState()
+        val loginInfoState by userStore.stateFlow.collectAsStateWithLifecycle()
         // 组合期直接读 SharedPreferences 会在主线程做首次磁盘加载（进页面就掉帧）→ 异步读
         var hasBackup by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {

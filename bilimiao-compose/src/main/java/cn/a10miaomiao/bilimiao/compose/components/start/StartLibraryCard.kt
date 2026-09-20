@@ -20,7 +20,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.R
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.components.miao.MiaoCard
@@ -57,7 +57,7 @@ fun StartLibraryCard(
     navigateTo: (ComposePage) -> Unit,
 ) {
     val userLibraryStore by rememberInstance<UserLibraryStore>()
-    val userLibraryState by userLibraryStore.stateFlow.collectAsState()
+    val userLibraryState by userLibraryStore.stateFlow.collectAsStateWithLifecycle()
     val isLogin = userId != null
     var containerWidthPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current

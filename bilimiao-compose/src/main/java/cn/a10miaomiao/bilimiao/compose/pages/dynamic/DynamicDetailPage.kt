@@ -24,7 +24,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -33,6 +32,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavOptions
@@ -162,10 +162,10 @@ private fun DynamicDetailPageContent(
     viewModel: DynamicDetailPageViewModel
 ) {
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val detailData = viewModel.detailData.collectAsState().value
+    val detailData = viewModel.detailData.collectAsStateWithLifecycle().value
 
     AnimatedContent(
         modifier = Modifier.fillMaxSize(),
@@ -182,8 +182,8 @@ private fun DynamicDetailPageContent(
     ) {
         if (it || detailData == null) {
             DynamicDetailPageLoadingContent(
-                loading = viewModel.loading.collectAsState().value,
-                fail = viewModel.fail.collectAsState().value,
+                loading = viewModel.loading.collectAsStateWithLifecycle().value,
+                fail = viewModel.fail.collectAsStateWithLifecycle().value,
                 innerPadding = windowInsets.toPaddingValues()
             )
         } else {

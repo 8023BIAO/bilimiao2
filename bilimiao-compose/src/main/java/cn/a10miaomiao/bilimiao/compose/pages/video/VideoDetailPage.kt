@@ -41,7 +41,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +55,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import bilibili.app.archive.v1.Arc
 import bilibili.app.dynamic.v2.DynamicItem
@@ -116,14 +116,22 @@ class VideoDetailPage(
 
     @Composable
     override fun Content() {
-        val viewModel: VideoDetailViewModel = diViewModel(key = id) {
+        // ★ key 不再带 id：同一个页面被复用来播下一个视频（自动连播 / 切集 / 从选集点下一个）时，
+        //   nav entry 不变、只有参数 id 变了。以前 `key = id` 会为每个 id 建一个新 ViewModel，
+        //   旧的全部留在 ViewModelStore 里直到这一页真正退出 —— 连播 50 集就是 50 个 VM，
+        //   每个都攥着自己那份详情/评论状态。现在整页只用一个 VM，id 变了换目标。
+        val viewModel: VideoDetailViewModel = diViewModel {
             VideoDetailViewModel(it, id, seekPosition, highlightDanmakuText)
         }
+        // 首次组合时 id 与 VM 构造时一致（VM 内部直接返回，不会重复加载）
+        LaunchedEffect(id, seekPosition) {
+            viewModel.changeVideoIfNeeded(id, seekPosition)
+        }
         val windowStore: WindowStore by rememberInstance()
-        val windowState = windowStore.stateFlow.collectAsState().value
+        val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
         val windowInsets = windowState.getContentInsets(localContainerView())
 
-        val detailData = viewModel.detailData.collectAsState().value
+        val detailData = viewModel.detailData.collectAsStateWithLifecycle().value
 
         BackHandler(
             onBack = viewModel::onBackPressed
@@ -143,8 +151,8 @@ class VideoDetailPage(
         ) {
             if (it || detailData == null) {
                 VideoDetailPageLoading(
-                    loading = viewModel.loading.collectAsState().value,
-                    fail = viewModel.fail.collectAsState().value,
+                    loading = viewModel.loading.collectAsStateWithLifecycle().value,
+                    fail = viewModel.fail.collectAsStateWithLifecycle().value,
                     innerPadding = windowInsets.toPaddingValues()
                 )
             } else {
@@ -173,16 +181,20 @@ private fun VideoDetailPageContent(
     arcData: Arc,
 ) {
     val playerStore by rememberInstance<PlayerStore>()
-    val playerState by playerStore.stateFlow.collectAsState()
+    val playerState by playerStore.stateFlow.collectAsStateWithLifecycle()
 
-    val mainReplyViewModel = diViewModel(
-        key = "main-reply-${arcData.aid}"
-    ) {
+    // ★ 同上：key 不再带 aid。连播换视频时 aid 会变，旧写法每个 aid 建一个评论 VM
+    //（每个 VM 的 init 都会发一次评论请求，而且全部留在 ViewModelStore 里）→ 现在换目标复用。
+    val mainReplyViewModel = diViewModel {
         MainReplyViewModel(
             it,
             type = 1,
             oid = arcData.aid.toString(),
         )
+    }
+    // 首次组合时 aid 与 VM 构造时一致（内部直接返回）
+    LaunchedEffect(arcData.aid) {
+        mainReplyViewModel.switchTarget(oid = arcData.aid.toString(), type = 1)
     }
 
     val videoPages = detailData.pages
@@ -205,7 +217,7 @@ private fun VideoDetailPageContent(
 //    val saveableStateHolder = rememberSaveableStateHolder()
 
     val replyListState = rememberLazyListState()
-    val currentReply by mainReplyViewModel.currentReply.collectAsState()
+    val currentReply by mainReplyViewModel.currentReply.collectAsStateWithLifecycle()
     BackHandler(
         enabled = currentReply != null
     ) {

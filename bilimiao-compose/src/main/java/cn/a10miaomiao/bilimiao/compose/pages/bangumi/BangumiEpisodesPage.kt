@@ -35,7 +35,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -382,14 +382,14 @@ private fun BangumiEpisodesPageContent(
         title = "番剧剧集"
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
-    val loading by viewModel.loading.collectAsState()
-    val failMessage by viewModel.fail.collectAsState()
-    val sectionList by viewModel.sectionList.collectAsState()
-    val currentSection by viewModel.currentSection.collectAsState()
-    val currentPlay by viewModel.currentPlay.collectAsState()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
+    val failMessage by viewModel.fail.collectAsStateWithLifecycle()
+    val sectionList by viewModel.sectionList.collectAsStateWithLifecycle()
+    val currentSection by viewModel.currentSection.collectAsStateWithLifecycle()
+    val currentPlay by viewModel.currentPlay.collectAsStateWithLifecycle()
 
     val listState = rememberLazyGridState()
     val scope = rememberCoroutineScope()

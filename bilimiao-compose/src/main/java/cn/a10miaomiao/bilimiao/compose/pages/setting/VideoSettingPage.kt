@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,6 +18,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.navOptions
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
@@ -165,7 +165,7 @@ private fun VideoSettingPageContent(
         title = "播放设置"
     )
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
@@ -177,7 +177,7 @@ private fun VideoSettingPageContent(
     ProvidePreferenceLocals(
         flow = prefFlow
     ) {
-        val preferences = prefFlow.collectAsState().value
+        val preferences = prefFlow.collectAsStateWithLifecycle().value
         val fnval = (preferences[SettingPreferences.PlayerFnval.name] as? Int)
             ?: SettingConstants.PLAYER_FNVAL_MP4
 

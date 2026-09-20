@@ -6,11 +6,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.preference.sliderIntPreference
@@ -28,7 +28,7 @@ internal fun DanmakuDisplaySettingContent(
     danmakuPreferences: SettingPreferences.Danmaku,
 ) {
     val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsState().value
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
@@ -39,7 +39,7 @@ internal fun DanmakuDisplaySettingContent(
     val enableSetting = if (danmakuPreferences.name != "default") {
         dataStore.data.map {
             it[danmakuPreferences.enable] ?: false
-        }.collectAsState(initial = true).value
+        }.collectAsStateWithLifecycle(initialValue = true).value
     } else {
         true
     }
