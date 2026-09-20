@@ -84,16 +84,28 @@ object AntifraudDiag {
         write("    · $msg")
     }
 
-    /** 收尾：整段同时进「错误日志」页，方便在手机上直接看/复制 */
-    fun finish(resultLine: String) {
+    /**
+     * 收尾：整段写进日志文件。
+     *
+     * @param mirror 是否**同时**塞一条进「错误日志」页。
+     *   复查一轮会查 10~30 次，**每次**都往错误日志塞一条的话，那一页会被刷爆（而且它没有条数上限）
+     *   —— 所以只有"整轮检测的最终结论"才 mirror，中间每次只进日志文件（文件每次进程启动会清空）。
+     */
+    fun finish(resultLine: String, mirror: Boolean = true) {
         traceRequests = false
         if (!enabled) return
         write("===== 结论：$resultLine =====")
-        runCatching {
-            ErrorLogCollector.logError(
-                error = "[评论反诈] $resultLine",
-                stackTrace = buffer.toString(),
-            )
+        if (mirror) {
+            runCatching {
+                // 进「错误日志」页时带上**日志文件尾部**（整轮检测的完整过程）：
+                // 只给 buffer 的话，那只是"收尾那一次"的几行，前后文全丢了 —— 而这一页
+                // 往往是用户唯一能截图/复制给我的东西。截到 4000 字，避免一条日志撑爆那一页。
+                val tail = runCatching { logFile?.readText()?.takeLast(4000).orEmpty() }.getOrDefault("")
+                ErrorLogCollector.logError(
+                    error = "[评论反诈] $resultLine",
+                    stackTrace = tail.ifBlank { buffer.toString() },
+                )
+            }
         }
         buffer.setLength(0)
     }

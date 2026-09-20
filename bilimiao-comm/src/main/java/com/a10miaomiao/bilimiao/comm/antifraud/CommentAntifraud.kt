@@ -84,6 +84,8 @@ object CommentAntifraud {
         hasPictures: Boolean,
         /** 手动复检：不等那 5/20 秒，立刻查（评论早发出去了，没有"刚发出去还没处理完"的问题） */
         skipWait: Boolean = false,
+        /** 是否把这次的结论塞进「错误日志」页（复查循环里的中间结论不塞，免得刷爆那一页） */
+        mirrorConclusion: Boolean = true,
     ): AntifraudResult {
         val waitMs = if (skipWait) 0L else if (hasPictures) WAIT_MS + WAIT_PIC_MS else WAIT_MS
         AntifraudDiag.start("评论反诈检测 oid=$oid type=$type rpid=$rpid root=$root")
@@ -91,12 +93,12 @@ object CommentAntifraud {
         delay(waitMs)
         return try {
             val r = doCheck(oid, type, rpid, root, sentTimeSec)
-            AntifraudDiag.finish("${r.state}｜${r.detail}｜code=${r.code} ${r.rawMessage}")
+            AntifraudDiag.finish("${r.state}｜${r.detail}｜code=${r.code} ${r.rawMessage}", mirror = mirrorConclusion)
             r
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             AntifraudDiag.step("抛异常：${e.javaClass.simpleName} ${e.message ?: ""}")
-            AntifraudDiag.finish("FAILED｜${e.javaClass.simpleName}")
+            AntifraudDiag.finish("FAILED｜${e.javaClass.simpleName}", mirror = mirrorConclusion)
             AntifraudResult(
                 state = AntifraudState.FAILED,
                 detail = "检测失败：${e.javaClass.simpleName} ${e.message ?: ""}".trim(),
@@ -126,10 +128,16 @@ object CommentAntifraud {
         recheckTotalMs: Long,
         onAttempt: ((attempt: Int, totalPlanned: Int, result: AntifraudResult) -> Unit)? = null,
     ): AntifraudResult {
-        val first = check(oid, type, rpid, root, sentTimeSec, hasPictures)
+        val first = check(oid, type, rpid, root, sentTimeSec, hasPictures, mirrorConclusion = false)
         onAttempt?.invoke(1, plannedAttempts(recheckEnabled, recheckTotalMs), first)
-        if (!recheckEnabled || recheckTotalMs <= 0L) return first
-        if (first.isBad) return first          // 一开场就不对，不用再复查
+        if (!recheckEnabled || recheckTotalMs <= 0L) {
+            AntifraudDiag.finish("只查一次：${first.state}｜${first.detail}")   // mirror = true
+            return first
+        }
+        if (first.isBad) {
+            AntifraudDiag.finish("首查就有问题：${first.state}｜${first.detail}")
+            return first          // 一开场就不对，不用再复查
+        }
 
         var attempt = 1
         var elapsed = 0L
@@ -146,26 +154,30 @@ object CommentAntifraud {
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 AntifraudDiag.step("复查抛异常：${e.javaClass.simpleName} ${e.message ?: ""}")
-                AntifraudDiag.finish("FAILED｜复查异常")
+                AntifraudDiag.finish("FAILED｜复查异常", mirror = false)
                 onAttempt?.invoke(attempt, plannedAttempts(true, recheckTotalMs), last)
                 continue
             }
-            AntifraudDiag.finish("${r.state}｜${r.detail}")
+            AntifraudDiag.finish("${r.state}｜${r.detail}", mirror = false)
             onAttempt?.invoke(attempt, plannedAttempts(true, recheckTotalMs), r)
             if (r.isBad) {
                 // ★ 就是这种情况：首次正常，后来才被限流
                 val afterText = if (elapsed < 60_000) "${elapsed / 1000} 秒后"
                 else "${elapsed / 60_000} 分钟后"
-                return r.copy(
+                val changed = r.copy(
                     detail = r.detail + "\n（首次检测是正常的，$afterText 复查才发现变化 —— B站这种『先放出来再限流』很常见）"
                 )
+                AntifraudDiag.finish("${changed.state}｜${changed.detail}")
+                return changed
             }
             last = r
         }
         // 全程正常：把"查了几次、盯了多久"写进结论，别让人以为只查了一下
-        return last.copy(
+        val finalNormal = last.copy(
             detail = last.detail + "\n（共复查 $attempt 次、持续 ${recheckTotalMs / 60000} 分钟都是正常）"
         )
+        AntifraudDiag.finish("${finalNormal.state}｜${finalNormal.detail}")
+        return finalNormal
     }
 
     /** 预计查几次（给界面显示用）：首次 + 复查次数 */
