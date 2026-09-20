@@ -136,6 +136,18 @@ class VideoDetailViewModel(
     private var _id = id
 
     /**
+     * 页面参数里"已经被消费过"的那个 id。
+     *
+     * 为什么需要：页面里有个 `LaunchedEffect(id, seekPosition) { changeVideoIfNeeded(...) }`，
+     * 而 NavHost 只组合**可见**的 entry —— 离开这一页（点 UP 主/相关视频/设置…）时组合被销毁、
+     * effect 取消，返回时用**同一批旧参数**重跑。此时页内切集（合集/播放列表 → changeVideo）
+     * 已经把 `_id` 换成了 B，而参数还是 A → 会被当成"用户要回到 A"，把视频切回去，
+     * 顺手还把那次的 seekPosition 又塞回一次性槽里（重复消费）。
+     * 记下"这个参数已经处理过"就没事了：参数真的变了才换目标。
+     */
+    private var consumedNavId: String? = id
+
+    /**
      * 当前视频的真实 BV 号（空降助手要用）。
      *
      * ★ **不能直接用 `_id`**：`_id` 不一定是 BV 号 ——「继续播放」卡片
@@ -195,8 +207,16 @@ class VideoDetailViewModel(
      * 首次组合时也会走到这里（id 与构造时相同）→ 直接返回，**不会**重复请求。
      */
     fun changeVideoIfNeeded(id: String, seekPosition: Long? = null) {
-        if (_id == id) return
-        // 新参数带来的起始位置：只消费一次（与构造参数 pendingSeekPosition 的语义一致）
+        // ① 同一批导航参数只处理一次：组合重建（离开再返回 / 旋转 / 切主题）会用旧参数重跑 effect，
+        //    不挡的话页内切集之后会被拽回"进入这一页时那个视频"（vc140 引入的回归，vc146 修）。
+        if (consumedNavId == id) return
+        consumedNavId = id
+        // ② 参数确实变了，但目标就是当前视频 → 无事可做（新 seek 由下面的分支处理）
+        if (_id == id) {
+            if (seekPosition != null && seekPosition > 0L) pendingSeekPosition = seekPosition
+            return
+        }
+        // ③ 真的换目标：新参数带来的起始位置只消费一次（与构造参数 pendingSeekPosition 的语义一致）
         pendingSeekPosition = seekPosition
         changeVideo(id)
     }
@@ -727,6 +747,8 @@ class VideoDetailViewModel(
      * 加载时的 22/33 加载动画也回来了。
      */
     fun toVideoPage(aid: String) {
+        // 点到当前正在看的这个视频（相关列表里可能含自身）→ 不压重复页
+        if (aid == _id) return
         pageNavigation.navigate(VideoDetailPage(
             id = aid,
         ), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)

@@ -92,6 +92,16 @@ class MainReplyViewModel(
     /** 当前在途的列表请求：刷新/切排序时先把它取消掉 */
     private var loadJob: Job? = null
 
+    /**
+     * 列表代次：每次发起加载 +1。
+     *
+     * 为什么要有：取消是**协作式**的 —— 旧请求可能已经从 `awaitCall()` 返回、
+     * 正走在"写回 list/_upMid/_replyCount"这段没有挂起点的代码上，此时取消标记根本来不及生效；
+     * 而换视频（switchTarget）/刷新已经 `list.reset()` 并发了新请求 → 旧响应会整批混进新列表
+     * （评论、UP 主、评论数串台）。写回前对一下代次，不是最新那批就整批丢弃。
+     */
+    private var loadGeneration = 0
+
     init {
         loadJob = loadData()
     }
@@ -114,6 +124,7 @@ class MainReplyViewModel(
     }
 
     private fun loadData() = viewModelScope.launch(Dispatchers.IO) {
+        val generation = ++loadGeneration
         try {
             list.loading.value = true
             list.fail.value = ""   // 开始加载就清掉上一次的失败提示
@@ -131,6 +142,8 @@ class MainReplyViewModel(
             val res = BiliGRPCHttp.request {
                 ReplyGRPC.mainList(req)
             }.awaitCall()
+            // 已经换过目标/刷新过 → 这批响应作废（见 loadGeneration 的注释）
+            if (generation != loadGeneration) return@launch
             val listData = list.data.value.toMutableList()
             if (_cursor == null) {
                 res.upTop?.let {
@@ -159,13 +172,16 @@ class MainReplyViewModel(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             e.printStackTrace()
-            if (e !is java.io.IOException || (e.message?.contains("gRPC") != true)) {
+            // 过期批次（已经换目标/刷新过）的失败也不要写：否则新视频的列表上会挂着旧请求的报错
+            if (generation == loadGeneration &&
+                (e !is java.io.IOException || (e.message?.contains("gRPC") != true))
+            ) {
                 list.fail.value = e.message ?: e.toString()
             }
         } finally {
-            // 被取消的旧请求不要复位标志位：否则会把新请求刚设上的 loading 清掉，
-            // 用户又能触发一次 loadMore（并发叠加）
-            if (isActive) {
+            // 被取消的旧请求、以及已经过期的旧批次都不要复位标志位：
+            // 否则会把新请求刚设上的 loading 清掉，用户又能触发一次 loadMore（并发叠加）
+            if (isActive && generation == loadGeneration) {
                 list.loading.value = false
                 _isRefreshing.value = false
             }

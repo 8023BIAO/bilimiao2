@@ -76,13 +76,14 @@ class PageNavigation(
         // ★ 但"同一个路由、不同参数"的导航绝不能按连点处理：导航框架的 launchSingleTop 只看路由、
         //   不看参数，会把当前页**替换**掉（相关视频点进另一个视频就是这种，后果见
         //   VideoDetailViewModel.toVideoPage 的注释）。所以这里补一道 600ms 的同指纹闸门：
-        //   同一个页面 + 同样参数在 600ms 内重复调用 → 直接忽略（连点保护照旧），
+        //   同一个页面 + 同样参数在 1000ms 内重复调用 → 直接忽略（连点保护照旧；窗口取 1 秒是为了
+        //   把"慢一点的双击"也挡住 —— 相关视频去掉 singleTop 之后没有别的兜底），
         //   参数不同（或过了窗口）→ 正常交给上层 navOptions 处理。
         // 指纹 = 页面自己给的 navDedupeKey（带参数的那种，比如 "VideoDetailPage/BV1xx"）；
         // 页面没给（null）= 不做去重，行为与从前完全一致。
         val signature = route.navDedupeKey
         val now = android.os.SystemClock.uptimeMillis()
-        if (signature != null && signature == lastNavSignature && now - lastNavAt < 600L) return
+        if (signature != null && signature == lastNavSignature && now - lastNavAt < 1000L) return
         lastNavSignature = signature
         lastNavAt = now
         hostController.navigate(route, navOptions ?: singleTopNavOptions, navigatorExtras)
@@ -127,10 +128,16 @@ class PageNavigation(
         return popped
     }
 
+    /**
+     * 打开某个视频详情页（首页/历史/消息/动态等卡片都走这里）。
+     *
+     * 用 defaultNavOptions 而不是 launchSingleTop：后者只看路由不看参数，
+     * 当栈顶已经是别的视频详情页时会把当前页**替换**掉（返回直接回上上层、滚动位置不重置、
+     * 也没有转场动画）—— 和"相关视频"那条链是同一个坑（见 VideoDetailViewModel.toVideoPage）。
+     * 重复点击由 VideoDetailPage 的 navDedupeKey 指纹闸门挡着，不会压两层。
+     */
     fun navigateToVideoInfo(id: String) {
-        hostController.navigate(VideoDetailPage(id), navOptions {
-            launchSingleTop = true
-        })
+        hostController.navigate(VideoDetailPage(id), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
     }
 
     fun launchWebBrowser(url: String) {

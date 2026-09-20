@@ -44,13 +44,13 @@ object BilibiliNavigation {
             var matcher = compile.matcher(path)
             if (matcher.find()) {
                 val id = matcher.group(1)
-                pageNavigation.navigate(VideoDetailPage("BV$id"))
+                pageNavigation.navigate(VideoDetailPage("BV$id"), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
                 return true
             }
             compile = Pattern.compile("av(\\d+)")
             matcher = compile.matcher(path.lowercase())
             if (matcher.find()) {
-                pageNavigation.navigate(VideoDetailPage(matcher.group(1)))
+                pageNavigation.navigate(VideoDetailPage(matcher.group(1)), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
                 return true
             }
             // 视频深链未匹配到 id 时交给路由表（类型安全路由兜底）
@@ -85,13 +85,13 @@ object BilibiliNavigation {
             var matcher = compile.matcher(path)
             if (matcher.find()) {
                 val id = matcher.group(1)
-                pageNavigation.navigate(VideoDetailPage("BV$id"))
+                pageNavigation.navigate(VideoDetailPage("BV$id"), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
                 return true
             }
             compile = Pattern.compile("av(\\d+)")
             matcher = compile.matcher(path.lowercase())
             if (matcher.find()) {
-                pageNavigation.navigate(VideoDetailPage(matcher.group(1)))
+                pageNavigation.navigate(VideoDetailPage(matcher.group(1)), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
                 return true
             }
             compile = Pattern.compile("ss(\\d+)")
@@ -138,7 +138,7 @@ object BilibiliNavigation {
         val queryParameterNames = uri.queryParameterNames
         if (queryParameterNames.contains("avid")) {
             val aid = uri.getQueryParameter("avid") ?: ""
-            pageNavigation.navigate(VideoDetailPage(aid))
+            pageNavigation.navigate(VideoDetailPage(aid), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
             return true
         }
 
