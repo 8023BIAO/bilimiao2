@@ -114,6 +114,12 @@ class VideoDetailPage(
     val highlightDanmakuText: String? = null,
 ) : ComposePage() {
 
+    /**
+     * 去重指纹带 id：同一个视频连点两次 → 只进一次（挡手抖）；
+     * 点另一个相关视频 → 指纹不同 → 正常压新页（返回能回到上一个视频）。
+     */
+    override val navDedupeKey: String get() = "VideoDetailPage/$id"
+
     @Composable
     override fun Content() {
         // ★ key 不再带 id：同一个页面被复用来播下一个视频（自动连播 / 切集 / 从选集点下一个）时，

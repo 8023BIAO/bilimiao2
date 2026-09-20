@@ -61,6 +61,10 @@ class PageNavigation(
         }
     }
 
+    /** 上一次导航的"页面+参数"指纹与时刻：只用来挡"同一个入口连点两次"（见 navigate） */
+    private var lastNavSignature: String? = null
+    private var lastNavAt = 0L
+
     fun <T : ComposePage> navigate(
         route: T,
         navOptions: NavOptions? = null,
@@ -68,6 +72,19 @@ class PageNavigation(
     ) {
         // ★ 默认补 launchSingleTop：连点同一个入口 N 次不再往返回栈压 N 层
         //   （全工程 40+ 个调用点没传 navOptions，以前它们全裸着 —— 用户要按 N 次返回）
+        //
+        // ★ 但"同一个路由、不同参数"的导航绝不能按连点处理：导航框架的 launchSingleTop 只看路由、
+        //   不看参数，会把当前页**替换**掉（相关视频点进另一个视频就是这种，后果见
+        //   VideoDetailViewModel.toVideoPage 的注释）。所以这里补一道 600ms 的同指纹闸门：
+        //   同一个页面 + 同样参数在 600ms 内重复调用 → 直接忽略（连点保护照旧），
+        //   参数不同（或过了窗口）→ 正常交给上层 navOptions 处理。
+        // 指纹 = 页面自己给的 navDedupeKey（带参数的那种，比如 "VideoDetailPage/BV1xx"）；
+        // 页面没给（null）= 不做去重，行为与从前完全一致。
+        val signature = route.navDedupeKey
+        val now = android.os.SystemClock.uptimeMillis()
+        if (signature != null && signature == lastNavSignature && now - lastNavAt < 600L) return
+        lastNavSignature = signature
+        lastNavAt = now
         hostController.navigate(route, navOptions ?: singleTopNavOptions, navigatorExtras)
     }
 

@@ -713,10 +713,23 @@ class VideoDetailViewModel(
         ))
     }
 
+    /**
+     * 打开"相关视频"里的另一个视频：**必须压新页**（传 defaultNavOptions），不能走默认的 launchSingleTop。
+     *
+     * 为什么：默认导航参数为了让"连点同一个入口"不压 N 层，给所有导航都补了 launchSingleTop；
+     * 而相关视频点进去的目标页**和当前页是同一个路由**（VideoDetailPage，只是 id 不同），
+     * 于是导航框架把当前这一页**替换**掉了 —— 用户实测到的三条问题全出在这儿：
+     *   ① 一路点到第 N 个视频，返回直接回首页（栈里从头到尾只有一个详情页）；
+     *   ② 新视频的页面沿用旧页面的滚动位置（同一个 entry，滚动状态没重建）；
+     *   ③ 没有转场动画、内容直接换掉（没有新 entry 就没有进场动画，还会闪一下）。
+     * 传 defaultNavOptions（不带 singleTop）后：压新页 → 返回回到上一个视频、页面从顶部开始、
+     * 走 BilimiaoPageRoute 里的转场动画；新 entry 的 ViewModel 是新的（detailData 为空）→
+     * 加载时的 22/33 加载动画也回来了。
+     */
     fun toVideoPage(aid: String) {
         pageNavigation.navigate(VideoDetailPage(
             id = aid,
-        ))
+        ), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
     }
 
     fun toSearchPage(keyword: String) {
