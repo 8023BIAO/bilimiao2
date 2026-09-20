@@ -1098,6 +1098,18 @@ class PlayerDelegate2(
                     lastPosition = ledger
                 }
             }
+            // ★ 快速重连也必须守"末尾不落点"：下面命中缓存后是直接 seekTo(lastPosition)，
+            //   而这个位置可能是"看完一集"留下的**片尾位置**（它同时被写进 PlaybackService 和本地记录，
+            //   退出重进/重试都会读到）→ seek 到片尾立刻 STATE_ENDED（和「重新播放」是同一个坑的另一条入口）。
+            //   只认 sameVideo 时播放器的时长：换视频时它还是上一段媒体的值，拿它判断会把新视频的
+            //   续播位置误清成 0（那才是"续播失效"）。清成 0 后会落到下面的全量路径，
+            //   由那里用**新取流拿到的** duration 再判一次。
+            if (sameVideo) {
+                val quickDuration = views.videoPlayer?.duration ?: 0L
+                if (quickDuration > 0L && lastPosition >= quickDuration - 2_000L) {
+                    lastPosition = 0L
+                }
+            }
             // ───── 快速重连：PlaybackService 有同一视频的缓存 URL → 跳过网络请求 ─────
             val quickUrl = PlaybackService.instance?.getSavedUrl(source.id) ?: ""
             if (!isChangedQuality && quickUrl.isNotEmpty() && lastPosition > 0L) {
