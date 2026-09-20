@@ -14,7 +14,6 @@ import java.util.Locale
 object DownloadPublisher {
 
     private const val MIME_VIDEO = "video/mp4"
-    private const val MIME_AUDIO = "audio/mp4"
     private const val MIME_DEFAULT = "application/octet-stream"
 
     /**
@@ -24,8 +23,14 @@ object DownloadPublisher {
     fun mimeOf(displayName: String): String {
         val lower = displayName.lowercase(Locale.ROOT)
         return when {
-            lower == "audio.m4s" -> MIME_AUDIO
-            lower.endsWith(".m4s") || lower.endsWith(".mp4") -> MIME_VIDEO
+            // ★★ .m4s 一律用 octet-stream —— 不能用 video/mp4、audio/mp4：
+            //   MediaProvider（MediaStore）会"帮你"把文件名补成与 MIME 匹配的扩展名，实测：
+            //     video.m4s  + video/mp4  → 存成 video.m4s.mp4
+            //     audio.m4s  + audio/mp4  → 存成 audio.m4s.m4a
+            //   而播放器是按 video.m4s / audio.m4s 去找文件的 → 找不到 → 黑屏（用户实测）。
+            //   用 octet-stream（没有对应扩展名）它就不动名字了。
+            lower.endsWith(".m4s") -> MIME_DEFAULT
+            lower.endsWith(".mp4") -> MIME_VIDEO
             else -> MIME_DEFAULT
         }
     }

@@ -174,9 +174,33 @@ object PublicDownloadStore {
         }
     }
 
+    /**
+     * 文件名候选：MediaProvider 会按 MIME 给文件补扩展名（video.m4s → video.m4s.mp4），
+     * 所以查不到原名时按常见后缀再试几个 —— 这样"以前发布出去、名字被改过"的文件也能正常播放/删除。
+     */
+    private fun nameVariants(displayName: String): List<String> {
+        val variants = linkedSetOf(displayName)
+        for (ext in listOf("mp4", "m4a", "m4s", "mp3", "aac", "wav")) {
+            variants.add("$displayName.$ext")
+        }
+        return variants.toList()
+    }
+
     private fun findMediaStoreUri(context: Context, relativeDir: String, displayName: String): Uri? {
         val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
         val want = relativePathOf(relativeDir).trimEnd('/')
+        for (name in nameVariants(displayName)) {
+            findMediaStoreUriExact(context, collection, want, name)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findMediaStoreUriExact(
+        context: Context,
+        collection: Uri,
+        want: String,
+        displayName: String,
+    ): Uri? {
         // 不用 RELATIVE_PATH 做 selection：不同 ROM 对它的匹配规则不一致（结尾斜杠/前缀匹配都有坑），
         // 只按 DISPLAY_NAME 查、再在代码里比对相对路径，稳定但要求文件名不能太多 —— entry.json/
         // index.json/danmaku.xml 这些都很少，媒体文件是精确名字（video.m4s 等），量可控。
