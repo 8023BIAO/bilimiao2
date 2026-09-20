@@ -324,6 +324,9 @@ object PublicDownloadStore {
             ) > 0
         } catch (e: Exception) {
             // 失败就按"查不到/删不掉"处理：这里是尽力而为的路径，发布版不留日志（要排查用 debug 包）
+            // ⚠️ 这个 catch 处在 `return try` 的**返回值位置**，必须给值：只留注释会把 try 表达式推成 Any，
+            //    报 "Return type mismatch: expected 'Boolean', actual 'Any'"（PC 编译时抓到过）
+            false
         }
     }
 
