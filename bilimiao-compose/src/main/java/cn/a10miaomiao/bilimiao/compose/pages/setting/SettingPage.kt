@@ -197,6 +197,10 @@ private fun SettingPageContent(
             SettingPageLink("评论反诈", "发评后自动检测是否被限流", "④ 扩展", "评论 反诈 限流 吞评 复查 申诉", viewModel::toAntifraudSettingPage),
             SettingPageLink("账号与存储", "游客模式、身份导入导出、缓存与重置", "⑤ 账号与数据", "账号 登录 游客 身份 导入 导出 备份 缓存 重置 清空", viewModel::toAccountDataSettingPage),
             SettingPageLink("关于本应用", "版本号、仓库、错误日志", "⑥ 关于", "关于 版本 版本号 vc github 仓库 错误 日志 致谢", viewModel::toAboutSettingPage),
+            // 动作型：没有独立页面（点了直接弹窗/执行），但同样要能被搜到
+            SettingPageLink("显示与字号", "应用内 DPI 与字体缩放，点了直接改", "② 界面", "dpi 字号 字体 缩放 字体大小 显示 太大 太小", { showDpiDialog = true }),
+            SettingPageLink("备份与恢复", "导出 / 导入全部设置（在「账号与存储」里）", "⑤ 账号与数据", "备份 恢复 导出 导入 设置文件 json 迁移", viewModel::toAccountDataSettingPage),
+            SettingPageLink("退出登录", "清除登录状态", "⑤ 账号与数据", "退出 登出 logout 切号 账号", { showLogoutDialog.value = true }),
         )
     }
     ProvidePreferenceLocals(
