@@ -1,6 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
 import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +48,9 @@ import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import me.zhanghai.compose.preference.preference
 import me.zhanghai.compose.preference.preferenceCategory
 import me.zhanghai.compose.preference.switchPreference
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
@@ -141,6 +146,15 @@ private class SettingPageViewModel(
 }
 
 
+/** 设置里"能点进去的页面"清单（供搜索用；点一下直接跳） */
+private class SettingPageLink(
+    val title: String,
+    val summary: String,
+    val category: String,
+    val keywords: String,
+    val nav: () -> Unit,
+)
+
 @Composable
 private fun SettingPageContent(
     viewModel: SettingPageViewModel
@@ -164,6 +178,27 @@ private fun SettingPageContent(
     }
     // 显示与字号：设置首页那一级直接弹窗（原来要"界面 → 显示与字号 → 再点一下"三步）
     var showDpiDialog by remember { mutableStateOf(false) }
+    // 设置搜索：空 = 显示 6 个大分类；非空 = 这一页刷成搜索结果（开关/数值项可直接改）
+    var searchQuery by remember { mutableStateOf("") }
+    val settingPages = remember(viewModel) {
+        listOf(
+            SettingPageLink("播放器设置", "后台/小窗、视频源、字幕、下载", "① 播放", "播放 播放器 缓冲 画质 格式 字幕 下载 小窗", viewModel::toVideoSettingPage),
+            SettingPageLink("弹幕设置", "弹幕显示、样式与过滤", "① 播放", "弹幕 danmaku 显示 样式 过滤 关键词", viewModel::toDanmakuSettingPage),
+            SettingPageLink("定时关闭", "播够指定时长自动停止", "① 播放", "定时 关闭 睡眠 停止", viewModel::toAutoStopTimerPage),
+            SettingPageLink("主题", "配色与深色模式", "② 界面", "主题 配色 颜色 深色 夜间 纯黑", viewModel::toThemePage),
+            SettingPageLink("首页设置", "首页入口、卡片与时光精选", "② 界面", "首页 主页 入口 卡片 列数 时光", viewModel::toHomeSettingPage),
+            SettingPageLink("底栏与导航", "锁定底栏、滚动隐藏行为", "② 界面", "底栏 导航 滚动 隐藏 标题行", viewModel::toBottomBarSettingPage),
+            SettingPageLink("内容屏蔽", "按标题 / UP / 标签 / UP名屏蔽", "③ 内容与评论", "屏蔽 过滤 标题 up 标签 黑名单", viewModel::toFilterSettingPage),
+            SettingPageLink("推荐过滤", "时长、播放量、封面、相关推荐等", "③ 内容与评论", "推荐 过滤 时长 播放量 封面 相关 推广", viewModel::toFilterRecommendPage),
+            SettingPageLink("评论区", "评论关键字、二级回复显示", "③ 内容与评论", "评论 评论区 关键字 二级 回复", viewModel::toFilterCommentPage),
+            SettingPageLink("空降助手", "自动跳过片头片尾 / 赞助片段", "④ 扩展", "空降 跳过 片头 片尾 赞助 恰饭", viewModel::toSponsorBlockSettingPage),
+            SettingPageLink("海外加速", "分段并发下载，改善卡顿", "④ 扩展", "海外 加速 并发 分段 卡顿 线程", viewModel::toThreadRipperSettingPage),
+            SettingPageLink("CDN", "竞速、固定主机、音频独立", "④ 扩展", "cdn 节点 线路 主机 竞速", viewModel::toCdnSettingPage),
+            SettingPageLink("评论反诈", "发评后自动检测是否被限流", "④ 扩展", "评论 反诈 限流 吞评 复查 申诉", viewModel::toAntifraudSettingPage),
+            SettingPageLink("账号与存储", "游客模式、身份导入导出、缓存与重置", "⑤ 账号与数据", "账号 登录 游客 身份 导入 导出 备份 缓存 重置 清空", viewModel::toAccountDataSettingPage),
+            SettingPageLink("关于本应用", "版本号、仓库、错误日志", "⑥ 关于", "关于 版本 版本号 vc github 仓库 错误 日志 致谢", viewModel::toAboutSettingPage),
+        )
+    }
     ProvidePreferenceLocals(
         flow = rememberPreferenceFlow(dataStore)
     ) {
@@ -180,6 +215,24 @@ private fun SettingPageContent(
                     modifier = Modifier.height(windowInsets.topDp.dp)
                 )
             }
+            // 搜索框（状态栏之下）：输入即搜、清空即回到 6 大类
+            item("search") {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    singleLine = true,
+                    placeholder = { Text("搜索设置（如：弹幕 / 缓存 / 底栏）") },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            TextButton(onClick = { searchQuery = "" }) { Text("清空") }
+                        }
+                    },
+                )
+            }
+            if (searchQuery.isBlank()) {
             // ===== ① 播放 =====
             preferenceCategory(key = "play", title = { Text("播放") })
             preference(
@@ -324,6 +377,62 @@ private fun SettingPageContent(
                 onClick = viewModel::toAboutSettingPage,
             )
 
+            } else {
+                // ===== 搜索结果 =====
+                // 页面入口（有跳转的）
+                val q = searchQuery.trim()
+                val pageHits = settingPages.filter { p ->
+                    p.title.lowercase().contains(q.lowercase()) ||
+                        p.category.lowercase().contains(q.lowercase()) ||
+                        p.keywords.lowercase().contains(q.lowercase())
+                }
+                // 开关 / 数值（可直接在这里改）
+                val itemHits = SettingsSearchIndex.search(q)
+                if (pageHits.isEmpty() && itemHits.isEmpty()) {
+                    item("no_result") {
+                        Column(Modifier.fillMaxWidth().padding(24.dp)) {
+                            Text("没找到「$q」相关的设置", style = MaterialTheme.typography.bodyLarge)
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "换个词试试，例如：弹幕、缓存、底栏、倍速、屏蔽、空降",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (pageHits.isNotEmpty()) {
+                    preferenceCategory(key = "search_pages", title = { Text("设置页面") })
+                    pageHits.forEach { p ->
+                        preference(
+                            key = "search_page_${p.title}",
+                            title = { Text(p.title) },
+                            summary = { Text("${p.category} · ${p.summary}") },
+                            onClick = p.nav,
+                        )
+                    }
+                }
+                if (itemHits.isNotEmpty()) {
+                    preferenceCategory(key = "search_items", title = { Text("设置项（可直接修改）") })
+                    itemHits.forEach { item ->
+                        when (item.kind) {
+                            SettingSearchItem.Kind.SWITCH -> switchPreference(
+                                key = item.prefKey,
+                                defaultValue = item.default as Boolean,
+                                title = { Text(item.title) },
+                                summary = { Text(item.category) },
+                            )
+                            SettingSearchItem.Kind.INT -> textIntPreference(
+                                key = item.prefKey,
+                                defaultValue = item.default as Int,
+                                title = { Text(item.title) },
+                                summary = { Text(item.category) },
+                                label = "",
+                            )
+                        }
+                    }
+                }
+            }
             item("bottom") {
                 Spacer(
                     modifier = Modifier.height(

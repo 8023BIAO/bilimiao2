@@ -83,8 +83,15 @@ fun DpiSettingDialog(onDismiss: () -> Unit) {
                             Toast.makeText(context, "字体缩放需在 0.5~3.0 之间", Toast.LENGTH_SHORT).show()
                             return@TextButton
                         }
-                        // 走既有工具，保证与 ScreenDpiUtil.readCustomConfiguration 读的是同一份存储
-                        com.a10miaomiao.bilimiao.comm.utils.ScreenDpiUtil.saveCustomConfiguration(dpi, fontScale)
+                        // 存进 DefaultSharedPreferences（app_dpi / app_font_scale）——
+                        // 与 app 模块 ScreenDpiUtil.readCustomConfiguration 读的是同一份文件；
+                        // 注意不能直接引用 app 模块的 ScreenDpiUtil（compose 模块不依赖 app）
+                        android.preference.PreferenceManager
+                            .getDefaultSharedPreferences(context.applicationContext)
+                            .edit()
+                            .putInt("app_dpi", dpi)
+                            .putFloat("app_font_scale", fontScale)
+                            .apply()
                         // 用 recreate() 重新应用配置即可：原来直接 System.exit(0) 会把正在播放的视频、
                         // 正在下载的任务（前台服务）一起杀掉。context 可能被 ContextWrapper 包着，拿不到就明确提示
                         var ctx: android.content.Context? = context
