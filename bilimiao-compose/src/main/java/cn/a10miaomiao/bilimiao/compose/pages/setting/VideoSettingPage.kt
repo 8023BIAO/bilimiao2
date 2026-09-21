@@ -395,16 +395,7 @@ private fun VideoSettingPageContent(
                     AnnotatedString(if (value > 0) "$value 秒" else "关闭")
                 }
             )
-            preference(
-                key = "auto_stop_duration",
-                title = {
-                    Text("播放器定时关闭")
-                },
-                summary = {
-                    Text("视频播放的时长，而不是实际经过的时间")
-                },
-                onClick = viewModel::autoStopTimerClick
-            )
+            // 「播放器定时关闭」已提到 设置 → ① 播放 → 定时关闭（避免同一项两处出现）
             switchPreference(
                 key = SettingPreferences.PlayerSeekPreviewShow.name,
                 title = {

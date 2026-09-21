@@ -77,7 +77,7 @@ private fun FilterSettingPageContent(
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
-    val pagerState = rememberPagerState(pageCount = { 5 })
+    val pagerState = rememberPagerState(pageCount = { 4 })
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
@@ -170,24 +170,6 @@ private fun FilterSettingPageContent(
 
             // 【已移除】"评论"tab — 已合并到"其他"tab
 
-            Tab(
-                text = {
-                    Text(
-                        text = "其他",
-                        color = if (4 == pagerState.currentPage) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onBackground
-                        }
-                    )
-                },
-                selected = pagerState.currentPage == 4,
-                onClick = {
-                    scope.launch {
-                        pagerState.animateScrollToPage(4)
-                    }
-                },
-            )
         }
         HorizontalPager(
             modifier = Modifier
@@ -212,9 +194,6 @@ private fun FilterSettingPageContent(
                 // 【已移除】3 — "评论"tab已合并到"其他"tab
                 3 -> {
                     FilterUpperNameListContent()
-                }
-                4 -> {
-                    FilterHomeContent()
                 }
             }
         }

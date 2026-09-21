@@ -96,9 +96,104 @@ class FlagsSettingPage : ComposePage() {
     @Composable
     override fun Content() {
         val viewModel: FlagsSettingPageViewModel = diViewModel()
-        FlagsSettingPageContent(viewModel)
+        FlagsSettingPageContent(viewModel, MoreSection.ALL, "实验性功能")
     }
 }
+
+/**
+ * 设置里的"更多"页面原先全挤在「实验性功能」一页里（1138 行 / 9 个分类，用户反馈"杂物间"）。
+ * 现在按大类拆成**可选区块**：每个页面只显示自己那几块，状态与弹窗仍留在本文件（不搬家）。
+ */
+private enum class MoreSection {
+    AI, DIAG, ANTIFRAUD, SPONSOR, RIPPER, CDN, DEV_TOOLS, STORAGE, ABOUT, BOTTOM_BAR, DISPLAY;
+
+    companion object {
+        val ALL: Set<MoreSection> = entries.toSet()
+        /** ④ 扩展 */
+        val EXT: Set<MoreSection> = setOf(SPONSOR, RIPPER, CDN, ANTIFRAUD, AI)
+        /** ⑤ 账号与数据 */
+        val ACCOUNT: Set<MoreSection> = setOf(DEV_TOOLS, STORAGE)
+        /** ⑥ 关于（含诊断） */
+        val ABOUT_PAGE: Set<MoreSection> = setOf(ABOUT, DIAG)
+        /** ② 界面 → 底栏与导航 */
+        val BOTTOM_BAR_PAGE: Set<MoreSection> = setOf(BOTTOM_BAR)
+        /** ② 界面 → 显示与字号 */
+        val DISPLAY_PAGE: Set<MoreSection> = setOf(DISPLAY)
+    }
+}
+
+/** ④ 扩展：空降助手 / 海外加速 / CDN / 评论反诈 / AI 视频总结 */
+@Serializable
+class ExtSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), MoreSection.EXT, "扩展")
+    }
+}
+
+/** ⑤ 账号与数据：身份导入导出 / 存储 / 重置 */
+@Serializable
+class AccountDataSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), MoreSection.ACCOUNT, "账号与数据")
+    }
+}
+
+/** ⑥ 关于：版本 / GitHub / 致谢 / 错误日志 / 诊断 */
+@Serializable
+class AboutSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), MoreSection.ABOUT_PAGE, "关于")
+    }
+}
+
+/** ② 界面 → 底栏与导航 */
+@Serializable
+class BottomBarSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), MoreSection.BOTTOM_BAR_PAGE, "底栏与导航")
+    }
+}
+
+/** ④ 扩展 → CDN */
+@Serializable
+class CdnSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), setOf(MoreSection.CDN), "CDN")
+    }
+}
+
+/** ④ 扩展 → 评论反诈 */
+@Serializable
+class AntifraudSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), setOf(MoreSection.ANTIFRAUD), "评论反诈")
+    }
+}
+
+/** ④ 扩展 → AI 视频总结 */
+@Serializable
+class AiSummarySettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), setOf(MoreSection.AI), "AI 视频总结")
+    }
+}
+
+/** ② 界面 → 显示与字号 */
+@Serializable
+class DisplayScaleSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), MoreSection.DISPLAY_PAGE, "显示与字号")
+    }
+}
+
 
 private class FlagsSettingPageViewModel(
     override val di: DI,
@@ -172,10 +267,12 @@ private class FlagsSettingPageViewModel(
 
 @Composable
 private fun FlagsSettingPageContent(
-    viewModel: FlagsSettingPageViewModel
+    viewModel: FlagsSettingPageViewModel,
+    sections: Set<MoreSection> = MoreSection.ALL,
+    pageTitle: String = "实验性功能",
 ) {
     PageConfig(
-        title = "实验性功能"
+        title = pageTitle
     )
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
@@ -460,6 +557,7 @@ private fun FlagsSettingPageContent(
                     modifier = Modifier.height(windowInsets.topDp.dp)
                 )
             }
+            if (MoreSection.DEV_TOOLS in sections) {
             preferenceCategory(
                 key = "dev_tools",
                 title = {
@@ -542,6 +640,8 @@ private fun FlagsSettingPageContent(
                 }
 
             // ===== 网络 =====
+            }
+            if (MoreSection.DIAG in sections) {
             preferenceCategory(
                 key = "network",
                 title = { Text("网络测试") }
@@ -553,6 +653,10 @@ private fun FlagsSettingPageContent(
                 summary = { Text("对 B站 Web API 自动添加 WBI 签名（-352 时关闭重试）") },
             )
 
+            }
+            if (MoreSection.AI in sections) {
+            // ===== AI =====
+            preferenceCategory(key = "ai", title = { Text("AI") })
             switchPreference(
                 key = SettingPreferences.AiSummaryEnabled.name,
                 defaultValue = false,
@@ -560,6 +664,9 @@ private fun FlagsSettingPageContent(
                 summary = { Text("在视频详情页「简介」上方显示，调用B站官方接口生成视频摘要") },
             )
 
+            }
+
+            if (MoreSection.ANTIFRAUD in sections) {
             // ===== 评论反诈（发评后自动检测是否被限流）=====
             // 判定规则照搬开源项目 biliSendCommAntifraud：
             // ShadowBan 的评论"带 Cookie 能找到、游客找不到"。
@@ -744,6 +851,8 @@ private fun FlagsSettingPageContent(
             )
 
             // ===== 空降助手（原在「播放设置」里，用户反馈藏得太深 → 移到这里）=====
+            }
+            if (MoreSection.SPONSOR in sections) {
             preferenceCategory(
                 key = "sponsor_block",
                 title = { Text("空降助手（跳过赞助/恰饭片段）") }
@@ -758,6 +867,8 @@ private fun FlagsSettingPageContent(
             // ===== 海外加速（分段并发下载，原「线程撕裂者」）=====
             // 思路来自 MrTangLuyao/Bilibili-thread-ripper：把播放器要读的分段再切成多个字节 Range 并发拉。
             // 与上面的 CDN 设置**互不干扰**：CDN 决定"用哪个节点"，这里只决定"节点上的字节怎么并发拉"。
+            }
+            if (MoreSection.RIPPER in sections) {
             preferenceCategory(
                 key = "thread_ripper",
                 title = { Text("海外加速（分段并发下载）") }
@@ -812,6 +923,8 @@ private fun FlagsSettingPageContent(
             )
 
             // ===== CDN =====
+            }
+            if (MoreSection.CDN in sections) {
             preferenceCategory(
                 key = "cdn",
                 title = { Text("CDN") }
@@ -839,10 +952,12 @@ private fun FlagsSettingPageContent(
             )
 
 
+            }
+            if (MoreSection.BOTTOM_BAR in sections) {
             preferenceCategory(
                 key = "behavior",
                 title = {
-                    Text("界面实验")
+                    Text("底栏与导航")
                 }
             )
                         // 【已移除】新弹幕引擎开关 — V2引擎已废弃
@@ -870,6 +985,10 @@ private fun FlagsSettingPageContent(
                     defaultValue = true,
                 )
             }
+            }
+            if (MoreSection.DISPLAY in sections) {
+            // ===== 显示与字号 =====
+            preferenceCategory(key = "display", title = { Text("显示与字号") })
             preference(
                 key = "dpi",
                 title = {
@@ -887,6 +1006,9 @@ private fun FlagsSettingPageContent(
                 },
             )
 
+            }
+
+            if (MoreSection.STORAGE in sections) {
             preferenceCategory(
                 key = "storage",
                 title = {
@@ -924,10 +1046,31 @@ private fun FlagsSettingPageContent(
             )
 
                 // 关于
+            }
+            if (MoreSection.ABOUT in sections) {
             preferenceCategory(
                 key = "about",
                 title = { Text("关于") }
             )
+                    // 当前版本：对外版本名 + versionCode（用户要求显式展示）
+                    val versionLabel = remember {
+                        try {
+                            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+                            val vc = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                                pi.longVersionCode
+                            } else {
+                                @Suppress("DEPRECATION") pi.versionCode.toLong()
+                            }
+                            "${pi.versionName}（VC $vc）"
+                        } catch (e: Exception) {
+                            "未知"
+                        }
+                    }
+                    preference(
+                        key = "app_version",
+                        title = { Text("当前版本") },
+                        summary = { Text(versionLabel) },
+                    )
             preference(
                 key = "github_repo",
                 title = { Text("我的 GitHub 仓库") },
@@ -965,6 +1108,7 @@ private fun FlagsSettingPageContent(
                     onClick = viewModel::toErrorLogPage,
                 )
 
+            }
             item("bottom") {
                 Spacer(
                     modifier = Modifier.height(

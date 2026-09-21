@@ -41,8 +41,16 @@ import me.zhanghai.compose.preference.preference
 import me.zhanghai.compose.preference.switchPreference
 import org.kodein.di.compose.rememberInstance
 
+/**
+ * 屏蔽设置 →（原"其他" tab）。
+ * 用户要求重新分类后，这里拆成两块：
+ *  - [FilterSection.RECOMMEND] 推荐过滤（时长/播放量/封面/相关推荐/白名单/推广/标签严格）→ 独立页「推荐过滤」
+ *  - [FilterSection.COMMENT]   评论区（评论关键字 + 显示二级回复）→ 独立页「评论区」
+ */
+enum class FilterSection { RECOMMEND, COMMENT, ALL }
+
 @Composable
-fun FilterHomeContent() {
+fun FilterHomeContent(sections: Set<FilterSection> = setOf(FilterSection.ALL)) {
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
@@ -71,6 +79,7 @@ fun FilterHomeContent() {
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
+            if (FilterSection.COMMENT in sections) {
             // === 评论区评论关键字 ===
             preference(
                 key = "comment_blocked_words",
@@ -87,6 +96,9 @@ fun FilterHomeContent() {
                 defaultValue = false,
             )
 
+            }
+
+            if (FilterSection.RECOMMEND in sections) {
             textIntPreference(
                 key = SettingPreferences.VideoMinDuration.name,
                 defaultValue = SettingConstants.VIDEO_MIN_DURATION_DEFAULT,
@@ -133,6 +145,8 @@ fun FilterHomeContent() {
                 summary = { Text("开启后，标签信息查询失败的视频按已屏蔽处理（默认放行，避免网络波动误杀；开启可消除标签屏蔽视频时隐时现）") },
                 defaultValue = false,
             )
+
+            }
 
             item("bottom") {
                 Spacer(
