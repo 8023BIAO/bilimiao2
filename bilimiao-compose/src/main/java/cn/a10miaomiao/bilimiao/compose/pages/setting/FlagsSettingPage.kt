@@ -90,44 +90,23 @@ private fun Context.findHostLifecycleOwner(): androidx.lifecycle.LifecycleOwner?
     return ctx as? androidx.lifecycle.LifecycleOwner
 }
 
-@Serializable
-class FlagsSettingPage : ComposePage() {
-
-    @Composable
-    override fun Content() {
-        val viewModel: FlagsSettingPageViewModel = diViewModel()
-        FlagsSettingPageContent(viewModel, MoreSection.ALL, "实验性功能")
-    }
-}
-
 /**
  * 设置里的"更多"页面原先全挤在「实验性功能」一页里（1138 行 / 9 个分类，用户反馈"杂物间"）。
  * 现在按大类拆成**可选区块**：每个页面只显示自己那几块，状态与弹窗仍留在本文件（不搬家）。
  */
 private enum class MoreSection {
-    AI, DIAG, ANTIFRAUD, SPONSOR, RIPPER, CDN, DEV_TOOLS, STORAGE, ABOUT, BOTTOM_BAR, DISPLAY;
+    ANTIFRAUD, SPONSOR, RIPPER, CDN, DEV_TOOLS, STORAGE, ABOUT, BOTTOM_BAR;
 
     companion object {
         val ALL: Set<MoreSection> = entries.toSet()
         /** ④ 扩展 */
-        val EXT: Set<MoreSection> = setOf(SPONSOR, RIPPER, CDN, ANTIFRAUD, AI)
+        val EXT: Set<MoreSection> = setOf(SPONSOR, RIPPER, CDN, ANTIFRAUD)
         /** ⑤ 账号与数据 */
         val ACCOUNT: Set<MoreSection> = setOf(DEV_TOOLS, STORAGE)
         /** ⑥ 关于（含诊断） */
-        val ABOUT_PAGE: Set<MoreSection> = setOf(ABOUT, DIAG)
+        val ABOUT_PAGE: Set<MoreSection> = setOf(ABOUT)
         /** ② 界面 → 底栏与导航 */
         val BOTTOM_BAR_PAGE: Set<MoreSection> = setOf(BOTTOM_BAR)
-        /** ② 界面 → 显示与字号 */
-        val DISPLAY_PAGE: Set<MoreSection> = setOf(DISPLAY)
-    }
-}
-
-/** ④ 扩展：空降助手 / 海外加速 / CDN / 评论反诈 / AI 视频总结 */
-@Serializable
-class ExtSettingPage : ComposePage() {
-    @Composable
-    override fun Content() {
-        FlagsSettingPageContent(diViewModel(), MoreSection.EXT, "扩展")
     }
 }
 
@@ -182,24 +161,6 @@ class AntifraudSettingPage : ComposePage() {
     @Composable
     override fun Content() {
         FlagsSettingPageContent(diViewModel(), setOf(MoreSection.ANTIFRAUD), "评论反诈")
-    }
-}
-
-/** ④ 扩展 → AI 视频总结 */
-@Serializable
-class AiSummarySettingPage : ComposePage() {
-    @Composable
-    override fun Content() {
-        FlagsSettingPageContent(diViewModel(), setOf(MoreSection.AI), "AI 视频总结")
-    }
-}
-
-/** ② 界面 → 显示与字号 */
-@Serializable
-class DisplayScaleSettingPage : ComposePage() {
-    @Composable
-    override fun Content() {
-        FlagsSettingPageContent(diViewModel(), MoreSection.DISPLAY_PAGE, "显示与字号")
     }
 }
 
@@ -309,23 +270,12 @@ private fun FlagsSettingPageContent(
     }
     val scope = rememberCoroutineScope()
     var showResetDialog by remember { mutableStateOf(false) }
-    var showDpiDialog by remember { mutableStateOf(false) }
     var showGuestConfirmDialog by remember { mutableStateOf(false) }
-    val currentDpi = context.resources.configuration.densityDpi
-    val currentFontScale = context.resources.configuration.fontScale
     // 分段并发下载：本机最多能开多少连接 = 处理器核数（并发设置页滑块的上限也是它）
     val maxThreads = remember {
         Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
     }
     // 光标放末尾：String 重载会让 DPI/字缩输入框的光标停在开头
-    var dpiText by remember {
-        val t = currentDpi.toString()
-        mutableStateOf(TextFieldValue(t, TextRange(t.length)))
-    }
-    var fontScaleText by remember {
-        val t = currentFontScale.toString()
-        mutableStateOf(TextFieldValue(t, TextRange(t.length)))
-    }
     var showCdnDialog by remember { mutableStateOf(false) }
     var currentCdnKey by remember { mutableStateOf("default") }
     LaunchedEffect(Unit) {
@@ -585,7 +535,8 @@ private fun FlagsSettingPageContent(
             preferenceCategory(
                 key = "dev_tools",
                 title = {
-                    Text("开发工具")
+                    // 这里装的是身份导入导出 / 返回登录 / 游客模式 / 设置导入导出 —— 早就不止"开发工具"了
+                    Text("账号与备份")
                 }
             )
             preference(
@@ -664,30 +615,6 @@ private fun FlagsSettingPageContent(
                 }
 
             // ===== 网络 =====
-            }
-            if (MoreSection.DIAG in sections) {
-            preferenceCategory(
-                key = "network",
-                title = { Text("网络测试") }
-            )
-            switchPreference(
-                key = SettingPreferences.WbiSignEnabled.name,
-                defaultValue = true,
-                title = { Text("WBI 签名") },
-                summary = { Text("对 B站 Web API 自动添加 WBI 签名（-352 时关闭重试）") },
-            )
-
-            }
-            if (MoreSection.AI in sections) {
-            // ===== AI =====
-            preferenceCategory(key = "ai", title = { Text("AI") })
-            switchPreference(
-                key = SettingPreferences.AiSummaryEnabled.name,
-                defaultValue = false,
-                title = { Text("AI 视频总结") },
-                summary = { Text("在视频详情页「简介」上方显示，调用B站官方接口生成视频摘要") },
-            )
-
             }
 
             if (MoreSection.ANTIFRAUD in sections) {
@@ -1010,27 +937,6 @@ private fun FlagsSettingPageContent(
                 )
             }
             }
-            if (MoreSection.DISPLAY in sections) {
-            // ===== 显示与字号 =====
-            preferenceCategory(key = "display", title = { Text("显示与字号") })
-            preference(
-                key = "dpi",
-                title = {
-                    Text("应用内DPI设置")
-                },
-                summary = {
-                    Text("当屏幕过大或过小时，可以尝试调整一下")
-                },
-                onClick = {
-                    val d = context.resources.configuration.densityDpi.toString()
-                    val f = context.resources.configuration.fontScale.toString()
-                    dpiText = TextFieldValue(d, TextRange(d.length))
-                    fontScaleText = TextFieldValue(f, TextRange(f.length))
-                    showDpiDialog = true
-                },
-            )
-
-            }
 
             if (MoreSection.STORAGE in sections) {
             preferenceCategory(
@@ -1203,83 +1109,6 @@ private fun FlagsSettingPageContent(
             )
         }
 
-        if (showDpiDialog) {
-            val defaultDpi = context.applicationContext.resources.configuration.densityDpi
-            val defaultFontScale = context.applicationContext.resources.configuration.fontScale
-            OverlayAlertDialog(
-                onDismissRequest = { showDpiDialog = false },
-                title = { Text("DPI 设置") },
-                text = {
-                    androidx.compose.foundation.layout.Column {
-                        Text("系统默认DPI：$defaultDpi   字缩：$defaultFontScale")
-                        Spacer(Modifier.height(12.dp))
-                        androidx.compose.material3.OutlinedTextField(
-                            value = dpiText,
-                            onValueChange = { dpiText = it },
-                            label = { Text("DPI (80~640)") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        androidx.compose.material3.OutlinedTextField(
-                            value = fontScaleText,
-                            onValueChange = { fontScaleText = it },
-                            label = { Text("字体缩放 (0.5~3.0)") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            try {
-                                val dpi = dpiText.text.toInt()
-                                val fontScale = fontScaleText.text.toFloat()
-                                if (dpi < 80 || dpi > 640) {
-                                    Toast.makeText(context, "DPI 需在 80~640 之间", Toast.LENGTH_SHORT).show()
-                                    return@TextButton
-                                }
-                                if (fontScale < 0.5f || fontScale > 3.0f) {
-                                    Toast.makeText(context, "字体缩放需在 0.5~3.0 之间", Toast.LENGTH_SHORT).show()
-                                    return@TextButton
-                                }
-                                val prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(context)
-                                prefs.edit()
-                                    .putInt("app_dpi", dpi)
-                                    .putFloat("app_font_scale", fontScale)
-                                    .commit()
-                                // 用 recreate() 重新应用配置即可：原来直接 System.exit(0) 会把
-                                // 正在播放的视频、正在下载的任务（前台服务）一起杀掉
-                                // context 不一定是 Activity（可能被 ContextWrapper 包着），
-                                // 拿不到就明确提示，别让"设置存了却不生效"变成静默失败
-                                var ctx: android.content.Context? = context
-                                while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) {
-                                    ctx = ctx.baseContext
-                                }
-                                val hostActivity = ctx as? android.app.Activity
-                                if (hostActivity != null) {
-                                    hostActivity.recreate()
-                                } else {
-                                    toast("设置已保存，请手动重启应用后生效")
-                                }
-                            } catch (e: NumberFormatException) {
-                                Toast.makeText(context, "请输入数字", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    ) {
-                        Text("确认")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDpiDialog = false }) {
-                        Text("取消")
-                    }
-                }
-            )
-        }
     }
 }
 

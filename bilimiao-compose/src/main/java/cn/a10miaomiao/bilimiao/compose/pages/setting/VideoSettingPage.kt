@@ -148,11 +148,6 @@ private class VideoSettingPageViewModel(
 
     val bottomProgressBarShowSelectionList = bottomProgressBarShowSelection.keys.toList()
 
-    fun autoStopTimerClick() {
-        pageNavigation.navigate(AutoStopTimerPage(), navOptions {
-            launchSingleTop = true
-        })
-    }
 
 }
 

@@ -50,15 +50,11 @@ import cn.a10miaomiao.bilimiao.compose.pages.rank.RankPage
 import cn.a10miaomiao.bilimiao.compose.pages.search.SearchResultPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.DanmakuDisplaySettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.DanmakuSettingPage
-import cn.a10miaomiao.bilimiao.compose.pages.setting.FlagsSettingPage
-import cn.a10miaomiao.bilimiao.compose.pages.setting.ExtSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.CdnSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.AntifraudSettingPage
-import cn.a10miaomiao.bilimiao.compose.pages.setting.AiSummarySettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.AccountDataSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.AboutSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.BottomBarSettingPage
-import cn.a10miaomiao.bilimiao.compose.pages.setting.DisplayScaleSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.ErrorLogPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.HomeSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.TimeSelectSettingPage
@@ -212,18 +208,14 @@ class BilimiaoPageRoute (
         composable<AutoStopTimerPage>()
         composable<DanmakuSettingPage>()
         composable<DanmakuDisplaySettingPage>()
-        composable<FlagsSettingPage>()
         // vc152 设置重新分类后新增的页面 —— 必须在这里注册，否则点进去会崩
         // （IllegalArgumentException: Destination with route XxxSettingPage cannot be found in navigation graph）
-        composable<ExtSettingPage>()
         composable<RipperSettingPage>()
         composable<CdnSettingPage>()
         composable<AntifraudSettingPage>()
-        composable<AiSummarySettingPage>()
         composable<AccountDataSettingPage>()
         composable<AboutSettingPage>()
         composable<BottomBarSettingPage>()
-        composable<DisplayScaleSettingPage>()
         composable<FilterRecommendSettingPage>()
         composable<FilterCommentSettingPage>()
         composable<ErrorLogPage>()

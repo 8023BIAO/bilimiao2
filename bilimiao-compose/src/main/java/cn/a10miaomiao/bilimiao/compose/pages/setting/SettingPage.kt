@@ -33,6 +33,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterSettingPage
+import cn.a10miaomiao.bilimiao.compose.pages.setting.widgets.DpiSettingDialog
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterRecommendSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterCommentSettingPage
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -90,9 +91,6 @@ private class SettingPageViewModel(
         pageNavigation.navigate(FilterSettingPage())
     }
 
-    fun toFlagsSettingPage() {
-        pageNavigation.navigate(FlagsSettingPage())
-    }
 
     fun toAutoStopTimerPage() {
         pageNavigation.navigate(AutoStopTimerPage())
@@ -102,9 +100,6 @@ private class SettingPageViewModel(
         pageNavigation.navigate(BottomBarSettingPage())
     }
 
-    fun toDisplayScaleSettingPage() {
-        pageNavigation.navigate(DisplayScaleSettingPage())
-    }
 
     fun toFilterRecommendPage() {
         pageNavigation.navigate(FilterRecommendSettingPage())
@@ -131,9 +126,6 @@ private class SettingPageViewModel(
         pageNavigation.navigate(AntifraudSettingPage())
     }
 
-    fun toAiSummarySettingPage() {
-        pageNavigation.navigate(AiSummarySettingPage())
-    }
 
     fun toAccountDataSettingPage() {
         pageNavigation.navigate(AccountDataSettingPage())
@@ -170,6 +162,8 @@ private fun SettingPageContent(
     val showLogoutDialog = remember {
         mutableStateOf(false)
     }
+    // 显示与字号：设置首页那一级直接弹窗（原来要"界面 → 显示与字号 → 再点一下"三步）
+    var showDpiDialog by remember { mutableStateOf(false) }
     ProvidePreferenceLocals(
         flow = rememberPreferenceFlow(dataStore)
     ) {
@@ -227,18 +221,19 @@ private fun SettingPageContent(
                 summary = { Text("锁定底栏、滚动隐藏行为") },
                 onClick = viewModel::toBottomBarSettingPage,
             )
+            // 显示与字号：单项设置，按"能内联就内联"的规则直接放在这一级（点了就弹窗）
             preference(
                 key = "display_scale",
                 title = { Text("显示与字号") },
-                summary = { Text("应用内 DPI 与字体缩放") },
-                onClick = viewModel::toDisplayScaleSettingPage,
+                summary = { Text("应用内 DPI 与字体缩放，点这里直接改") },
+                onClick = { showDpiDialog = true },
             )
 
             // ===== ③ 内容与评论 =====
             preferenceCategory(key = "content", title = { Text("内容与评论") })
             preference(
                 key = "filter",
-                title = { Text("屏蔽规则") },
+                title = { Text("内容屏蔽") },
                 summary = { Text("按标题 / UP / 标签 / UP名屏蔽") },
                 onClick = viewModel::toFilterSettingPage
             )
@@ -281,11 +276,18 @@ private fun SettingPageContent(
                 summary = { Text("发评后自动检测是否被限流") },
                 onClick = viewModel::toAntifraudSettingPage,
             )
-            preference(
-                key = "ai_summary",
+            // 单项设置直接内联（按"能内联就内联"）：省掉一次跳转
+            switchPreference(
+                key = SettingPreferences.AiSummaryEnabled.name,
+                defaultValue = false,
                 title = { Text("AI 视频总结") },
-                summary = { Text("详情页显示视频摘要") },
-                onClick = viewModel::toAiSummarySettingPage,
+                summary = { Text("视频详情页「简介」上方显示 B站官方接口生成的摘要") },
+            )
+            switchPreference(
+                key = SettingPreferences.WbiSignEnabled.name,
+                defaultValue = true,
+                title = { Text("WBI 签名") },
+                summary = { Text("给 B站 Web API 自动签名（遇到 -352 报错时可试着关掉）") },
             )
 
             // ===== ⑤ 账号与数据 =====
@@ -295,12 +297,6 @@ private fun SettingPageContent(
                 title = { Text("账号与存储") },
                 summary = { Text("游客模式、身份导入导出、缓存与重置") },
                 onClick = viewModel::toAccountDataSettingPage,
-            )
-            preference(
-                key = "export_setting",
-                title = { Text("备份与恢复") },
-                summary = { Text("导出 / 导入全部设置") },
-                onClick = viewModel::toExportSettingPage,
             )
             if (userState.isLogin()) {
                 preference(
@@ -336,6 +332,10 @@ private fun SettingPageContent(
                 )
             }
         }
+    }
+
+    if (showDpiDialog) {
+        DpiSettingDialog(onDismiss = { showDpiDialog = false })
     }
 
     if (showLogoutDialog.value) {
