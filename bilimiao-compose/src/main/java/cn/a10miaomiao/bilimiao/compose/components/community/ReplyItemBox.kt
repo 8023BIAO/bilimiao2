@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
@@ -26,7 +27,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cn.a10miaomiao.bilimiao.compose.R
@@ -86,6 +89,19 @@ class ReplyItemBoxPictureInfo(
     val height: Int,
     val size: Int,
 )
+
+/** 一级评论下面预览的二级回复（条数上限见 [SUB_REPLY_PREVIEW_MAX]） */
+@Stable
+class SubReplyPreviewInfo(
+    val uname: String,
+    val content: ReplyItemBoxContentInfo?,
+)
+
+/**
+ * 一级评论下最多预览几条二级回复。官方是 2 条，这里对齐官方；
+ * 其余回复靠下面那行「共N条回复」点进楼中楼看全部。
+ */
+private const val SUB_REPLY_PREVIEW_MAX = 2
 
 @Stable
 class ReplyItemBoxContentInfo(
@@ -220,6 +236,10 @@ fun ReplyItemBox(
     onReplyClick: () -> Unit = {},
     onDeleteClick: () -> Unit = {},
     onClick: () -> Unit = {},
+    /** 一级评论下直接带出几条二级回复（设置项「显示二级回复」；默认关 = 原版行为） */
+    showSubReplies: Boolean = false,
+    /** 二级回复的屏蔽词判定（true = 屏蔽掉、不显示），与一级评论共用同一套规则 */
+    isSubReplyBlocked: (bilibili.main.community.reply.v1.ReplyInfo) -> Boolean = { false },
 ) {
     val content = remember(item.content) {
         item.content?.let {
@@ -259,6 +279,43 @@ fun ReplyItemBox(
             )
         } ?: listOf()
     }
+    // ★ 二级回复预览：数据就挂在接口返回的一级评论上（ReplyInfo.replies），**不需要多打任何请求**。
+    //   只渲染前 SUB_REPLY_PREVIEW_MAX 条，且和一级评论一样过屏蔽词（含 /正则/）。
+    //   全部被屏蔽、或接口没给预览时，下面的「共N条回复」入口仍然保留 —— 不然进楼中楼的路就断了。
+    val subReplyPreview = remember(item.replies, item.count, showSubReplies, isSubReplyBlocked) {
+        if (!showSubReplies || item.count <= 0L) {
+            emptyList()
+        } else {
+            item.replies.filterNot(isSubReplyBlocked)
+                .take(SUB_REPLY_PREVIEW_MAX)
+                .map { sub ->
+                    SubReplyPreviewInfo(
+                        uname = sub.member?.name ?: "",
+                        content = sub.content?.let { c ->
+                            ReplyItemBoxContentInfo(
+                                message = c.message,
+                                emote = c.emote.values.filterNotNull().map { emote ->
+                                    ReplyItemBoxContentInfo.EmoteInfo(emote.id, emote.text, emote.url)
+                                },
+                                url = c.url.values.filterNotNull().map { url ->
+                                    ReplyItemBoxContentInfo.UrlInfo(url.title, url.pcUrl)
+                                },
+                                atNameToMid = c.atNameToMid,
+                            )
+                        },
+                    )
+                }
+        }
+    }
+    val subReplyEntryText = remember(item.count, item.replyControl?.subReplyEntryText, subReplyPreview.size, showSubReplies) {
+        // 服务器会给一句「共x条回复」（reply_control.sub_reply_entry_text），有就用它，没有自己拼
+        if (showSubReplies && item.count > subReplyPreview.size) {
+            item.replyControl?.subReplyEntryText?.takeIf { it.isNotBlank() }
+                ?: "共${item.count}条回复"
+        } else {
+            ""
+        }
+    }
     ReplyItemBox(
         modifier = modifier,
         oid = item.oid,
@@ -277,6 +334,8 @@ fun ReplyItemBox(
         isUpper = isUpper,
         showDelete = showDelete,
         isLike = item.replyControl?.action == 1L,
+        subReplies = subReplyPreview,
+        subReplyEntryText = subReplyEntryText,
         onAvatarClick = onAvatarClick,
         onLikeClick = onLikeClick,
         onReplyClick = onReplyClick,
@@ -305,11 +364,16 @@ fun ReplyItemBox(
     isUpper: Boolean = false,
     showDelete: Boolean = false,
     isLike: Boolean = false,
+    /** 二级回复预览（空 = 不显示这块） */
+    subReplies: List<SubReplyPreviewInfo> = emptyList(),
+    /** 「共N条回复」入口文案（空 = 不显示这一行） */
+    subReplyEntryText: String = "",
     onAvatarClick: () -> Unit = {},
     onLikeClick: () -> Unit = {},
     onReplyClick: () -> Unit = {},
     onDeleteClick: () -> Unit = {},
     onClick: () -> Unit = {},
+    onSubReplyClick: () -> Unit = onReplyClick,
 ) {
     Row(
         Modifier
@@ -410,6 +474,14 @@ fun ReplyItemBox(
                     ImagesGrid(picturesList)
                 }
             }
+            // 二级回复预览（设置项「显示二级回复」打开时才非空）；点整块进楼中楼看全部
+            if (subReplies.isNotEmpty() || subReplyEntryText.isNotBlank()) {
+                SubReplyPreviewBox(
+                    subReplies = subReplies,
+                    entryText = subReplyEntryText,
+                    onClick = onSubReplyClick,
+                )
+            }
             Row(
                 modifier = Modifier.padding(vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -489,5 +561,75 @@ fun ReplyItemBox(
                 }
             }
         }
+    }
+}
+
+/**
+ * 一级评论下面的二级回复预览块（对齐官方客户端的观感）：
+ * 圆角浅底，里面每行是「用户名 + 回复 @某某 :内容」（最多两行，超出打省略号），
+ * 最后一行是「共N条回复」入口。整块可点 —— 点哪一行都进楼中楼看全部。
+ */
+@Composable
+private fun SubReplyPreviewBox(
+    subReplies: List<SubReplyPreviewInfo>,
+    entryText: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .padding(top = 5.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+            .clickable(
+                onClick = onClick,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = ScaleIndication,
+            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        subReplies.forEach { sub ->
+            SubReplyPreviewRow(sub)
+        }
+        if (entryText.isNotBlank()) {
+            Text(
+                text = entryText,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubReplyPreviewRow(sub: SubReplyPreviewInfo) {
+    val content = sub.content
+    if (content == null) return
+    val unameColor = MaterialTheme.colorScheme.primary
+    val nodes = content.toAnnotatedTextNode()
+    val emoteMap = inlineAnnotatedContent(nodes, size = 16.sp)
+    val message = annotatedText(nodes)
+    // 用户名和正文要在同一段里连排（正文可能带表情/链接，所以先拿到 AnnotatedString 再拼）
+    val text = remember(sub.uname, message, unameColor) {
+        buildAnnotatedString {
+            if (sub.uname.isNotBlank()) {
+                withStyle(SpanStyle(color = unameColor)) { append(sub.uname) }
+                append(" ")
+            }
+            append(message)
+        }
+    }
+    SelectionContainer {
+        Text(
+            text = text,
+            inlineContent = emoteMap,
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

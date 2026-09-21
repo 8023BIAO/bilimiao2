@@ -79,6 +79,14 @@ fun FilterHomeContent() {
                 onClick = { showCommentFilterDialog = true }
             )
 
+            // 评论区显示：一级评论下直接带出几条二级回复（默认关 = 原版只显示一级）
+            switchPreference(
+                key = SettingPreferences.CommentSubReplyPreview.name,
+                title = { Text("显示二级回复") },
+                summary = { Text("一级评论下直接带出几条，点进去看全部") },
+                defaultValue = false,
+            )
+
             textIntPreference(
                 key = SettingPreferences.VideoMinDuration.name,
                 defaultValue = SettingConstants.VIDEO_MIN_DURATION_DEFAULT,

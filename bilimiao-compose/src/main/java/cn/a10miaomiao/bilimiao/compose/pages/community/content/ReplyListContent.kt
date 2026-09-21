@@ -57,6 +57,10 @@ fun ReplyListContent(
     val blockedWords by dataStore.data.map {
         it[SettingPreferences.CommentBlockedWords] ?: emptySet()
     }.collectAsStateWithLifecycle(initialValue = emptySet())
+    // 「显示二级回复」开关：默认关 = 原版行为（一级评论下不带二级回复预览）
+    val showSubReplies by dataStore.data.map {
+        it[SettingPreferences.CommentSubReplyPreview] ?: false
+    }.collectAsStateWithLifecycle(initialValue = false)
     // 解析屏蔽词为 AC + 正则（同 FilterStore 逻辑）
     val (commentPlainMatcher, commentRegexList) = remember(blockedWords) {
         val plainWords = mutableListOf<String>()
@@ -76,19 +80,37 @@ fun ReplyListContent(
         Pair(matcher, regexes)
     }
     val allList by viewModel.list.data.collectAsStateWithLifecycle()
+    // ★ 屏蔽词判定抽成一个函数：一级评论和"二级回复预览"共用同一套规则（AC 子串 + /正则/），
+    //   否则会出现"一级评论被屏蔽了，它的二级回复预览还露着"。
+    val isBlockedText: (String?) -> Boolean = remember(blockedWords, commentPlainMatcher, commentRegexList) {
+        { text ->
+            if (text.isNullOrEmpty()) {
+                false
+            } else {
+                var blocked = false
+                // Aho-Corasick 子串命中
+                commentPlainMatcher?.let { if (it.containsAny(text)) blocked = true }
+                // 正则匹配
+                if (!blocked) {
+                    for (regex in commentRegexList) {
+                        if (regex.containsMatchIn(text)) {
+                            blocked = true
+                            break
+                        }
+                    }
+                }
+                blocked
+            }
+        }
+    }
     // ★ 屏蔽词过滤要 remember：blockedWords 非空时，父级每次重组（下拉刷新、loading/finished
     //   变化、滚动回收）都会把**全部评论**在主线程上重新过一遍 AC 自动机 + 正则并生成新 List。
-    val list = remember(allList, blockedWords, commentPlainMatcher, commentRegexList) {
-        if (blockedWords.isEmpty()) allList else allList.filter { reply ->
-            val text = reply.content?.message ?: return@filter true
-            // Aho-Corasick 子串命中
-            commentPlainMatcher?.let { if (it.containsAny(text)) return@filter false }
-            // 正则匹配
-            for (regex in commentRegexList) {
-                if (regex.containsMatchIn(text)) return@filter false
-            }
-            true
-        }
+    val list = remember(allList, blockedWords, isBlockedText) {
+        if (blockedWords.isEmpty()) allList else allList.filterNot { isBlockedText(it.content?.message) }
+    }
+    // 二级回复预览的过滤回调：identity 要稳（replyItemBox 里当 remember key 用），所以单独 remember
+    val isSubReplyBlocked: (bilibili.main.community.reply.v1.ReplyInfo) -> Boolean = remember(isBlockedText) {
+        { sub -> isBlockedText(sub.content?.message) }
     }
     val listLoading by viewModel.list.loading.collectAsStateWithLifecycle()
     val listFinished by viewModel.list.finished.collectAsStateWithLifecycle()
@@ -160,6 +182,8 @@ fun ReplyListContent(
                     item = replyItem,
                     isUpper = replyMid == upMid,
                     showDelete = userState.isSelf(replyMid),
+                    showSubReplies = showSubReplies,
+                    isSubReplyBlocked = isSubReplyBlocked,
                     onLikeClick = {
                         viewModel.likeReplyById(replyItem.id)
                     },

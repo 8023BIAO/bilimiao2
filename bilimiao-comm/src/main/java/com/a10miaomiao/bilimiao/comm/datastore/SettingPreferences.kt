@@ -336,6 +336,12 @@ object SettingPreferences {
     val DanmakuFilterEnabled = booleanPreferencesKey("danmaku_filter_enabled")
     val DanmakuFilterKeywords = stringSetPreferencesKey("danmaku_filter_keywords")
     val CommentBlockedWords = stringSetPreferencesKey("comment_blocked_words")
+    /**
+     * 评论区：一级评论下面直接带出几条二级回复（默认关 = 原版行为：只显示一级，点进去才看二级）。
+     * 预览用的数据是接口随一级评论一起返回的（ReplyInfo.replies），开这个开关**不会多打任何请求**。
+     * 二级回复同样过 [CommentBlockedWords] 那套屏蔽词（含 /正则/）。
+     */
+    val CommentSubReplyPreview = booleanPreferencesKey("comment_sub_reply_preview")
     val DanmakuFilterDuplicate = booleanPreferencesKey("danmaku_filter_duplicate")
 
     class Danmaku(
