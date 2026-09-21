@@ -50,7 +50,14 @@ import org.kodein.di.compose.rememberInstance
 enum class FilterSection { RECOMMEND, COMMENT, ALL }
 
 @Composable
-fun FilterHomeContent(sections: Set<FilterSection> = setOf(FilterSection.ALL)) {
+fun FilterHomeContent(
+    sections: Set<FilterSection> = setOf(FilterSection.ALL),
+    /**
+     * 作为**独立页面**打开时要自己留出状态栏高度；
+     * 在「屏蔽设置」的 tab 里由父级 TabRow 负责，保持 false（否则会多出一截空白）。
+     */
+    applyTopInset: Boolean = false,
+) {
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
@@ -75,8 +82,12 @@ fun FilterHomeContent(sections: Set<FilterSection> = setOf(FilterSection.ALL)) {
                 )
         ) {
 
-            item {
-                Spacer(modifier = Modifier.height(10.dp))
+            item("top") {
+                Spacer(
+                    modifier = Modifier.height(
+                        (if (applyTopInset) windowInsets.topDp.dp else 0.dp) + 10.dp
+                    )
+                )
             }
 
             if (FilterSection.COMMENT in sections) {
@@ -150,7 +161,9 @@ fun FilterHomeContent(sections: Set<FilterSection> = setOf(FilterSection.ALL)) {
 
             item("bottom") {
                 Spacer(
-                    modifier = Modifier.height(windowInsets.bottomDp.dp)
+                    modifier = Modifier.height(
+                        windowInsets.bottomDp.dp + windowStore.bottomAppBarHeightDp.dp
+                    )
                 )
             }
         }

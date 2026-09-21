@@ -19,7 +19,7 @@ class FilterRecommendSettingPage : ComposePage() {
     override fun Content() {
         // 独立成页后必须自己声明标题，否则顶栏没有标题/返回
         PageConfig(title = "推荐过滤")
-        FilterHomeContent(setOf(FilterSection.RECOMMEND))
+        FilterHomeContent(setOf(FilterSection.RECOMMEND), applyTopInset = true)
     }
 }
 
@@ -28,6 +28,6 @@ class FilterCommentSettingPage : ComposePage() {
     @Composable
     override fun Content() {
         PageConfig(title = "评论区")
-        FilterHomeContent(setOf(FilterSection.COMMENT))
+        FilterHomeContent(setOf(FilterSection.COMMENT), applyTopInset = true)
     }
 }

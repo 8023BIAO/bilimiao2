@@ -69,6 +69,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.setting.ExportSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.VideoSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.SponsorBlockSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.ThreadRipperSettingPage
+import cn.a10miaomiao.bilimiao.compose.pages.setting.RipperSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeRegionDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.mine.MyFollowPage
@@ -215,6 +216,7 @@ class BilimiaoPageRoute (
         // vc152 设置重新分类后新增的页面 —— 必须在这里注册，否则点进去会崩
         // （IllegalArgumentException: Destination with route XxxSettingPage cannot be found in navigation graph）
         composable<ExtSettingPage>()
+        composable<RipperSettingPage>()
         composable<CdnSettingPage>()
         composable<AntifraudSettingPage>()
         composable<AiSummarySettingPage>()

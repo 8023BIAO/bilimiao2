@@ -158,6 +158,15 @@ class BottomBarSettingPage : ComposePage() {
     }
 }
 
+/** ④ 扩展 → 海外加速（一级页：启用开关 + 「并发设置」入口 —— 别直接指到二级页，否则开关找不到） */
+@Serializable
+class RipperSettingPage : ComposePage() {
+    @Composable
+    override fun Content() {
+        FlagsSettingPageContent(diViewModel(), setOf(MoreSection.RIPPER), "海外加速")
+    }
+}
+
 /** ④ 扩展 → CDN */
 @Serializable
 class CdnSettingPage : ComposePage() {

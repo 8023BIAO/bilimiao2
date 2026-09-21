@@ -118,8 +118,9 @@ private class SettingPageViewModel(
         pageNavigation.navigate(SponsorBlockSettingPage())
     }
 
+    /** ④ 扩展 → 海外加速：进**一级页**（里面有「启用分段并发下载」开关 + 「并发设置」入口） */
     fun toThreadRipperSettingPage() {
-        pageNavigation.navigate(ThreadRipperSettingPage())
+        pageNavigation.navigate(RipperSettingPage())
     }
 
     fun toCdnSettingPage() {
