@@ -279,6 +279,21 @@ private fun FlagsSettingPageContent(
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
+    // 当前版本：对外版本名 + versionCode（关于页展示；用 PackageManager 取，跨模块安全）
+    // 必须在 LazyColumn 之外算 —— LazyListScope 的 lambda 不是 @Composable 上下文，里面不能调 remember
+    val appVersionLabel = remember(context) {
+        try {
+            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+            val vc = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                pi.longVersionCode
+            } else {
+                @Suppress("DEPRECATION") pi.versionCode.toLong()
+            }
+            "${pi.versionName}（VC $vc）"
+        } catch (e: Exception) {
+            "未知"
+        }
+    }
     val userStore: UserStore by rememberInstance()
     val dataStore = remember {
         SettingPreferences.run { context.dataStore }
@@ -1052,24 +1067,10 @@ private fun FlagsSettingPageContent(
                 key = "about",
                 title = { Text("关于") }
             )
-                    // 当前版本：对外版本名 + versionCode（用户要求显式展示）
-                    val versionLabel = remember {
-                        try {
-                            val pi = context.packageManager.getPackageInfo(context.packageName, 0)
-                            val vc = if (android.os.Build.VERSION.SDK_INT >= 28) {
-                                pi.longVersionCode
-                            } else {
-                                @Suppress("DEPRECATION") pi.versionCode.toLong()
-                            }
-                            "${pi.versionName}（VC $vc）"
-                        } catch (e: Exception) {
-                            "未知"
-                        }
-                    }
                     preference(
                         key = "app_version",
                         title = { Text("当前版本") },
-                        summary = { Text(versionLabel) },
+                        summary = { Text(appVersionLabel) },
                     )
             preference(
                 key = "github_repo",
