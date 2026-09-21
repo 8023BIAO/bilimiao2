@@ -2,6 +2,7 @@ package cn.a10miaomiao.bilimiao.compose.pages.filter
 
 import androidx.compose.runtime.Composable
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
+import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.pages.filter.content.FilterHomeContent
 import cn.a10miaomiao.bilimiao.compose.pages.filter.content.FilterSection
 import kotlinx.serialization.Serializable
@@ -16,6 +17,8 @@ import kotlinx.serialization.Serializable
 class FilterRecommendSettingPage : ComposePage() {
     @Composable
     override fun Content() {
+        // 独立成页后必须自己声明标题，否则顶栏没有标题/返回
+        PageConfig(title = "推荐过滤")
         FilterHomeContent(setOf(FilterSection.RECOMMEND))
     }
 }
@@ -24,6 +27,7 @@ class FilterRecommendSettingPage : ComposePage() {
 class FilterCommentSettingPage : ComposePage() {
     @Composable
     override fun Content() {
+        PageConfig(title = "评论区")
         FilterHomeContent(setOf(FilterSection.COMMENT))
     }
 }
