@@ -380,8 +380,10 @@ object CommentAntifraudLauncher {
         val body = buildString {
             append(where)
             append("\n\n评论内容：")
-            append(message.take(200))
-            if (message.length > 200) append("…")
+            // ★ 这里原来写的是 message.take(200) + "…"：内容长了就被截掉，用户"想看全部"看不到。
+            //   DialogX 的消息体本来就在 dialogx 的 DialogScrollView 里（外面还有 MaxRelativeLayout 封顶高度），
+            //   所以直接给全文即可 —— 长了能上下滑，按钮不受影响。
+            append(message)
             append("\n\n判定依据：")
             append(result.detail)
             if (result.code != 0) {
