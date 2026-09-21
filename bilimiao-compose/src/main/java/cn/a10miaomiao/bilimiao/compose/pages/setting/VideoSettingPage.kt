@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+// `val x by state` 需要 getValue 操作符在作用域内（本文件是逐个导入，不是 runtime.* —— 漏了会报
+// "Type 'State<...>' has no method 'getValue(...)', so it cannot serve as a delegate"）
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
