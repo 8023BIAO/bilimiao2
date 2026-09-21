@@ -40,6 +40,7 @@ import me.zhanghai.compose.preference.listPreference
 import me.zhanghai.compose.preference.preference
 import me.zhanghai.compose.preference.preferenceCategory
 import me.zhanghai.compose.preference.switchPreference
+import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
@@ -61,6 +62,14 @@ private class VideoSettingPageViewModel(
 
     private val fragment by instance<Fragment>()
     private val pageNavigation by instance<PageNavigation>()
+
+    /**
+     * 定时关闭：页面本体还是 [AutoStopTimerPage]（"懒得重构"就不动了），
+     * 只是把入口收进「播放设置」—— 用户在播放器点齿轮进来时找不到它。
+     */
+    fun toAutoStopTimerPage() {
+        pageNavigation.navigate(AutoStopTimerPage())
+    }
 
     private val fnvalSelection = mapOf(
         SettingConstants.PLAYER_FNVAL_DASH to AnnotatedString("dash(支持4K)"),
@@ -160,6 +169,10 @@ private fun VideoSettingPageContent(
         title = "播放设置"
     )
     val windowStore: WindowStore by rememberInstance()
+    // 本页有两种出场方式：① 设置首页里当整页打开 ② 播放器齿轮按钮 openBottomSheet(VideoSettingPage())
+    // 在弹层里时它不在 nav 返回栈上，往 nav 栈 navigate 会被弹层盖住 → 要判断一下（见下面「定时关闭」）
+    val bottomSheetState: BottomSheetState by rememberInstance()
+    val bottomSheetPage by bottomSheetState.page.collectAsStateWithLifecycle()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
 
@@ -270,6 +283,20 @@ private fun VideoSettingPageContent(
                 title = {
                     Text("播放控制设置")
                 }
+            )
+            // 定时关闭：原来只在设置首页一级挂着，用户在播放器点齿轮进来找不到它（用户反馈）
+            preference(
+                key = "auto_stop_timer",
+                title = { Text("定时关闭") },
+                summary = { Text("播够指定时长自动暂停") },
+                onClick = {
+                    if (bottomSheetPage is VideoSettingPage) {
+                        // 弹层里换页：整页 navigate 会被弹层盖住
+                        bottomSheetState.open(AutoStopTimerPage())
+                    } else {
+                        viewModel.toAutoStopTimerPage()
+                    }
+                },
             )
             switchPreference(
                 key = SettingPreferences.PlayerNotification.name,

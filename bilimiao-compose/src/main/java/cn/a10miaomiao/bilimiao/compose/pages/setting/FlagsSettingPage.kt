@@ -862,7 +862,9 @@ private fun FlagsSettingPageContent(
                     )
                 },
             )
-            // 说明改成 QA（用户要求）：Q1 什么时候该调大 / Q2 多 CDN 并发怎么开 / Q3 MP4 能不能用
+            // 说明就留一条 QA（用户要求）：什么时候该调大。
+            // 多 CDN 抢跑**不用写** —— 它不管 CDN 竞速开不开都会抢跑（候选来自 baseUrl + backupUrl，
+            // CdnNodePool 照样登记多个节点，竞速只影响"谁是第一个"）。
             preferenceCategory(
                 key = "thread_ripper_qa",
                 title = { Text("说明") }
@@ -873,29 +875,6 @@ private fun FlagsSettingPageContent(
                 title = { Text("Q：什么时候该调大？") },
                 summary = {
                     Text("卡顿、4K 缓冲跟不上就调大；手机一般 4~8 条够用，连接越多开销越大。")
-                },
-            )
-            preference(
-                key = "tr_qa_multi_cdn",
-                enabled = false,
-                title = { Text("Q：多 CDN 并发怎么开？") },
-                summary = {
-                    Text(
-                        "要同时向多个节点要同一段（主节点 900ms 还没交出首字节就换一条问，谁先回用谁），" +
-                            "得先在「CDN」里打开「CDN 竞速」；把 CDN 固定成单一主机时就不会换节点。" +
-                            "两边互不影响：CDN 决定用哪个节点，这里只管节点上的字节怎么并发拉。"
-                    )
-                },
-            )
-            preference(
-                key = "tr_qa_mp4",
-                enabled = false,
-                title = { Text("Q：MP4 源能用吗？") },
-                summary = {
-                    Text(
-                        "能。只要这次请求拿得到文件长度就会并发拉；" +
-                            "拿不到长度的（部分 MP4 渐进请求）会自动退回单连接，不用手动关。"
-                    )
                 },
             )
             preference(
