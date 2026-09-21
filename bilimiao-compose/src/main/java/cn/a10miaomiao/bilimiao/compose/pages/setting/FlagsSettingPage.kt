@@ -856,6 +856,20 @@ private fun FlagsSettingPageContent(
                 },
                 defaultValue = true,
             )
+            // 只有"允许随滚动隐藏"（锁定底栏 = 关）时才谈得上"标题行要不要一起藏"
+            val bottomBarLocked = (prefValues[SettingPreferences.BottomBarLock.name] as? Boolean) ?: true
+            if (!bottomBarLocked) {
+                switchPreference(
+                    key = SettingPreferences.BottomBarScrollHideTitle.name,
+                    title = {
+                        Text("标题行一起隐藏")
+                    },
+                    summary = {
+                        Text("滚动隐藏时，页名那一条也一起收起来")
+                    },
+                    defaultValue = true,
+                )
+            }
             preference(
                 key = "dpi",
                 title = {

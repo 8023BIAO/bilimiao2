@@ -181,6 +181,10 @@ class MainActivity
                         AppBarBehavior.globalLock = locked
                         ui.root.bottomBarLocked = locked
                         ui.root.appBarBehavior?.bottomBarLocked = locked
+                        // 「标题行一起隐藏」：滚动隐藏时要不要把"页名"那 20dp 也一起收走
+                        // （默认是；关掉就退回"只收菜单排、页名留着"的旧行为）
+                        ui.root.appBarBehavior?.hideTitleWhenScrolled =
+                            prefs[SettingPreferences.BottomBarScrollHideTitle] ?: true
                         if (locked) {
                             ui.root.appBar?.let { bar ->
                                 ui.root.appBarBehavior?.slideUp(bar, false)

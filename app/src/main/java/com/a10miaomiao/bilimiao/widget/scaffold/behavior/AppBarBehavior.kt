@@ -27,12 +27,17 @@ class AppBarBehavior : CoordinatorLayout.Behavior<View> {
     var appBarHeight = 0
     var appBarWidth = 0
     var appBarMenuHeight = 0
+    /** 底栏里"页名"那一条的高度（`AppBarVerticalUi` 的标题行） */
+    var appBarTitleHeight = 0
+    /** 滚动隐藏时是否连标题行一起收起（设置项「标题行一起隐藏」，默认是） */
+    var hideTitleWhenScrolled = true
     var showPlayer = false
 
     constructor(context: Context, attrs: AttributeSet?) : super(context, attrs) {
         appBarHeight = context.config.appBarHeight
         appBarWidth = context.config.appBarMenuWidth
         appBarMenuHeight = context.config.appBarMenuHeight
+        appBarTitleHeight = context.config.appBarTitleHeight
         init()
     }
 
@@ -115,9 +120,20 @@ class AppBarBehavior : CoordinatorLayout.Behavior<View> {
     fun setAdditionalHiddenOffsetY(child: View, @Dimension offset: Int) {
         additionalHiddenOffsetY = offset
         if (currentState == STATE_SCROLLED_DOWN) {
-            child.translationY = (appBarMenuHeight + additionalHiddenOffsetY).toFloat()
+            child.translationY = hiddenOffsetY.toFloat()
         }
     }
+
+    /**
+     * "藏起来"时该往下平移多少。
+     *
+     * 底栏是两段拼的：`appBarMenuHeight`(菜单排) + `appBarTitleHeight`(页名那一条)。
+     * 以前固定只平移菜单排那 50dp，于是页名那 20dp 永远留在屏幕上（用户实机反馈："滚动了还露着一条「首页」"）。
+     * 现在按设置项「标题行一起隐藏」决定要不要把它算进来。
+     */
+    private val hiddenOffsetY: Int
+        get() = appBarMenuHeight + additionalHiddenOffsetY +
+                if (hideTitleWhenScrolled) appBarTitleHeight else 0
 
     override fun onStartNestedScroll(
         coordinatorLayout: CoordinatorLayout,
@@ -200,7 +216,7 @@ class AppBarBehavior : CoordinatorLayout.Behavior<View> {
             return
         }
         currentState = STATE_SCROLLED_DOWN
-        val targetTranslationY = appBarMenuHeight + additionalHiddenOffsetY
+        val targetTranslationY = hiddenOffsetY
         if (animate) {
             child.animate()
                 .translationY(targetTranslationY.toFloat())

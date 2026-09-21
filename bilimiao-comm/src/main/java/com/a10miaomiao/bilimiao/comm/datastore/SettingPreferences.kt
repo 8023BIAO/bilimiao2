@@ -301,6 +301,12 @@ object SettingPreferences {
     val PlayerAutoStopDuration = intPreferencesKey("player_auto_stop_duration")
     // 锁定底栏，不随滚动隐藏
     val BottomBarLock = booleanPreferencesKey("bottom_bar_lock")
+    /**
+     * 滚动隐藏底栏时，**是否连"页名"那一条标题行一起收起**（默认是）。
+     * 关掉 = 只收起 50dp 菜单排、页名那 20dp 留在屏幕上（旧行为，"我在哪"更有底）。
+     * 只在 [BottomBarLock] = 关（也就是允许随滚动隐藏）时才有意义。
+     */
+    val BottomBarScrollHideTitle = booleanPreferencesKey("bottom_bar_scroll_hide_title")
     // 视频播放磁盘缓存大小（MB, 默认500）
     val PlayerDiskCacheSize = intPreferencesKey("player_disk_cache_size")
     // 图片缓存大小限制（MB, 默认50）
