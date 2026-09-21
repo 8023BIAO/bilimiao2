@@ -351,22 +351,6 @@ private fun SettingPageContent(
                 summary = { Text("游客模式、身份导入导出、缓存与重置") },
                 onClick = viewModel::toAccountDataSettingPage,
             )
-            if (userState.isLogin()) {
-                preference(
-                    key = "logout",
-                    title = {
-                        Text(
-                            text = "退出登录",
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center,
-                            color = Color.Red,
-                        )
-                    },
-                    onClick = {
-                        showLogoutDialog.value = true
-                    }
-                )
-            }
 
             // ===== ⑥ 关于 =====
             preferenceCategory(key = "about_app", title = { Text("关于") })
@@ -377,6 +361,26 @@ private fun SettingPageContent(
                 onClick = viewModel::toAboutSettingPage,
             )
 
+                // 退出登录：破坏性操作单独吊在 6 大类最底下（不塞进任何分类里）
+                if (userState.isLogin()) {
+                    item("logout_gap") {
+                        Spacer(modifier = Modifier.height(18.dp))
+                    }
+                    preference(
+                        key = "logout",
+                        title = {
+                            Text(
+                                text = "退出登录",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                                color = Color.Red,
+                            )
+                        },
+                        onClick = {
+                            showLogoutDialog.value = true
+                        }
+                    )
+                }
             } else {
                 // ===== 搜索结果 =====
                 // 页面入口（有跳转的）
