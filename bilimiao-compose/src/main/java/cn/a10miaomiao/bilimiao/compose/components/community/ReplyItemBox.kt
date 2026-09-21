@@ -281,7 +281,8 @@ fun ReplyItemBox(
     }
     // ★ 二级回复预览：数据就挂在接口返回的一级评论上（ReplyInfo.replies），**不需要多打任何请求**。
     //   只渲染前 SUB_REPLY_PREVIEW_MAX 条，且和一级评论一样过屏蔽词（含 /正则/）。
-    //   全部被屏蔽、或接口没给预览时，下面的「共N条回复」入口仍然保留 —— 不然进楼中楼的路就断了。
+    //   **不放「共N条回复」那一行**：下面点赞/回复那排里，回复图标后面的数字就是总条数，重复了。
+    //   预览全被屏蔽时这一块直接不显示，进楼中楼由下排那个数字负责。
     val subReplyPreview = remember(item.replies, item.count, showSubReplies, isSubReplyBlocked) {
         if (!showSubReplies || item.count <= 0L) {
             emptyList()
@@ -307,15 +308,6 @@ fun ReplyItemBox(
                 }
         }
     }
-    val subReplyEntryText = remember(item.count, item.replyControl?.subReplyEntryText, subReplyPreview.size, showSubReplies) {
-        // 服务器会给一句「共x条回复」（reply_control.sub_reply_entry_text），有就用它，没有自己拼
-        if (showSubReplies && item.count > subReplyPreview.size) {
-            item.replyControl?.subReplyEntryText?.takeIf { it.isNotBlank() }
-                ?: "共${item.count}条回复"
-        } else {
-            ""
-        }
-    }
     ReplyItemBox(
         modifier = modifier,
         oid = item.oid,
@@ -335,7 +327,6 @@ fun ReplyItemBox(
         showDelete = showDelete,
         isLike = item.replyControl?.action == 1L,
         subReplies = subReplyPreview,
-        subReplyEntryText = subReplyEntryText,
         onAvatarClick = onAvatarClick,
         onLikeClick = onLikeClick,
         onReplyClick = onReplyClick,
@@ -366,8 +357,6 @@ fun ReplyItemBox(
     isLike: Boolean = false,
     /** 二级回复预览（空 = 不显示这块） */
     subReplies: List<SubReplyPreviewInfo> = emptyList(),
-    /** 「共N条回复」入口文案（空 = 不显示这一行） */
-    subReplyEntryText: String = "",
     onAvatarClick: () -> Unit = {},
     onLikeClick: () -> Unit = {},
     onReplyClick: () -> Unit = {},
@@ -475,10 +464,9 @@ fun ReplyItemBox(
                 }
             }
             // 二级回复预览（设置项「显示二级回复」打开时才非空）；点整块进楼中楼看全部
-            if (subReplies.isNotEmpty() || subReplyEntryText.isNotBlank()) {
+            if (subReplies.isNotEmpty()) {
                 SubReplyPreviewBox(
                     subReplies = subReplies,
-                    entryText = subReplyEntryText,
                     onClick = onSubReplyClick,
                 )
             }
@@ -566,13 +554,13 @@ fun ReplyItemBox(
 
 /**
  * 一级评论下面的二级回复预览块（对齐官方客户端的观感）：
- * 圆角浅底，里面每行是「用户名 + 回复 @某某 :内容」（最多两行，超出打省略号），
- * 最后一行是「共N条回复」入口。整块可点 —— 点哪一行都进楼中楼看全部。
+ * 圆角浅底，里面每行是「用户名 + 回复 @某某 :内容」（最多两行，超出打省略号）。
+ * 整块可点 —— 点哪一行都进楼中楼看全部。
+ * 这里**不显示「共N条回复」**：下排回复图标后面的数字就是总条数。
  */
 @Composable
 private fun SubReplyPreviewBox(
     subReplies: List<SubReplyPreviewInfo>,
-    entryText: String,
     onClick: () -> Unit,
 ) {
     Column(
@@ -591,15 +579,6 @@ private fun SubReplyPreviewBox(
     ) {
         subReplies.forEach { sub ->
             SubReplyPreviewRow(sub)
-        }
-        if (entryText.isNotBlank()) {
-            Text(
-                text = entryText,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
