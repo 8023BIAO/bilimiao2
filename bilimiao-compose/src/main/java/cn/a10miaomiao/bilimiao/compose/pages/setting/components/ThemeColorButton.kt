@@ -102,7 +102,9 @@ fun ThemeColorButton(
                 text = colorName,
                 modifier = Modifier.padding(top = 16.dp),
                 style = MaterialTheme.typography.labelMedium,
-                color = if (selected) baseColor else MaterialTheme.colorScheme.outline,
+                // 选中的主题色名字：用主题里的 primary（= 这颗种子色在当前明暗下的"可读版本"），
+                // 直接画种子色的话，深色主题下的深紫 / 浅色主题下的浅黄都会看不清
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
             )
         }
     }

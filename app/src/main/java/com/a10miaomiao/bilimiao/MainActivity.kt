@@ -226,6 +226,9 @@ class MainActivity
             ui.root.onPlayerChanged = {
                 statusBarHelper.isLightStatusBar =
                     !it || (ui.root.orientation == ScaffoldView.HORIZONTAL && !ui.root.fullScreenPlayer)
+                // 导航栏（手势条）看的是**页面底部**：只有全屏播放器时底下才是黑的，
+                // 竖屏播放器底部仍是跟主题走的信息流/底栏
+                statusBarHelper.isLightNavigationBar = !ui.root.fullScreenPlayer
                 ui.root.rootWindowInsets?.let { setWindowInsets(it) }
             }
         } else {
@@ -684,6 +687,8 @@ class MainActivity
         if (mainUi == null) return
         statusBarHelper.isLightStatusBar =
             !ui.root.showPlayer || (ui.root.orientation == ScaffoldView.HORIZONTAL && !ui.root.fullScreenPlayer)
+        // 同上：转屏/退出全屏后底部会变回浅色，导航栏图标明暗要跟着更新
+        statusBarHelper.isLightNavigationBar = !ui.root.fullScreenPlayer
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             setWindowInsetsAndroidL()
         }

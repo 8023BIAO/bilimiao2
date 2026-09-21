@@ -611,7 +611,8 @@ private fun ReplyTextField(
             ),
             value = state.input,
             onValueChange = state::inputChange,
-            cursorBrush = SolidColor(Color(0xff00897B)),
+            // 光标颜色跟随主题（原来写死一个青色，换主题色/深色模式都不搭）
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             decorationBox = { innerTextField ->
                 if (state.textEmpty) {
                     Text("请发表你的评论", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

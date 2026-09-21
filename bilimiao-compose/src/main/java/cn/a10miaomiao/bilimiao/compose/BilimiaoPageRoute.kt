@@ -64,7 +64,6 @@ import cn.a10miaomiao.bilimiao.compose.pages.setting.AutoStopTimerPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.ExportSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.VideoSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.SponsorBlockSettingPage
-import cn.a10miaomiao.bilimiao.compose.pages.setting.ThreadRipperSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.RipperSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeRegionDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingPage
@@ -204,7 +203,7 @@ class BilimiaoPageRoute (
         composable<ThemeSettingPage>()
         composable<VideoSettingPage>()
         composable<SponsorBlockSettingPage>()
-        composable<ThreadRipperSettingPage>()
+        // ThreadRipperSettingPage 已删除：并发连接数滑块内联进海外加速一级页
         composable<AutoStopTimerPage>()
         composable<DanmakuSettingPage>()
         composable<DanmakuDisplaySettingPage>()

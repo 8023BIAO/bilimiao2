@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.setting
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -180,13 +181,20 @@ private fun SettingPageContent(
     var showDpiDialog by remember { mutableStateOf(false) }
     // 设置搜索：空 = 显示 6 个大分类；非空 = 这一页刷成搜索结果（开关/数值项可直接改）
     var searchQuery by remember { mutableStateOf("") }
+    // 搜索状态下的返回键（系统返回 / 底栏「返回」）：先清掉搜索词、留在设置页，
+    // 搜索框空了才真的退出设置页 —— 否则输入完搜索一按返回就掉回首页，用户一脸问号。
+    // 注：ComposeFragment.onBackPressed() 走的是 Activity 的 onBackPressedDispatcher，
+    //     这个 BackHandler 比 NavHost 的兜底 callback 后注册 → 优先级更高，能拦住。
+    BackHandler(enabled = searchQuery.isNotEmpty()) {
+        searchQuery = ""
+    }
     val settingPages = remember(viewModel) {
         listOf(
             SettingPageLink("播放器设置", "后台/小窗、视频源、字幕、下载", "① 播放", "播放 播放器 缓冲 画质 格式 字幕 下载 小窗", viewModel::toVideoSettingPage),
             SettingPageLink("弹幕设置", "弹幕显示、样式与过滤", "① 播放", "弹幕 danmaku 显示 样式 过滤 关键词", viewModel::toDanmakuSettingPage),
             SettingPageLink("定时关闭", "播够指定时长自动停止", "① 播放", "定时 关闭 睡眠 停止", viewModel::toAutoStopTimerPage),
             SettingPageLink("主题", "配色与深色模式", "② 界面", "主题 配色 颜色 深色 夜间 纯黑", viewModel::toThemePage),
-            SettingPageLink("首页设置", "首页入口、卡片与时光精选", "② 界面", "首页 主页 入口 卡片 列数 时光", viewModel::toHomeSettingPage),
+            SettingPageLink("首页设置", "首页入口显示", "② 界面", "首页 主页 首页入口 入口显示 卡片 列数 时光姬", viewModel::toHomeSettingPage),
             SettingPageLink("底栏与导航", "锁定底栏、滚动隐藏行为", "② 界面", "底栏 导航 滚动 隐藏 标题行", viewModel::toBottomBarSettingPage),
             SettingPageLink("内容屏蔽", "按标题 / UP / 标签 / UP名屏蔽", "③ 内容与评论", "屏蔽 过滤 标题 up 标签 黑名单", viewModel::toFilterSettingPage),
             SettingPageLink("推荐过滤", "时长、播放量、封面、相关推荐等", "③ 内容与评论", "推荐 过滤 时长 播放量 封面 相关 推广", viewModel::toFilterRecommendPage),
@@ -269,7 +277,7 @@ private fun SettingPageContent(
             preference(
                 key = "home",
                 title = { Text("首页设置") },
-                summary = { Text("首页入口、卡片与时光精选") },
+                summary = { Text("首页入口显示") },
                 onClick = viewModel::toHomeSettingPage
             )
             preference(
@@ -377,7 +385,8 @@ private fun SettingPageContent(
                                 text = "退出登录",
                                 modifier = Modifier.fillMaxWidth(),
                                 textAlign = TextAlign.Center,
-                                color = Color.Red,
+                                // 用主题的 error 色而不是写死 #FF0000：深色主题下纯红扎眼、也不跟主题色走
+                                color = MaterialTheme.colorScheme.error,
                             )
                         },
                         onClick = {

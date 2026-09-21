@@ -106,6 +106,8 @@ val defaultImageLoading: ImageLoading = {
     Box(modifier = Modifier.fillMaxSize()) {
         CircularProgressIndicator(
             modifier = Modifier.align(Alignment.Center),
+            // 这是 M2 的 CircularProgressIndicator（本文件没接 M3 主题，取不到 colorScheme），
+            // 目前只在黑色看图器里出现，浅灰可见；不改成 M2 的 colors（那套没被 App 主题配置过，会更错）
             color = Color.LightGray,
         )
     }

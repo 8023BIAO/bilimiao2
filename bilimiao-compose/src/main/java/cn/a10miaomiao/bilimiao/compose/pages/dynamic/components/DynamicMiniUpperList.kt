@@ -88,7 +88,8 @@ fun DynamicMiniUpperList(
                             Text(
                                 text = "我",
                                 fontSize = 10.sp,
-                                color = Color.White,
+                                // 底色是 primary（半透明），前景跟随主题而不是写死白色
+                                color = MaterialTheme.colorScheme.onPrimary,
                             )
                         }
                     }

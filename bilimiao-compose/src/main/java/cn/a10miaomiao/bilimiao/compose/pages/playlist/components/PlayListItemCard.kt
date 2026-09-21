@@ -74,7 +74,8 @@ internal fun PlayListItemCard(
                         ),
                 ) {
                     Text(
-                        color = Color.White,
+                        // 同上：底是 primary，深色主题下白字看不清
+                        color = MaterialTheme.colorScheme.onPrimary,
                         text = "${index + 1}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,

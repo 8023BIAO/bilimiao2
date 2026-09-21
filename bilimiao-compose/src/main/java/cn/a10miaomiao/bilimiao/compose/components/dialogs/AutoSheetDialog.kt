@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.window.core.layout.WindowWidthSizeClass
+import cn.a10miaomiao.bilimiao.compose.isAppThemeDark
 
 @Composable
 fun AutoSheetDialog(
@@ -60,6 +61,9 @@ fun AutoSheetDialog(
         // 根据你自己的功能，调整进入方向即可，支持:TOP/LEFT/RIGHT/BOTTOM/NONE
         properties = AnyPopDialogProperties(
             direction = direction,
+            // 导航栏图标明暗要跟着**当前主题**走。AnyPopDialog 把 navigationBarColor 设成透明、
+            // 底下就是这张 surface 色的卡片，所以"深色主题 + 写死的深色图标"= 黑底黑图标，看不见。
+            isAppearanceLightNavigationBars = !isAppThemeDark(),
         ),
     )
 }

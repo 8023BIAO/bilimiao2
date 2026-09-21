@@ -14,6 +14,7 @@ import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
 import android.text.style.UnderlineSpan
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -330,7 +331,17 @@ internal fun TextParagraphItem(paragraph: ArticleParagraph.TextParagraph) {
                 paragraph.nodes.forEach { node ->
                     if (node.text.contains('<')) {
                         val spanned = HtmlTagHandler.fromHtml(node.text)
-                        val annotated = spannedToAnnotatedString(spanned, node.fontSize)
+                        // 深色主题下正文里的深色字（<font color="#333333">）会变成黑底黑字 →
+                        // 这里把 onSurface 传进去，让太暗的字色被替换掉（与 parseNodeColor 同一套规则）
+                        val annotated = spannedToAnnotatedString(
+                            spanned,
+                            node.fontSize,
+                            darkThemeFallback = if (isSystemInDarkTheme()) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                null
+                            },
+                        )
                         if (annotated.text.isBlank() && node.text.isNotBlank()) {
                             append(node.text
                                 .replace(Regex("<[^>]+>"), "")
@@ -393,7 +404,15 @@ internal fun TextParagraphItem(paragraph: ArticleParagraph.TextParagraph) {
     }
 }
 
-private fun spannedToAnnotatedString(spanned: Spanned, baseFontSize: Int): AnnotatedString {
+/**
+ * @param darkThemeFallback 非 null 时（= 当前是深色主题），把亮度太低的文字色换成它，
+ *   避免 `<font color="#333333">` 这类正文在深色背景上不可见。
+ */
+private fun spannedToAnnotatedString(
+    spanned: Spanned,
+    baseFontSize: Int,
+    darkThemeFallback: Color? = null,
+): AnnotatedString {
     return buildAnnotatedString {
         val text = spanned.toString()
         append(text)
@@ -414,7 +433,15 @@ private fun spannedToAnnotatedString(spanned: Spanned, baseFontSize: Int): Annot
                     addStyle(SpanStyle(fontWeight = fw, fontStyle = fs), start, end)
                 }
                 is ForegroundColorSpan -> {
-                    addStyle(SpanStyle(color = Color(span.foregroundColor)), start, end)
+                    val spanColor = Color(span.foregroundColor)
+                    addStyle(
+                        SpanStyle(
+                            color = darkThemeFallback?.let { adaptDarkTextColor(spanColor, it) }
+                                ?: spanColor
+                        ),
+                        start,
+                        end,
+                    )
                 }
                 is AbsoluteSizeSpan -> {
                     addStyle(SpanStyle(fontSize = span.size.sp), start, end)
@@ -527,7 +554,7 @@ private fun StatItem(label: String, value: String) {
 @Composable
 private fun parseNodeColor(hexColor: String): Color {
     if (hexColor.isBlank()) return MaterialTheme.colorScheme.onSurface
-    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDarkTheme = isSystemInDarkTheme()
     val fallback = MaterialTheme.colorScheme.onSurface
     val parsed = runCatching {
         val colorStr = hexColor.removePrefix("#")
@@ -538,12 +565,14 @@ private fun parseNodeColor(hexColor: String): Color {
         }
     }.getOrNull() ?: return fallback
     // 暗色主题下，深色文字（如 #333333）不可见 → 用 onSurface 代替
-    if (isDarkTheme) {
-        val r = parsed.red
-        val g = parsed.green
-        val b = parsed.blue
-        val luminance = 0.299f * r + 0.587f * g + 0.114f * b
-        if (luminance < 0.4f) return fallback
-    }
-    return parsed
+    return if (isDarkTheme) adaptDarkTextColor(parsed, fallback) else parsed
+}
+
+/**
+ * 深色主题下，亮度太低的文字色换成 [fallback]（否则黑底黑字看不见）。
+ * `parseNodeColor` 与 `spannedToAnnotatedString` 共用这一套阈值。
+ */
+private fun adaptDarkTextColor(color: Color, fallback: Color): Color {
+    val luminance = 0.299f * color.red + 0.587f * color.green + 0.114f * color.blue
+    return if (luminance < 0.4f) fallback else color
 }

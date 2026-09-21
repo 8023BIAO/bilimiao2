@@ -112,7 +112,8 @@ fun DynamicUpperList(
                             Icon(
                                 imageVector = Icons.Default.AllInclusive,
                                 contentDescription = "全部",
-                                tint = Color.White,
+                                // 底色是 primary，前景必须用 onPrimary（浅色主题下 primary 很浅，白字看不见）
+                                tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(32.dp)
                             )
                         }

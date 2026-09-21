@@ -343,7 +343,8 @@ fun TypeBangumiContent(
                                         )
                                         .padding(vertical = 2.dp, horizontal = 4.dp),
                                     text = "国产动漫",
-                                    color = Color.White,
+                                    // 深色主题下 primary 是浅色调，写死白色会看不清 → 跟随主题
+                                    color = MaterialTheme.colorScheme.onPrimary,
                                     style = MaterialTheme.typography.labelSmall,
                                 )
                             }

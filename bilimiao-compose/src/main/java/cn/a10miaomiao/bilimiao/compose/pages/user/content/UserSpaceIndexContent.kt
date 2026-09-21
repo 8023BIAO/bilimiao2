@@ -214,13 +214,14 @@ fun UserSpaceIndexContent(
                             ) {
                                 Text(
                                     text = "查看更多",
-                                    color = Color.White,
+                                    // 底色就是 onBackground 的 30%，前景用写死白色在浅色主题下几乎看不见
+                                    color = MaterialTheme.colorScheme.onBackground,
                                 )
                                 Icon(
                                     modifier = Modifier.padding(top = 10.dp)
                                         .size(24.dp),
                                     imageVector = Icons.Default.ArrowForward,
-                                    tint = Color.White,
+                                    tint = MaterialTheme.colorScheme.onBackground,
                                     contentDescription = null,
                                 )
                             }

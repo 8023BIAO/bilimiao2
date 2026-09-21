@@ -50,12 +50,6 @@ object SettingsSearchIndex {
         SettingSearchItem("HomeBangumiGridSpan", "home_bangumi_grid_span", "每行卡片数", "② 界面", SettingSearchItem.Kind.INT, 0, "每行卡片数 ② 界面 首页 主页"),
         SettingSearchItem("VideoHideCover", "video_hide_cover", "不显示封面", "③ 内容与评论", SettingSearchItem.Kind.SWITCH, false, "不显示封面 ③ 内容与评论 视频 内容"),
         SettingSearchItem("VideoHideRelates", "video_hide_relates", "隐藏相关推荐", "③ 内容与评论", SettingSearchItem.Kind.SWITCH, false, "隐藏相关推荐 ③ 内容与评论 视频 内容"),
-        SettingSearchItem("TimeSelectShow", "time_select_show", "显示时光精选", "② 界面", SettingSearchItem.Kind.SWITCH, true, "显示时光精选 ② 界面 时光机 时光精选 旧视频"),
-        SettingSearchItem("TimeSelectExcludeRecent", "time_select_exclude_recent", "排除最近N天", "② 界面", SettingSearchItem.Kind.INT, 0, "排除最近N天 ② 界面 时光机 时光精选 旧视频"),
-        SettingSearchItem("TimeSelectAllRegions", "time_select_all_regions", "全部分区", "② 界面", SettingSearchItem.Kind.SWITCH, true, "全部分区 ② 界面 时光机 时光精选 旧视频"),
-        SettingSearchItem("TimeSelectMinDuration", "time_select_min_duration", "最小时长(秒)", "② 界面", SettingSearchItem.Kind.INT, 0, "最小时长(秒) ② 界面 时光机 时光精选 旧视频"),
-        SettingSearchItem("TimeSelectMinPlayCount", "time_select_min_play_count", "最小播放量", "② 界面", SettingSearchItem.Kind.INT, 0, "最小播放量 ② 界面 时光机 时光精选 旧视频"),
-        SettingSearchItem("TimeSelectOriginalOnly", "time_select_original_only", "只看原创", "② 界面", SettingSearchItem.Kind.SWITCH, true, "只看原创 ② 界面 时光机 时光精选 旧视频"),
         SettingSearchItem("WbiSignEnabled", "wbi_sign_enabled", "WBI 签名", "② 界面", SettingSearchItem.Kind.SWITCH, true, "WBI 签名 ② 界面"),
         SettingSearchItem("AiSummaryEnabled", "ai_summary_enabled", "AI 视频总结", "② 界面", SettingSearchItem.Kind.SWITCH, false, "AI 视频总结 ② 界面"),
         SettingSearchItem("AntifraudEnabled", "antifraud_enabled", "发评论后自动检测是否被限流", "④ 扩展", SettingSearchItem.Kind.SWITCH, false, "发评论后自动检测是否被限流 ④ 扩展 评论 反诈 限流 吞评"),
@@ -87,9 +81,9 @@ object SettingsSearchIndex {
         SettingSearchItem("FilterTagStrict", "filter_tag_strict", "标签查询失败时拦截", "③ 内容与评论", SettingSearchItem.Kind.SWITCH, false, "标签查询失败时拦截 ③ 内容与评论 过滤 屏蔽"),
         SettingSearchItem("DanmakuEnable", "danmaku_enable", "启用弹幕", "① 播放", SettingSearchItem.Kind.SWITCH, true, "启用弹幕 ① 播放 弹幕 danmaku 弹屏"),
         SettingSearchItem("DanmakuSysFont", "danmaku_sys_font", "弹幕使用系统字体", "① 播放", SettingSearchItem.Kind.SWITCH, true, "弹幕使用系统字体 ① 播放 弹幕 danmaku 弹屏"),
-        SettingSearchItem("DanmakuFilterEnabled", "danmaku_filter_enabled", "启用弹幕过滤", "其他", SettingSearchItem.Kind.SWITCH, false, "启用弹幕过滤 其他 弹幕 danmaku 弹屏 过滤 屏蔽 弹幕 过滤 关键词"),
+        SettingSearchItem("DanmakuFilterEnabled", "danmaku_filter_enabled", "启用弹幕过滤", "① 播放", SettingSearchItem.Kind.SWITCH, false, "启用弹幕过滤 ① 播放 弹幕 danmaku 弹屏 过滤 屏蔽 弹幕 过滤 关键词"),
         SettingSearchItem("CommentSubReplyPreview", "comment_sub_reply_preview", "显示二级回复", "③ 内容与评论", SettingSearchItem.Kind.SWITCH, false, "显示二级回复 ③ 内容与评论 评论 评论区"),
-        SettingSearchItem("DanmakuFilterDuplicate", "danmaku_filter_duplicate", "过滤重复弹幕", "其他", SettingSearchItem.Kind.SWITCH, false, "过滤重复弹幕 其他 弹幕 danmaku 弹屏 过滤 屏蔽 弹幕 过滤 关键词"),
+        SettingSearchItem("DanmakuFilterDuplicate", "danmaku_filter_duplicate", "过滤重复弹幕", "① 播放", SettingSearchItem.Kind.SWITCH, false, "过滤重复弹幕 ① 播放 弹幕 danmaku 弹屏 过滤 屏蔽 弹幕 过滤 关键词"),
     )
 
     /** 关键词搜索：空串返回空列表（调用方据此决定是显示 6 大类还是搜索结果） */

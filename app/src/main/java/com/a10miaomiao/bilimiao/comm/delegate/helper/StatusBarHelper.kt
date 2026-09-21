@@ -28,6 +28,18 @@ class StatusBarHelper(
             field = value
             update()
         }
+    /**
+     * 导航栏（手势条）底下的界面是不是浅色 → true = 用**深色**图标。
+     *
+     * 与 [isLightStatusBar] 分开：状态栏看的是"页面顶部"（竖屏播放器在顶部 → 那里是黑的），
+     * 导航栏看的是"页面底部"（底栏/信息流都是跟主题走的），两者不能共用一个值。
+     * 全屏播放器时底部也是黑的，由 MainActivity 置为 false。
+     */
+    var isLightNavigationBar = true
+        set(value) {
+            field = value
+            update()
+        }
 
     init {
         // 全透明状态栏
@@ -52,12 +64,17 @@ class StatusBarHelper(
         }
         val isNightMode = activity.resources.configuration.uiMode and
             Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        // ★ 顺序要紧：先写老的 systemUiVisibility，再用 compat 接口设置图标明暗。
+        //   WindowInsetsControllerCompat 在低版本就是往 systemUiVisibility 里塞 LIGHT_* 位，
+        //   反过来写会把刚设好的明暗位清掉（表现为状态栏/导航栏图标颜色不跟主题）。
+        activity.window.decorView.systemUiVisibility = uiFlags
         val controller = WindowCompat.getInsetsController(
             activity.window,
             activity.window.decorView
         )
         controller.isAppearanceLightStatusBars = isLightStatusBar && !isNightMode
-        activity.window.decorView.systemUiVisibility = uiFlags
+        // 原来**完全没设**导航栏明暗 → 浅色主题下白图标压在浅色底栏上 = 看不见（用户反馈的"没适配"）
+        controller.isAppearanceLightNavigationBars = isLightNavigationBar && !isNightMode
     }
 
     fun getStatusBarHeight (): Int {

@@ -182,10 +182,8 @@ private class FlagsSettingPageViewModel(
         pageNavigation.navigate(SponsorBlockSettingPage())
     }
 
-    /** 分段并发下载（原「线程撕裂者」）的并发子设置页 */
-    fun toThreadRipperSettingPage() {
-        pageNavigation.navigate(ThreadRipperSettingPage())
-    }
+    // 分段并发下载的「并发连接数」已内联进海外加速一级页（ThreadRipperSettingPage 已删除），
+    // 这里不再需要跳转方法。
 
     // 身份信息导入导出已改为文件操作，见 FlagsSettingPageContent 中的 launchers
 
@@ -621,6 +619,13 @@ private fun FlagsSettingPageContent(
             // ===== 评论反诈（发评后自动检测是否被限流）=====
             // 判定规则照搬开源项目 biliSendCommAntifraud：
             // ShadowBan 的评论"带 Cookie 能找到、游客找不到"。
+            // ★ 第一个开关是**总开关**：CommentAntifraudLauncher 读到 false 就整个不跑
+            //   （见 readSettings 的调用点），所以它关掉时后面的复查/时长必须置灰，
+            //   否则用户会以为"总开关关了，下面还能单独打开"。
+            val antifraudOn =
+                (prefValues[SettingPreferences.AntifraudEnabled.name] as? Boolean) ?: false
+            val antifraudRecheckOn =
+                (prefValues[SettingPreferences.AntifraudRecheckEnabled.name] as? Boolean) ?: true
             preferenceCategory(
                 key = "antifraud",
                 title = { Text("评论反诈") }
@@ -628,11 +633,11 @@ private fun FlagsSettingPageContent(
             switchPreference(
                 key = SettingPreferences.AntifraudEnabled.name,
                 defaultValue = false,
-                title = { Text("发评论后自动检测是否被限流") },
+                title = { Text("发评论后自动检测是否被限流（总开关）") },
                 summary = {
                     Text(
-                        if (it) "已开启：查出被限流会弹窗，可删除或去申诉"
-                        else "判断评论是否只有你自己看得见"
+                        if (it) "已开启：查出被限流会弹窗，可删除或去申诉；下面的复查设置才生效"
+                        else "已关闭：整个反诈都不跑，下面的复查设置灰着、改了也不生效"
                     )
                 },
             )
@@ -640,11 +645,15 @@ private fun FlagsSettingPageContent(
             switchPreference(
                 key = SettingPreferences.AntifraudRecheckEnabled.name,
                 defaultValue = true,
+                enabled = { antifraudOn },
                 title = { Text("自动复查（推荐开）") },
                 summary = {
                     Text(
-                        if (it) "已开启：正常也会继续盯，直到状态变化或盯满时长"
-                        else "只查一次（评论可能先正常、过一会儿才被限流）"
+                        when {
+                            !antifraudOn -> "总开关关着 —— 先打开上面的开关"
+                            it -> "已开启：正常也会继续盯，直到状态变化或盯满时长"
+                            else -> "只查一次（评论可能先正常、过一会儿才被限流）"
+                        }
                     )
                 },
             )
@@ -655,9 +664,18 @@ private fun FlagsSettingPageContent(
                 valueRange = 1..30,
                 // steps = 两端点之间的档位数 = 28（每分钟一档）
                 valueSteps = 28,
+                enabled = { antifraudOn && antifraudRecheckOn },
                 title = { Text("复查监控时长") },
                 valueText = { v -> Text("$v 分钟") },
-                summary = { v -> Text("首查 5 秒后开始，之后每 30 秒查一次，共盯 $v 分钟") },
+                summary = { v ->
+                    Text(
+                        when {
+                            !antifraudOn -> "总开关关着 —— 先打开上面的开关"
+                            !antifraudRecheckOn -> "自动复查关着，这一项不生效"
+                            else -> "首查 5 秒后开始，之后每 30 秒查一次，共盯 $v 分钟"
+                        }
+                    )
+                },
             )
             preference(
                 key = "antifraud_about",
@@ -840,17 +858,46 @@ private fun FlagsSettingPageContent(
                     )
                 },
             )
-            preference(
-                key = "thread_ripper_threads_entry",
-                title = { Text("并发设置") },
-                enabled = !mp4Selected,
-                summary = {
+            // 并发连接数：**就地内联在这一页**（原来还要再点一次「并发设置」进三级页，
+            // 一级页明明能放下 → 用户嫌多此一举）。滑块本体原来在 ThreadRipperSettingPage，
+            // 那个页面已删除；说明压缩成下面一条，不再单独开页。
+            val ripperOn =
+                (prefValues[SettingPreferences.ThreadRipperEnable.name] as? Boolean) ?: false
+            sliderIntPreference(
+                key = SettingPreferences.ThreadRipperThreads.name,
+                defaultValue = 4,
+                valueRange = 0..maxThreads,
+                // zhanghai 的 SliderPreference：steps = 两端点之间的档位数，故为 (end - start - 1)
+                valueSteps = (maxThreads - 1).coerceAtLeast(0),
+                // 开关没开 / 当前是 MP4 源时，这根滑块不生效 → 置灰
+                enabled = { !mp4Selected && ripperOn },
+                title = { Text("并发连接数") },
+                valueText = { v ->
+                    Text(if (v <= 0) "不限（= 本机 $maxThreads 条）" else "$v 条连接")
+                },
+                summary = { v ->
+                    // 把"这个档位实际会发生什么"直接算给用户看（上游的算法：区间平均等分，每份至少 64KB）
+                    val n = if (v <= 0) maxThreads else v
                     Text(
-                        if (mp4Selected) "当前是 MP4 源，改了没用"
-                        else "并发连接数（默认 4，最多 $maxThreads 条）"
+                        when {
+                            mp4Selected -> "当前是 MP4 源，改了没用（先改成 DASH）"
+                            !ripperOn -> "总开关关着 —— 先打开上面的开关"
+                            else -> "把一个分段分给 $n 条连接并发拉（默认 4，最多 $maxThreads 条）"
+                        }
                     )
                 },
-                onClick = viewModel::toThreadRipperSettingPage,
+            )
+            // 原来的三条说明（什么时候调大 / 为什么要多个节点 / 和 CDN 的关系）压缩成一条
+            preference(
+                key = "thread_ripper_tip",
+                enabled = false,
+                title = { Text("什么时候该调大") },
+                summary = {
+                    Text(
+                        "卡顿、4K 缓冲跟不上就调大，手机一般 4~8 条够用；" +
+                            "与 CDN 设置互不影响：CDN 决定用哪个节点，这里只管节点上的字节怎么并发拉"
+                    )
+                },
             )
             preference(
                 key = "thread_ripper_about",
