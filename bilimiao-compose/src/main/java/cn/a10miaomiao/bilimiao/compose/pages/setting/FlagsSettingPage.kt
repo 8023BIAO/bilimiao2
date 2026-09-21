@@ -6,7 +6,6 @@ import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import android.content.Context
 import android.content.SharedPreferences
 import android.webkit.CookieManager
@@ -454,27 +453,11 @@ private fun FlagsSettingPageContent(
     ProvidePreferenceLocals(
         flow = prefFlow
     ) {
-        // 视频格式：MP4(2) 时分段并发下载**对它无效**（MP4 是整段顺序下载、没有分段可切，
-        // ThreadRipperDataSource 的并发条件要求"请求长度已知"，渐进式请求 length=UNSET → 直接单连接透传）
-        // → 按用户要求：置灰不可点，并且如果原本开着就自动关掉，同时把原因写在说明里。
+        // ★ 分段并发下载**不再按视频格式置灰/自动关闭**（用户实测反馈：MP4 有时候也能并发，
+        //   不该"一改成 MP4 就帮你关掉"）。运行时那一层本来就是自适应的：
+        //   ThreadRipperDataSource 只在"这次请求拿得到长度"时才切分并发，拿不到长度
+        //   （部分 MP4 渐进请求 length=UNSET）就原样透传单连接，并发失败还有熔断兜底。
         val prefValues = prefFlow.collectAsStateWithLifecycle().value
-        val fnvalValue = (prefValues[SettingPreferences.PlayerFnval.name] as? Int)
-            ?: SettingConstants.PLAYER_FNVAL_DASH
-        val mp4Selected = fnvalValue == SettingConstants.PLAYER_FNVAL_MP4
-        LaunchedEffect(mp4Selected) {
-            if (mp4Selected &&
-                (prefValues[SettingPreferences.ThreadRipperEnable.name] as? Boolean) == true
-            ) {
-                SettingPreferences.edit(context) {
-                    it[SettingPreferences.ThreadRipperEnable] = false
-                }
-                Toast.makeText(
-                    context,
-                    "当前视频格式是 MP4：分段并发下载对它无效，已自动关闭",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
         // 游客模式状态（必须在 Composable 作用域内）
         val loginInfoState by userStore.stateFlow.collectAsStateWithLifecycle()
         // 组合期直接读 SharedPreferences 会在主线程做首次磁盘加载（进页面就掉帧）→ 异步读
@@ -845,22 +828,17 @@ private fun FlagsSettingPageContent(
             switchPreference(
                 key = SettingPreferences.ThreadRipperEnable.name,
                 defaultValue = false,
-                // MP4 源下置灰（不可点）—— 见上面 mp4Selected 的说明
-                enabled = { !mp4Selected },
                 title = { Text("启用分段并发下载") },
                 summary = {
                     Text(
-                        when {
-                            mp4Selected -> "当前是 MP4 源，改了没用（先改成 DASH）"
-                            it -> "已开启：分段切成多块并发下载（仅 DASH 有效）"
-                            else -> "分段切成多块并发下载，海外建议开"
-                        }
+                        if (it) "已开启：分段切成多块并发下载；拿不到长度的请求自动退回单连接"
+                        else "分段切成多块并发下载，海外/卡顿时建议开"
                     )
                 },
             )
             // 并发连接数：**就地内联在这一页**（原来还要再点一次「并发设置」进三级页，
             // 一级页明明能放下 → 用户嫌多此一举）。滑块本体原来在 ThreadRipperSettingPage，
-            // 那个页面已删除；说明压缩成下面一条，不再单独开页。
+            // 那个页面已删除。
             val ripperOn =
                 (prefValues[SettingPreferences.ThreadRipperEnable.name] as? Boolean) ?: false
             sliderIntPreference(
@@ -869,8 +847,8 @@ private fun FlagsSettingPageContent(
                 valueRange = 0..maxThreads,
                 // zhanghai 的 SliderPreference：steps = 两端点之间的档位数，故为 (end - start - 1)
                 valueSteps = (maxThreads - 1).coerceAtLeast(0),
-                // 开关没开 / 当前是 MP4 源时，这根滑块不生效 → 置灰
-                enabled = { !mp4Selected && ripperOn },
+                // 总开关没开时这根滑块不生效 → 置灰（跟视频格式无关）
+                enabled = { ripperOn },
                 title = { Text("并发连接数") },
                 valueText = { v ->
                     Text(if (v <= 0) "不限（= 本机 $maxThreads 条）" else "$v 条连接")
@@ -879,23 +857,44 @@ private fun FlagsSettingPageContent(
                     // 把"这个档位实际会发生什么"直接算给用户看（上游的算法：区间平均等分，每份至少 64KB）
                     val n = if (v <= 0) maxThreads else v
                     Text(
-                        when {
-                            mp4Selected -> "当前是 MP4 源，改了没用（先改成 DASH）"
-                            !ripperOn -> "总开关关着 —— 先打开上面的开关"
-                            else -> "把一个分段分给 $n 条连接并发拉（默认 4，最多 $maxThreads 条）"
-                        }
+                        if (!ripperOn) "总开关关着 —— 先打开上面的开关"
+                        else "把一个分段分给 $n 条连接并发拉（默认 4，最多 $maxThreads 条）"
                     )
                 },
             )
-            // 原来的三条说明（什么时候调大 / 为什么要多个节点 / 和 CDN 的关系）压缩成一条
+            // 说明改成 QA（用户要求）：Q1 什么时候该调大 / Q2 多 CDN 并发怎么开 / Q3 MP4 能不能用
+            preferenceCategory(
+                key = "thread_ripper_qa",
+                title = { Text("说明") }
+            )
             preference(
-                key = "thread_ripper_tip",
+                key = "tr_qa_when_bigger",
                 enabled = false,
-                title = { Text("什么时候该调大") },
+                title = { Text("Q：什么时候该调大？") },
+                summary = {
+                    Text("卡顿、4K 缓冲跟不上就调大；手机一般 4~8 条够用，连接越多开销越大。")
+                },
+            )
+            preference(
+                key = "tr_qa_multi_cdn",
+                enabled = false,
+                title = { Text("Q：多 CDN 并发怎么开？") },
                 summary = {
                     Text(
-                        "卡顿、4K 缓冲跟不上就调大，手机一般 4~8 条够用；" +
-                            "与 CDN 设置互不影响：CDN 决定用哪个节点，这里只管节点上的字节怎么并发拉"
+                        "要同时向多个节点要同一段（主节点 900ms 还没交出首字节就换一条问，谁先回用谁），" +
+                            "得先在「CDN」里打开「CDN 竞速」；把 CDN 固定成单一主机时就不会换节点。" +
+                            "两边互不影响：CDN 决定用哪个节点，这里只管节点上的字节怎么并发拉。"
+                    )
+                },
+            )
+            preference(
+                key = "tr_qa_mp4",
+                enabled = false,
+                title = { Text("Q：MP4 源能用吗？") },
+                summary = {
+                    Text(
+                        "能。只要这次请求拿得到文件长度就会并发拉；" +
+                            "拿不到长度的（部分 MP4 渐进请求）会自动退回单连接，不用手动关。"
                     )
                 },
             )
