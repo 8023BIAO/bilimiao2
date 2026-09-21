@@ -165,12 +165,16 @@
                 android:gravity="center"
                 android:src="@drawable/bili_player_play_can_play" />
 
+            <!-- 弹幕输入药丸：底色是固定的半透明白（shape_send_danmaku_bg #AAFFFFFF，压在视频上），
+                 所以字色必须**固定为深色**；原来没写 textColor → 深色主题下取到近白色的主题字色，
+                 白字压白药丸 = 看不见（审计发现） -->
             <TextView
                 android:id="@+id/send_danmaku"
                 android:layout_width="0dp"
                 android:layout_height="30dp"
                 android:layout_weight="1"
                 android:text="发送弹幕"
+                android:textColor="#FF212121"
                 android:background="@drawable/shape_send_danmaku_bg"
                 android:gravity="center" />
 

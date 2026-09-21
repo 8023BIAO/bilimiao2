@@ -23,14 +23,14 @@
             android:id="@+id/mMainContainerLl"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="#fff"
+            android:background="?android:attr/colorBackground"
             android:orientation="vertical"
             android:paddingHorizontal="10dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="#FFF"
+                android:background="?android:attr/colorBackground"
                 android:gravity="center"
                 android:orientation="horizontal"
                 android:paddingTop="20dp">
@@ -49,7 +49,7 @@
                     android:layout_height="wrap_content"
                     android:gravity="start"
                     android:text="查看封面 · "
-                    android:textColor="#000"
+                    android:textColor="?android:attr/textColorPrimary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
@@ -59,7 +59,7 @@
                     android:layout_height="wrap_content"
                     android:gravity="start"
                     android:text="AV10071"
-                    android:textColor="#000"
+                    android:textColor="?android:attr/textColorPrimary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
@@ -94,6 +94,7 @@
                         android:paddingHorizontal="10dp"
                         android:paddingBottom="10dp"
                         android:text=""
+                        android:textColor="?android:attr/textColorPrimary"
                         android:textSize="16sp" />
 
                 </LinearLayout>
@@ -111,7 +112,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="20dp"
-                android:background="#FFF"
+                android:background="?android:attr/colorBackground"
                 android:gravity="center"
                 android:orientation="horizontal">
 
@@ -120,7 +121,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:background="#f5f5f5">
+                    android:background="?android:attr/colorBackgroundFloating">
 
                     <LinearLayout
                         android:id="@+id/mSaveCoverLl"
@@ -134,11 +135,13 @@
                             android:id="@+id/mSaveCoverTv"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:textColor="?android:attr/textColorPrimary"
                             android:text="保存封面" />
                         <TextView
                             android:id="@+id/mPermissionTv"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:textColor="?android:attr/textColorSecondary"
                             android:text="请给予存储权限( •̀ ω •́ )✧"
                             android:textSize="8sp" />
                     </LinearLayout>
@@ -149,7 +152,7 @@
                     android:id="@+id/mBtnBox2"
                     android:layout_width="48dp"
                     android:layout_height="48dp"
-                    android:background="#f5f5f5"
+                    android:background="?android:attr/colorBackgroundFloating"
                     android:layout_marginLeft="10dp">
 
                     <ImageView
