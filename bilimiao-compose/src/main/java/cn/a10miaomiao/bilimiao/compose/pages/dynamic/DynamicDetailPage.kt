@@ -56,12 +56,15 @@ import cn.a10miaomiao.bilimiao.compose.components.community.ReplyItemBox
 import cn.a10miaomiao.bilimiao.compose.components.dyanmic.DynamicModuleBox
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.status.BiliFailBox
+import cn.a10miaomiao.bilimiao.compose.components.status.BiliLoadingBox
 
 import cn.a10miaomiao.bilimiao.compose.pages.community.MainReplyListPageContent
 import cn.a10miaomiao.bilimiao.compose.pages.community.MainReplyViewModel
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
+import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
+import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.store.WindowStore.Insets
@@ -70,11 +73,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
+import org.json.JSONObject
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import kotlin.coroutines.cancellation.CancellationException
 
 @Serializable
 data class DynamicDetailPage(
@@ -114,6 +120,19 @@ private class DynamicDetailPageViewModel(
 
     private val _detailData = MutableStateFlow<DynamicItem?>(null)
     val detailData: StateFlow<DynamicItem?> get() = _detailData
+
+    /**
+     * 评论区目标（oid + type）。默认 = (动态id, 17)：转发/纯文字这类动态本来就是这套。
+     * 但**图文动态**实测是 `basic.comment_type = 11`、`basic.comment_id_str` 是 rid（不是动态 id），
+     * 拿动态 id + 17 去取会直接 -404 → 评论区一片空白。gRPC 的 DynamicItem 里没有这两个字段，
+     * 所以详情显示出来之前先补一次 web 动态详情把它们读出来；读不到就保持默认值，不比改动前差。
+     */
+    private val _commentOid = MutableStateFlow(cleanDynId)
+    val commentOid: StateFlow<String> get() = _commentOid
+
+    private val _commentType = MutableStateFlow(17)
+    val commentType: StateFlow<Int> get() = _commentType
+
     init {
         if (cleanDynId.isNotBlank()) {
             loadData()
@@ -124,6 +143,10 @@ private class DynamicDetailPageViewModel(
         try {
             _loading.value = true
             _fail.value = null
+            // ★ 评论区目标先确认再放详情：详情一显示评论区就会拿着目标去拉评论，
+            //   用默认的"动态id + 17"对图文动态必然 -404 → 会先闪一次错误再被修正。
+            //   探针最多等 2 秒（超时就按默认值走），不能让它拖住详情本身。
+            withTimeoutOrNull(2000) { loadCommentTarget() }
             val req = DynDetailReq(
                 uid = userStore.state.info?.mid ?: 0L,
                 dynamicId = cleanDynId,
@@ -145,6 +168,34 @@ private class DynamicDetailPageViewModel(
             e.printStackTrace()
         } finally {
             _loading.value = false
+        }
+    }
+
+    /** 补一次 HTTP 动态详情，只为拿评论区的真实 oid/type；失败静默（详情照常显示） */
+    private suspend fun loadCommentTarget() {
+        try {
+            val response = MiaoHttp.request {
+                url = BiliApiService.biliApi(
+                    "x/polymer/web-dynamic/v1/detail",
+                    "id" to cleanDynId,
+                    "features" to "itemOpusStyle,opusBigCover",
+                    "timezone_offset" to "-480",
+                )
+            }.awaitCall()
+            val json = JSONObject(response.body?.string() ?: "")
+            val basic = json.optJSONObject("data")
+                ?.optJSONObject("item")
+                ?.optJSONObject("basic")
+            val commentId = basic?.optString("comment_id_str") ?: ""
+            val commentType = basic?.optInt("comment_type", 0) ?: 0
+            if (commentId.isNotBlank() && commentType > 0) {
+                _commentOid.value = commentId
+                _commentType.value = commentType
+            }
+        } catch (e: CancellationException) {
+            throw e   // withTimeoutOrNull 的超时取消，别吞掉
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -212,6 +263,13 @@ private fun DynamicDetailPageLoadingContent(
                 .fillMaxSize()
                 .padding(innerPadding)
         )
+    } else if (loading) {
+        // 加载中也给个加载图（以前这里什么都不画，点进去先白屏一下）
+        BiliLoadingBox(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        )
     }
 }
 
@@ -221,14 +279,16 @@ private fun DynamicDetailPageDetailContent(
     windowInsets: Insets,
     detailData: DynamicItem,
 ) {
-    // extend 可能为 null（部分动态类型），之前 !! 会直接崩溃；拿不到就退回空串
-    val oid = detailData.extend?.dynIdStr ?: ""
+    // 评论区目标由 VM 给（默认 动态id+17，图文动态会被修正成 comment_id_str+11；
+    // key 带上两者，目标变了就换一个 ReplyViewModel）
+    val commentOid by viewModel.commentOid.collectAsStateWithLifecycle()
+    val commentType by viewModel.commentType.collectAsStateWithLifecycle()
     val replyViewModel = diViewModel(
-        key = "dynamic.reply.${oid}"
+        key = "dynamic.reply.${commentOid}.${commentType}"
     ) {
         MainReplyViewModel(
-            it, oid,
-            type = 17,
+            it, commentOid,
+            type = commentType,
             extra = "{\"spmid\":\"dt.dt-detail.0.0\",\"from_spmid\":\"\"}",
             filterTagName = "全部"
         )

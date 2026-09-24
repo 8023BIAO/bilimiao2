@@ -52,8 +52,10 @@ class ArticleReaderPage(
 
         val article by articleVM.article.collectAsStateWithLifecycle()
         val replyCount = article?.replyCount ?: 0
-        val tabs = remember(replyCount) {
-            listOf("article" to "专栏", "reply" to "评论($replyCount)")
+        // 本页两个入口共用：opus 长 id 是**动态**，cv 小 id 才是专栏
+        val articleTabTitle = if (id >= 1_000_000_000_000L) "动态" else "专栏"
+        val tabs = remember(replyCount, articleTabTitle) {
+            listOf("article" to articleTabTitle, "reply" to "评论($replyCount)")
         }
         val pagerState = rememberPagerState(pageCount = { tabs.size })
         val coroutineScope = rememberCoroutineScope()

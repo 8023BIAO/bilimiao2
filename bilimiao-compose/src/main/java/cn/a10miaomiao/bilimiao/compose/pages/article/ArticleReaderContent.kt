@@ -55,6 +55,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import org.kodein.di.compose.rememberInstance
+import cn.a10miaomiao.bilimiao.compose.components.image.ImagesGrid
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.localImagePreviewerController
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
@@ -70,6 +71,7 @@ import com.bumptech.glide.integration.compose.GlideImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.min
 
 /** 专栏头部日期格式：提到文件级，避免每次重组都 new 一个（只用主线程，无并发问题） */
 private val ARTICLE_DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -81,8 +83,11 @@ fun ArticleReaderContent(
     bottomPadding: androidx.compose.ui.unit.Dp = 32.dp,
 ) {
     val context = LocalContext.current
-    // 两个入口共用本页：opus id（长 id）复制动态链接；专栏 cv id 复制 read/cv 链接
-    val articleUrl = if (viewModel.articleId >= 1_000_000_000_000L) {
+    // 两个入口共用本页：opus id（长 id）= 动态；专栏 cv id = 专栏。
+    // 文案跟着走，否则"点动态进来标题写着专栏"。
+    val isOpus = viewModel.articleId >= 1_000_000_000_000L
+    val pageLabel = if (isOpus) "动态" else "专栏"
+    val articleUrl = if (isOpus) {
         "https://t.bilibili.com/${viewModel.articleId}"
     } else {
         "https://www.bilibili.com/read/cv${viewModel.articleId}"
@@ -100,7 +105,7 @@ fun ArticleReaderContent(
             title = "复制链接"
         }
     }
-    val configId = PageConfig(title = "专栏", menu = menu)
+    val configId = PageConfig(title = pageLabel, menu = menu)
     PageListener(configId = configId) { _, item ->
         when (item.key) {
             1 -> {
@@ -109,7 +114,7 @@ fun ArticleReaderContent(
             }
             2 -> {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("专栏链接", articleUrl))
+                clipboard.setPrimaryClip(ClipData.newPlainText("${pageLabel}链接", articleUrl))
                 android.widget.Toast.makeText(context, "已复制链接", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
@@ -463,65 +468,110 @@ private fun spannedToAnnotatedString(
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 internal fun ImageParagraphItem(paragraph: ArticleParagraph.ImageParagraph) {
-    val imageUrl = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
-        if (paragraph.url.startsWith("//")) "https:${paragraph.url}" else paragraph.url
-    )
-    val imgWidth = if (paragraph.width > 0) paragraph.width else 600
-    val imgHeight = if (paragraph.height > 0) paragraph.height else 400
-    val aspectRatio = if (paragraph.width > 0 && paragraph.height > 0) {
-        paragraph.width.toFloat() / paragraph.height.toFloat()
-    } else {
-        16f / 9f
-    }
-    val previewerController = localImagePreviewerController()
-    val imageModel = PreviewImageModel(
-        previewUrl = imageUrl,
-        originalUrl = imageUrl,
-        width = imgWidth.toFloat(),
-        height = imgHeight.toFloat(),
-    )
-    val previewerState = rememberPreviewerState(
-        verticalDragType = VerticalDragType.Down,
-        pageCount = { 1 },
-        getKey = { imageUrl },
-    )
-    val itemState = rememberTransformItemState(
-        intrinsicSize = Size(imgWidth.toFloat(), imgHeight.toFloat()),
-    )
+    val pictures = paragraph.pics
+    if (pictures.isEmpty()) return
 
+    // 单图：保持"整宽大图 + 点开单图预览"的老样子
+    if (pictures.size == 1) {
+        val pic = pictures[0]
+        val imageUrl = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
+            if (pic.url.startsWith("//")) "https:${pic.url}" else pic.url
+        )
+        val imgWidth = if (pic.width > 0) pic.width else 600
+        val imgHeight = if (pic.height > 0) pic.height else 400
+        val aspectRatio = if (pic.width > 0 && pic.height > 0) {
+            pic.width.toFloat() / pic.height.toFloat()
+        } else {
+            16f / 9f
+        }
+        val previewerController = localImagePreviewerController()
+        val imageModel = PreviewImageModel(
+            previewUrl = imageUrl,
+            originalUrl = imageUrl,
+            width = imgWidth.toFloat(),
+            height = imgHeight.toFloat(),
+        )
+        val previewerState = rememberPreviewerState(
+            verticalDragType = VerticalDragType.Down,
+            pageCount = { 1 },
+            getKey = { imageUrl },
+        )
+        val itemState = rememberTransformItemState(
+            intrinsicSize = Size(imgWidth.toFloat(), imgHeight.toFloat()),
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        previewerController.enterTransform(
+                            state = previewerState,
+                            models = listOf(imageModel),
+                            index = 0,
+                        )
+                    },
+            ) {
+                TransformItemView(
+                    key = imageUrl,
+                    itemState = itemState,
+                    transformState = previewerState,
+                ) {
+                    GlideImage(
+                        model = imageUrl,
+                        contentDescription = paragraph.caption.ifBlank { "图片" },
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(aspectRatio),
+                    )
+                }
+            }
+            if (paragraph.caption.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = paragraph.caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        return
+    }
+
+    // 多图（图文动态/多图专栏）：一个段落里的整组图用九宫格铺开 ——
+    // 与动态卡片、评论图片同一个 ImagesGrid，点任意一张进预览器还能左右翻整组
+    val imageModels = remember(pictures) {
+        pictures.map { pic ->
+            val url = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
+                if (pic.url.startsWith("//")) "https:${pic.url}" else pic.url
+            )
+            val imgWidth = if (pic.width > 0) pic.width else 600
+            val imgHeight = if (pic.height > 0) pic.height else 400
+            val w = min(600, imgWidth)
+            val h = w * imgHeight / imgWidth
+            PreviewImageModel(
+                previewUrl = url + "@${w}w_${h}h",
+                originalUrl = url,
+                width = imgWidth.toFloat(),
+                height = imgHeight.toFloat(),
+            )
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .clickable {
-                    previewerController.enterTransform(
-                        state = previewerState,
-                        models = listOf(imageModel),
-                        index = 0,
-                    )
-                },
-        ) {
-            TransformItemView(
-                key = imageUrl,
-                itemState = itemState,
-                transformState = previewerState,
-            ) {
-                GlideImage(
-                    model = imageUrl,
-                    contentDescription = paragraph.caption.ifBlank { "图片" },
-                    contentScale = ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(aspectRatio),
-                )
-            }
-        }
+        ImagesGrid(imageModels)
         if (paragraph.caption.isNotBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(

@@ -22,13 +22,23 @@ sealed class ArticleParagraph {
         val align: String = "left",
     ) : ArticleParagraph()
 
+    /**
+     * 图片段落 = **一组**图（不是一个）。
+     * opus/动态的图文正文里一个 para_type=2 段落的 pic.pics 可以装下整组图（最多 9 张），
+     * 旧字段只有 url/width/height，解析时也只取 pics[0] → 点进动态只显示第一张图。
+     */
     data class ImageParagraph(
-        val url: String = "",
-        val width: Int = 0,
-        val height: Int = 0,
+        val pics: List<ArticlePicture> = emptyList(),
         val caption: String = "",
     ) : ArticleParagraph()
 }
+
+/** 正文里的一张图（宽高用于占位比例，缺失时渲染端会退回默认值） */
+data class ArticlePicture(
+    val url: String = "",
+    val width: Int = 0,
+    val height: Int = 0,
+)
 
 /**
  * 解析 opus/专栏正文段落。专栏接口(/x/article/view)与 web-dynamic opus detail 的
@@ -132,10 +142,22 @@ fun parseArticleParagraphs(jsonArray: JSONArray?): List<ArticleParagraph> {
                 val pics = picObj?.optJSONArray("pics")
                 var caption = ""
                 if (pics != null && pics.length() > 0) {
-                    val firstPic = pics.optJSONObject(0)
-                    val url = firstPic?.optString("url") ?: ""
-                    val width = firstPic?.optInt("width") ?: 0
-                    val height = firstPic?.optInt("height") ?: 0
+                    // ★ 一个图片段落里的**每一张图**都要留下（旧实现只读 pics[0]，
+                    //   多图动态点进来只看得到第一张）
+                    val pictureList = mutableListOf<ArticlePicture>()
+                    for (j in 0 until pics.length()) {
+                        val pic = pics.optJSONObject(j) ?: continue
+                        val url = pic.optString("url")
+                        if (url.isBlank()) continue
+                        pictureList.add(
+                            ArticlePicture(
+                                url = url,
+                                width = pic.optInt("width"),
+                                height = pic.optInt("height"),
+                            )
+                        )
+                    }
+                    if (pictureList.isEmpty()) continue
 
                     if (i + 1 < jsonArray.length()) {
                         val nextItem = jsonArray.optJSONObject(i + 1)
@@ -152,7 +174,7 @@ fun parseArticleParagraphs(jsonArray: JSONArray?): List<ArticleParagraph> {
                             }
                         }
                     }
-                    list.add(ArticleParagraph.ImageParagraph(url, width, height, caption))
+                    list.add(ArticleParagraph.ImageParagraph(pictureList, caption))
                 }
             }
         }
