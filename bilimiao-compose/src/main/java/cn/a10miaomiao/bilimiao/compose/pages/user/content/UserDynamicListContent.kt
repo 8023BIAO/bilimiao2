@@ -1,6 +1,5 @@
 package cn.a10miaomiao.bilimiao.compose.pages.user.content
 
-import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,6 +30,7 @@ import cn.a10miaomiao.bilimiao.compose.common.localEmitter
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.components.dyanmic.DynamicItemCard
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
+import cn.a10miaomiao.bilimiao.compose.pages.dynamic.navigateToDynamic
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
@@ -112,10 +112,10 @@ private class UserDynamicListContentViewModel(
     fun toDetailPage(
         item: bilibili.app.dynamic.v2.DynamicItem
     ) {
-        val extend = item.extend ?: return
-        val toUrl = extend.cardUrl
+        if (item.extend == null) return
         try {
-            pageNavigation.navigateByUri(Uri.parse(toUrl))
+            // opus 类动态进动态详情页，其它类型仍按 cardUrl 路由（见 navigateToDynamic）
+            pageNavigation.navigateToDynamic(item)
         } catch (e: Exception) {
             e.printStackTrace()
         }

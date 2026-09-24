@@ -20,6 +20,7 @@ import cn.a10miaomiao.bilimiao.compose.common.localPageNavigation
 import cn.a10miaomiao.bilimiao.compose.components.image.ImagesGrid
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
 import cn.a10miaomiao.bilimiao.compose.components.video.VideoItemBox
+import cn.a10miaomiao.bilimiao.compose.pages.dynamic.navigateToDynamic
 import cn.a10miaomiao.bilimiao.compose.pages.video.VideoDetailPage
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import kotlin.math.min
@@ -104,6 +105,7 @@ fun DynForwardBox(
 ) {
     val modules = dynForward.item?.modules ?: return
     val uriHandler = LocalUriHandler.current
+    val pageNavigation = localPageNavigation()
     Column (
         modifier = Modifier
             .padding(
@@ -115,8 +117,13 @@ fun DynForwardBox(
                 color = MaterialTheme.colorScheme.surfaceVariant,
             )
             .clickable {
-                dynForward.item?.extend?.let {
-                    uriHandler.openUri(it.cardUrl)
+                val item = dynForward.item
+                // 转发内容点开走应用内路由：以前 uriHandler.openUri(cardUrl) 丢给系统，
+                // 而 opus 类 cardUrl 会被应用自己的深链入口转进「专栏」页。
+                if (item == null || !pageNavigation.navigateToDynamic(item)) {
+                    item?.extend?.cardUrl?.takeIf { it.isNotBlank() }?.let {
+                        uriHandler.openUri(it)
+                    }
                 }
             }
     ) {

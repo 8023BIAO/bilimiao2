@@ -1,6 +1,5 @@
 package cn.a10miaomiao.bilimiao.compose.pages.dynamic.content
 
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import bilibili.app.dynamic.v2.UpListItem
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicViewModel
+import cn.a10miaomiao.bilimiao.compose.pages.dynamic.navigateToDynamic
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import org.kodein.di.compose.rememberInstance
@@ -159,14 +159,14 @@ class DynamicUpperContentViewModel(
     }
 
     fun toDetailPage(item: DynamicItem) {
-        val extend = item.extend ?: run {
+        if (item.extend == null) {
             // 部分动态类型没有 extend：以前直接 return，用户点了完全没反应
             toast("这条动态暂时打不开")
             return
         }
-        val toUrl = extend.cardUrl
         try {
-            pageNavigation.navigateByUri(Uri.parse(toUrl))
+            // opus 类动态进动态详情页，其它类型仍按 cardUrl 路由（见 navigateToDynamic）
+            pageNavigation.navigateToDynamic(item)
         } catch (e: Exception) {
             e.printStackTrace()
         }

@@ -16,7 +16,7 @@ import androidx.navigation.NavOptionsBuilder
 import androidx.navigation.Navigator
 import androidx.navigation.navOptions
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
-import cn.a10miaomiao.bilimiao.compose.pages.article.ArticleReaderPage
+import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.video.VideoDetailPage
 import cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions
 import cn.a10miaomiao.bilimiao.compose.common.singleTopNavOptions
@@ -31,7 +31,11 @@ class PageNavigation(
     val hostController get() = navHostController()
 
     fun navigateByUri(deepLink: Uri): Boolean {
-        // opus 深链统一进专栏页（与搜索入口一致，两个入口共用 ArticleReaderPage）。
+        // opus 深链（bilibili://opus/{id}、bilibili://opus/detail/{id}）→ **动态详情页**。
+        // vc83 曾把它们统一合进专栏页(ArticleReaderPage)，结果"点动态进专栏"（动态本来就有专门的动态页）。
+        // 实测：gRPC 动态详情对这类 opus 长 id 5/5 都能取到正文 + 全部图片；专栏页那条数据源
+        // (x/polymer/web-dynamic/v1/opus/detail) 反而有 2/5 的图藏在 MODULE_TYPE_TOP 里取不到。
+        // 专栏(cv)链接不走这里：/read/cv{id}、bilimiao://article/{id} 由路由表进专栏页。
         // 先剥离 query/编码残留再解析，避免 "For input string: 123?jump_opus=1" 崩溃
         if ((deepLink.scheme == "bilibili" || deepLink.scheme == "bilimiao")
             && deepLink.host == "opus"
@@ -44,7 +48,7 @@ class PageNavigation(
             val opusId = rawId.toLongOrNull()
             if (opusId != null) {
                 return runCatching {
-                    hostController.navigate(ArticleReaderPage(opusId), navOptions {
+                    hostController.navigate(DynamicDetailPage(opusId.toString()), navOptions {
                         launchSingleTop = true
                     })
                 }.isSuccess.also {

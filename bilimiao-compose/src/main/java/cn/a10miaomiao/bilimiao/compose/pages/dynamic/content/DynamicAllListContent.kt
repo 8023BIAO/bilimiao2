@@ -1,6 +1,5 @@
 package cn.a10miaomiao.bilimiao.compose.pages.dynamic.content
 
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -48,6 +47,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.bangumi.BangumiDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicVideoContentInfo
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicVideoInfo
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicViewModel
+import cn.a10miaomiao.bilimiao.compose.pages.dynamic.navigateToDynamic
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
@@ -169,14 +169,14 @@ class DynamicAllListContenttViewModel(
     }
 
     fun toDetailPage(item: DynamicItem) {
-        val extend = item.extend ?: run {
+        if (item.extend == null) {
             // 部分动态类型没有 extend：以前直接 return，用户点了完全没反应
             toast("这条动态暂时打不开")
             return
         }
-        val toUrl = extend.cardUrl
         try {
-            pageNavigation.navigateByUri(Uri.parse(toUrl))
+            // opus 类动态进动态详情页，其它类型仍按 cardUrl 路由（见 navigateToDynamic）
+            pageNavigation.navigateToDynamic(item)
         } catch (e: Exception) {
             e.printStackTrace()
         }

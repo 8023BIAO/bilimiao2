@@ -150,10 +150,16 @@ class BilimiaoPageRoute (
             deepLinks = listOf(
                 navDeepLink<DynamicDetailPage>(
                     basePath = "bilibili://following/detail"
+                ),
+                // opus 分享/卡片深链也进动态详情
+                // （vc83 把这条删掉、改道专栏页，才有了"点动态进专栏"）
+                navDeepLink<DynamicDetailPage>(
+                    basePath = "bilibili://opus/detail"
                 )
             )
         )
-        // opus 深链统一在 PageNavigation.navigateByUri 里转进 ArticleReaderPage（与搜索入口一致）
+        // 专栏(cv) 深链仍进专栏阅读页；应用内动态卡片走
+        // pages/dynamic/DynamicItemNavigation.kt 的 navigateToDynamic()，同样进动态详情
 
         // rank
         composable<RankPage>(
