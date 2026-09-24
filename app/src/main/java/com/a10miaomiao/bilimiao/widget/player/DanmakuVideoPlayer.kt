@@ -263,6 +263,12 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             //   这个方法会被弹幕渲染线程**逐帧**调用（R2LDanmaku/L2RDanmaku 的横向位置就是
             //   按它算的），也会被弹幕缓存线程调用 —— 在这里直接读播放器是跨线程访问。
             lastTime = danmakuNowMs()
+            if (DANMAKU_CLOCK_LOG && (++danmakuTickCount % 500) == 0) {
+                android.util.Log.d(
+                    "BMDanmaku",
+                    "TICK thr=${Thread.currentThread().name} clock=$lastTime"
+                )
+            }
             return lastTime
         }
 
@@ -281,18 +287,30 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     //     弹幕的时间轴从此停在 0：弹幕缓存只准备开头一小段、逐帧算的横向坐标也跟着错，
     //     "任何时刻接着播"的续播保鲜（原本写在弹幕回调里）更是永远读不到真位置；
     //   · 就算某些内核（系统 MediaPlayer）容忍跨线程调用，位置也是播放器内部状态，不保证读到一致值。
-    // 所以改成：**位置只在主线程采**（下面这个 250ms 的心跳），弹幕线程只读 @Volatile 快照；
-    // 两次采样之间用单调时钟 + 实测倍速外推，保证逐帧平滑（直接返回粗快照会让弹幕一跳一跳）。
+    // ★ 现在的模型（跟 PiliPlus 的 canvas_danmaku 一致，实测这才是"自然"的那一种）：
+    //   **弹幕时间是一根自己往前走的线性时钟**：clock(t) = 锚点 + (t - 锚点时刻) × 斜率。
+    //   斜率 = 播放器当前倍速（含长按倍速），只在"暂停/缓冲 → 0"和"恢复 → 倍速"之间切换，
+    //   另外用播放器位置做**斜率级的慢修正**（最多 ±20%，绝不把位置硬掰回去）。
+    //   于是弹幕的运动永远是直线（严格匀速），画面上看不到台阶；位置也不会跑偏。
+    //
+    // 走过的弯路（别再回头）：
+    //   ① "250ms 采样 + 实测倍速外推 + 每拍硬设位置" → 每 250ms 一次小台阶、节奏还会掉到 1s；
+    //   ② "10ms 采样 + 直接贴播放器位置" → 把播放器位置的量化台阶/抖动全继承过来（"不自然"）。
+    //   参考实现（PiliPlus/canvas_danmaku）：Ticker 每帧累加时间，暂停冻结、恢复接着走，
+    //   播放器位置只在 seek 时用一次 —— 弹幕时间从不逐帧跟播放器。
     @Volatile private var danmakuPosMs = 0L
     @Volatile private var danmakuPosAtUptimeMs = 0L
 
-    /** 实测倍速（由相邻两次采样的位移/耗时算出，自动包含设置里的倍速和长按倍速） */
-    @Volatile private var danmakuPosSpeed = 1f
+    /** 时钟斜率（毫秒/毫秒）：= 播放倍速；0 = 冻结（暂停/缓冲） */
+    @Volatile private var danmakuClockRate = 0f
 
-    /** 采样时是否在播放：暂停/缓冲时不做外推，时间就冻在快照上 */
-    @Volatile private var danmakuPosAdvancing = false
+    /** 上一次采样到的播放器位置/时刻：只用来判断"画面有没有真的往前走" */
+    @Volatile private var danmakuSamplePosMs = 0L
 
-    /** 播放中 250ms 采一次（够弹幕缓存判定用），空闲时 1s 一次（几乎不耗电） */
+    /**
+     * 采样间隔：播放中 200ms（够用来判断缓冲 + 做慢修正），非播放态 500ms（暂停中 seek 也能很快跟上）。
+     * 注意：采样只影响"修正"的及时性，不影响弹幕运动的平滑度 —— 平滑度由上面那根线性时钟保证。
+     */
     private val danmakuSnapshotRunnable = Runnable {
         refreshDanmakuSnapshot()
         scheduleDanmakuSnapshot()
@@ -300,7 +318,8 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
 
     private fun scheduleDanmakuSnapshot() {
         removeCallbacks(danmakuSnapshotRunnable)
-        postDelayed(danmakuSnapshotRunnable, if (danmakuPosAdvancing) 250L else 1000L)
+        val playing = mCurrentState == CURRENT_STATE_PLAYING
+        postDelayed(danmakuSnapshotRunnable, if (playing) 200L else 500L)
     }
 
     /**
@@ -319,23 +338,36 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             -1L
         }
         if (pos < 0L) return
-        val prevPos = danmakuPosMs
-        val prevAt = danmakuPosAtUptimeMs
-        val wall = nowUptime - prevAt
+        // 重新 prepare / surface 重建的瞬间会短暂读到 0：账本里明明有真实位置，就别把弹幕时间拽回片头
+        if (pos == 0L && lastGoodPositionMs > 3_000L) return
+        val prevPos = danmakuSamplePosMs
         val delta = pos - prevPos
-        // 只有"正常往前走"的采样才用来估倍速：seek / 缓冲 / 暂停后的第一拍都跳过（沿用上次的倍率）
-        if (prevAt > 0L && wall in 1L..2000L && delta in 0L..(wall * 4L)) {
-            val measured = delta.toFloat() / wall.toFloat()
-            // 限幅 0.25~4×：正常倍速最多 3×（长按 3×），超过这个范围的采样一定是跳变，
-            // 不能被当成倍速去外推（否则时间轴会先冲出去再被下一拍拉回来）。
-            if (measured > 0.1f) danmakuPosSpeed = measured.coerceIn(0.25f, 4f)
+        danmakuSamplePosMs = pos
+        // "画面真的在往前走"：状态是播放中，**而且**这一拍位置确实变过
+        //（缓冲时 GSY 会把状态拨回 PLAYING，只看状态会出现"画面停着、弹幕还在飘"）
+        //（第一拍没有上一拍可比，按"状态是播放中"算）
+        val advancing = mCurrentState == CURRENT_STATE_PLAYING && (prevPos <= 0L || delta > 0L)
+        val clock = danmakuNowMs()
+        val drift = pos - clock
+        val rate = currentPlaybackSpeed()
+        when {
+            // 暂停 / 缓冲：弹幕时间就地冻住（恢复时从这一帧接着走 —— 用户要的"接着过去"）
+            !advancing -> setDanmakuClock(clock, 0f)
+            // 真的跳了（seek / 重建 / 长时间后台）：对齐，别让弹幕慢几十秒
+            kotlin.math.abs(drift) > 2_000L -> setDanmakuClock(pos, rate)
+            // 正常播放：只微调斜率（最多 ±20%），位置保持连续 → 运动始终是直线，没有台阶
+            else -> setDanmakuClock(
+                clock,
+                rate * (1f + (drift / 4_000f).coerceIn(-0.2f, 0.2f)),
+            )
         }
-        danmakuPosMs = pos
-        danmakuPosAtUptimeMs = nowUptime
-        // 只有"状态是播放中"**且**"这一拍真的往前走了"才外推：GSY 在缓冲结束时会把视图状态恢复成
-        // 缓冲开始前保存的那个（缓冲中按了暂停 → 状态又被拨回 PLAYING，底层其实还停着），
-        // 只看状态会让"画面停着、弹幕还在飘"。
-        danmakuPosAdvancing = mCurrentState == CURRENT_STATE_PLAYING && delta > 0L
+        if (DANMAKU_CLOCK_LOG && nowWall - danmakuLogAt >= 1000L) {
+            danmakuLogAt = nowWall
+            android.util.Log.d(
+                "BMDanmaku",
+                "SAMPLE pos=$pos clock=${danmakuNowMs()} drift=$drift rate=$rate state=$mCurrentState"
+            )
+        }
         // 约 1 秒记一次账就够
         if (nowWall - lastGoodUpdateAt < 1000L) return
         lastGoodUpdateAt = nowWall
@@ -351,14 +383,66 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         }
     }
 
-    /** 弹幕线程唯一的时间入口：读快照 + 按实测倍速外推，**不碰播放器** */
+    /**
+     * 弹幕线程唯一的时间入口：**线性时钟**，不碰播放器。
+     * clock(t) = 锚点 + (现在 - 锚点时刻) × 斜率 —— 严格匀速，弹幕运动因此是直线。
+     */
     private fun danmakuNowMs(): Long {
-        val base = danmakuPosMs
-        if (!danmakuPosAdvancing) return base
         val elapsed = android.os.SystemClock.uptimeMillis() - danmakuPosAtUptimeMs
-        if (elapsed <= 0L) return base
-        return base + (elapsed * danmakuPosSpeed).toLong()
+        if (elapsed <= 0L) return danmakuPosMs
+        return danmakuPosMs + (elapsed * danmakuClockRate).toLong()
     }
+
+    /**
+     * 重设时钟：把当前时间锚在 [anchorMs]（<=0 表示"当前推算值"）并换成新斜率 [rate]。
+     * 换斜率必须先锚一次，否则刚过去的那段时间会被新斜率重算 —— 那就是一次跳变。
+     */
+    private fun setDanmakuClock(anchorMs: Long, rate: Float) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val anchor = if (anchorMs > 0L) anchorMs else danmakuNowMs()
+        danmakuPosMs = anchor
+        danmakuPosAtUptimeMs = now
+        danmakuClockRate = if (rate.isFinite()) rate.coerceIn(0f, 4f) else 1f
+    }
+
+    /** 时钟复位（换视频用）：锚点、斜率、上一拍位置全部清空，等第一拍采样硬对齐到新视频 */
+    private fun resetDanmakuClock() {
+        danmakuPosMs = 0L
+        danmakuPosAtUptimeMs = android.os.SystemClock.uptimeMillis()
+        danmakuClockRate = 0f
+        danmakuSamplePosMs = 0L
+    }
+
+    /** 播放器当前倍速（含长按倍速）；读不到就按 1× */
+    private fun currentPlaybackSpeed(): Float = try {
+        speed.coerceIn(0.25f, 4f)
+    } catch (_: Exception) {
+        1f
+    }
+
+    /**
+     * 临时诊断开关：每秒往 logcat 打一条弹幕时间（tag `BMDanmaku`）。
+     * 为什么留着：弹幕"抖/不同轴"这类问题光看代码断不干净，有一条时间序列就能一眼定位。
+     * 采样侧打 SAMPLE（播放器位置/我们的时间/状态），弹幕线程侧打 TICK（它每帧读到的时间 + 线程名）。
+     * 排查完把这个常量改 false 即可（不会有人看到输出）。
+     */
+    private val DANMAKU_CLOCK_LOG = true
+    private var danmakuLogAt = 0L
+    private var danmakuTickCount = 0
+
+    /**
+     * 把弹幕时间**立刻**钉在 [positionMs] 上（<=0 时退回"现在推算到的位置"，保持连续），
+     * 斜率保持不变 —— 用于"时间轴突变"的瞬间（seek、暂停/恢复），别等下一拍采样。
+     */
+    private fun anchorDanmakuSnapshot(positionMs: Long) {
+        setDanmakuClock(positionMs, danmakuClockRate)
+    }
+
+    /**
+     * "弹幕本来就差不多在这个位置"的判定门限（毫秒）。
+     * 只用来挡**重复的纠正性 seek**：真拖动/空降都是秒级以上的差距，会照旧走硬重锚。
+     */
+    private val NEAR_DANMAKU_SEEK_MS = 700L
 
     private var mDisplayCutout: DisplayCutout? = null
 
@@ -471,6 +555,9 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         mSeekOnStart = 0L
         // 弹幕的"准备后再跳"锚点同理：不清的话，上一个视频那次 seek 会把新视频的弹幕起点也拽过去
         danmakuStartSeekPosition = -1L
+        // ★ 弹幕时钟也要复位：不复位的话新视频开头那几拍仍按上一个视频的时间在画，
+        //   要等采样发现"漂了 2 秒"才对齐 —— 那一下就是换集时的弹幕错乱
+        resetDanmakuClock()
         removeCallbacks(restartGuardRunnable)
     }
 
@@ -539,9 +626,12 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         //   不经过我们的 seekTo 覆写，所以"续播 / 换清晰度 / 网络重试"时 syncDanmakuSeek 一次都不会跑：
         //   弹幕层既不重锚定（渲染起点还停在 0），又要等下一拍心跳（非播放态间隔 1000ms）快照才追上 →
         //   这 ≤1 秒里弹幕按错的时间画，随后一次性补画一片（"唰一下"在续播时照旧）。
+        // 弹幕层"本来在哪"要趁快照刷新之前先看一眼：prepare 中途采到的位置可能是旧值/0，
+        // 刷新完再判断就会把"位置其实没变"误判成"跳了"，于是多锚一次（就是那个多余的"拽一下"）
+        val danmakuClockBefore = danmakuNowMs()
         refreshDanmakuSnapshot()
         if (seekOnPrepare > 0L) {
-            syncDanmakuSeek(seekOnPrepare)
+            syncDanmakuSeek(seekOnPrepare, danmakuClockBefore)
         }
         // GSY 在 mPauseBeforePrepared 分支里会紧接着 onVideoPause()，而此时 seek 可能还没落地，
         // 它读到的 0 会被写进 mCurrentPosition（= 下一次续播位置）→ 用账本补回来
@@ -2627,19 +2717,36 @@ initDanmakuTouchListener()
      * （`mStartRenderTime`）重新锚在 pos 上：**起点之前的弹幕不再补画**（不会半路冒出来），
      * 起点之后的弹幕照常从右边进场 —— 既没有"闪现"，也不用像别的播放器那样清空整屏硬等。
      *
+     * ★ 但**位置本来就没变**的时候绝不能锚：DFM 的 `DrawTask.seek()` 里是
+     *   `reset()` + 清空 `mRunningDanmakus` + 重设 `mStartRenderTime` —— 正在飞的弹幕会被整屏抹掉、
+     *   只让时间 ≥ pos 的重新从右边进场。典型场景就是"点播放/回前台 → GSY 内部重新 prepare 并 seek 回
+     *   原位置 → [startAfterPrepared] 又调这里一次"：播放器刚被拽回位置（对），弹幕层紧跟着又被硬重锚
+     *   一次（多余）→ 用户看到"刚回到位置又被谁拖了一下"。这种只对齐快照、不重锚。
+     *
+     * @param danmakuClockBefore 调用方**刷新快照之前**看到的弹幕时间（判断"本来就在附近"用）；
+     *      不传就取当前值 —— [startAfterPrepared] 必须先取再刷新，否则 prepare 中途采到的旧位置会把判据带偏。
+     *
      * 弹幕还没准备好时先记在 [danmakuStartSeekPosition]，等 prepared() 回调里补一次。
      */
-    private fun syncDanmakuSeek(positionMs: Long) {
+    private fun syncDanmakuSeek(
+        positionMs: Long,
+        danmakuClockBefore: Long = danmakuNowMs(),
+    ) {
         if (positionMs < 0L) return
-        // ① 时间快照立刻跟到新位置：不然弹幕线程在 seek 完成的这几十毫秒里还按旧位置算坐标
-        danmakuPosMs = positionMs
-        danmakuPosAtUptimeMs = android.os.SystemClock.uptimeMillis()
-        danmakuPosAdvancing = false // 等下一拍采样确认真实位置，避免 seek 期间外推过冲
-        // ② 让 DFM 把渲染窗口重新锚在新位置上
-        if (!mHadPlay || !mDanmakuView.isPrepared) {
+        val prepared = mHadPlay && mDanmakuView.isPrepared
+        val alreadyThere = prepared &&
+            kotlin.math.abs(positionMs - danmakuClockBefore) <= NEAR_DANMAKU_SEEK_MS
+        // ① 时间立刻跟到新位置（斜率不变：暂停中就是冻住，播放中继续按倍速走）
+        anchorDanmakuSnapshot(positionMs)
+        if (!prepared) {
             danmakuStartSeekPosition = positionMs
             return
         }
+        if (alreadyThere) {
+            scheduleDanmakuSnapshot()
+            return
+        }
+        // ② 让 DFM 把渲染窗口重新锚在新位置上
         resolveDanmakuSeek(this, positionMs)
     }
 
@@ -2748,9 +2855,10 @@ initDanmakuTouchListener()
     }
 
     fun releaseDanmaku() {
-        // 心跳停掉：关播放器/播完之后不该继续每 250ms~1s 去读一次播放器位置
-        //（下次 onPrepared() 会重新启动）
+        // 心跳停掉：关播放器/播完之后不该继续去读播放器位置（下次 onPrepared() 会重新启动）；
+        // 时钟斜率也归零，别让一个已经释放的播放器后面继续"走时间"
         removeCallbacks(danmakuSnapshotRunnable)
+        danmakuClockRate = 0f
         mDanmakuView.release()
         // 【已移除】V2引擎释放 — V2引擎已废弃
     }
@@ -2789,6 +2897,8 @@ initDanmakuTouchListener()
     }
 
     protected fun danmakuOnPause() {
+        // ★ 暂停：弹幕时间就地冻住（PiliPlus 的 `_lastTick = _notifier.value; _ticker.stop()`）
+        setDanmakuClock(danmakuNowMs(), 0f)
         if (mDanmakuView != null && mDanmakuView.isPrepared) {
             mDanmakuView.pause()
         // 【已移除】V2暂停 — V2引擎已废弃
@@ -2796,8 +2906,13 @@ initDanmakuTouchListener()
     }
 
     protected fun danmakuOnResume() {
+        // ★ 恢复：从冻住的那一帧**接着走**（不重新对齐播放器位置），斜率回到当前倍速
+        //（PiliPlus 的 `_ticker.start()`）。位置与播放器之间那点差交给采样的斜率微调慢慢吃掉。
+        val pos = currentPositionWhenPlaying
+        setDanmakuClock(danmakuNowMs(), currentPlaybackSpeed())
+        scheduleDanmakuSnapshot()
         if (mDanmakuView != null && mDanmakuView.isPrepared) {
-            mDanmakuView.start(currentPositionWhenPlaying)
+            mDanmakuView.start(pos)
         // 【已移除】V2恢复 — V2引擎已废弃
         }
     }
