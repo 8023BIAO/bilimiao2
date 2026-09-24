@@ -232,6 +232,17 @@ private class FlagsSettingPageViewModel(
 }
 
 
+/**
+ * 版本名**显示用**：去掉尾部的 "-<构建序号>"（例如 V2026.09.25-54 → V2026.09.25）。
+ * 那个后缀只是"同一天多次构建"的区分号，对外没必要看到；版本号另外用 VC 显示。
+ * （内部 versionName / 发布命名 / 崩溃日志里仍保留完整名字）
+ */
+private fun displayVersionName(versionName: String?): String {
+    val name = versionName?.trim().orEmpty()
+    if (name.isEmpty()) return "未知"
+    return name.replace(Regex("-\\d+$"), "")
+}
+
 @Composable
 private fun FlagsSettingPageContent(
     viewModel: FlagsSettingPageViewModel,
@@ -256,7 +267,7 @@ private fun FlagsSettingPageContent(
             } else {
                 @Suppress("DEPRECATION") pi.versionCode.toLong()
             }
-            "${pi.versionName}（VC $vc）"
+            "${displayVersionName(pi.versionName)}（VC $vc）"
         } catch (e: Exception) {
             "未知"
         }
