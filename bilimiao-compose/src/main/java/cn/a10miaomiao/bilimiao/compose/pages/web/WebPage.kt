@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -24,11 +25,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
+import cn.a10miaomiao.bilimiao.compose.isAppThemeDark
 import cn.a10miaomiao.bilimiao.compose.common.BiliJsBridge
 import cn.a10miaomiao.bilimiao.compose.common.navigation.BilibiliNavigation
 import cn.a10miaomiao.bilimiao.compose.common.addPaddingValues
@@ -112,7 +115,13 @@ private class WebPageViewModel(
 //        initWebView(webView)
     }
 
-    fun initWebView(view: WebView) {
+    /** 当前是否深色主题；由 Compose 侧每帧同步进来（切主题时原地更新，不重建 WebView） */
+    private var darkTheme = false
+    private var themeBgColor = 0
+
+    fun initWebView(view: WebView, isDark: Boolean = false, bgColor: Int = 0) {
+        darkTheme = isDark
+        themeBgColor = bgColor
         // 深链入口（bilimiao://web?url= / bilibili://forward?-Btarget=）校验：
         // 非白名单域名不允许进入带 JS 桥的内嵌浏览器
         val startHost = Uri.parse(startUrl).host ?: ""
@@ -123,6 +132,13 @@ private class WebPageViewModel(
         }
         val biliJsBridge = BiliJsBridge(fragment, pageNavigation, view)
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
+        // ★ 主题跟随（用户 2026-09-25 要求：内置网页要跟软件主题，别一片白）：
+        //   ① 背景色**必须在 loadUrl 之前**设好，否则加载那一下是白的（闪一下）；
+        //   ② 深色内容分两条路：B 站页面用它自带的官方深色令牌（给 <html> 加 bili_dark，
+        //      theme.min.css 里有这套变量），非 B 站页面交给系统的"算法暗化"。
+        //      两条**不能同时用**，会二次变暗（调研结论）。
+        if (bgColor != 0) view.setBackgroundColor(bgColor)
+        applyThemeToWebView(view)
         view.webViewClient = mWebViewClient
         view.webChromeClient = mWebChromeClient
         view.settings.apply {
@@ -147,6 +163,28 @@ private class WebPageViewModel(
         if (!inAppNavigated.value) {
             view.loadUrl(startUrl)
         }
+    }
+
+    /** 主题应用（初始化 + 切主题时都会走；原地更新，不重建） */
+    fun applyTheme(container: android.view.View?, isDark: Boolean, bgColor: Int) {
+        darkTheme = isDark
+        themeBgColor = bgColor
+        if (bgColor != 0) {
+            container?.setBackgroundColor(bgColor)
+            webView?.setBackgroundColor(bgColor)
+        }
+        webView?.let { applyThemeToWebView(it) }
+    }
+
+    private fun applyThemeToWebView(view: WebView) {
+        // ★ 只改 WebView 自己的背景色（防止加载那一下白闪），**不碰网页内容**。
+        //
+        // 走过的弯路（用户 2026-09-25 拍板撤掉，别再回头）：
+        //   · 给 B 站页面注入官方深色令牌 `bili_dark` → 申诉页表单变成"白底白字"
+        //     （用户原话："我把主题看得见，黑色主题看不见"）；算法暗化同样有二次变暗的风险。
+        //   · 结论：内置网页的主题适配"要替对方页面调样式"，成本高、坑多，不值当；
+        //     需要深色的场景（申诉页）改走外部浏览器。
+        if (themeBgColor != 0) view.setBackgroundColor(themeBgColor)
     }
 
     private val mWebViewClient = object : WebViewClient() {
@@ -228,6 +266,8 @@ private class WebPageViewModel(
         }
 
         override fun onPageFinished(view: WebView, url: String) {
+            // 每次加载完都按当前主题刷一遍（含 SPA 路由切换；注入脚本本身幂等）
+            applyThemeToWebView(view)
             super.onPageFinished(view, url)
             loading.value = false
 //            val js = """javascript:(function() {
@@ -272,6 +312,9 @@ private fun WebPageContent(
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
+    // 内置网页：只用主题背景色防白闪，不改网页内容（深色注入已按用户要求撤掉）
+    val darkTheme = isAppThemeDark()
+    val themeBgColor = MaterialTheme.colorScheme.background.toArgb()
 
     // 从 App 内目标页返回时：本页只是"跳转中间页" → 直接跳过自己回上一层，
     // 并且不再重建 WebView（重建 → 重新加载 startUrl → 重定向 → 又被拽回目标页）
@@ -294,12 +337,18 @@ private fun WebPageContent(
                     ),
                 factory = {
                     FrameLayout(it).apply {
+                        // 容器也铺主题背景：加载前那一下不能是白的
+                        setBackgroundColor(themeBgColor)
                         val webView = viewModel.webView ?: WebView(it).also {
-                            viewModel.initWebView(it)
+                            viewModel.initWebView(it, darkTheme, themeBgColor)
                             viewModel.webView = it
                         }
                         addView(webView)
                     }
+                },
+                update = { container ->
+                    // ★ 用 update 原地改，**不要重建**：申诉页是表单，重建会把已填内容清空
+                    viewModel.applyTheme(container, darkTheme, themeBgColor)
                 },
                 onRelease = {
                     // 释放 WebView 原生资源，避免页面频繁进出时内存持续累积

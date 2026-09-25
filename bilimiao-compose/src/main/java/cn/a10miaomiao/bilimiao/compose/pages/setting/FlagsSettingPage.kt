@@ -34,6 +34,7 @@ import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
+import cn.a10miaomiao.bilimiao.compose.common.localPageNavigation
 import cn.a10miaomiao.bilimiao.compose.pages.setting.ErrorLogPage
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
@@ -257,6 +258,8 @@ private fun FlagsSettingPageContent(
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val context = LocalContext.current
+    // 这个函数是顶层 @Composable（不在 FlagsSettingPageState 类里），要用 CompositionLocal 拿导航
+    val pageNavigation = localPageNavigation()
     // 当前版本：对外版本名 + versionCode（关于页展示；用 PackageManager 取，跨模块安全）
     // 必须在 LazyColumn 之外算 —— LazyListScope 的 lambda 不是 @Composable 上下文，里面不能调 remember
     val appVersionLabel = remember(context) {
@@ -741,58 +744,78 @@ private fun FlagsSettingPageContent(
                         Text(
                             "${lastResult.where} · 评论 ${lastResult.rpid}\n" +
                                 "内容：${lastResult.message.ifBlank { "(无)" }}\n" +
-                                "判定：${lastResult.detail}\n（点这里可「重新检测」）"
+                                "判定：${lastResult.detail}\n（点开可申诉 / 删除；复检用下面那行）"
                         )
                     },
                     onClick = {
                         if (ClickGuard.allow("flags:antifraud_last")) {
-                            com.kongzue.dialogx.dialogs.MessageDialog.build()
-                                .setTitle((if (lastResult.isBad) "⚠️ " else "✅ ") + lastResult.title)
-                                .setMessage(
-                                    "${lastResult.where}\n评论 ID：${lastResult.rpid}\n\n" +
+                            // ★ 与"发完评论后的检测弹窗"共用同一个构建入口 —— 用户要求两处按钮和位置
+                            //   一模一样（"不要这个位置在那，这个位置在这"）。
+                            //   原来这里自己拼了一个弹窗（重新检测/清空记录/关闭），所以看不到申诉按钮。
+                            //   重新检测、清空记录这两个动作挪到下面的独立行，功能没丢。
+                            cn.a10miaomiao.bilimiao.compose.pages.community.components.CommentAntifraudLauncher
+                                .showResultDialog(
+                                    mark = if (lastResult.isBad) "⚠️ " else "✅ ",
+                                    title = lastResult.title,
+                                    body = "${lastResult.where}\n评论 ID：${lastResult.rpid}\n\n" +
                                         "评论内容：${lastResult.message.ifBlank { "(无)" }}\n\n" +
                                         "判定依据：${lastResult.detail}\n\n" +
-                                        "检测时间：${lastResult.timeText()}"
+                                        "检测时间：${lastResult.timeText()}",
+                                    isBad = lastResult.isBad,
+                                    oid = lastResult.oid,
+                                    type = lastResult.type,
+                                    rpid = lastResult.rpid,
+                                    message = lastResult.message,
                                 )
-                                .setOkButton("重新检测") { _, _ ->
-                                    // 手动复检：不发新评论也能验证判定（评论常常几分钟后才被限流）
-                                    val launcher = cn.a10miaomiao.bilimiao.compose.pages.community.components.CommentAntifraudLauncher
-                                    if (lastResult.oid > 0L && lastResult.type > 0) {
-                                        launcher.recheck(
-                                            oid = lastResult.oid,
-                                            type = lastResult.type,
-                                            rpid = lastResult.rpid,
-                                            root = lastResult.root,
-                                            message = lastResult.message,
-                                            // 记录里有发送时间就带上（早停才准）；老记录是 0 = 不早停
-                                            sentTimeSec = lastResult.sentTimeSec,
-                                        )
-                                    } else {
-                                        // 老版本（vc124 及以前）的记录里没存 oid/type，只有"视频 BVxxxx"这段文字
-                                        // → 从里面把 BV 抠出来，换成 aid 再复检（用户实测撞上过"缺少参数"）
-                                        val bv = Regex("BV[0-9A-Za-z]{10}")
-                                            .find(lastResult.where)?.value
-                                        if (bv != null) {
-                                            launcher.recheckByBv(
-                                                bv = bv,
-                                                rpid = lastResult.rpid,
-                                                message = lastResult.message,
-                                                sentTimeSec = lastResult.sentTimeSec,
-                                            )
-                                        } else {
-                                            com.kongzue.dialogx.dialogs.PopTip.show(
-                                                "这条记录是旧版本存的、没带视频信息，没法复检；再发一条评论就有了"
-                                            )
-                                        }
-                                    }
-                                    false
+                        }
+                    },
+                )
+                // 手动复检：不发新评论也能验证判定（评论常常几分钟后才被限流）
+                preference(
+                    key = "antifraud_recheck",
+                    title = { Text("重新检测这条评论") },
+                    summary = { Text("不发新评论也能复检；评论常常几分钟后才被限流") },
+                    onClick = {
+                        if (ClickGuard.allow("flags:antifraud_recheck")) {
+                            val launcher = cn.a10miaomiao.bilimiao.compose.pages.community.components
+                                .CommentAntifraudLauncher
+                            if (lastResult.oid > 0L && lastResult.type > 0) {
+                                launcher.recheck(
+                                    oid = lastResult.oid,
+                                    type = lastResult.type,
+                                    rpid = lastResult.rpid,
+                                    root = lastResult.root,
+                                    message = lastResult.message,
+                                    // 记录里有发送时间就带上（早停才准）；老记录是 0 = 不早停
+                                    sentTimeSec = lastResult.sentTimeSec,
+                                )
+                            } else {
+                                // 老版本（vc124 及以前）的记录里没存 oid/type，只有"视频 BVxxxx"这段文字
+                                // → 从里面把 BV 抠出来，换成 aid 再复检（用户实测撞上过"缺少参数"）
+                                val bv = Regex("BV[0-9A-Za-z]{10}").find(lastResult.where)?.value
+                                if (bv != null) {
+                                    launcher.recheckByBv(
+                                        bv = bv,
+                                        rpid = lastResult.rpid,
+                                        message = lastResult.message,
+                                        sentTimeSec = lastResult.sentTimeSec,
+                                    )
+                                } else {
+                                    com.kongzue.dialogx.dialogs.PopTip.show(
+                                        "这条记录是旧版本存的、没带视频信息，没法复检；再发一条评论就有了"
+                                    )
                                 }
-                                .setCancelButton("清空记录") { _, _ ->
-                                    AntifraudResultState.clear(context)
-                                    false
-                                }
-                                .setOtherButton("关闭")
-                                .show()
+                            }
+                        }
+                    },
+                )
+                preference(
+                    key = "antifraud_clear",
+                    title = { Text("清空检测记录") },
+                    summary = { Text("删掉保存的「上次检测结果」") },
+                    onClick = {
+                        if (ClickGuard.allow("flags:antifraud_clear")) {
+                            AntifraudResultState.clear(context)
                         }
                     },
                 )
@@ -803,12 +826,19 @@ private fun FlagsSettingPageContent(
                 summary = { Text("评论被限流时来这里申诉") },
                 onClick = {
                     if (ClickGuard.allow("flags:antifraud_appeal")) {
-                        context.startActivity(
-                            android.content.Intent(
-                                android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse("https://www.bilibili.com/h5/comment/appeal")
+                        // 走外部浏览器（用户 2026-09-25 拍板："你还是跳外部吧，一劳永逸"）：
+                        // 内置 WebView 得替 B站 页面适配主题（深色注入后表单白底白字），不值当。
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(
+                                        cn.a10miaomiao.bilimiao.compose.pages.community.components
+                                            .CommentAntifraudLauncher.APPEAL_URL
+                                    )
+                                )
                             )
-                        )
+                        }
                     }
                 },
             )
@@ -876,6 +906,55 @@ private fun FlagsSettingPageContent(
             // 说明就留一条 QA（用户要求）：什么时候该调大。
             // 多 CDN 抢跑**不用写** —— 它不管 CDN 竞速开不开都会抢跑（候选来自 baseUrl + backupUrl，
             // CdnNodePool 照样登记多个节点，竞速只影响"谁是第一个"）。
+            // ── 2026-09-25 四点改进的开关（默认值一律取"不会变差"的那一侧）──
+            // 总开关没开时整块置灰：这些开关只作用在分段并发这一层，单连接时它们没有任何效果。
+            switchPreference(
+                key = SettingPreferences.ThreadRipperSmartAssign.name,
+                defaultValue = true,
+                enabled = { ripperOn },
+                title = { Text("智能节点调度") },
+                summary = {
+                    Text(
+                        "按实测吞吐加权分配分块（快的节点多领活、慢的不再平均占坑）；" +
+                            "速度分 90 秒过期、单次不足 48KB 不计分。关掉 = 老的「平均轮转」。"
+                    )
+                },
+            )
+            switchPreference(
+                key = SettingPreferences.ThreadRipperAdaptiveHedge.name,
+                defaultValue = true,
+                enabled = { ripperOn },
+                title = { Text("自适应抢跑延迟") },
+                summary = {
+                    Text("抢跑错峰按实测首块耗时自动调整（400~900ms）；只会比原来的固定 900ms 更早，不会更晚。")
+                },
+            )
+            switchPreference(
+                key = SettingPreferences.ThreadRipperPushback.name,
+                defaultValue = true,
+                enabled = { ripperOn },
+                title = { Text("412/429 风控退让") },
+                summary = {
+                    Text("被限流时先降一档并发 + 冷静 180 秒；冷静期内再次被限流才熔断 10 分钟（原来是一被限流就熔断）。")
+                },
+            )
+            switchPreference(
+                key = SettingPreferences.ThreadRipperCrossHost.name,
+                defaultValue = false,
+                enabled = { ripperOn },
+                title = { Text("跨节点候选合成（实验性）") },
+                summary = { on ->
+                    Text(
+                        if (on) {
+                            "已开启：会把同一份签名地址换到 B站其它 CDN 域名上试（候选 2~4 → 最多 12 条）；" +
+                                "签名能否跨域名复用未经验证，若出现大量失败请关掉。"
+                        } else {
+                            "把 API 给的地址换到 B站其它 CDN 域名，候选更多、抢跑更有牌可打。" +
+                                "★ 默认关：签名能否跨域名复用未经验证，可能反而引入 403/412。"
+                        }
+                    )
+                },
+            )
             preferenceCategory(
                 key = "thread_ripper_qa",
                 title = { Text("说明") }

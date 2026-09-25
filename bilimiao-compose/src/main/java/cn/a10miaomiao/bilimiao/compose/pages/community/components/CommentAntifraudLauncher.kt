@@ -35,8 +35,30 @@ import kotlinx.coroutines.withContext
  */
 object CommentAntifraudLauncher {
 
-    /** B站官方评论申诉页（H5，App 内置 WebView 打开，带着登录态） */
+    /** B站官方评论申诉页（H5）。**用外部浏览器打开** —— 见 [openAppealPage] 的说明 */
     const val APPEAL_URL = "https://www.bilibili.com/h5/comment/appeal"
+
+    /**
+     * 打开官方申诉页 —— **走外部浏览器**。
+     *
+     * 这里换过两轮，把结论写下来免得再折腾（用户 2026-09-25 拍板："你还是跳外部吧，一劳永逸"）：
+     *   · 内置 WebView：得替 B站 页面适配主题 —— 注入官方深色令牌 `bili_dark` 之后，
+     *     表单变成"白底白字"（用户原话："黑色主题看不见"），提交还因为填错字段报"请求错误"；
+     *   · 顺带的"把评论ID/位置复制到剪贴板让用户粘"也一起去掉了：用户粘进了"BV号"那一格，直接提交失败；
+     *   · 外部浏览器本来就是 B站 官方通道，登录一次长期有效，不用我们维护。
+     */
+    private fun openAppealPage() {
+        runCatching {
+            val ctx = BilimiaoCommApp.commApp.app
+            val intent = android.content.Intent(
+                android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse(APPEAL_URL)
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(intent)
+        }.onFailure {
+            toast("没能打开浏览器，申诉页地址：$APPEAL_URL")
+        }
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -391,26 +413,71 @@ object CommentAntifraudLauncher {
             }
             append("\n\n结果仅供参考：阿瓦隆会按账号/评论区/内容分别控评，不代表账号被封。")
         }
+        showResultDialog(
+            mark = mark,
+            title = result.title,
+            body = body,
+            isBad = result.isBad,
+            oid = oid,
+            type = type,
+            rpid = rpid,
+            message = message,
+            onOpenAppeal = onOpenAppeal,
+        )
+    }
+
+    /**
+     * 反诈结果弹窗 —— **两处共用**：① 发完评论后的首次检测；② 设置页里那条"上次检测结果"。
+     *
+     * 用户 2026-09-25 要求：**两个弹窗的按钮和位置必须一模一样**（"不要这个位置在那，这个位置在这"），
+     * 所以这里只留一个构建入口，谁都不许自己拼按钮。
+     *
+     * 按钮顺序（DialogX 的 Material 布局槽位是固定的：`btn_selectOther` + space(weight=1) +
+     * `btnSelectNegative` + `btnSelectPositive`，即"最左 / 空隙 / 中间 / 最右"），
+     * 因此按**位置**分配而不是按语义分配：
+     *   ① 关闭 → other（最左）    ② 申诉此评论 → cancel（中间）    ③ 删除此评论 → ok（最右）
+     *
+     * 另外：申诉**无条件显示**（原来写成"有回调才显示"，用户实测弹窗里根本没有申诉按钮）。
+     */
+    fun showResultDialog(
+        mark: String,
+        title: String,
+        body: String,
+        isBad: Boolean,
+        oid: Long,
+        type: Int,
+        rpid: Long,
+        message: String,
+        onOpenAppeal: ((oid: Long, type: Int, rpid: Long) -> Unit)? = null,
+    ) {
         val dialog = MessageDialog.build()
-            .setTitle(mark + result.title)
+            .setTitle(mark + title)
             .setMessage(body)
-            .setCancelButton("关闭")
-        if (result.isBad) {
-            dialog.setOkButton("删除这条评论") { _, _ ->
+        if (isBad) {
+            dialog.setOtherButton("关闭") { _, _ -> false }
+            dialog.setCancelButton("申诉此评论") { _, _ ->
+                openAppealPage()
+                false
+            }
+            dialog.setOkButton("删除此评论") { _, _ ->
                 deleteComment(type, oid, rpid)
                 false
             }
-            if (onOpenAppeal != null) {
-                dialog.setOtherButton("去申诉") { _, _ ->
-                    onOpenAppeal(oid, type, rpid)
-                    false
-                }
-            }
         } else {
+            dialog.setCancelButton("关闭")
             dialog.setOkButton("知道了")
         }
         dialog.show()
     }
+
+    /**
+     * 去申诉：先把"是哪条评论"复制进剪贴板，再用**内置浏览器**打开官方申诉页。
+     *
+     * 为什么复制：官方申诉页是个表单，要填评论定位；而它支持的 URL 参数我们没有权威依据
+     * （不臆造参数，免得表单打不开），所以把信息放剪贴板让用户直接粘。
+     * 为什么走内置页：App 的登录态在内置 WebView 的 CookieManager 里，甩给外部浏览器等于让用户
+     * 重新登录一次（用户实测反馈）。
+     */
 
     private fun deleteComment(type: Int, oid: Long, rpid: Long) {
         scope.launch {
