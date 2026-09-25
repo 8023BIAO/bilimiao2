@@ -212,6 +212,30 @@ object SettingPreferences {
     /** 线程数档位：0 = 不限（自适应，最多到本机处理器核数），1..max = 固定线程数 */
     val ThreadRipperThreads = intPreferencesKey("thread_ripper_threads")
 
+    // ── 2026-09-25 四点改进的开关（对齐 lemonteaau/PiliPlus 的 thread_ripper）──
+    // 默认值一律取"不会变差"的那一侧：能回到旧行为的一律默认开、引入新假设的一律默认关。
+    /**
+     * 智能节点调度：SWRR 平滑加权轮询（按实测吞吐加权，而不是平均轮转）
+     * + 速度分 90 秒 TTL + 单次读够 48KiB 才计分。**默认开**；关掉 = 完全回到旧行为。
+     */
+    val ThreadRipperSmartAssign = booleanPreferencesKey("thread_ripper_smart_assign")
+
+    /**
+     * 跨 host 候选合成：把 API 给的签名路径换到内置的其它 B站 CDN 域名上，候选 2~4 → 最多 12 条。
+     * **默认关** —— "签名能否跨 host 复用"没有实测验证（改动说明里有风险标注）。
+     * 关着时候选列表与失败封禁行为与改动前完全一致。
+     */
+    val ThreadRipperCrossHost = booleanPreferencesKey("thread_ripper_cross_host")
+
+    /** 自适应抢跑延迟：按实测首块耗时把 900ms 的固定错峰压到 400~900ms。**默认开** */
+    val ThreadRipperAdaptiveHedge = booleanPreferencesKey("thread_ripper_adaptive_hedge")
+
+    /**
+     * 412/429 风控退让：先"降一档并发 + 180 秒冷静期"，冷静期内再次触发才走原来的熔断。
+     * **默认开**；关掉 = 恢复"直接计入 3 次分块失败 → 熔断 10 分钟"。
+     */
+    val ThreadRipperPushback = booleanPreferencesKey("thread_ripper_pushback")
+
     /**
      * Player
      */

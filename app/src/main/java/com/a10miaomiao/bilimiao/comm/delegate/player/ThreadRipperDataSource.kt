@@ -8,6 +8,7 @@ import android.os.SystemClock
 import androidx.media3.common.C
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.utils.RipperDiag
@@ -33,13 +34,25 @@ import java.util.concurrent.TimeUnit
  *
  * ★ vc105 起补齐了上游的**多节点**部分（原来的实现只在一个节点上并发，海外遇到"节点活着但慢"就干等）：
  *   - 候选节点来自 App 自己的 CDN 逻辑（`baseUrl` + `backupUrl`，竞速排序后的列表），登记进 [CdnNodePool]；
- *   - 每个分块**错峰 900ms 抢跑**：主节点太久没首字节，就同时向另一个节点（必须不同 host）也发一条，
+ *   - 每个分块**错峰抢跑**：主节点太久没首字节，就同时向另一个节点（必须不同 host）也发一条，
  *     谁先交出首块谁赢，输的那条立刻掐掉且**不算失败**；
  *   - 节点记速度分（bps 滑动平均）+ 失败退避（3s 起、60s 封顶），坏节点自动靠后；
  *   - 超时：首字节 5.5s / 无进度 4s 掐连接（上游同值）；**不设"单次尝试总时长上限"**
  *     （vc107 教训：番剧走 `[merging]` 后一次请求就是几百 MB，15 秒上限会把正常下载反复掐断 → 黑屏），
  *     改成"最低速度 80KB/s、宽限 10s"——只甩掉活着但基本不动的连接。
  *   用户把 CDN 固定成某个主机时候选全是同一个 host → 抢跑自然退化成"不换节点"。
+ *
+ * ★ 2026-09-25：按 lemonteaau/PiliPlus 的做法补了四点（**每一项都有独立开关、默认关=回到旧实现**）：
+ *   ① 节点调度 SWRR 加权轮询 + 速度分 90 秒 TTL + 单次 48KiB 才计分（[ThreadRipperSettings.smartAssign]，默认开）
+ *      → 见 [CdnNodePool.orderFor]；快节点领到更多块，慢节点不再"平均占坑"。
+ *   ② 跨 host 候选合成 + 三粒度封禁（[ThreadRipperSettings.crossHostCandidates]，**默认关**）
+ *      → 见 `CdnCandidateSynthesizer` / `CdnBanList`；涉及"签名能否跨 host 复用"这个未验证假设，
+ *        所以默认关，关着时候选与封禁行为**与改动前逐字节一致**。
+ *   ③ 自适应抢跑延迟 400~900ms（[ThreadRipperSettings.adaptiveHedge]，默认开）
+ *      → 见 companion 的 [hedgeDelayMs]；上界就是老的固定 900ms，只会更早、不会更晚。
+ *   ④ 412/429 风控退让：降一档 + 180 秒冷静期，冷静期内再次触发才走熔断（[ThreadRipperSettings.pushback]，默认开）
+ *      → 见 [ThreadRipperSettings.notePushback] / [ThreadRipperSettings.effectiveCap]；
+ *        替掉原来"3 次分块失败 → 直接熔断 10 分钟"的那记重锤（那条路径本身仍然保留）。
  *
  * ★ 与 CDN 选择的关系：**完全独立、互不干扰**。
  *   本工程已有的「CDN 竞速 / CDN 固定主机 / 音频不跟随 CDN」照旧生效 ——
@@ -74,6 +87,92 @@ internal object ThreadRipperSettings {
     val maxThreads: Int
         get() = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
 
+    // ─────────────── 2026-09-25 新增的四个开关（全部可一键回退到改之前的行为） ───────────────
+    // 设计原则：开关关掉时，**代码路径回到旧实现**，而不是"新实现但参数保守" ——
+    // 这样"默认值取不会变差的那一侧"是可验证的，不是靠承诺。
+
+    /**
+     * ① 节点调度：SWRR 平滑加权轮询 + 速度分 90 秒 TTL + 单次 48KiB 才计分。
+     * **默认开**。关掉 = 完全回到"bps 降序 + 全局游标轮转（平均分配）、速度分永不过期、无计分门槛"。
+     */
+    @Volatile
+    var smartAssign: Boolean = true
+
+    /**
+     * ② 跨 host 候选合成 + 三粒度封禁（`CdnCandidateSynthesizer` / `CdnBanList`）。
+     * **默认关** —— "签名能不能跨 host 复用"**没有实测验证**，见 `CdnCandidateSynthesizer` 的类注释。
+     * 关着时：候选列表与封禁表现在与改动前**逐字节一致**。
+     */
+    @Volatile
+    var crossHostCandidates: Boolean = false
+
+    /**
+     * ③ 自适应抢跑延迟（400~900ms，按实测首块耗时调整）。
+     * **默认开**。关掉 = 恢复固定的 900ms。
+     */
+    @Volatile
+    var adaptiveHedge: Boolean = true
+
+    /**
+     * ④ 412/429 风控退让（降一档 + 180 秒冷静期，冷静期内再次触发才走原来的熔断）。
+     * **默认开**。关掉 = 恢复"直接计入 3 次分块失败 → 10 分钟熔断"。
+     */
+    @Volatile
+    var pushback: Boolean = true
+
+    /** 风控退让的冷静期：这么长时间内保持降档、并且"再触发一次就熔断"（对齐对方 180 秒） */
+    const val PUSHBACK_COOLDOWN_SECONDS = 180L
+
+    private const val PUSHBACK_COOLDOWN_MS = PUSHBACK_COOLDOWN_SECONDS * 1000L
+
+    /** 冷静期里累计降了几档（一档 = 一条连接） */
+    @Volatile
+    private var pushbackSteps: Int = 0
+
+    @Volatile
+    private var pushbackUntilMs: Long = 0L
+
+    /**
+     * 遇到 HTTP 412/429 时调用：**降一档 + 进入 180 秒冷静期**。
+     *
+     * @return true = 这次是"冷静期内再次触发"，调用方应走**原来的熔断**（10 分钟全单连接）。
+     *
+     * 为什么要拆成两步（对齐 lemonteaau/PiliPlus `auto_concurrency.dart:128-131` 的 `pushback()`）：
+     * B站的 412/429 很多时候是**瞬时风控**，原来的实现把它当成"分块坏了"，
+     * 3 次就熔断 10 分钟全走单连接 —— 对用户来说是"断崖式降速"。
+     * 现在的梯度是：第一次限流 → 少一条连接、冷静 180 秒；真的被盯上了（冷静期内又来）才熔断。
+     */
+    fun notePushback(): Boolean {
+        synchronized(this) {
+            val now = SystemClock.uptimeMillis()
+            val inCooldown = now < pushbackUntilMs
+            pushbackUntilMs = now + PUSHBACK_COOLDOWN_MS
+            if (inCooldown) return true
+            pushbackSteps++
+            return false
+        }
+    }
+
+    /**
+     * 冷静期内的并发上限：**降一档 = 少一条连接**。
+     *
+     * "档"就是用户那根滑块的一格（这也是用户明确要求的：用现有滑块值当上限，
+     * 不引入对方 8/12/16/24/32 那套自动升降）。下限永远是 1。
+     *
+     * 冷静期一过自动回到用户设的值 —— 这就是"180 秒内不再升档"：
+     * 我们本来就没有自动升档机制，这里保证的是**降下去的值不会提前弹回来**。
+     */
+    fun effectiveCap(configured: Int): Int {
+        synchronized(this) {
+            val now = SystemClock.uptimeMillis()
+            if (now >= pushbackUntilMs) {
+                pushbackSteps = 0
+                return configured
+            }
+            return (configured - pushbackSteps).coerceAtLeast(1)
+        }
+    }
+
     /**
      * 每条连接**最少**分到的字节数：**64KB**，与上游 Bilibili-thread-ripper 的
      * `minChunkBytes: 64 * 1024`（`range-core.js` / `splitRange`）完全一致。
@@ -100,6 +199,16 @@ internal object ThreadRipperSettings {
         // ThreadRipperAutoThreads 这个键保留在 DataStore 里但已不再使用（旧版本的开关）
         enabled = prefs[SettingPreferences.ThreadRipperEnable] ?: false
         threads = (prefs[SettingPreferences.ThreadRipperThreads] ?: 4).coerceIn(0, maxThreads)
+        // ── 四个新开关（默认值 = "不会变差"的那一侧）──
+        smartAssign = prefs[SettingPreferences.ThreadRipperSmartAssign] ?: true
+        crossHostCandidates = prefs[SettingPreferences.ThreadRipperCrossHost] ?: false
+        adaptiveHedge = prefs[SettingPreferences.ThreadRipperAdaptiveHedge] ?: true
+        pushback = prefs[SettingPreferences.ThreadRipperPushback] ?: true
+        // 把开关下发给两个纯逻辑对象：它们自己不做设置读取，只认这两个标志位。
+        // CdnBanList 默认就是 false —— 也就是"跨 host 合成没开，封禁表绝不生效"。
+        CdnNodePool.smartAssign = smartAssign
+        CdnNodePool.crossHost = crossHostCandidates
+        CdnBanList.enabled = crossHostCandidates
     }
 
     /**
@@ -109,12 +218,17 @@ internal object ThreadRipperSettings {
      *   count = min(用户设的连接数, ceil(本次字节数 / 64KB))
      * 也就是"把这次的区间平均分给 N 条连接"，只有每份不足 64KB 时才自动少开。
      * 「不限」= 上限取本机核数。
+     *
+     * ★ 2026-09-25：在此基础上叠加**风控退让**（[effectiveCap]）—— 收到 412/429 后的
+     *   180 秒冷静期内，这里的上限会比用户设的少一档（下限 1）。
+     *   412/429 退让开关关掉时，这一行等于没写（[effectiveCap] 不被调用）。
      */
     fun resolveThreads(chunkBytes: Long): Int {
         if (!enabled) return 1
         val max = maxThreads
         val configured = threads
-        val cap = if (configured <= 0) max else configured.coerceIn(1, max)
+        var cap = if (configured <= 0) max else configured.coerceIn(1, max)
+        if (pushback) cap = effectiveCap(cap)
         val bySize = ((chunkBytes + MIN_CHUNK_BYTES - 1) / MIN_CHUNK_BYTES).toInt()
         return bySize.coerceIn(1, cap)
     }
@@ -238,8 +352,54 @@ internal class ThreadRipperDataSource(
          * **抢跑错峰**：主节点这么久还没交出首字节，就同时向第二个节点也发一条请求，
          * 谁先回来用谁，输的那条立刻掐掉（**不算失败**）。
          * 与上游 `hedgeDelayMs: 900` 一致 —— 这是它"哪个下载好了就先用哪个"的核心。
+         *
+         * ★ 2026-09-25：这个值现在是**上限**，实际值由 [hedgeDelayMs] 按实测首块耗时自适应
+         *   （范围 [HEDGE_DELAY_MIN_MS]~[HEDGE_DELAY_MS]）。它本身仍被 [awaitWinner] 的
+         *   等待上限引用 —— 那里用最大值，等于"判决窗口只会更宽，不会更窄"。
          */
         const val HEDGE_DELAY_MS = 900L
+
+        /**
+         * 自适应抢跑延迟的**下限：400ms**（**不用**上游的 250ms）。
+         *
+         * 上游 `range_proxy.dart:32-33` 是 `(pieceMs * 1.5).clamp(250, 900)`。我们不下探到 250：
+         * 250ms 在移动网络下几乎等于"每个块都把两个节点同时打一遍"，请求量翻倍更容易触发
+         * B站风控（412/429）——用户明确要求"不要用 250ms 下限，太激进"。
+         * 400ms 仍然明显早于原来的固定 900ms，收益保留、风险减半。
+         */
+        const val HEDGE_DELAY_MIN_MS = 400L
+
+        /**
+         * 实测**首块耗时**的 EMA（毫秒，0 = 还没测到）。只由"抢跑赢家"贡献 ——
+         * 输的那条本来就会被掐，它的耗时里混着错峰等待，不能代表线路速度。
+         *
+         * 为什么用"首块耗时"当 pieceMs：它就是"这个节点把 64KB 吐出来要多久"，
+         * 抢跑延迟比它略长一点（×1.5）才叫"比正常情况慢，开始抢跑"。
+         */
+        @Volatile
+        private var pieceMsEma = 0L
+
+        /**
+         * 本轮抢跑该错峰多久：`首块耗时 × 1.5`，**硬夹在 400~900ms**。
+         *
+         * 不会负优化的三个理由：
+         *  1. 上界就是原来的固定值 900ms —— 自适应**只会让它更早**，永远不会更晚；
+         *  2. 还没测到（进程刚起 / 第一个块）→ 直接返回 900，与以前一模一样；
+         *  3. 开关 [ThreadRipperSettings.adaptiveHedge] 关掉 → 也直接返回 900。
+         */
+        fun hedgeDelayMs(): Long {
+            if (!ThreadRipperSettings.adaptiveHedge) return HEDGE_DELAY_MS
+            val pieceMs = pieceMsEma
+            if (pieceMs <= 0L) return HEDGE_DELAY_MS
+            return (pieceMs * 3 / 2).coerceIn(HEDGE_DELAY_MIN_MS, HEDGE_DELAY_MS)
+        }
+
+        /** 记一次"赢家拿到首块用了多久"（EMA 0.65/0.35，与速度分同权重） */
+        fun notePieceTime(ms: Long) {
+            if (ms <= 0L) return
+            val old = pieceMsEma
+            pieceMsEma = if (old <= 0L) ms else old * 65 / 100 + ms * 35 / 100
+        }
 
         /**
          * **单次尝试的最低速度**：低于它、且还有别的节点可选 → 认定这条连接"活着但基本不动"，换节点续传。
@@ -355,7 +515,9 @@ internal class ThreadRipperDataSource(
 
         if (threads <= 1) return openSingle(dataSpec)
 
-        val pool = CdnNodePool.orderFor(dataSpec.uri)
+        // ★ 这里只是打日志，必须用 preview() 而不是 orderFor()：
+        //   orderFor 会推进 SWRR 的分配名额，用它打日志等于每次请求都白白偏一次调度。
+        val pool = CdnNodePool.preview(dataSpec.uri)
         RipperDiag.log(
             "parallel",
             "并发拉取：${threads} 连接 / ${length / 1024}KB @${dataSpec.position / 1024}KB" +
@@ -564,13 +726,15 @@ internal class ThreadRipperDataSource(
      * （队列满就阻塞 —— 这是"预读"的边界，也是内存闸门；上层不读了就靠 [cancel] 打断 `put`）。
      *
      * ★ vc105 起：**多节点抢跑**（对齐上游 Bilibili-thread-ripper 的核心机制）
-     *  - 本块先从节点池里的某个节点起步；若 [HEDGE_DELAY_MS] 内没交出第一个数据块，
+     *  - 本块先从节点池里的某个节点起步（哪个节点由 SWRR 按实测吞吐决定，见①）；
+     *    若 [hedgeDelayMs]（400~900ms 自适应，见③）内没交出第一个数据块，
      *    就**同时**向第二个节点（必须是不同 host）也发一条 —— 谁先交出首块谁赢，
      *    输的那条立刻掐掉，而且**不算失败**（这正是抢跑的意义：慢的不该被记账）；
      *  - 赢家继续把这一块剩下的读完，所以稳定后每个块仍然只有一条活跃连接；
      *  - 首字节 [FIRST_BYTE_TIMEOUT_MS] / 无进度 [STALL_TIMEOUT_MS] / 单次尝试
      *    "活着但基本不动"（80KB/s 以下）才换节点；
      *  - 失败会记进 [CdnNodePool]，坏节点被暂停（指数退避、60 秒封顶），重试时自动换节点；
+     *    HTTP 412/429 例外：走④的"降一档 + 冷静期"，不喂给熔断器的 streak；
      *  - **分块级重试**：只重下这一块没下完的部分（`pushed` 记录已确认入队的字节数）。
      *
      * 单节点（没登记过候选 / 用户固定了主机 / PCDN 节点）时行为与以前一样：
@@ -606,7 +770,14 @@ internal class ThreadRipperDataSource(
 
         private var attempts = 0
 
-        /** 本块的候选节点（节点池给：跳过被暂停的，按速度分排 + 轮换） */
+        /**
+         * 本块的候选节点（节点池给：第一个 = SWRR 选择的起步节点，其余 = 抢跑/重试备胎；
+         * 被暂停的、太慢的、被封禁的都排在后面而不是被删掉）。
+         *
+         * ★ 构造顺序很重要：分块是在 `openParallel()` 的循环里**逐个构造**的，
+         *   所以这里每 new 一个 Chunk 就消耗一个 SWRR 名额 —— 第 i 块拿到的正是
+         *   SWRR 序列里的第 i 个节点，快节点自然领到更多块。
+         */
         private val urls: List<String> = CdnNodePool.orderFor(spec.uri)
 
         /** 轮换游标：赢家会被提到最前，下一次重试优先用它 */
@@ -673,6 +844,26 @@ internal class ThreadRipperDataSource(
                             Thread.currentThread().interrupt()
                             return
                         }
+                        // ───── ④ 412/429 风控退让（2026-09-25）─────
+                        // B站的 412（被风控）/429（限流）不是"这个块坏了"，把它喂给
+                        // "连续 3 次分块失败 → 熔断 10 分钟全单连接"那记重锤，用户感受到的就是
+                        // "突然从 8 条连接掉到 1 条、十分钟回不来"。
+                        // 现在：先**降一档并发 + 180 秒冷静期**；只有冷静期内**再次**触发才走熔断。
+                        // 注意这里**不调 noteChunkFailure()** —— 限流不该给熔断器的 streak 计数。
+                        if (ThreadRipperSettings.pushback) {
+                            val status = httpStatusOf(e)
+                            if (status == 412 || status == 429) {
+                                noteChunkSuccess()
+                                val again = ThreadRipperSettings.notePushback()
+                                RipperDiag.log(
+                                    "pushback",
+                                    "分块 ${start / 1024}KB 收到 HTTP $status → 降一档并发 + " +
+                                        "冷静 ${ThreadRipperSettings.PUSHBACK_COOLDOWN_SECONDS} 秒" +
+                                        if (again) "；冷静期内再次触发 → 走熔断" else ""
+                                )
+                                if (again) tripBreaker()
+                            }
+                        }
                         attempts++
                         if (attempts > MAX_ATTEMPTS) {
                             RipperDiag.log(
@@ -716,9 +907,12 @@ internal class ThreadRipperDataSource(
         }
 
         /**
-         * 本轮试哪几条路：主节点先上，第二个候选错峰 [HEDGE_DELAY_MS]。
+         * 本轮试哪几条路：主节点先上，第二个候选错峰 [hedgeDelayMs]（400~900ms 自适应，见 ③）。
          * 抢跑的第二个**必须换 host** —— 用户把 CDN 固定成某个主机时，候选全是同一个 host，
          * 这里就自然退化成"单节点不换"（这是我们对用户的承诺）。
+         *
+         * ★ 主节点就是 `urls[0]`：它是 [CdnNodePool.orderFor] 用 SWRR 选出来的（点①），
+         *   所以"哪个节点领到这一块"从平均分配变成了按实测吞吐加权分配。
          */
         private fun planForThisAttempt(): List<Pair<String, Long>> {
             val list = urls.ifEmpty { listOf(spec.uri.toString()) }
@@ -728,7 +922,7 @@ internal class ThreadRipperDataSource(
             return if (hedge == null) {
                 listOf(primary to 0L)
             } else {
-                listOf(primary to 0L, hedge to HEDGE_DELAY_MS)
+                listOf(primary to 0L, hedge to hedgeDelayMs())
             }
         }
 
@@ -765,7 +959,14 @@ internal class ThreadRipperDataSource(
                 racers.forEach { r ->
                     // 9 秒都没首字节 / 直接报错，记它一笔（带上原因，方便下次一眼看出是 416 还是超时）
                     if (r.firstBlock == null) {
-                        CdnNodePool.noteFailure(r.url, r.failure?.let { "${it.javaClass.simpleName}: ${it.message}" })
+                        // status/received 交给三粒度封禁表（只在「跨 host 合成」开着时才有账可记）：
+                        // 412/429/403 这类 4xx 空响应和"连接层超时"在它眼里是两种不同的病。
+                        CdnNodePool.noteFailure(
+                            r.url,
+                            r.failure?.let { "${it.javaClass.simpleName}: ${it.message}" },
+                            status = httpStatusOf(r.failure),
+                            received = r.delivered,
+                        )
                     }
                     runCatching { r.lose() }
                 }
@@ -787,6 +988,8 @@ internal class ThreadRipperDataSource(
 
         /** 等第一个数据块：谁先到谁是赢家；全都失败了就把最后一个异常抛出去 */
         private fun awaitWinner(racers: List<Attempt>): Attempt {
+            // 判决窗口用**最大**抢跑延迟算（[HEDGE_DELAY_MS]，不是自适应的当前值）：
+            // 自适应只会让抢跑更早发生，用最大值当上限 = 窗口只宽不窄，不会把正常等待判成超时。
             val deadline = SystemClock.uptimeMillis() +
                 FIRST_BYTE_TIMEOUT_MS + HEDGE_DELAY_MS + FIRST_BLOCK_SLACK_MS
             while (true) {
@@ -840,13 +1043,21 @@ internal class ThreadRipperDataSource(
 
             private var ds: DataSource? = null
 
-            /** 本次尝试已经交付的字节数（[awaitFinish] 用它算速度） */
+            /**
+             * 本次尝试已经交付的字节数（[awaitFinish] 用它算速度）。
+             * ★ 2026-09-25 去掉了 `private`：抢跑全挂时 [downloadAttempt] 要把它交给
+             *   [CdnNodePool.noteFailure] 的 `received` 参数（"有数据回来就不算空响应"）。
+             */
             @Volatile
-            private var delivered = 0L
+            var delivered = 0L
 
-            /** 真正开始收数据的时刻（速度分用它算，抢跑的 900ms 错峰不该算进去） */
+            /** 真正开始收数据的时刻（速度分用它算，抢跑的错峰等待不该算进去） */
             @Volatile
             private var dataStartAt = 0L
+
+            /** 首块耗时（毫秒，-1 = 还没量到）：自适应抢跑延迟的输入，见 companion 的 [notePieceTime] */
+            @Volatile
+            private var firstBlockMs = -1L
 
             private val thread = Thread({ body() }, "ripper-attempt").apply { isDaemon = true }
 
@@ -908,10 +1119,11 @@ internal class ThreadRipperDataSource(
                     if (delayMs > 0) {
                         Thread.sleep(delayMs)
                         if (lost || closed) return
-                        // 走到这里 = 主节点 900ms 还没交出首字节 → 正式抢跑
+                        // 走到这里 = 主节点在 hedgeDelayMs 内还没交出首字节 → 正式抢跑
+                        // （延迟是自适应的，所以日志里打实际值，不再写死 900）
                         RipperDiag.log(
                             "hedge",
-                            "分块 ${start / 1024}KB：主节点 ${HEDGE_DELAY_MS}ms 没首字节 → 抢跑第二条（${hostOf(url)}）"
+                            "分块 ${start / 1024}KB：主节点 ${delayMs}ms 没首字节 → 抢跑第二条（${hostOf(url)}）"
                         )
                     }
                     if (lost || closed) return
@@ -936,6 +1148,8 @@ internal class ThreadRipperDataSource(
                         ?: throw IOException("分段提前结束（还差 $remaining 字节）")
                     remaining -= first.size
                     firstBlock = first
+                    // ③ 自适应抢跑延迟的输入：首块耗时（只在"赢了"之后才会真的记进 EMA，见下）
+                    firstBlockMs = SystemClock.uptimeMillis() - dataStartAt
 
                     // ② 等判决：调用方每 15ms 轮询一次，正常几毫秒就出结果
                     val judgeDeadline = SystemClock.uptimeMillis() + DECISION_WAIT_MS
@@ -958,6 +1172,9 @@ internal class ThreadRipperDataSource(
                     }
 
                     // ③ 赢家：首块 + 剩下的全部按顺序交付
+                    //    ★ 只有赢了才把"首块耗时"记进 EMA —— 输的那条是被掐掉的，
+                    //      它的耗时里混着错峰等待和"根本没轮到我"，不能代表线路速度。
+                    if (firstBlockMs > 0) notePieceTime(firstBlockMs)
                     deliver(first)
                     delivered += first.size
                     while (remaining > 0 && !closed && !lost) {
@@ -988,6 +1205,11 @@ internal class ThreadRipperDataSource(
                         failure != null && !undecidedExit -> CdnNodePool.noteFailure(
                             url,
                             failure?.let { "${it.javaClass.simpleName}: ${it.message}" },
+                            // ★ 把 HTTP 状态码和"实际收到多少字节"交给节点池：
+                            //   412/429/403 这类 4xx **空响应**与"连接层超时"在封禁表里是两种病，
+                            //   而"有数据回来"的失败根本不该算空响应（received > 0 直接跳过记账）。
+                            status = httpStatusOf(failure),
+                            received = delivered,
                         )
                     }
                 }
@@ -1021,3 +1243,22 @@ internal class ThreadRipperDataSource(
  */
 private fun hostOf(url: String): String =
     runCatching { Uri.parse(url).host.orEmpty() }.getOrDefault("")
+
+/**
+ * 从异常链里挖出 HTTP 状态码（0 = 不是 HTTP 响应码错误，例如超时/DNS/TLS）。
+ *
+ * 为什么要它（2026-09-25）：④ 的风控退让只对 **412 / 429** 生效，
+ * 而 media3 的 `DefaultHttpDataSource` 把非 2xx 包成
+ * [HttpDataSource.InvalidResponseCodeException]（`responseCode` 字段），
+ * 有时外面还会再套一层 `HttpDataSourceException`，所以沿着 `cause` 往里找。
+ * 找不到就返回 0 —— 调用方把这个当"连接层的空响应"处理，不会误判成风控。
+ */
+private fun httpStatusOf(t: Throwable?): Int {
+    var c = t
+    var depth = 0
+    while (c != null && depth++ < 8) {
+        if (c is HttpDataSource.InvalidResponseCodeException) return c.responseCode
+        c = c.cause
+    }
+    return 0
+}
