@@ -59,6 +59,58 @@ class MessageAPI {
     }
 
     /**
+     * 获取系统通知列表（消息中心 → 系统通知）。
+     *
+     * ⚠️ 这个接口**不在 api.bilibili.com** 上，而是在 message.bilibili.com（Web 接口：
+     *    只认 Cookie(SESSDATA) + csrf，不认 APP 的 appkey/sign/access_key），
+     *    所以这里用 biliMessageApi + isWebApi，而不是本类其它方法用的 biliApi。
+     *    （同 CommentApi.addWithPictures 的道理：带上 appkey/sign 会被服务端按"APP 通道"判定。）
+     *
+     * 分页：首屏不传 cursor；下一页传**上一页最后一条**的 cursor（PiliPlus handleListResponse 的用法）。
+     * 返回体的 `data` 直接是数组（没有顶层 cursor 对象），故解析成 List<SystemMessageInfo>。
+     *
+     * 来源：PiliPlus lib/http/msg.dart 的 MsgHttp.msgFeedNotify + lib/http/api.dart 的 Api.msgSysNotify。
+     * 状态：接口地址与参数已确认（照抄 PiliPlus）；返回结构由 PiliPlus 的解析代码反推 → **待实机验证**。
+     */
+    fun sysNotify(
+        cursor: Long? = null,
+        pageSize: Int = 20,
+    ) = MiaoHttp.request {
+        isWebApi = true
+        url = BiliApiService.biliMessageApi(
+            "x/sys-msg/query_notify_list",
+            "cursor" to cursor?.toString(),
+            "page_size" to pageSize.toString(),
+            // mobi_app=web + build=0：按 Web 端返回（time_at 才是给人看的文案）；build 不要用 APP 的版本号
+            "mobi_app" to "web",
+            "build" to "0",
+            "web_location" to "333.40164",
+        )
+    }
+
+    /**
+     * 上报"系统通知读到哪了"（服务端游标），成功之后 Tab 红点才会灭。
+     *
+     * csrf 取 WebView 侧 cookie 里的 bili_jct（MiaoHttp.csrfToken）：我们发的是 Web 请求，用的是同一套 Cookie。
+     * 取不到时 ApiHelper.urlencode 会把空值参数丢掉，服务端会以 csrf 校验失败拒绝 ——
+     * 调用方按"上报失败不影响看通知"处理即可（未读数只是留着下次再消）。
+     *
+     * 来源：PiliPlus lib/http/msg.dart 的 MsgHttp.msgSysUpdateCursor（GET + csrf + cursor）。
+     * 状态：待实机验证。
+     */
+    fun sysUpdateCursor(cursor: Long): MiaoHttp {
+        val csrf = MiaoHttp.csrfToken()
+        return MiaoHttp.request {
+            isWebApi = true
+            url = BiliApiService.biliMessageApi(
+                "x/sys-msg/update_cursor",
+                "csrf" to csrf,
+                "cursor" to cursor.toString(),
+            )
+        }
+    }
+
+    /**
      * 获取私信会话列表（REST API，保留兼容）
      */
     fun sessions() = MiaoHttp.request {

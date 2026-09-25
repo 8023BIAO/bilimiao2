@@ -43,6 +43,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.message.content.AtMessageContent
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.LikeMessageContent
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.PrivateMessageContent
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.ReplyMessageContent
+import cn.a10miaomiao.bilimiao.compose.pages.message.content.SystemMessageContent
 import com.a10miaomiao.bilimiao.comm.store.MessageStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.store.WindowStore
@@ -75,6 +76,14 @@ class MessagePage : ComposePage() {
 
 }
 
+/**
+ * 消息页的 5 个 Tab。
+ *
+ * ★ name 用极简文案（回复 / @我 / 赞 / 私信 / 系统）：
+ *   5 个长名字（"回复我的""我的@""收到的赞""私信""系统通知"）在窄屏上会被挤成两行、Tab 条整体抬高，
+ *   用户 2026-09-25 实测反馈"要极简、好识别，要不然多的话它又抬上去，不好看"。
+ *   只动显示名：id 与下面的角标（unread.reply / at / like / chat / sys_msg）逻辑一个字都没改。
+ */
 private sealed class MessagePageTab(
     val id: Int,
     val name: String,
@@ -83,7 +92,7 @@ private sealed class MessagePageTab(
     abstract fun PageContent()
     data object Reply : MessagePageTab(
         id = 0,
-        name = "回复我的"
+        name = "回复"
     ) {
         @Composable
         override fun PageContent() {
@@ -93,7 +102,7 @@ private sealed class MessagePageTab(
 
     data object At : MessagePageTab(
         id = 1,
-        name = "@我的"
+        name = "@我"
     ) {
         @Composable
         override fun PageContent() {
@@ -103,7 +112,7 @@ private sealed class MessagePageTab(
 
     data object Like : MessagePageTab(
         id = 2,
-        name = "收到的赞"
+        name = "赞"
     ) {
         @Composable
         override fun PageContent() {
@@ -121,6 +130,21 @@ private sealed class MessagePageTab(
         }
     }
 
+    /**
+     * 系统通知：放在"私信"**后面**（用户要求的位置）。
+     * 它和另外四个 Tab 不一样 —— 数据不是"某个人对我做了什么"，而是 B站自己发的通知
+     * （稿件状态/活动/风纪等），所以列表里没有头像和用户，见 SystemMessageContent。
+     */
+    data object SystemMsg : MessagePageTab(
+        id = 4,
+        name = "系统"
+    ) {
+        @Composable
+        override fun PageContent() {
+            SystemMessageContent()
+        }
+    }
+
 }
 
 private class MessagePageViewModel(
@@ -135,6 +159,7 @@ private class MessagePageViewModel(
         MessagePageTab.At,
         MessagePageTab.Like,
         MessagePageTab.PrivateMsg,
+        MessagePageTab.SystemMsg,
     )
 
     init {
@@ -186,6 +211,7 @@ private fun MessagePageContent(
                                     1 -> it.at
                                     2 -> it.like
                                     3 -> it.chat
+                                    4 -> it.sys_msg
                                     else -> 0
                                 }
                             } ?: 0

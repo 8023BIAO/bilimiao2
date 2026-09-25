@@ -82,6 +82,21 @@ class MessageStore(override val di: DI) :
         }
     }
 
+    /**
+     * 读完系统通知后清系统通知未读。
+     *
+     * 未读数来自 x/msgfeed/unread 的 sys_msg 字段（消息页 Tab 上那个红点用的就是它）。
+     * 消红点除了改本地状态，还要把服务端游标推上去（见 MessageAPI.sysUpdateCursor），
+     * 否则下次拉 unread 又会把它带回来。
+     */
+    fun clearSysMsgUnread() {
+        setState {
+            unread = unread?.copy(
+                sys_msg = 0
+            )
+        }
+    }
+
     fun clearLikeUnread() {
         setState {
             unread = unread?.copy(
