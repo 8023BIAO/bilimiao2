@@ -81,8 +81,23 @@ class CoverViewModel(
                 activity.startActivity(intent)
             }
             "ROOM" -> {
-                intent.data = Uri.parse("https://live.bilibili.com/$id")
-                activity.startActivity(intent)
+                // 直播改走**原生播放页**（第二阶段 A 路）：独立 Activity，roomId 走 Intent extra，
+                // 由它自己去 room_init 换算真实房间号并播（原来是丢给外部浏览器）。
+                //
+                // ★为什么用 setClassName 的字符串、而不是直接 import LivePlayerActivity：
+                //   本文件在 bilimiao-cover 模块，LivePlayerActivity 在 app 模块，
+                //   依赖方向是 app → cover，反向引用会形成循环依赖，编译不过。
+                //   extra 的 key "roomId" 与 LivePlayerActivity.EXTRA_ROOM_ID 是同一份约定。
+                val liveIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setClassName(activity, "com.a10miaomiao.bilimiao.LivePlayerActivity")
+                    putExtra("roomId", id)
+                }
+                // 原生页万一拉不起来（理论上不会），退回原来的"外部浏览器"行为，别让用户点了没反应
+                runCatching { activity.startActivity(liveIntent) }.onFailure {
+                    runCatching {
+                        activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://live.bilibili.com/$id")))
+                    }
+                }
             }
             "CV" -> {
                 intent.data = Uri.parse("https://www.bilibili.com/read/cv$id")

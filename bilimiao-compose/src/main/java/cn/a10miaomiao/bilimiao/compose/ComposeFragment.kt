@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,8 +97,10 @@ import cn.a10miaomiao.bilimiao.compose.components.dialogs.MessageDialogState
 import cn.a10miaomiao.bilimiao.compose.components.image.MyImagePreviewer
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.ImagePreviewerProvider
 import cn.a10miaomiao.bilimiao.compose.pages.home.HomePage
-import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
+import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
+import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
+import com.a10miaomiao.bilimiao.comm.live.LiveSpaceLauncher
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MyPage
 import com.a10miaomiao.bilimiao.comm.mypage.myPageConfig
@@ -183,6 +186,17 @@ class ComposeFragment : Fragment(), MyPage, DIAware, OnBackPressedDispatcherOwne
                 val config = LocalConfiguration.current
                 val connection = rememberNestedScrollInteropConnection(container ?: LocalView.current)
                 composeNav = rememberNavController()
+                // ★直播播放页「UP主」按钮 → 用户空间的**注册桥**（全工程唯一注册点，见 LiveSpaceLauncher）。
+                //   为什么注册在这里：直播页在 app 模块、用户空间是 compose 模块的 Compose 页面，
+                //   两边唯一的共同可见点就是 comm 模块的 LiveSpaceLauncher（app 反向 import compose 会成环）。
+                //   为什么用 DisposableEffect：页面在时挂上实现、Fragment 销毁时注销 ——
+                //   注销后直播页的 open() 会返回 false，由它自己 toast 兜底，不会静默失败。
+                DisposableEffect(pageNavigation) {
+                    LiveSpaceLauncher.register { mid ->
+                        pageNavigation.navigate(UserSpacePage(id = mid.toString()))
+                    }
+                    onDispose { LiveSpaceLauncher.unregister() }
+                }
                 CompositionLocalProvider(
                     LocalContainerView provides container,
                     LocalPageConfigState provides pageConfigState,

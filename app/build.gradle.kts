@@ -15,8 +15,8 @@ android {
         applicationId = "com.a10miaomiao.bilimiao.mod"
         minSdk = 24
         targetSdk = 36
-        versionCode = 167
-        versionName = "v2026.09.25-59"
+        versionCode = 169
+        versionName = "v2026.09.26-60"
 
         flavorDimensions("default")
 
@@ -136,6 +136,8 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.dash)
+    // 直播 HLS(.m3u8)：LivePlayerDelegate 造 HlsMediaSource 用（方案 §3.1）
+    implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.gsy.video.player)
 
     implementation(libs.okhttp3)

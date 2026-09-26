@@ -271,7 +271,10 @@ class PlayerAPI {
             if (attempt > 0) params["_"] = System.currentTimeMillis().toString()
             val res = try {
                 MiaoHttp.request {
-                    // web 语义：不加 app-key/env/Authorization，只带 Cookie + WBI 签名
+                    // web 语义：不加 app-key/env/Authorization，只带 Cookie。
+                    // ★WBI 作用域（2026-09 收敛）：这里**不签名** —— 本接口在签名器修好之前一直
+                    //   是未签名请求（且预览图能取到），用户要求非直播区域与修复前逐字节一致。
+                    //   将来若确认要签：给下面这行加上 WbiSigner.WbiScope.NON_LIVE，见 WbiSigner.WbiScope。
                     isWebApi = true
                     url = "https://api.bilibili.com/x/player/videoshot?" + ApiHelper.urlencode(params)
                     headers["Referer"] = "https://www.bilibili.com/video/av${numericAid ?: bv}"

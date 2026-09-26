@@ -39,6 +39,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterRecommendSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterCommentSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.home.HomePage
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveSearchPage
 import cn.a10miaomiao.bilimiao.compose.pages.message.MessagePage
 import cn.a10miaomiao.bilimiao.compose.pages.message.ChatPage
 import cn.a10miaomiao.bilimiao.compose.pages.mine.HistoryPage
@@ -57,6 +58,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.setting.AboutSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.BottomBarSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.ErrorLogPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.HomeSettingPage
+import cn.a10miaomiao.bilimiao.compose.pages.setting.LiveSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.TimeSelectSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.RegionSelectPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.SettingPage
@@ -68,6 +70,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.setting.RipperSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeRegionDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.mine.MyFollowPage
+import cn.a10miaomiao.bilimiao.compose.pages.user.EditProfilePage
 import cn.a10miaomiao.bilimiao.compose.pages.user.MyFollowerPage
 import cn.a10miaomiao.bilimiao.compose.pages.setting.ThemeSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.user.SearchFollowPage
@@ -110,6 +113,11 @@ class BilimiaoPageRoute (
                 }
             )
         )
+
+        // live（第三阶段 B 路）：直播搜索页。
+        // ★ComposePage 必须在这里注册：导航是按 KClass 反查路由表的，漏了就是"点进去直接崩"
+        //   （代码检查.sh 规则 C 会拦下这种漏注册）。带不带关键字都能进（keyword 有默认值）。
+        composable<LiveSearchPage>()
 
         // auth
         composable<LoginPage>()
@@ -203,6 +211,9 @@ class BilimiaoPageRoute (
             )
         )
         composable<HomeSettingPage>()
+        // 直播设置（第四阶段）：后台/小窗、默认画质、线路、弹幕、直播列表。
+        // 与页面文件同一次改动注册（规则 C：ComposePage 漏注册 = 点进去直接崩）
+        composable<LiveSettingPage>()
         // ====== 时光精选已禁用 ======
         // composable<TimeSelectSettingPage>()
         // composable<RegionSelectPage>()
@@ -281,6 +292,8 @@ class BilimiaoPageRoute (
                 )
             )
         )
+        // 编辑资料（自己的空间 → 「更多」→「编辑资料」）
+        composable<EditProfilePage>()
         composable<UserSpaceSearchPage>()
         composable<UserFollowPage>()
         composable<SearchFollowPage>()

@@ -5,7 +5,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.os.Build
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +56,7 @@ import com.kongzue.dialogx.dialogs.MessageDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
@@ -184,6 +186,73 @@ private class SystemMessageContentModel(
     }
 
     /**
+     * 删除单条系统通知（长按列表项 → 确认框点"确定" → 走这里）。
+     *
+     * 顺序是刻意的：**先等服务端确认删掉了，再动本地列表**。
+     * 反过来先删本地再请求（乐观删除）一旦失败，界面上没了、退出重进又回来，
+     * 用户会以为"删了但没删干净"——宁可慢半拍，也不要这种鬼影。
+     *
+     * 失败（网络异常 / code != 0）只 toast，**绝不碰本地列表**（需求点名的"不要误删本地项"）。
+     * 这里比回复/@/点赞三个 Tab 的 `removeItem` 多判了一次 `res.isSuccess`：
+     * 它们只要"HTTP 请求没抛异常"就 toast("删除成功")，服务端回 code=1 也会报成功 —— 那是错的。
+     */
+    fun deleteMessage(item: SystemMessageInfo) {
+        val id = item.id
+        if (id == null) {
+            // 服务端删的是 id（不是 cursor）。拿不到 id 就只能明说，别发一个 ids=[null] 出去
+            toast("这条通知缺少 id，无法删除")
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // 用 JsonElement 而不是 Unit 收 data：这个接口的 data 是什么形状 PiliPlus 没解析过
+                //（它只读 code）。用 Unit 的话，服务端哪天回个 `"data": 0` 就会抛解析异常，
+                // 把"其实已经删掉了"误报成失败。JsonElement 什么形状都收得下，我们只要 code / message。
+                val res = BiliApiService.messageApi
+                    .delSysNotify(id)
+                    .awaitCall()
+                    .json<ResultInfo<JsonElement>>()
+                if (res.isSuccess) {
+                    removeLocalItem(id)
+                    toast("删除成功")
+                } else {
+                    toast(res.message.ifBlank { "删除失败，请重试" })
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                toast(e.message ?: "删除失败，请重试")
+            }
+        }
+    }
+
+    /**
+     * 把一条通知从本地列表里摘掉，并**扶正分页状态**（只在服务端删成功之后调）。
+     *
+     * 两个坑：
+     *  ① 游标：`cursor` 记的是"当前最后一条的 cursor"，同时是下一页请求的起点（见 [loadData]）。
+     *     删掉的正好是最后一条时，游标就指向一条已经不存在的通知了 —— 必须往前挪到新的最后一条。
+     *     删中间/开头则不用动：游标仍是最后一条的，语义没变。
+     *  ② 删空：列表空了但 finished 还是 false 的话，空态判断（`list.isEmpty() && listFinished`）
+     *     不成立，UI 会掉到 ListStateBox 的"空空如也"（那不是这个页面该说的话）。
+     *     这里直接把分页标成"到底了"，让它显示"没有系统通知"。
+     */
+    private fun removeLocalItem(id: Long) {
+        val current = list.data.value
+        val index = current.indexOfFirst { it.id == id }
+        if (index < 0) return   // 已经不在了（被删过 / 已被刷新换掉）：什么都不用做
+        val removed = current[index]
+        val remaining = current.toMutableList().apply { removeAt(index) }
+        list.data.value = remaining
+        if (removed.cursor != null && removed.cursor == cursor) {
+            cursor = remaining.lastOrNull()?.cursor
+        }
+        if (remaining.isEmpty()) {
+            cursor = null
+            list.finished.value = true
+        }
+    }
+
+    /**
      * 全页**唯一**的链接跳转入口 —— 列表正文里的点击、弹窗里的"打开链接"都走这里，
      * 两处绝不会各判一套规则（用户 2026-09-25 反馈的"点 github 链接弹不支持"就是旧分流造成的）。
      *
@@ -252,6 +321,12 @@ fun SystemMessageContent() {
                         onClick = {
                             showSystemMessageDetailDialog(context, item, viewModel::openLink)
                         },
+                        // ③ 长按整行 → 确认框 → 删掉这一条（接口见 MessageAPI.delSysNotify）。
+                        //    combinedClickable 把长按和点击分开处理，长按**不会**顺带触发 onClick，
+                        //    所以不会出现"长按一下顺手弹出全文弹窗"。
+                        onLongClick = {
+                            showSystemMessageDeleteDialog(item) { viewModel.deleteMessage(item) }
+                        },
                         onOpenLink = viewModel::openLink,
                     )
                 }
@@ -299,13 +374,19 @@ fun SystemMessageContent() {
  *   subtitle→ 正文（bodyMedium，里面挂链接）+ 右下角时间（小号、outline 色）
  * 它那边一行也没有头像/昵称 —— 系统通知本来就没有"对方用户"。
  *
- * 整块可点：点任意位置弹窗看全文（见 [showSystemMessageDetailDialog]）。
+ * 整块可点可长按：点任意位置弹窗看全文（见 [showSystemMessageDetailDialog]），
+ * 长按弹删除确认框（见 [showSystemMessageDeleteDialog]）。
  * 正文里的链接是 LinkAnnotation，点击由文本自身消费，不会顺带把弹窗也带出来。
+ *
+ * `@OptIn(ExperimentalFoundationApi::class)`：这个 Compose 版本里 combinedClickable 仍是实验 API
+ *（同 PrivateMessageContent / VideoCoverBox 的写法，照抄即可）。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SystemMessageItemBox(
     item: SystemMessageInfo,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onOpenLink: (String) -> Unit,
 ) {
     val linkStyles = TextLinkStyles(
@@ -324,7 +405,12 @@ private fun SystemMessageItemBox(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            // combinedClickable 而不是 clickable：长按删除要挂在整行上，
+            // 且长按与点击互斥（长按抬起时不会补一次 onClick）
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Text(
@@ -615,6 +701,46 @@ private fun showSystemMessageDetailDialog(
         }
     }
     dialog.show()
+}
+
+/**
+ * ③ 长按列表项弹出的"删除确认"框（用户要求：弹出提示框问是否删除，带取消和确定两个按钮）。
+ *
+ * 按钮按 DialogX 固定槽位**按位置**分配（Material 布局是 `btn_selectOther` + 空隙 +
+ * `btnSelectNegative` + `btnSelectPositive`，即最左 / 中间 / 最右，与"看全文"弹窗、
+ * 评论反诈弹窗同一套排法）。这里只有两个按钮，所以：
+ *   **取消 = cancel（中间）、确定 = ok（最右）**，最左的 other 槽位空着不占位。
+ *
+ * 正文必须说清"删的是哪一条"：列表里好几条通知长得差不多，只写"确定删除吗？"用户没法确认。
+ * 所以正文带上标题 + 时间（时间用列表同一份 formatSysMsgTime，不另起一套格式）。
+ *
+ * 点"确定"只是发起请求（弹窗照常关掉），成功/失败由 ViewModel 里那次 toast 告知，
+ * 不在这里等结果 —— 网络慢的时候卡着一个不关的弹窗更难受。
+ */
+private fun showSystemMessageDeleteDialog(
+    item: SystemMessageInfo,
+    onConfirm: () -> Unit,
+) {
+    val title = item.title.orEmpty().ifBlank { "系统通知" }
+    val timeText = formatSysMsgTime(item.rawTimeText)
+    val body = buildString {
+        append("确定删除这条通知吗？\n\n")
+        append(title)
+        if (timeText.isNotBlank()) {
+            append('\n')
+            append(timeText)
+        }
+        append("\n\n删除后不可恢复。")
+    }
+    MessageDialog.build()
+        .setTitle("删除通知")
+        .setMessage(body)
+        .setCancelButton("取消")
+        .setOkButton("确定") { _, _ ->
+            onConfirm()
+            false
+        }
+        .show()
 }
 
 /**

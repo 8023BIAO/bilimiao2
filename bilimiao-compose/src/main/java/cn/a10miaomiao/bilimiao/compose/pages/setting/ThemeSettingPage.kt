@@ -18,7 +18,9 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -26,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
+import cn.a10miaomiao.bilimiao.compose.isAppThemeDark
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.flow.stateMap
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
@@ -33,6 +36,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
+import cn.a10miaomiao.bilimiao.compose.pages.setting.components.CustomThemeColorDialog
 import cn.a10miaomiao.bilimiao.compose.pages.setting.components.ThemeColorButton
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -45,6 +49,14 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+
+/**
+ * 主题色列表里"自定义"那一项的哨兵 key。
+ *
+ * 沿用 Material You（0x100000000）的老写法：用一个超出 32 位真彩色范围的值当 id，
+ * 既不会和任何真实颜色撞车，也能继续用 `List<Pair<Long, String>>` 装这一列。
+ */
+private const val CUSTOM_THEME_COLOR_KEY = 0x200000000L
 
 @Serializable
 class ThemeSettingPage : ComposePage() {
@@ -89,6 +101,8 @@ private class ThemeSettingPageViewModel(
         0xFF39C5BB to "初音绿",
         0xFF66CCFF to "天依蓝",
         0x100000000 to "Material You",
+        // 第 11 项：自定义（主色 / 副色 / 点缀色，点开弹窗自己调）
+        CUSTOM_THEME_COLOR_KEY to "自定义",
     )
 
     val themeState = appStore.stateFlow.stateMap {
@@ -118,6 +132,14 @@ private class ThemeSettingPageViewModel(
         }
         appStore.setThemeColor(color, type)
     }
+
+    /**
+     * 保存自定义三色（第 11 项弹窗点"保存"）。
+     * 走 AppStore.setCustomThemeColor：同时落"当前生效的主题"和"自定义存的那一份"。
+     */
+    fun setCustomThemeColor(primary: Int, secondary: Int, tertiary: Int) {
+        appStore.setCustomThemeColor(primary, secondary, tertiary)
+    }
 }
 
 
@@ -129,6 +151,9 @@ private fun ThemeSettingPageContent(
     PageConfig(
         title = "主题设置"
     )
+    // 第 11 项"自定义"的调色弹窗开关。放在页面本地（和 TextIntPreference / DpiSettingDialog 一个套路）：
+    // 宿主 Activity 声明了 configChanges，转屏不重建，remember 足够稳，不必塞进 ViewModel。
+    var showCustomColorDialog by remember { mutableStateOf(false) }
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
@@ -234,19 +259,37 @@ private fun ThemeSettingPageContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    val isCustomActive = themeState.type == SettingConstants.THEME_TYPE_CUSTOM
                     viewModel.colorList.forEach { color ->
+                        val colorValue = color.first
+                        val isCustomColor = colorValue == CUSTOM_THEME_COLOR_KEY
+                        // Material You 的老写法就是"大于 32 位"的哨兵（0x100000000）；
+                        // 自定义的哨兵同样在 32 位之外，所以要显式排掉它
+                        val isDynamicColor = colorValue > 0xFFFFFFFF && !isCustomColor
                         ThemeColorButton(
                             onClick = {
-                                viewModel.setThemeColor(color.first)
+                                if (isCustomColor) {
+                                    // 没保存过 → 弹窗默认"当前主题色 + 副色/点缀色跟随主色"；
+                                    // 保存过 → 弹窗带着上次的三色继续改（默认值在下面组装）
+                                    showCustomColorDialog = true
+                                } else {
+                                    viewModel.setThemeColor(colorValue)
+                                }
                             },
-                            baseColor = if (color.first > 0xFFFFFFFF)
-                                Color(viewModel.materialYouColor)
-                            else
-                                Color(color.first),
-                            selected = if (color.first > 0xFFFFFFFF)
-                                themeState.type == SettingConstants.THEME_TYPE_DYNAMIC_COLOR
-                            else
-                                themeState.color == color.first.toInt(),
+                            baseColor = when {
+                                // 第 11 项按"用户自己那套"上色：没存过就跟着当前主题色，
+                                // 存过就用自定义主色（这样切到预设色后，这一格依旧显示自定义长什么样）
+                                isCustomColor -> Color(themeState.customPrimary ?: themeState.color)
+                                isDynamicColor -> Color(viewModel.materialYouColor)
+                                else -> Color(colorValue)
+                            },
+                            selected = when {
+                                isCustomColor -> isCustomActive
+                                isDynamicColor -> themeState.type == SettingConstants.THEME_TYPE_DYNAMIC_COLOR
+                                // 预设色保持原来的"颜色值相等就高亮"；只加一条：自定义生效时不再跟着亮，
+                                // 否则自定义主色恰好等于某个预设色（很常见，比如就是喜欢胖次蓝）会同时选中两个
+                                else -> !isCustomActive && themeState.color == colorValue.toInt()
+                            },
                             colorName = color.second,
                         )
                     }
@@ -254,5 +297,24 @@ private fun ThemeSettingPageContent(
             }
         }
 
+    }
+
+    if (showCustomColorDialog) {
+        // 默认值：没保存过自定义 → 主色 = 当前主题色，副色/点缀色 = 跟随主色（同值，
+        // 弹窗里显示成"跟随主色"，保存后也不覆盖调色板）；保存过 → 带着上次的三色继续改
+        val savedPrimary = themeState.customPrimary ?: themeState.color
+        CustomThemeColorDialog(
+            initialPrimary = savedPrimary,
+            initialSecondary = themeState.customSecondary ?: savedPrimary,
+            initialTertiary = themeState.customTertiary ?: savedPrimary,
+            // 预览要按"当前实际明暗"生成，否则深色下预览的是浅色配色，保存完发现不是那个样子
+            darkTheme = isAppThemeDark(),
+            onDismiss = { showCustomColorDialog = false },
+            onSave = { primary, secondary, tertiary ->
+                viewModel.setCustomThemeColor(primary, secondary, tertiary)
+                // 关掉弹窗回到主题页：主题页在 MaterialTheme 里，AppStore.state 一变就整体换色
+                showCustomColorDialog = false
+            },
+        )
     }
 }

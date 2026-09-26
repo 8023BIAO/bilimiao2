@@ -50,6 +50,7 @@ import cn.a10miaomiao.bilimiao.compose.components.image.previewer.ImagePreviewer
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.localImagePreviewerController
 import cn.a10miaomiao.bilimiao.compose.components.image.viewer.ModelProcessor
+import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import cn.a10miaomiao.bilimiao.compose.components.user.UserLevelIcon
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.TransformItemView
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.VerticalDragType
@@ -57,6 +58,7 @@ import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberPre
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberTransformItemState
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserArchiveViewModel
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpaceViewModel
+import com.a10miaomiao.bilimiao.comm.live.entity.LiveUserStatus
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
@@ -65,10 +67,29 @@ import com.bumptech.glide.integration.compose.GlideImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * 用户空间顶部的大头像。
+ *
+ * ★为什么改成走 [LiveBadgedAvatar]（而不是原来的裸 GlideImage）：
+ *   用户在播时要在这张脸上挂「直播中」+ 涟漪，点头像直接进直播间。
+ *   头像本体（带图片预览器缩放层的那一坨）通过 `avatarContent` 槽位原样传进去，
+ *   所以**图片预览器的行为一点没变**，只是外面多了一层"在播装饰 + 点击路由"。
+ *
+ * ★为什么 [rippleActive] 要由外面传进来：
+ *   这个头像是跟着 `ChainScrollableLayout` 一起上滑淡出的（UserSpacePage 里算的 alpha），
+ *   滚上去之后虽然还在组合树里，但已经看不见了 —— 这时必须把涟漪停掉，
+ *   否则就是白白烧电。传 false 时 LiveBadgedAvatar 内部**整个动画节点都不进组合树**。
+ *
+ * ★为什么 [liveStatus] 是"外面塞进来"而不是自己去查：
+ *   这个页面的首屏接口 `x/v2/space` 本来就返回了 `live.liveStatus` / `live.roomid`
+ *   （见 SpaceInfo.LiveInfo 的注释），一份数据两用，**一次额外请求都不用发**。
+ */
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun UserFaceImage(
     face: String,
+    liveStatus: LiveUserStatus?,
+    rippleActive: Boolean,
 ) {
     val previewerController = localImagePreviewerController()
     val previewerState = rememberPreviewerState(
@@ -79,37 +100,41 @@ private fun UserFaceImage(
     val itemState = rememberTransformItemState(
         intrinsicSize = Size(200f, 200f),
     )
-    Box(
-        modifier = Modifier.size(80.dp, 80.dp)
-            .clip(CircleShape)
-            .clickable {
-                previewerController.enterTransform(
-                    previewerState,
-                    listOf(
-                        PreviewImageModel(
-                            originalUrl = UrlUtil.autoHttps(face),
-                            previewUrl = UrlUtil.autoHttps(face) + "@200w_200h",
-                            height = 200f,
-                            width = 200f
-                        )
-                    ),
-                )
-            },
-    ) {
-        TransformItemView(
-            key = face,
-            itemState = itemState,
-            transformState = previewerState,
-        ) {
-            GlideImage(
-                modifier = Modifier.fillMaxSize()
-                    .clip(CircleShape),
-                model = UrlUtil.autoHttps(face) + "@200w_200h",
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
+    LiveBadgedAvatar(
+        face = face,
+        size = 80.dp,
+        liveStatus = liveStatus,
+        animateRipple = rippleActive,
+        // 没在播时点头像 = 原来的"看大图"；在播时被"进直播间"顶掉（用户要的就是这个）
+        onClick = {
+            previewerController.enterTransform(
+                previewerState,
+                listOf(
+                    PreviewImageModel(
+                        originalUrl = UrlUtil.autoHttps(face),
+                        previewUrl = UrlUtil.autoHttps(face) + "@200w_200h",
+                        height = 200f,
+                        width = 200f
+                    )
+                ),
             )
-        }
-    }
+        },
+        avatarContent = {
+            TransformItemView(
+                key = face,
+                itemState = itemState,
+                transformState = previewerState,
+            ) {
+                GlideImage(
+                    modifier = Modifier.fillMaxSize()
+                        .clip(CircleShape),
+                    model = UrlUtil.autoHttps(face) + "@200w_200h",
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalGlideComposeApi::class)
@@ -197,11 +222,28 @@ private fun NumBox(
 fun UserSpaceHeader(
     modifier: Modifier = Modifier,
     isLargeScreen: Boolean = false,
+    /**
+     * 头像上的涟漪要不要动。
+     *
+     * ★为什么由外面算：头部是跟着 `ChainScrollableLayout` 上滑淡出的
+     *   （UserSpacePage 里那个 `alpha`），滚出视野后它**仍在组合树里**，
+     *   LazyColumn 那种"回收即停"的省电机制在这里不生效 ——
+     *   所以把"可见性"从调用方显式传进来，看不见就别烧电。
+     */
+    rippleActive: Boolean = true,
     viewModel: UserSpaceViewModel,
     archiveViewModel: UserArchiveViewModel,
 ) {
     val detailData = viewModel.detailData.collectAsStateWithLifecycle().value ?: return Box {}
     val cardData = detailData.card
+    // 在播状态直接来自本页首屏接口的 `live` 对象（一次额外请求都不用发，见 SpaceInfo.LiveInfo）
+    val liveStatus = remember(cardData.mid, detailData.live) {
+        LiveUserStatus.of(
+            uid = cardData.mid,
+            liveStatus = detailData.live.liveStatus,
+            roomId = detailData.live.roomid,
+        )
+    }
     val location = cardData.space_tag?.firstOrNull {
         it.type == "location"
     }?.title ?: ""
@@ -232,7 +274,11 @@ fun UserSpaceHeader(
                     .padding(bottom = 5.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                UserFaceImage(cardData.face)
+                UserFaceImage(
+                    face = cardData.face,
+                    liveStatus = liveStatus,
+                    rippleActive = rippleActive,
+                )
                 if (isLargeScreen) {
                     Box(
                         modifier = Modifier

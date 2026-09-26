@@ -25,7 +25,7 @@ import kotlinx.serialization.json.contentOrNull
 @Serializable
 data class SystemMessageInfo(
     /**
-     * 通知 id（暂不参与展示，留作列表去重/后续"删除单条"用）。
+     * 通知 id（不参与展示；用于列表去重，以及"长按删除单条"—— 见 MessageAPI.delSysNotify）。
      */
     val id: Long? = null,
 

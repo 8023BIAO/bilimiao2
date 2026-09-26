@@ -130,9 +130,17 @@ class VideoAPI {
 
     /**
      * AI 视频总结
+     *
+     * ★WBI 作用域（2026-09 收敛）：这里**故意保持"不签名"**。
+     *   本函数在 WbiSigner 修好之前拿到的一直是未签名 URL（签名器从来没生效过），
+     *   而"不签"是当时全 App 各区域能正常工作的实际状态，用户要求非直播区域零变化。
+     *   默认 scope=null 会让下面这行原样返回 rawUrl（逐字节等于修复前）。
+     *   注：视频页的 AI 总结走的是 VideoDetailViewModel 里那套自己的签名实现，与这里无关。
+     *   将来若确认这个共享接口也需要签名，把下面一行改成：
+     *     url = WbiSigner.signUrlBlocking(rawUrl, WbiSigner.WbiScope.NON_LIVE)
      */
     fun aiConclusion(bvid: String, cid: String, upMid: String) = MiaoHttp.request {
-        // WEB API：跳过 APP 头部，显式计算 WBI 签名
+        // WEB API：跳过 APP 头部（★不是"显式计算 WBI 签名"，签名按上面的作用域默认关闭）
         isWebApi = true
         val encBvid = java.net.URLEncoder.encode(bvid, "UTF-8")
         val encCid = java.net.URLEncoder.encode(cid, "UTF-8")

@@ -50,6 +50,7 @@ import com.a10miaomiao.bilimiao.comm.delegate.helper.SupportHelper
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerDelegate2
 import com.a10miaomiao.bilimiao.comm.delegate.theme.ThemeDelegate
+import com.a10miaomiao.bilimiao.comm.live.LiveLastRoomStore
 import com.a10miaomiao.bilimiao.comm.mypage.MenuActions
 import com.a10miaomiao.bilimiao.comm.mypage.MyPage
 import com.a10miaomiao.bilimiao.comm.mypage.MyPageConfigInfo
@@ -532,6 +533,14 @@ class MainActivity
     override fun onStart() {
         super.onStart()
         basePlayerDelegate.onStart()
+        // ★「回 App 仍停在直播间」的**确定性**恢复（2026-09-26 本轮，只加这一行 + 一个 import）：
+        //   主界面回到前台时，把 [LiveLastRoomStore] 的生命周期观察者挂上（幂等；本对象自己注册，
+        //   所以 Application/Manifest 都不用动），并在"本进程还没写过记录"时补问一次 DataStore
+        //   （进程被系统回收后重新打开的那条路）。
+        //   ★真正的"该不该把直播间开回来"不在这里判：`onStart` 时本页还没 resume，决策在
+        //   "有 Activity resume / 直播间销毁"两个触发点上做 —— 判据（前台是主界面、
+        //   没有活着的直播间、记录还在、取走即消费）全部在 LiveLastRoomStore 里，见它的 KDoc。
+        LiveLastRoomStore.onHostForeground(this)
     }
 
     override fun onStop() {

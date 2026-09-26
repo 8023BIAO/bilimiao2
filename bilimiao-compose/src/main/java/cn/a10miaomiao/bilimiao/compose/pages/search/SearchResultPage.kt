@@ -33,6 +33,8 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.pages.search.content.SearchAllContent
 import cn.a10miaomiao.bilimiao.compose.pages.search.content.SearchByTypeContent
+import cn.a10miaomiao.bilimiao.compose.pages.search.content.SearchLiveContent
+import cn.a10miaomiao.bilimiao.compose.pages.search.content.SearchLiveTabId
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -112,6 +114,25 @@ private sealed class SearchResultPageTab(
         }
     }
 
+    /**
+     * 直播。数据源不是全站搜索的 gRPC（`searchByType` 的直播索引没验证过），
+     * 而是已经实装并实测可用的直播搜索接口 `xlive/app-interface/v2/search_live`
+     * （见 `content/SearchLiveContent.kt` 的类注释）。
+     *
+     * id 用 [SearchLiveTabId] 而不是 `PageTabIds.SearchByType[4]`：那个 TabId 是"全站搜索
+     * gRPC 的分类"命名空间，本 Tab 走的是另一条接口；而且本次改动范围不含 `PageTabIds.kt`
+     * （见 [SearchLiveTabId] 的注释）。
+     */
+    data object Live : SearchResultPageTab(
+        id = SearchLiveTabId,
+        name = "直播"
+    ) {
+        @Composable
+        override fun PageContent(keyword: String, isActive: Boolean) {
+            SearchLiveContent(keyword, isActive)
+        }
+    }
+
 }
 
 private class SearchPageViewModel(
@@ -125,6 +146,9 @@ private class SearchPageViewModel(
         SearchResultPageTab.Bangumi,
         SearchResultPageTab.Author,
         SearchResultPageTab.Movies,
+        // 直播排在「影视」之后、「专栏」之前：与 B 站全站搜索的分类顺序一致
+        // （综合 / 视频 / 番剧 / 影视 / 直播 / 专栏 / 话题 / 用户）
+        SearchResultPageTab.Live,
         SearchResultPageTab.Column,
     )
 

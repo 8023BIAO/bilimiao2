@@ -1,0 +1,36 @@
+<!--
+  直播「听音频」媒体通知上「回到直播」按钮的图标（工程自制）。
+
+  为什么自建而不是用库里现成的：
+  这个位置原来用的是 media3 的 `media3_icon_radio`（电台波纹）。用户实测反馈
+  「通知栏的这个 WiFi 图标是什么按钮啊？」—— 波纹形状在 24dp 下就是标准的 WiFi 图标，
+  语义（电台/收听）和按钮真正干的事（把直播页拉回前台）完全对不上。
+
+  为什么长这样：
+  「方框 + 从缺口射出的箭头」是各平台通用的「打开 / 打开页面」符号，一眼就是"点它会把画面
+  打开"，不会有第二种解读；箭头朝右上而不是向下（向下会被读成"下载"）。方框左下闭合、
+  右上留缺口，箭头从方框里穿出去，视觉重心与相邻的播放/暂停（实心三角）、
+  结束直播（实心方块）一致 —— 三个按钮是同一套几何语言。
+
+  风格对齐：与 media3 图标集同源（Material Symbols 系），同样是
+  24dp / viewBox 960 / 线宽 80 / 纯白填充。系统会把媒体通知这一排动作图标按主题统一着色，
+  所以这里只画形状，颜色沿用 media3 的做法写纯白。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- 方框：左下闭合、右上留缺口，箭头从缺口穿出 -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M160,160 L520,160 L520,240 L240,240 L240,720 L720,720 L720,520 L800,520 L800,800 L160,800 Z" />
+    <!-- 箭杆：45°，从方框内部指向右上缺口（线宽 80，与方框同宽） -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M390,510 L600,300 L660,360 L450,570 Z" />
+    <!-- 箭头：与箭杆同向，底宽约为杆的 2.6 倍，尖部落在缺口里 -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M552,252 L780,180 L708,408 Z" />
+</vector>

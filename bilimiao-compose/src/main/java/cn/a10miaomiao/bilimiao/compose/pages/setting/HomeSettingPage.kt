@@ -61,8 +61,11 @@ private class HomeSettingPageViewModel(
 
     val entryViews = mapOf(
         SettingConstants.HOME_ENTRY_VIEW_DEFAULT to "默认",
+        // 顺序与首页 Tab 的排列一致（直播在最前，分区插在热门后、番剧前）
+        SettingConstants.HOME_ENTRY_VIEW_LIVE to "直播",
         SettingConstants.HOME_ENTRY_VIEW_RECOMMEND to "推荐",
         SettingConstants.HOME_ENTRY_VIEW_POPULAR to "热门",
+        SettingConstants.HOME_ENTRY_VIEW_REGION to "分区",
         SettingConstants.HOME_ENTRY_VIEW_BANGUMI to "番剧",
         SettingConstants.HOME_ENTRY_VIEW_CINEMA to "影视",
         // SettingConstants.HOME_ENTRY_VIEW_TIME_SELECT to "时光精选",
@@ -157,6 +160,15 @@ private fun HomeSettingPageContent(
                 },
                 defaultValue = false,
             )
+            // 「直播」：和分区那个开关完全同一套（SettingPreferences 键 + AppStore 统一读取口），
+            // 默认 true = 老用户升级后首页第一个 Tab 直接就是直播，不想要的在这里关掉
+            switchPreference(
+                key = SettingPreferences.HomeLiveShow.name,
+                title = {
+                    Text("显示直播")
+                },
+                defaultValue = true,
+            )
             // switchPreference(
             //     key = SettingPreferences.TimeSelectShow.name,
             //     title = {
@@ -175,6 +187,15 @@ private fun HomeSettingPageContent(
                 key = SettingPreferences.HomePopularShow.name,
                 title = {
                     Text("显示热门")
+                },
+                defaultValue = false,
+            )
+            // 「分区」：和上面几个开关走同一套键（SettingPreferences）+ 同一个 AppStore 读取口，
+            // 默认 true = 老用户升级后直接多出这个 Tab，不想要的在这里关掉
+            switchPreference(
+                key = SettingPreferences.HomeRegionShow.name,
+                title = {
+                    Text("显示分区")
                 },
                 defaultValue = false,
             )

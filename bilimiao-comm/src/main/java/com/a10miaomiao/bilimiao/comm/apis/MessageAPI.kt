@@ -3,9 +3,14 @@ package com.a10miaomiao.bilimiao.comm.apis
 import bilibili.im.interfaces.v1.ImInterfaceGRPC
 import bilibili.im.interfaces.v1.ReqGetSessions
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
+import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class MessageAPI {
 
@@ -111,6 +116,57 @@ class MessageAPI {
     }
 
     /**
+     * 删除单条系统通知（消息页「系统通知」长按列表项 → 确认框 → 确定）。
+     *
+     * 三条约束都逐字照 PiliPlus 核对过（lib/http/msg.dart:294 `delSysMsg` + lib/http/api.dart:692）：
+     *
+     * ① 域名同样是 message.bilibili.com → 必须 `biliMessageApi` + `isWebApi`，
+     *    和 [sysNotify] 一个道理：带上 APP 的 appkey/sign/Authorization 会被服务端按"APP 通道"判定。
+     * ② **不需要 WBI 签名**。依据是 PiliPlus 自己：`delSysMsg` 用的是裸 `Request().post`，
+     *    没有像紧挨着的 `setTop`（msg.dart:319 起）那样调 `WbiSign.makSign` —— 同一个文件里
+     *    需要签名的接口都显式签了，这个没签，说明服务端不校验 w_rid。
+     *    我们这边也不用额外做什么：MiaoHttp 的 WbiSigner 只在 `api.bilibili.com` 上生效，
+     *    message.bilibili.com 天然不会被签（见 MiaoHttp.buildRequest 里的 isApiBili 判断）。
+     * ③ 要 csrf（cookie 里的 bili_jct），而且 PiliPlus **query 和 body 里各放了一份**，这里照传。
+     *
+     * 参数形态不要"顺手优化"：
+     *   - `ids` 是**数组**（删一条也包成 `[id]`），不是单个标量；
+     *   - 另外两个固定字段 `station_ids: []` / `type: 4`（4 = 系统通知这一类）PiliPlus 是写死的，照发；
+     *   - body 是 **JSON 而不是表单**：Dio 的 `data` 传 Map 时默认就是 application/json
+     *     （对照同一个文件里的 `delMsgfeed`，它为了发表单**特意**写了
+     *     `Options(contentType: Headers.formUrlEncodedContentType)`，`delSysMsg` 没写）。
+     *     所以这里用 `body = ...toRequestBody("application/json")`，**不能**用 formBody：
+     *     x-www-form-urlencoded 表达不了数组，改写成 `ids[]` 是另一套约定，服务端不认
+     *     —— 这正是之前一直没敢做这个功能的原因。
+     *
+     * 来源：PiliPlus lib/http/msg.dart:294-317、lib/http/api.dart:692。
+     * 状态：URL / 方法 / 参数名 / 编码方式 / 是否签名均已核对；返回体只取 code 与 message（PiliPlus 也只看这两个）。
+     *      **待实机验证**。
+     */
+    fun delSysNotify(id: Long): MiaoHttp {
+        val csrf = MiaoHttp.csrfToken()
+        return MiaoHttp.request {
+            isWebApi = true
+            url = BiliApiService.biliMessageApi(
+                "x/sys-msg/del_notify_list",
+                "mobi_app" to "android",
+                "csrf" to csrf,
+            )
+            method = MiaoHttp.POST
+            // JSON body：表达得了 ids 数组，也和服务端认的 content-type 一致（见上面说明）
+            body = MiaoJson.toJson(
+                DelSysNotifyBody(
+                    csrf = csrf.orEmpty(),
+                    ids = listOf(id),
+                    stationIds = emptyList(),
+                    type = 4,
+                    mobiApp = "android",
+                )
+            ).toRequestBody("application/json".toMediaType())
+        }
+    }
+
+    /**
      * 获取私信会话列表（REST API，保留兼容）
      */
     fun sessions() = MiaoHttp.request {
@@ -207,3 +263,22 @@ class MessageAPI {
     }
 
 }
+
+/**
+ * 删除系统通知的 JSON 请求体（只服务 [MessageAPI.delSysNotify]）。
+ *
+ * 刻意**不给任何字段默认值**：MiaoJson.kotlinJson 没有开 `encodeDefaults`，
+ * kotlinx.serialization 默认会把"等于默认值"的字段整个省掉 —— 那样 `station_ids` / `type` / `mobi_app`
+ * 就会从 body 里消失，而 `type = 4` 很可能是服务端用来区分"删的是系统通知"的依据。
+ * 全字段必填 = 每次请求都原样发出 PiliPlus 那一份 body。
+ *
+ * 下划线字段名用 @SerialName 钉死（服务端认的就是这个名字），不跟着 Kotlin 命名规范走。
+ */
+@Serializable
+private data class DelSysNotifyBody(
+    val csrf: String,
+    val ids: List<Long>,
+    @SerialName("station_ids") val stationIds: List<Long>,
+    val type: Int,
+    @SerialName("mobi_app") val mobiApp: String,
+)

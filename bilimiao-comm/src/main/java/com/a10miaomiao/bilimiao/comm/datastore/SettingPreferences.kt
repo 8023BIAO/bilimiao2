@@ -112,6 +112,13 @@ object SettingPreferences {
     val HomeBangumiShow = booleanPreferencesKey("home_bangumi_show")
     // 显示影视
     val HomeCinemaShow = booleanPreferencesKey("home_cinema_show")
+    // 显示分区
+    // 键名沿用上面这一组的命名（HomeXxxShow / home_xxx_show）；字符串保持不变，
+    // 是因为分区功能最早就是往这个键写的，已经点过开关的用户升级后设置不会丢。
+    val HomeRegionShow = booleanPreferencesKey("home_region_show")
+    // 显示直播（第三阶段 A 路：首页第一个 Tab）。键名沿用这一组的命名习惯，
+    // 新键 = 新字符串，所以默认值 true 能直接对"老用户升级后第一次读"生效。
+    val HomeLiveShow = booleanPreferencesKey("home_live_show")
     // 【已删除】HomePopularCarryToken — 热门API不支持个性化，开关无实际作用
     // 推荐列表样式
     val HomeRecommendListStyle = intPreferencesKey("home_recommend_list_style")
@@ -155,6 +162,17 @@ object SettingPreferences {
     val ThemeColor = longPreferencesKey("theme_color")
     // 主题类型
     val ThemeType = intPreferencesKey("theme_type")
+    // ===== 自定义主题（第 11 项）=====
+    // 只做加法：这三个 key 在老版本里根本不存在，读出来是 null，
+    // 于是"没保存过自定义颜色"这件事天然可判（state 里对应字段也是 null）。
+    // 为什么不复用 ThemeColor 存自定义主色：切到预设色会把 ThemeColor 覆盖掉，
+    // 那样"再点自定义"就还原不出用户上次调的三色了（需求要求带着已保存的颜色继续改）。
+    // 自定义主色（0xFFRRGGBB；null = 从没保存过自定义配色）
+    val ThemeCustomPrimary = intPreferencesKey("theme_custom_primary")
+    // 自定义副色；与主色**相等**表示"跟随主色"（此时不覆盖 materialkolor 的调色板）
+    val ThemeCustomSecondary = intPreferencesKey("theme_custom_secondary")
+    // 自定义点缀色（强调色）；与主色相等表示"跟随主色"
+    val ThemeCustomTertiary = intPreferencesKey("theme_custom_tertiary")
     // 深色模式
     val ThemeDarkMode = intPreferencesKey("theme_dark_mode")
     //
@@ -344,6 +362,254 @@ object SettingPreferences {
 
     // 屏蔽标签严格模式：标签 gRPC 查询失败时按已屏蔽处理（默认放行，避免网络波动误杀）
     val FilterTagStrict = booleanPreferencesKey("filter_tag_strict")
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 直播设置（第四阶段）
+    //
+    // 为什么单开一组 `live_*` 键，不复用 PlayerBackground / PlayerPipOnBackground：
+    //   ① 语义不同：点播的"后台播放"是**继续出声**（MediaSessionService + 前台服务），
+    //      直播的"后台继续直播"是**画面照常播**（PiP / 不退播），两者的系统限制与合规要求完全两回事；
+    //   ② 用户要的是"设置里有一整块直播设置"，复用点播的键会让同一个开关在两处出现、改一处两处都变。
+    //   键名一律 `live_` 前缀：老版本里这些键根本不存在，读出来是 null → 各自走默认值，
+    //   所以"老用户升级后行为不变"这件事天然成立（默认值全部对齐现有代码的写死值）。
+    // ══════════════════════════════════════════════════════════════════════
+
+    /** 后台继续直播（退到后台**不**暂停）。默认关，见 [SettingConstants.LIVE_BACKGROUND_PLAY_DEFAULT] */
+    val LiveBackgroundPlay = booleanPreferencesKey("live_background_play")
+    /** 退后台自动进 PIP 小窗。默认开 */
+    val LivePipOnBackground = booleanPreferencesKey("live_pip_on_background")
+    /**
+     * 默认画质。存**接口 qn 原值**（80/150/250/400/10000/15000/20000/30000），
+     * 或两个策略值 [SettingConstants.LIVE_QUALITY_HIGHEST] / [SettingConstants.LIVE_QUALITY_LOWEST]。
+     */
+    val LiveDefaultQuality = intPreferencesKey("live_default_quality")
+    /** 默认线路策略：0 = 自动换线（默认）/ 1 = 固定第一条 */
+    val LiveLinePolicy = intPreferencesKey("live_line_policy")
+    /** 断流/失败时自动重连（重取流 + 换线）。默认开 */
+    val LiveAutoReconnect = booleanPreferencesKey("live_auto_reconnect")
+    /** 双击画面暂停/继续。默认开 */
+    val LiveDoubleTapPause = booleanPreferencesKey("live_double_tap_pause")
+    /** 进直播间默认开弹幕。默认开 */
+    val LiveDanmakuEnable = booleanPreferencesKey("live_danmaku_enable")
+    /**
+     * 直播弹幕字号（sp）。默认 15 = LiveDanmakuOverlay 里原来写死的字号。
+     * ★直播**自己那套**样式之一：只对直播生效，和点播的字号倍率键互不相干。
+     */
+    val LiveDanmakuFontSize = intPreferencesKey("live_danmaku_font_size")
+    /**
+     * 直播弹幕不透明度（%）。默认 100 = 完全不透明。
+     * ★直播**自己那套**样式之一（点播那边存的是 0f~1f，量纲不同，所以各用各的键）。
+     */
+    val LiveDanmakuOpacity = intPreferencesKey("live_danmaku_opacity")
+    /**
+     * 直播弹幕速度（**倍率** 0.5~2.0，越大越快）。默认 1.0。
+     *
+     * 为什么用 Float 倍率而不是 Int 百分比：浮层的速度语义就是倍率
+     * （`travelDurationMs = 7000ms / speedScale`），存倍率 = 设置页写进去什么、浮层就用什么，
+     * 中间不存在换算；默认 1.0 与点播那套的默认速度等价 → 7000ms，行为与接线前逐字一致。
+     * 档位真值（0.5~2.0、0.1 一档）与文案在 `LiveDanmakuSettings.LIVE_SPEED_*` / `speedText()`。
+     */
+    val LiveDanmakuSpeed = floatPreferencesKey("live_danmaku_speed")
+    /**
+     * 【已停用】直播弹幕"跟随点播弹幕设置"（Boolean，原默认 true）。
+     *
+     * 用户原话："单独设置就单独设置，这两个跟随又是不跟随的样子，我都蒙了。就让直播的那个弹幕成另一套吧。"
+     * → 开关已从设置页删除，`LiveDanmakuSettings.from()` 也不再读它：直播弹幕固定用
+     *   上面那几个 `live_danmaku_*` 键（字号/不透明度/速度/显示区域），屏蔽词固定共用点播那一份。
+     *
+     * ★键对象与默认值 [SettingConstants.LIVE_DANMAKU_FOLLOW_VOD_DEFAULT] **原样保留、字符串一个字没改**
+     *   （DataStore 按字符串相等认键，删键 = 老用户已落盘的值变孤儿）；
+     *   键名字符串仍与 `comm.live.danmaku.LiveDanmakuSettings.KEY_FOLLOW_ON_DEMAND` 一致，
+     *   但全工程**零处读写**，老数据只是静静躺着。
+     */
+    val LiveDanmakuFollowVod = booleanPreferencesKey("live_danmaku_follow_vod")
+    /**
+     * 直播弹幕显示区域（%）：25/50/75/100。默认 100 = 全屏。
+     * ★键字符串同样与 `LiveDanmakuSettings.KEY_AREA_PERCENT` 一致（同一份约定）。
+     * 同样是直播自己那套（点播只有"最大行数"这个行数模型，没有区域比例语义）。
+     */
+    val LiveDanmakuAreaPercent = intPreferencesKey("live_danmaku_area_percent")
+    /**
+     * 直播播放页是否跟随重力感应**自动旋转**（竖屏竖着看、横过来全屏）。
+     *
+     * 为什么单开一个 `live_auto_rotate`、不复用点播那套 `player_full_mode`：
+     * 点播的"全屏模式"是**视频比例驱动**的（竖向视频跟随视频方向），直播没有"视频比例"这个前提
+     * （流永远是 16:9），用户要的只是"手机怎么拿就怎么显示"，两者判据不同，混用会互相改坏。
+     *
+     * 为什么默认**开**：现状本来就是跟随系统 —— `AndroidManifest.xml` 里 LivePlayerActivity
+     * 没写 `screenOrientation`，且 `configChanges` 已声明 `orientation|screenSize|...`，
+     * 转屏不重建 Activity、窗口几何在 `onConfigurationChanged` 里重算。默认值必须对齐现状，
+     * 否则老用户升级后会得到"以前转屏能变、现在不变了"这种莫名其妙的回退。
+     *
+     * 读取方：直播播放页起播/转屏时决定 `requestedOrientation`
+     * （`if (autoRotate) SCREEN_ORIENTATION_FULL_SENSOR else 保持不动`，A 路接线，
+     * 用法写在 `LiveSettingPage` 的文件头 KDoc 里）。
+     */
+    val LiveAutoRotate = booleanPreferencesKey("live_auto_rotate")
+    /** 直播浏览页每行卡片数：0 = 自适应（默认）/ 1..5 = 固定列数 */
+    val LiveGridSpan = intPreferencesKey("live_grid_span")
+    /**
+     * 直播浏览页默认排序（接口 `sort_type`）。
+     * 为什么用 String 而不是 Int：这个值要**原样**发给接口（"online"/"live_time"），
+     * 存字符串就不用维护一张"数字 ↔ 字符串"的翻译表，也不会出现表里漏一项就发空串的情况
+     * （★实测：`sort_type` 传空串接口返回 0 条，不报错，很难查）。
+     */
+    val LiveSortType = stringPreferencesKey("live_sort_type")
+
+    /**
+     * 首页直播 Tab 的**筛选记忆**（2026-09-26 用户反馈"它没有持久化记忆，番剧/影视就有"）。
+     *
+     * 格式：`"<顶级分区id>:<子分区id>"`（例如 `"1:0"`=动画区全部、`"-1:0"`=推荐）。
+     * 与 `HomeBangumiFilter`（番剧那个）同一套做法：一个字符串键装下整份选择。
+     * 排序不在这里 —— 它有自己的键 `live_sort_type`（早就在用了）。
+     */
+    val HomeLiveFilter = stringPreferencesKey("home_live_filter")
+
+    /**
+     * ★「上次停在哪个直播间」（2026-09-26 本轮）：**用户带着直播间离开 App** 时记下的房间号。
+     *
+     * 只由 `comm.live.LiveLastRoomStore` 读写（`LivePlayerActivity` 的离开/退出钩子叫它），
+     * 消费方是"回 App 仍停在直播间"的确定性恢复：回到前台时若 [LiveLastRoomRestore] 还是 true，
+     * 就把这个房间号重新开起来。存的是**入口给的原样房间号**（短号/真实号都行 ——
+     * 直播间自己进来第一件事就是 `room_init` 换算，与 `EXTRA_ROOM_ID` 的约定完全一致）。
+     *
+     * ★为什么要落 DataStore 而不是进程级字段：进程被系统回收后，"上次停在哪个直播间"这件事
+     *   仍然成立（用户回到 App 时该回到直播间），进程级字段会随着进程一起消失。
+     */
+    val LiveLastRoom = stringPreferencesKey("live_last_room")
+
+    /**
+     * ★「应当恢复」标记（与 [LiveLastRoom] 成对）：true = 下次 App 回到前台要把那个直播间开回来。
+     *
+     * 三条清理路径（少一条都会误触发，见 `LiveLastRoomStore` 的 KDoc）：
+     * ① 用户**主动退出**直播间（返回键 / 顶栏返回）→ 清；
+     * ② App 从**非直播间**页面退到后台（例如点播页）→ 清 —— 这就是"点播页离开不该被拉去直播"那条；
+     * ③ 直播间自己回到全屏前台（人已经在直播间里了）→ 清（防循环）。
+     *
+     * 默认（键不存在）= false：老版本升级上来读不到这个键 → 不恢复 → 行为与升级前一致。
+     */
+    val LiveLastRoomRestore = booleanPreferencesKey("live_last_room_restore")
+
+    /**
+     * 直播设置的一把读取。
+     *
+     * 为什么要有它（而不是让每个调用点自己去 prefs[...] ?: 默认值）：
+     *   默认值只写在这里一份，读取方（直播播放页/浏览页）拿到的语义永远和设置页显示的默认值一致；
+     *   少写一次 `?: false`，就少一次"设置页显示关、代码按开跑"的机会。
+     */
+    object Live {
+        /**
+         * 直播设置的内存快照。字段名就是使用方的语义名。
+         *
+         * 全部字段都有默认值 = 可以无参构造，所以 AppStore 的 state 直接用它当类型（不用再抄一份）。
+         */
+        data class Values(
+            val backgroundPlay: Boolean = SettingConstants.LIVE_BACKGROUND_PLAY_DEFAULT,
+            val pipOnBackground: Boolean = SettingConstants.LIVE_PIP_ON_BACKGROUND_DEFAULT,
+            val defaultQuality: Int = SettingConstants.LIVE_DEFAULT_QUALITY_DEFAULT,
+            val linePolicy: Int = SettingConstants.LIVE_LINE_POLICY_DEFAULT,
+            val autoReconnect: Boolean = SettingConstants.LIVE_AUTO_RECONNECT_DEFAULT,
+            /** 直播页是否跟随重力感应自动旋转（竖屏竖着看、横过来全屏）。默认开 */
+            val autoRotate: Boolean = SettingConstants.LIVE_AUTO_ROTATE_DEFAULT,
+            val doubleTapPause: Boolean = SettingConstants.LIVE_DOUBLE_TAP_PAUSE_DEFAULT,
+            val danmakuEnable: Boolean = SettingConstants.LIVE_DANMAKU_ENABLE_DEFAULT,
+            val danmakuFontSize: Int = SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT,
+            val danmakuOpacity: Int = SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
+            /**
+             * 弹幕速度倍率（0.5~2.0，越大越快）。默认 1.0。
+             * ★直播自己那套的速度（不再有"跟随点播"这一说，见 [LiveDanmakuFollowVod] 的注释）。
+             */
+            val danmakuSpeed: Float = SettingConstants.LIVE_DANMAKU_SPEED_DEFAULT,
+            /** 弹幕显示区域（%）：25/50/75/100 */
+            val danmakuAreaPercent: Int = SettingConstants.LIVE_DANMAKU_AREA_PERCENT_DEFAULT,
+            val gridSpan: Int = SettingConstants.LIVE_GRID_SPAN_DEFAULT,
+            /**
+             * 接口 `sort_type` 原值（"online" / "live_time"）。
+             * 空串是**非法值**（实测接口会返回 0 条），所以这里兜底成"按人气"。
+             */
+            val sortType: String = LIVE_SORT_TYPE_ONLINE,
+        ) {
+            /** 是否要求"最低可用"画质（播放器在 accept_qn 里挑最小） */
+            val qualityLowest: Boolean get() = defaultQuality == SettingConstants.LIVE_QUALITY_LOWEST
+
+            /** 是否"最高可用"（默认，等价于请求原画，由服务端按登录态降级） */
+            val qualityHighest: Boolean get() = defaultQuality == SettingConstants.LIVE_QUALITY_HIGHEST
+
+            /** 提交给 `areaRoomList(sortType=...)` 的值；任何非法值都退回"按人气" */
+            val sortTypeOrOnline: String
+                get() = sortType.takeIf { it == LIVE_SORT_TYPE_LIVE_TIME } ?: LIVE_SORT_TYPE_ONLINE
+        }
+
+        /** 接口 sort_type 的两个合法值（实测只有这两个；传别的/空串都会拿到空列表） */
+        const val LIVE_SORT_TYPE_ONLINE = "online"
+        const val LIVE_SORT_TYPE_LIVE_TIME = "live_time"
+
+        /**
+         * 读 Float 设置的**安全兜底**。
+         *
+         * 为什么要有它：这几个 Float 键在历史版本/手改数据里有可能存成了 Int，
+         * DataStore 读 Float 遇到 Int 会抛 `ClassCastException`（点播侧 `PlayerController.initDanmakuContext`
+         * 就是这么兜的）。直播速度键虽然是本轮新加的、正常不会有脏数据，
+         * 但"设置读崩了 = 直播弹幕整个不显示"，代价太大，所以照点播的规矩兜一层。
+         * ★只在**已确认是 Float 键**的地方用；Int/Boolean 键不要用它（那会把类型错误藏起来）。
+         */
+        private fun Preferences?.floatOr(
+            key: Preferences.Key<Float>,
+            defaultValue: Float,
+        ): Float = try {
+            this?.get(key) ?: defaultValue
+        } catch (_: ClassCastException) {
+            defaultValue
+        }
+
+        /** 把一个 Preferences 快照翻译成 [Values]（缺项走默认值，见 [Values] 的字段默认值） */
+        fun of(prefs: Preferences?): Values = Values(
+            backgroundPlay = prefs?.get(LiveBackgroundPlay)
+                ?: SettingConstants.LIVE_BACKGROUND_PLAY_DEFAULT,
+            pipOnBackground = prefs?.get(LivePipOnBackground)
+                ?: SettingConstants.LIVE_PIP_ON_BACKGROUND_DEFAULT,
+            defaultQuality = prefs?.get(LiveDefaultQuality)
+                ?: SettingConstants.LIVE_DEFAULT_QUALITY_DEFAULT,
+            linePolicy = prefs?.get(LiveLinePolicy)
+                ?: SettingConstants.LIVE_LINE_POLICY_DEFAULT,
+            autoReconnect = prefs?.get(LiveAutoReconnect)
+                ?: SettingConstants.LIVE_AUTO_RECONNECT_DEFAULT,
+            autoRotate = prefs?.get(LiveAutoRotate)
+                ?: SettingConstants.LIVE_AUTO_ROTATE_DEFAULT,
+            doubleTapPause = prefs?.get(LiveDoubleTapPause)
+                ?: SettingConstants.LIVE_DOUBLE_TAP_PAUSE_DEFAULT,
+            danmakuEnable = prefs?.get(LiveDanmakuEnable)
+                ?: SettingConstants.LIVE_DANMAKU_ENABLE_DEFAULT,
+            danmakuFontSize = prefs?.get(LiveDanmakuFontSize)
+                ?: SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT,
+            danmakuOpacity = prefs?.get(LiveDanmakuOpacity)
+                ?: SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
+            // ★这里原来读的是"跟随点播弹幕设置"（`LiveDanmakuFollowVod`）：本轮该开关已删除，
+            //   读取一并去掉 —— 直播弹幕固定用自己那套键（字号/不透明度/速度/显示区域）。
+            danmakuSpeed = prefs.floatOr(LiveDanmakuSpeed, SettingConstants.LIVE_DANMAKU_SPEED_DEFAULT),
+            danmakuAreaPercent = prefs?.get(LiveDanmakuAreaPercent)
+                ?: SettingConstants.LIVE_DANMAKU_AREA_PERCENT_DEFAULT,
+            gridSpan = prefs?.get(LiveGridSpan) ?: SettingConstants.LIVE_GRID_SPAN_DEFAULT,
+            sortType = prefs?.get(LiveSortType) ?: LIVE_SORT_TYPE_ONLINE,
+        )
+    }
+
+    /**
+     * 直播设置的**主线程读取口**（★推荐 A 路/LivePlayerActivity 用这个）。
+     *
+     * 为什么不给一个挂起版本：播放页的 `onCreate/onStop/onUserLeaveHint` 都是主线程回调，
+     * 而 DataStore 只有挂起读取（`data.first()`）。这里走的是 [cachedPreferencesOrNull] 那份
+     * **进程级内存快照**（`BilimiaoCommApp.onCreate` 里 [warmUpCache] 已经热起来了）：
+     * 主线程 O(1) 取，不阻塞、不联网，进程刚起还没读完时返回的就是各字段的默认值。
+     *
+     * 用法（播放页）：
+     * ```
+     * val live = SettingPreferences.liveSettings()
+     * if (live.backgroundPlay) { ...不暂停... } else delegate?.pause()
+     * ```
+     * 想在 Compose 里**跟着设置变**，用 `AppStore.stateFlow` 的 `state.live`（同一个 Values 类型）。
+     */
+    fun liveSettings(): Live.Values = Live.of(cachedPreferencesOrNull())
 
     /**
      * Danmaku

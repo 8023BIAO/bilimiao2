@@ -35,6 +35,7 @@ import cn.a10miaomiao.bilimiao.download.DownloadService
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
+import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerLauncher
 import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerSource
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.player.PlayListFrom
@@ -363,7 +364,14 @@ class VideoDetailViewModel(
         }
 
         // 播放视频
-        basePlayerDelegate.openPlayer(
+        // ★ 阶段 1：点播播放搬进独立 Activity（VideoPlayerActivity）——这样 PiP 小窗底下是
+        //   自家的视频详情页，而不是手机桌面（根因见 `直播优化-点播PIP立即开启-说明.md` §7.3）。
+        //   回退：`VideoPlayerLauncher.USE_STANDALONE_ACTIVITY = false` 即回到"主界面内播放"的老路径；
+        //   这里传进去的 source 与老路径**是同一个对象**，播放语义（取流/弹幕/清晰度/续播）不变。
+        //   末尾的 `playListStore.state.items` 是合集/播单自动连播要用的播放列表快照：
+        //   新页面有自己的一份 store，不带过去的话合集播完第一集会直接弹「播放完成」。
+        VideoPlayerLauncher.play(
+            activity,
             VideoPlayerSource(
                 mainTitle = arc.title,
                 title = title,
@@ -408,7 +416,9 @@ class VideoDetailViewModel(
                         height = dimension.height.toInt()
                     }
                 }
-            }
+            },
+            basePlayerDelegate,
+            playListStore.state.items,
         )
     }
 

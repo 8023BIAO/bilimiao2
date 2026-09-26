@@ -5,13 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
@@ -27,11 +25,7 @@ import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
-import cn.a10miaomiao.bilimiao.compose.R
-import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
-import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
-import com.bumptech.glide.integration.compose.GlideImage
-import com.bumptech.glide.integration.compose.placeholder
+import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
@@ -219,7 +213,6 @@ private class UserFollowPageViewModel(
     }
 }
 
-@OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun UserFollowPageContent(
     viewModel: UserFollowPageViewModel,
@@ -286,13 +279,14 @@ private fun UserFollowPageContent(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    GlideImage(
-                        model = UrlUtil.autoHttps(follow.face) + "@200w_200h",
-                        loading = placeholder(R.drawable.bili_akari_img),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
+                    // 在播的 UP 会挂「直播中」+ 涟漪，点头像直接进直播间。
+                    // ★这一屏所有头像的查询会被 LiveStatusCache 合并成**一条**请求，
+                    //   而且滑出屏幕的 item 根本不会被组合 → 自然"离屏不请求"。
+                    LiveBadgedAvatar(
+                        face = follow.face,
+                        size = 40.dp,
+                        mid = follow.mid,
+                        onClick = { viewModel.toUserDetailPage(follow.mid) },
                     )
                     Column(
                         modifier = Modifier

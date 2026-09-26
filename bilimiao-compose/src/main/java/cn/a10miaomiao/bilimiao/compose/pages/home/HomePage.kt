@@ -48,8 +48,10 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicPage
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeBangumiContent
+import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeLiveContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomePopularContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeRecommendContent
+import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeRegionContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeTimeMachineContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeTimeSelectContent
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
@@ -88,6 +90,18 @@ private sealed class HomePageTab(
 
     @Composable abstract fun PageContent(pageState: HomePageState)
 
+    /**
+     * 直播：顶部横向分类标签条（全部/网游/手游/…，实测 12 个顶级分区 + 子分区）+ 直播房间卡片。
+     * 用户明确要求**放在第一个**（"为什么不在首页的第一个 tab 加上直播的分区"），
+     * 所以它在 getTabs 里也是第一个被 add 的，排在「时光姬」前面。
+     */
+    data object Live : HomePageTab(id = PageTabIds.HomeLive, name = "直播") {
+        @Composable
+        override fun PageContent(pageState: HomePageState) {
+            HomeLiveContent()
+        }
+    }
+
     data object TimeMachine :
             HomePageTab(
                     id = PageTabIds.HomeTimeMachine,
@@ -110,6 +124,17 @@ private sealed class HomePageTab(
         @Composable
         override fun PageContent(pageState: HomePageState) {
             HomePopularContent()
+        }
+    }
+
+    /**
+     * 分区：左侧一条竖排分区条 + 右侧该分区的视频卡片（内容在 HomeRegionContent.kt）。
+     * 位置按用户要求插在「热门」之后、「番剧」之前。
+     */
+    data object Region : HomePageTab(id = PageTabIds.HomeRegion, name = "分区") {
+        @Composable
+        override fun PageContent(pageState: HomePageState) {
+            HomeRegionContent()
         }
     }
 
@@ -159,6 +184,12 @@ private class HomePageViewModel(
 
     private var lastBackPressedTime = 0L
 
+    /**
+     * 「分区」Tab 显不显示，和热门/番剧/影视一样由 AppStore.HomeSettingState 统一管：
+     * 设置页写 datastore → AppStore 的 collector 推新 state → 这里重建 Tab 列表。
+     * 早先这里自己又 collect 了一份分区自己的 datastore，等于同一件事两条数据流，
+     * 还漏掉了下面 HOME_ENTRY_VIEW_REGION 那个"首页入口"选项，现在并回一条。
+     */
     private val _tabs = mutableStateOf(getTabs(appStore.state.home))
     val tabs
         get() = _tabs.value
@@ -183,6 +214,14 @@ private class HomePageViewModel(
     private fun getTabs(setting: HomeSettingState): List<HomePageTab> {
         val entryView = setting.entryView
         val tabs = mutableListOf<HomePageTab>()
+        // 直播放最前面（用户要求：首页第一个 Tab 就是直播）。
+        // 它和其它 Tab 一样：既能被「显示直播」开关藏掉，也能当「首页入口」的默认落点。
+        if (setting.showLive) {
+            tabs.add(HomePageTab.Live)
+            if (entryView == SettingConstants.HOME_ENTRY_VIEW_LIVE) {
+                initialPage = tabs.size - 1
+            }
+        }
         if (setting.showTimeMachine) {
             tabs.add(HomePageTab.TimeMachine)
             if (entryView == SettingConstants.HOME_ENTRY_VIEW_DEFAULT) {
@@ -205,6 +244,14 @@ private class HomePageViewModel(
         if (setting.showPopular) {
             tabs.add(HomePageTab.Popular)
             if (entryView == SettingConstants.HOME_ENTRY_VIEW_POPULAR) {
+                initialPage = tabs.size - 1
+            }
+        }
+        // 分区：用户要求插在「热门」之后、「番剧」之前。
+        // 和上面几个 Tab 一样，既能被显示开关藏掉，也能当「首页入口」的默认落点
+        if (setting.showRegion) {
+            tabs.add(HomePageTab.Region)
+            if (entryView == SettingConstants.HOME_ENTRY_VIEW_REGION) {
                 initialPage = tabs.size - 1
             }
         }
@@ -307,11 +354,14 @@ private fun HomePageContent(viewModel: HomePageViewModel) {
                                     action = MenuActions.search
                                 }
 
-                                // 筛选：仅在番剧/影视 Tab 显示
+                                // 筛选：仅在番剧/影视/直播 Tab 显示
+                                // （直播第四阶段：分类从"搜索框下面两条长标签"搬进筛选弹窗后，
+                                //   底栏这个按钮就是和番剧/影视**完全一致**的那个入口）
                                 val currentTab =
                                     viewModel.tabs.getOrNull(pagerState.currentPage)
                                 if (currentTab is HomePageTab.Bangumi ||
-                                    currentTab is HomePageTab.Cinema) {
+                                    currentTab is HomePageTab.Cinema ||
+                                    currentTab is HomePageTab.Live) {
                                     myItem {
                                         key = MenuKeys.filter
                                         title = "筛选"
@@ -335,7 +385,9 @@ private fun HomePageContent(viewModel: HomePageViewModel) {
             if (tab != null) {
                 when (tab) {
                     is HomePageTab.Bangumi,
-                    is HomePageTab.Cinema -> {
+                    is HomePageTab.Cinema,
+                    // 直播：同一个 EmitterAction，由 HomeLiveContent 收下来开直播分类弹窗
+                    is HomePageTab.Live -> {
                         emitter.emit(EmitterAction.OpenFilter(tabId = tab.id))
                     }
                     else -> {}

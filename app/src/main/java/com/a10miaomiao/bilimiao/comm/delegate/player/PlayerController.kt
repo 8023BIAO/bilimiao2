@@ -812,9 +812,20 @@ class PlayerController(
      * 进小窗（画中画）。
      *
      * 顶栏那个「小窗播放」图标按钮和「更多」菜单里的小窗播放都走这里，逻辑只留一份。
+     *
+     * ★这是**手动入口**：用户点一下就**立即**进小窗，不需要先退到桌面
+     *   （`Activity.enterPictureInPictureMode()` 在前台调用即生效，见 PicInPicHelper）。
+     *   退后台自动进 PiP 是另一条路（[PlayerDelegate2.tryEnterPipOnBackground]，受设置「后台小窗播放」门控），
+     *   两条路最终共用同一份 PiP 参数。
      */
     fun enterPip() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 播放器没开着就别进：没有内容的 PiP 窗口是纯黑一块，用户会以为播放器坏了。
+            // （按钮本身在播放器 UI 里，正常点不到，这里只防状态竞态）
+            if (!delegate.isOpened()) {
+                toast("播放器还没准备好")
+                return
+            }
             val height = playerSourceInfo?.height
             val width = playerSourceInfo?.width
             // 设置宽高比例值
@@ -825,7 +836,14 @@ class PlayerController(
                 Rational(width, height)
             }
             try {
-                delegate.picInPicHelper?.enterPictureInPictureMode(aspectRatio)
+                // 返回值 = 系统有没有接受这次请求。false 时原来是一声不吭，
+                // 用户只会觉得"点了没反应"，这里如实反馈（进 PiP 失败最常见的原因：
+                // 系统设置/ROM 关了本应用的画中画权限，或设备正处于不允许 PiP 的多窗口状态）
+                val entered = delegate.picInPicHelper?.enterPictureInPictureMode(aspectRatio) == true
+                if (!entered) {
+                    miaoLogger() debug "enterPip 被系统拒绝：sdk=${Build.VERSION.SDK_INT} ratio=$aspectRatio"
+                    toast("系统未允许进入小窗播放")
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 toast("此设备不支持小窗播放")

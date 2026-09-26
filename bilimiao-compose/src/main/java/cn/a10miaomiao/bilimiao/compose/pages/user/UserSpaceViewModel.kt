@@ -23,6 +23,7 @@ import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.entity.user.SpaceInfo
+import com.a10miaomiao.bilimiao.comm.live.LiveStatusCache
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
@@ -104,6 +105,14 @@ class UserSpaceViewModel(
                 val result = res.requireData()
                 _detailData.value = result
                 _isFollow.value = result.card.relation.is_follow == 1
+                // ★把"顺手拿到的"在播状态灌进全局缓存：这个接口本来就返回了 live 对象，
+                //   一分钱不花。灌进去之后，同一个 UP 出现在关注列表/动态卡片里时
+                //   直接命中缓存，那边一次请求都不用发（见 LiveStatusCache.put 的注释）。
+                LiveStatusCache.put(
+                    uid = result.card.mid,
+                    liveStatus = result.live.liveStatus,
+                    roomId = result.live.roomid,
+                )
             } else {
                 _fail.value = res.message
                 toast(res.message)
@@ -164,6 +173,11 @@ class UserSpaceViewModel(
             toast("网络错误")
             e.printStackTrace()
         }
+    }
+
+    /** 自己的空间 → 「编辑资料」。目标页已在 BilimiaoPageRoute 里 composable 注册（规则 C） */
+    fun toEditProfile() {
+        pageNavigation.navigate(EditProfilePage())
     }
 
     fun toFans() {
@@ -263,6 +277,9 @@ class UserSpaceViewModel(
             }
             MenuKeys.follow -> {
                 attention()
+            }
+            MenuKeys.edit -> {
+                toEditProfile()
             }
             MenuKeys.message -> {
                 val info = detailData.value ?: return

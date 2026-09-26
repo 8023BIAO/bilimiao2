@@ -93,6 +93,11 @@ private class SettingPageViewModel(
         pageNavigation.navigate(DanmakuSettingPage())
     }
 
+    /** 直播设置（第四阶段）：和「播放器设置 / 弹幕设置」并列挂在 ① 播放 下 */
+    fun toLiveSettingPage() {
+        pageNavigation.navigate(LiveSettingPage())
+    }
+
     fun toFilterSettingPage() {
         pageNavigation.navigate(FilterSettingPage())
     }
@@ -192,6 +197,8 @@ private fun SettingPageContent(
         listOf(
             SettingPageLink("播放器设置", "后台/小窗、视频源、字幕、下载", "① 播放", "播放 播放器 缓冲 画质 格式 字幕 下载 小窗", viewModel::toVideoSettingPage),
             SettingPageLink("弹幕设置", "弹幕显示、样式与过滤", "① 播放", "弹幕 danmaku 显示 样式 过滤 关键词", viewModel::toDanmakuSettingPage),
+            // 直播设置的搜索入口（页面级）：搜"直播 / 小窗 / 画质 / 线路 / 弹幕"都能直达
+            SettingPageLink("直播设置", "后台/小窗、默认画质、线路、直播弹幕与列表", "① 播放", "直播 live 直播间 后台 继续 小窗 pip 画中画 画质 清晰度 原画 线路 cdn 重连 弹幕 排序 卡片 列数", viewModel::toLiveSettingPage),
             SettingPageLink("定时关闭", "在「播放器设置 → 播放控制设置」里", "① 播放", "定时 关闭 睡眠 停止", viewModel::toAutoStopTimerPage),
             SettingPageLink("主题", "配色与深色模式", "② 界面", "主题 配色 颜色 深色 夜间 纯黑", viewModel::toThemePage),
             SettingPageLink("首页设置", "首页入口显示", "② 界面", "首页 主页 首页入口 入口显示 卡片 列数 时光姬", viewModel::toHomeSettingPage),
@@ -258,6 +265,14 @@ private fun SettingPageContent(
                 title = { Text("弹幕设置") },
                 summary = { Text("弹幕显示、样式与过滤") },
                 onClick = viewModel::toDanmakuSettingPage,
+            )
+            // 直播设置（第四阶段）：直播的后台/小窗/画质/线路/弹幕/列表是一整块独立语义，
+            // 单开一页而不是塞进「播放器设置」（点播后台播放是继续出声，直播是画面照常播）
+            preference(
+                key = "live",
+                title = { Text("直播设置") },
+                summary = { Text("后台/小窗、默认画质、线路、直播弹幕与列表") },
+                onClick = viewModel::toLiveSettingPage,
             )
             // 「定时关闭」搬进「播放器设置 → 播放控制设置」了（用户：在播放器点齿轮进来要能找到它），
             // 这里不再单独挂一行；搜索索引里保留入口，搜"定时"仍能直达。

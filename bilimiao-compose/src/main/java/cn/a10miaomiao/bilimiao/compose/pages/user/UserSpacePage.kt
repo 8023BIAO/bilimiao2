@@ -197,6 +197,14 @@ private fun UserSpacePageDetailContent(
 //                        key = 3
 //                        title = "用浏览器打开"
 //                    }
+                    // 编辑资料只对**自己的**空间有意义（对齐 PiliPlus：它是在自己空间把「关注」
+                    // 换成「编辑资料」，见报告 §1.1）。这里不动头部主按钮，只在「更多」里加一项。
+                    if (viewModel.isSelf) {
+                        myItem {
+                            key = MenuKeys.edit
+                            title = "编辑资料"
+                        }
+                    }
                     myItem {
                         key = 4
                         title = "复制链接"
@@ -336,6 +344,9 @@ private fun UserSpacePageDetailContent(
                         }
                     },
                 isLargeScreen = isLargeScreen,
+                // 头部淡出（alpha→0）之后就把头像的涟漪停掉：这里还在组合树里，
+                // 不像 LazyColumn 那样会被回收，只能靠这个开关显式省电
+                rippleActive = alpha > 0.02f,
                 viewModel = viewModel,
                 archiveViewModel = archiveViewModel,
             )

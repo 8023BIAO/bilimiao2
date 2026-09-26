@@ -49,6 +49,8 @@ object BiliApiService {
     /** 小电视空降助手（BilibiliSponsorBlock）：独立服务端 bsbsb.top，与 B 站 API 无关 */
     val sponsorBlockAPI = SponsorBlockApi()
     val userApi = UserApi()
+    /** 账号资料（编辑资料页）：读 x/v2/account/myinfo + 改昵称/签名，见 MemberProfileApi */
+    val memberProfileApi = MemberProfileApi()
     val userRelationApi = UserRelationApi()
     val messageApi = MessageAPI()
     val authApi = AuthApi()
