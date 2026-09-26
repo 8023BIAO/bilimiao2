@@ -84,6 +84,7 @@ import com.a10miaomiao.bilimiao.comm.live.LivePageTrace
 import com.a10miaomiao.bilimiao.comm.live.LivePortraitStage
 import com.a10miaomiao.bilimiao.comm.live.danmaku.ConnState
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuClient
+import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveMessage
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveRoomDetail
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveRoomInitInfo
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveStatus
@@ -1297,6 +1298,58 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /** 开播轮询任务（未开播/下播时才活着） */
     private var pollJob: Job? = null
 
+    // ── 「没在播」这条线（★本轮新增：未开播 / 中途下播）────────────────────────
+    /**
+     * **"现在没有在播"的锁定**（未开播 / 中途下播 / 拿不到流反复失败之后都落在这里）。
+     *
+     * ```
+     * true  → 所有自动追流一律不做（[autoRetryLiveStream] 的第 ⓪ 道门、看门狗直接跳过），
+     *          唯一的恢复路径 = "等待开播"轮询 [startOfflinePolling]（45s 一次的单次尝试）
+     * false → 一切照旧（与改动前逐字节一致）
+     * ```
+     *
+     * 为什么必须有它：修前"下播"这件事**没有任何判据**，看门狗 + delegate 的自动换线/重取流
+     * 各自只有"降速"用的滑动窗口（窗口一过额度回满），于是中途下播会变成无限换流
+     * （详见交付报告 §2）。锁定之后"换流"这条链**只剩一个终点**：等主播回来。
+     *
+     * 谁来置位：① [LivePlayerDelegate.LivePlayState.OFFLINE]（delegate 判定"没有流了"）；
+     * ② [LivePlayerDelegate.Listener.onLiveOffline]（delegate 拿到**硬证据**：`live_status != 1`）。
+     * 谁来清：真的播出画面（`PLAYING`）/ 用户手动「重新取流」/ 开播轮询发现开播后重新起播。
+     */
+    private var offlineLatched = false
+
+    /**
+     * "主播已下播 / 未开播"这个弹窗**本次进房是否已经弹过**。
+     *
+     * ★用户明确要求"不要自动循环弹窗"：一次下播事件只弹一次；真的重新开播（`PLAYING`）之后
+     *   才重新允许下一次（那时是**新的一次**下播，再弹一次才是对的）。
+     */
+    private var offlineDialogShown = false
+
+    /** 那个一次性提示弹窗（走本页统一的 [normalDialog]，与「画质·线路」同一套观感） */
+    private var liveOfflineDialog: AlertDialog? = null
+
+    /**
+     * **本次进房有没有真的播出过画面**（`PLAYING`）—— 只用来决定文案说"未开播"还是"已下播"。
+     *
+     * ★为什么用"出过画面"而不是列表里那个 `live_status`：列表可能是旧的（用户实测："我之前的列表
+     *   还是'他开播'的状态，我进去其实他没开播"），而这个标记是**本页亲眼看到的**事实。
+     */
+    private var hasPlayedThisRoom = false
+
+    /**
+     * ★本轮新增：自动追流的预算**是不是已经用尽**（一次性，不再随滑窗回满）。
+     *
+     * 修前 [autoRetryLiveStream] 的 ④ 号门是"5 分钟内最多 3 次"的**滑动窗口**：窗口滑过去额度就
+     * 自动恢复 ⇒ 只要房间一直不出流，它就会**永远**每 20s 追一次（这正是"一直在换流"的一路）。
+     * 现在改成"一份预算用到底"：用完就停手并如实告知；只有**真的恢复播放**（`PLAYING`）或用户
+     * 手动「重新取流」才重新给一份（见 [autoRetryBudgetExhausted] 的两个复位点）。
+     */
+    private var autoRetryBudgetExhausted = false
+
+    /** 弹幕 WS 的直播状态订阅（`LIVE` / `PREPARING`）—— 零成本的下播信号，喂给 delegate 的判据 */
+    private var liveSignalJob: Job? = null
+
     /** 已经就"该清晰度拿不到"提示过的 qn，避免反复弹 toast */
     private var warnedQn = -1
 
@@ -1973,6 +2026,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         )
         pollJob?.cancel()
         danmakuStateJob?.cancel()
+        // ★本轮：弹幕流里的"直播状态"订阅也要收（它抓着 delegate 与本页实例）
+        liveSignalJob?.cancel()
         liveHealthJob?.cancel()
         mainHandler.removeCallbacks(hideControlsRunnable)
         // ★第九批：那条"几何落定后重推弹幕列表"的任务也要撤（它抓着本页的 View 与弹幕宿主）
@@ -2009,6 +2064,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   加速度计是**系统服务**，不注销它就一直抓着本页实例，退出直播间也回收不掉。
         disarmDeviceOrientationSentinel()
         streamDialog = null
+        // ★本轮：「主播已下播」那个一次性提示随页面一起收（它是本页建的 AlertDialog 窗口）
+        dismissLiveOfflineDialog()
         // ★第十四批：直播设置弹窗的宿主也要释放（ComposeView 一 detach 就会 dispose 那份组合，
         //   弹窗的 `Dialog` 窗口随之收掉 —— 页面没了弹窗还挂在屏幕上是不可能发生的）。
         liveSettingSheetHost?.release()
@@ -2537,13 +2594,27 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             setupPlayerAndDanmaku(effectiveRoomId)
             // ★只在"明确没在播"时才提前报未开播（原来只要 room_init 说不可播就直接 OFFLINE，
             //   而 room_init 本身现在经常 412/数据滞后 → 用户看到假"未开播"）。真正的判据交给取流结果。
+            // ★★本轮（未开播与中途下播）：这一支现在做**三件事**，而且必须在 delegate.start() **之前**：
+            //   ① 以**服务端实时状态**为准（[resolveRoom] = 现有降级链 room_init → getH5InfoByRoom → get_info）
+            //      —— 进房这一刻 `live_status == 0` 就**不取流、不进播放态**（连一次 getRoomPlayInfo 都不发）；
+            //   ② 走 [enterOfflineWait] 而不是只写一行状态文字：**锁定**"没在播"（自动追流/换线全部停），
+            //      并起 45s 的"等待开播"轮询；
+            //   ③ 弹一次"主播未开播"（[showLiveOfflineDialogOnce]，判据是"本次进房没播出过画面"）。
+            //   ★列表里的旧状态**不许当真**：那一路（`HomeLiveContent`）只把 roomId 传进来、
+            //     不传任何 live_status（见那里的 `toLiveRoom`），本页一律自己问服务端。
             if (init != null && init.live_status == 0) {
                 // ★实测：轮播房 live_status=2 虽然接口 code=0，但 playurl_info 是 null，
-                //   一条流都拿不到（方案 §1）—— 所以这里按"能不能播"判定，而不是按 code
-                delegateListener.onPlayStateChanged(
-                    LivePlayerDelegate.LivePlayState.OFFLINE,
-                    "房间未开播（live_status=${init.live_status}）",
+                //   一条流都拿不到（方案 §1）—— 所以这里只把**明确的 0（未开播）**提前挡下，
+                //   2（轮播）仍要放进去试一次（`LivePlayabilityJudge.shouldAttemptPlay` 的既有结论：
+                //   只挡 0，其余放行让"取流"这最权威的一步决定）。
+                LivePageTrace.note(
+                    "offline.entry",
+                    "room" to effectiveRoomId,
+                    "liveStatus" to init.live_status,
+                    "source" to "resolveRoom",
                 )
+                enterOfflineWait("主播未开播（等待开播…）")
+                showLiveOfflineDialogOnce(init.live_status, "resolveRoom")
                 return@launch
             }
             setStreamStatus("正在获取直播流…")
@@ -2737,21 +2808,137 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 开播轮询：未开播/下播之后每 [OFFLINE_POLL_INTERVAL_MS] 查一次 `live_status`，
      * 一开播就用真实房间号重新起播。
+     *
+     * ★★本轮（未开播与中途下播）它是**锁定之后唯一的自动恢复路径**：
+     * ```
+     * 进房发现没开播 / 中途下播 / 反复拿不到流
+     *   → [enterOfflineWait]（锁定 + 停掉所有自动追流 + 换文案）
+     *     → 本函数：每 45s **一次**（真的只问一次接口，不是连环换流）
+     *       → 开播了 → delegate.start() → 出画面 → PLAYING 把锁定解开
+     * ```
+     * 为什么是"单次尝试"而不是"重试套餐"：这一路每次只做一件事 —— 问一句 `live_status`；
+     * 只有在**服务端说开播了**的情况下才会重新取流一次。所以它天然不会形成换流风暴。
+     *
+     * ★它仍然用 [resolveRoom] 的**降级链**（`room_init` → `getH5InfoByRoom` → `get_info`）：
+     *   `room_init` 已被风控整端点 412 封过（实测 97.7%），只信它会让轮询永远"查不到"。
+     *   `?: continue` 那一支（三个都失败）**保持"继续等"**：拿不到 ≠ 没开播，宁可下一轮再问，
+     *   也绝不把"没问到"写成"未开播"（与 `LiveRoomProbe.STATUS_UNKNOWN` 同一条原则）。
      */
     private fun startOfflinePolling() {
         if (pollJob?.isActive == true) return
         pollJob = lifecycleScope.launch {
             while (isActive) {
-                setStreamStatus("房间未开播，${OFFLINE_POLL_INTERVAL_MS / 1000}s 后自动重试…")
+                setStreamStatus("等待开播：${OFFLINE_POLL_INTERVAL_MS / 1000}s 后自动检查（开播即自动起播）")
                 delay(OFFLINE_POLL_INTERVAL_MS)
                 val init = resolveRoom(rawRoomId) ?: continue
                 if (LiveStatus.isPlayable(init.live_status)) {
                     setStreamStatus("主播开播了，正在起播…")
+                    // ★本轮：开播了 = "没在播"这条线结束（锁定解开、预算复位）。
+                    //   真正的解锁仍在 PLAYING 那一支（出画面才算数），这里先解开是为了让
+                    //   "起播这一次失败"也能重新走一遍自动追流（否则一次失败就再无自愈）。
+                    offlineLatched = false
+                    autoRetryBudgetExhausted = false
                     delegate?.start(requestedQn)
                     return@launch
                 }
             }
         }
+    }
+
+    /**
+     * ★本轮新增：**进入"没在播"的等待态**（`OFFLINE` 状态与锁定判定的**唯一收敛点**）。
+     *
+     * 做四件事（顺序无关，但一件都不能少）：
+     * 1. **锁定** [offlineLatched] ⇒ 看门狗与 [autoRetryLiveStream] 从此什么都不做（换流停止）；
+     * 2. **清掉自动追流的记账**（预算窗口 + "已提醒"标记）—— 下一次真的开播恢复后是全新的一轮；
+     * 3. 如实写状态行（文案由 delegate 给，区分"未开播 / 已下播 / 反复中断"）并收起转圈；
+     * 4. 起 [startOfflinePolling]（锁定期间**唯一**的自动恢复路径）。
+     *
+     * ★它**不弹**任何弹窗：弹窗只在**有硬证据**时弹（[showLiveOfflineDialogOnce]），
+     *   否则"流断了但主播可能还在"也会被说成"下播"，那是把猜测当结论。
+     */
+    private fun enterOfflineWait(message: String) {
+        offlineLatched = true
+        autoRetryBudgetExhausted = false
+        autoRetryStamps.clear()
+        autoRetryBudgetWarned = false
+        // ★转圈必须收掉：进度条是"正在取流"的信号，而这一刻已经**没有流可等**了
+        //   （进房那条路是 `startResolveAndPlay()` 开的转圈，不走 delegate 回调，
+        //     所以这里必须自己收 —— 漏了这一行就是"一直在转圈"）
+        showLoading(false)
+        setStreamStatus(message)
+        startOfflinePolling()
+    }
+
+    /**
+     * ★本轮新增：**"主播已下播 / 未开播"的一次性提示**（用户原话："这个我想整个弹窗说他没开播"）。
+     *
+     * ## 为什么这么克制（三件事刻意不做）
+     * | 不做 | 为什么 |
+     * |---|---|
+     * | **不自动退出直播间** | 用户可能只是想看看封面、等一会儿、或者去点别的；替他退出去是**替他做决定**。退出走系统返回键/顶栏返回（他本来就会用），弹窗里只留一句"知道了" |
+     * | **不循环弹** | 一次下播事件只弹一次（[offlineDialogShown]）；真的重新开播（`PLAYING`）之后才允许下一次 —— 否则"轮询失败→再弹→再失败"会变成弹窗风暴 |
+     * | **不打断版式/手势** | 走本页统一的 [normalDialog]（MaterialAlertDialog，独立窗口、居中、系统算几何），横竖屏/PiP/小窗下都不会越界，也不参与任何几何契约 |
+     *
+     * ## 弹窗里的两句话
+     * - 标题：**"主播已下播"**（本次进房真的播出过画面 —— [hasPlayedThisRoom]）/ **"主播未开播"**（一次都没播起来）；
+     *   ★判据是本页**亲眼看到的画面**，不是列表里那个可能过期的 `live_status`（用户实测："列表还是'他开播'，进去其实没开播"）。
+     * - 正文：一句"已经在等待开播，开播后会自动起播" —— 让用户知道**现在什么都不用做**，
+     *   也在暗示"不会一直换流了"（这正是本轮修的东西）。
+     *
+     * @param liveStatus 判据看到的那次 `live_status`（只进诊断日志，不进文案）
+     * @param source 判据来源（只进诊断日志）
+     */
+    private fun showLiveOfflineDialogOnce(liveStatus: Int, source: String) {
+        if (isFinishing || isDestroyed) return
+        if (isInPictureInPictureMode) {
+            // 小窗里弹一个"主播已下播"没有意义（用户在看别的页面），状态行/等待开播照旧。
+            LivePageTrace.note("offline.dialog.skip", "reason" to "pip", "source" to source)
+            return
+        }
+        if (offlineDialogShown) {
+            LivePageTrace.note("offline.dialog.skip", "reason" to "alreadyShown", "source" to source)
+            return
+        }
+        offlineDialogShown = true
+        val played = hasPlayedThisRoom
+        LivePageTrace.note(
+            "offline.dialog",
+            "room" to rawRoomId,
+            "liveStatus" to liveStatus,
+            "source" to source,
+            "everPlayed" to played,
+        )
+        // 与「画质·线路」「直播设置」同一条规矩：同一时刻只留一个弹窗
+        dismissDialogs()
+        dismissDanmakuInput()
+        val dialog = normalDialog()
+            .setTitle(if (played) "主播已下播" else "主播未开播")
+            .setMessage(
+                if (played) {
+                    "直播已经结束，已停止自动重试。\n留在本页即可：主播重新开播后会自动起播。"
+                } else {
+                    "这个直播间现在没有开播，已停止自动重试。\n留在本页即可：开播后会自动起播。"
+                }
+            )
+            .setPositiveButton("知道了", null)
+            .create()
+        // 点"知道了"只关弹窗（**留在页面等待**，正是上面正文承诺的事）；退出仍走返回键
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+                LivePageTrace.note("offline.dialog.ack", "room" to rawRoomId, "polling" to (pollJob?.isActive == true))
+                runCatching { dialog.dismiss() }
+            }
+        }
+        dialog.setOnDismissListener { if (liveOfflineDialog === dialog) liveOfflineDialog = null }
+        liveOfflineDialog = dialog
+        runCatching { dialog.show() }
+    }
+
+    /** 收掉"主播已下播"提示（幂等；开播/重新取流/页面销毁时都要收） */
+    private fun dismissLiveOfflineDialog() {
+        liveOfflineDialog?.takeIf { it.isShowing }?.let { runCatching { it.dismiss() } }
+        liveOfflineDialog = null
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -2781,6 +2968,21 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 if (state == ConnState.Failed) {
                     toast("弹幕连接失败（风控或认证被拒），点底栏「弹幕重连」可再试一次")
                 }
+            }
+        }
+        // ★本轮新增：**弹幕流里的直播状态**（`cmd=PREPARING` / `cmd=LIVE`）—— 下播的**零成本信号**。
+        //
+        // 为什么值得接：主播下播时弹幕链路会先收到 `PREPARING`，比"播放器发现流断了"更早，
+        // 而且**不多花任何一次请求**（这条连接本来就在跑；`LiveDanmakuClient` 早就把这个消息
+        // 发进 `messages` 了，只是此前**没有任何消费端**）。
+        // 为什么只当"嫌疑"：判据与定性全部交给 delegate 的 `LiveOfflineDetector`
+        // （`PREPARING` 可能是瞬态，真要定性必须再问一次 `live_status`；
+        //  `STOP_LIVE_ROOM_LIST` 是全局列表消息，刻意不用 —— 见那里的判据表）。
+        liveSignalJob?.cancel()
+        liveSignalJob = lifecycleScope.launch {
+            client.messages.collect { message ->
+                if (message !is LiveMessage.LiveStatus) return@collect
+                delegate?.noteDanmakuLiveSignal(message.status)
             }
         }
     }
@@ -2904,6 +3106,18 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                     // ★本轮：「直播中」是**正常态** → 走 [setStreamStatusNormal]（状态行整条隐藏，
                     //   顶栏只剩返回 + 房间号（在线人数））；它同时负责把上一条异常文案清掉。
                     setStreamStatusNormal("直播中")
+                    // ★本轮：真的播出画面 = 一次**真恢复** —— 把"没在播"这条线的账全部解开：
+                    //   · 解除锁定（下一条路才允许自动追流）；
+                    //   · 重新给一份自动追流预算（上次那份用尽是因为"确实追不回来"，现在追回来了）；
+                    //   · 允许下一次下播**再弹一次**提示（新的事件）；并把已经弹着的那个收掉
+                    //     （开播轮询把画面接上了，弹窗不该再挡着）。
+                    hasPlayedThisRoom = true
+                    offlineLatched = false
+                    autoRetryBudgetExhausted = false
+                    offlineDialogShown = false
+                    autoRetryStamps.clear()
+                    autoRetryBudgetWarned = false
+                    dismissLiveOfflineDialog()
                     updatePlayPauseButton()
                 }
 
@@ -2917,13 +3131,25 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
                 LivePlayerDelegate.LivePlayState.OFFLINE -> {
                     showLoading(false)
-                    setStreamStatus(message ?: "房间未开播")
-                    // 下播/未开播 → 转入开播轮询（这是唯一的"自动恢复"路径）
-                    startOfflinePolling()
+                    // ★本轮：**没有流了 ⇒ 锁定"没在播"**：停掉一切自动追流，只留 45s 开播轮询。
+                    //   文案用 delegate 给的那句（它按 live_status / 有没有播过区分措辞，
+                    //   且绝不把接口术语写给用户看）。
+                    enterOfflineWait(message ?: "暂时没有直播信号（等待开播…）")
                 }
 
                 LivePlayerDelegate.LivePlayState.ERROR -> {
                     showLoading(false)
+                    // ★本轮：「等待开播」期间的那次起播尝试失败 = 轮询的**中间态**，不是新事件：
+                    //   · **不 toast**（否则每 45s 弹一次"服务端暂未下发播放地址…"）；
+                    //   · **把轮询接回去**（`startOfflinePolling()` 出来时那个协程已经 return 了）——
+                    //     否则用户会停在一句"稍后自动重试"上，而实际上**再没有任何东西会去重试**。
+                    //   ★这一路是"服务端说在播、但这次确实没给流"（B 站下播后常见的一段自相矛盾期），
+                    //     所以频率仍然是 45s 一次**单次尝试**，不是换流风暴。
+                    if (offlineLatched) {
+                        setStreamStatus(message ?: "暂时没有直播信号（等待开播…）")
+                        if (pollJob?.isActive != true) startOfflinePolling()
+                        return
+                    }
                     setStreamStatus(message ?: "播放失败")
                     message?.let { toast(it) }
                     setControlsVisible(true)
@@ -2946,6 +3172,18 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             videoContainer.requestLayout()
             // 比例变了 → PiP 的宽高比与源矩形提示跟着变，不然 PiP 窗口会留黑边/动画起点错位
             updatePipParams()
+        }
+
+        /**
+         * ★本轮新增：delegate **确认了"主播没在播"**（硬证据：取流 `live_status != 1`，
+         * 或限频复查 `get_info` 明确说没在播）。
+         *
+         * 这里只做**一件事**：弹那个一次性的提示。状态行文案与"等待开播"轮询已经由
+         * [LivePlayerDelegate.LivePlayState.OFFLINE] 那一支（[enterOfflineWait]）做掉了 ——
+         * 两个回调分工见 `LivePlayerDelegate.Listener` 的 KDoc，不重复、也不互相打架。
+         */
+        override fun onLiveOffline(liveStatus: Int, source: String) {
+            showLiveOfflineDialogOnce(liveStatus, source)
         }
     }
 
@@ -3007,18 +3245,35 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ## 现在谁在调它（两条路，**没有**常驻按钮）
      * | 调用方 | 场景 |
      * |---|---|
-     * | [autoRetryLiveStream] | 自动：回到前台 / 看门狗检出停滞、落后或"画面不出新帧"（带防抖与预算） |
-     * | [showStreamDialog] 的「重新取流」 | 手动：用户自己点，**不受**防抖与预算限制 |
+     * | [autoRetryLiveStream] | 自动：回到前台 / 看门狗检出停滞、落后或"画面不出新帧"（带防抖与预算，`fromAuto = true`） |
+     * | [showStreamDialog] 的「重新取流」 | 手动：用户自己点，**不受**防抖与预算限制（`fromAuto` 用默认值 false） |
+     *
+     * ★本轮新增 [fromAuto]：**手动**这一路还要额外做三件事（自动那一路刻意不做，理由见下）：
+     * ```
+     * ① 解除"没在播"的锁定（offlineLatched = false）—— 用户明确要我再来一次；
+     * ② 重新给一份自动追流预算（autoRetryBudgetExhausted = false）；
+     * ③ 收掉"主播已下播"那个提示（并允许下一次下播再弹）。
+     * ```
+     * 自动那一路不做：它是**看门狗自己**发起的，若它也解锁/发预算，"预算用尽 ⇒ 停手"这道终点
+     * 就会被它自己无限续杯 —— 那正是修前"一直在换流"的成因之一（见交付报告 §2）。
      */
-    private fun retryPlayback() {
+    private fun retryPlayback(fromAuto: Boolean = false) {
         // ★诊断日志（只读）：手动/自动"重新取流"的**起**
         LivePageTrace.note(
             "retry.start",
             "delegate" to (delegate != null),
             "pip" to isInPictureInPictureMode,
             "pageStarted" to pageStarted,
+            "fromAuto" to fromAuto,
+            "offlineLatched" to offlineLatched,
         )
         pollJob?.cancel()
+        if (!fromAuto) {
+            offlineLatched = false
+            autoRetryBudgetExhausted = false
+            offlineDialogShown = false
+            dismissLiveOfflineDialog()
+        }
         val d = delegate
         if (d == null) {
             LivePageTrace.note("retry.path", "path" to "startResolveAndPlay")
@@ -3142,6 +3397,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private fun checkLiveHealthOnce() {
         if (isFinishing || isDestroyed) return
+        // ★本轮：已经锁定"没在播"（未开播/中途下播/反复拿不到流）⇒ 看门狗什么都不做。
+        //   画面停住是**预期之内**的（主播已经下播、播放器已被 delegate 暂停），
+        //   再判"停滞/不出帧"只会得出"要追流"这个错误结论 —— 那正是无限换流的一路。
+        //   两个采样起点一起清零：等真的重新开播（锁定被 PLAYING 解开）时从零开始计。
+        if (offlineLatched) {
+            stallSinceMs = 0L
+            frameStaticSinceMs = 0L
+            return
+        }
         // 后台 / 小窗里不追：用户没在看全屏，追了也白追（还会白耗一次接口）
         if (!pageStarted || isInPictureInPictureMode || pipEntryPending) return
         val p = delegate?.player ?: return
@@ -3249,22 +3513,30 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ## 防抖与预算（B 站接口对频率很敏感，方案 §3.5：连"分区直播列表"都会回 -352）
      * ```
+     * ⓪ 已经锁定"没在播"（[offlineLatched]）            → 不做（★本轮新增：这就是"下播之后别再换流"）
      * ① 页面没在前台 / 在小窗 / 正在进小窗        → 不做
      * ② 「自动重连」关掉（live_auto_reconnect=false）→ 不做（那是用户"我要完全手动"的明确表态，
      *                                              手动入口 = 弹窗里的「重新取流」）
      * ③ 距离上一次自动追流 < AUTO_RETRY_MIN_INTERVAL_MS → 不做（合并同一秒里的多个触发源）
-     * ④ AUTO_RETRY_WINDOW_MS 窗口内已经追了 AUTO_RETRY_MAX_IN_WINDOW 次 → 不做，并**只提醒一次**
-     * ⑤ 以上都过 → 记账（时间戳入队）+ 调 [retryPlayback]
+     * ④ 这一份预算已经用尽（[autoRetryBudgetExhausted]）→ 不做，并**只提醒一次**
+     * ⑤ 这一份预算里已经追了 AUTO_RETRY_MAX_IN_WINDOW 次 → 不做，并**只提醒一次**
+     * ⑥ 以上都过 → 记账（时间戳入队）+ 调 [retryPlayback]
      * ```
-     * ★④ 是"止损阀"：真遇到一条持续坏的流，看门狗会每 [LIVE_WATCHDOG_INTERVAL_MS] 就再想追一次，
-     *   没有它就会变成"每 20 秒打一次接口"的死循环。用满预算后顶栏状态与 toast 都会把
-     *   "手动入口在「画质·线路 → 重新取流」"这句话给出来（设置里的自动重连也可以打开）。
-     * ★预算窗口是滑动的：队列里超过 [AUTO_RETRY_WINDOW_MS] 的时间戳会被丢掉，
-     *   窗口滑过去就自动恢复额度（[autoRetryBudgetWarned] 同时复位，下次用满还会再提醒一次）。
+     * ★④⑤ 是"止损阀"，而且**不再随滑窗回满**（★本轮改的就是这一点）：真遇到一条持续坏的流，
+     *   看门狗会每 [LIVE_WATCHDOG_INTERVAL_MS] 就再想追一次，没有它就会变成"每 20 秒打一次接口"
+     *   的死循环；而**只有滑动窗口**的旧写法会"窗口一过额度自动恢复"，也就是**永远**在追 ——
+     *   这正是用户实测的"一直在换流换流"。现在一份预算用到底，只有两条路能重新给预算：
+     *   真的恢复播放（`PLAYING`）或用户手动「画质·线路 → 重新取流」。
      */
     private fun autoRetryLiveStream(reason: String) {
         if (isFinishing || isDestroyed) {
             LivePageTrace.note("autoRetry.blocked", "reason" to reason, "gate" to "finishingOrDestroyed")
+            return
+        }
+        // ★本轮 ⓪ 号门：已经判定"没在播"（未开播 / 中途下播 / 反复拿不到流）⇒ 一次都不追。
+        //   这是"下播之后不再换流"的第一道、也是最关键的一道闸门。
+        if (offlineLatched) {
+            LivePageTrace.note("autoRetry.blocked", "reason" to reason, "gate" to "offlineLatched")
             return
         }
         if (!pageStarted || isInPictureInPictureMode || pipEntryPending) {
@@ -3299,10 +3571,18 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             )
             return
         }
+        // ★本轮 ④ 号门：**这一份预算已经用尽** ⇒ 一次都不再追（不是"等窗口滑过去再说"）。
+        //   复位点只有两个：真的恢复播放（PLAYING）/ 用户手动「重新取流」（见 retryPlayback 的 fromAuto）。
+        if (autoRetryBudgetExhausted) {
+            LivePageTrace.note("autoRetry.blocked", "reason" to reason, "gate" to "budgetExhausted")
+            return
+        }
         while (autoRetryStamps.isNotEmpty() && now - autoRetryStamps.first() > AUTO_RETRY_WINDOW_MS) {
             autoRetryStamps.removeFirst()
         }
         if (autoRetryStamps.size >= AUTO_RETRY_MAX_IN_WINDOW) {
+            // ★本轮：用满即**停手到底**（旧写法只是"这一窗口内不再追"，窗口一滑又满血复活）
+            autoRetryBudgetExhausted = true
             // ★诊断日志（只读）：被"5 分钟 3 次"的预算拦下
             LivePageTrace.note(
                 "autoRetry.blocked",
@@ -3332,7 +3612,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         )
         miaoLogger() info "[live] 自动追流：$reason"
         // 状态文案交给 delegate（retry() → load() 会报"正在重新获取直播流…"），这里不抢着写
-        retryPlayback()
+        // ★`fromAuto = true`：自动这一路**不解开**"没在播"的锁定、也不重新给 Activity 侧的预算 ——
+        //   那是"用户明确要我再来一次"（手动「重新取流」）才该做的事；自动这一路只负责把画面追回来。
+        retryPlayback(fromAuto = true)
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -5695,7 +5977,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * | 正在回到直播最新进度… / 重连中… / 正在重新获取直播流… | delegate 的 behind-live-window / 重连 / 重取流 |
      * | 所有线路均失败… / 线路反复失败… / 已固定线路 1… | delegate 的换线预算用尽与"固定第一条"策略 |
      * | 已暂停 | [delegateListener] 的 PAUSED（用户主动暂停，必须看得见） |
-     * | 房间未开播，45s 后自动重试… / 房间未开播（live_status=…） | 未开播轮询 / OFFLINE |
+     * | 主播未开播（等待开播…）/ 主播已下播（等待重新开播…）/ 直播流反复中断，已停止自动重连（等待开播…） | delegate 的 OFFLINE（★本轮：`live_status` 不再是写给用户看的术语） |
+     * | 等待开播：45s 后自动检查（开播即自动起播） | 未开播/下播之后的轮询 [startOfflinePolling]（★本轮改的文案） |
      * | 播放失败：… / 房间号无法识别 | ERROR / 房间号解析失败 |
      * | 自动追流已暂停（5 分钟内已追 3 次） | [autoRetryLiveStream] 的预算用尽 |
      * | 弹幕 连接中 / 重连中 / 连接失败 / 未连接 | [danmakuStatusLabel]（★断开侧异常；已连接是正常态，不显示） |
@@ -6004,10 +6287,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   · 点底栏「设置」→ [showLiveSettingSheet] 先调这里（收掉可能开着的「画质·线路」）；
      *   · 点底栏「画质」→ [showStreamDialog] 也调这里（收掉可能开着的设置弹窗）。
      *   漏了这一行就会出现"两个弹窗叠在一起、返回键要按两次"。
+     * ★本轮：「主播已下播」那个一次性提示也归这里管（同一条规矩，纯加法）。
      */
     private fun dismissDialogs() {
         streamDialog?.dismiss()
         dismissLiveSettingSheet()
+        dismissLiveOfflineDialog()
     }
 
     /**

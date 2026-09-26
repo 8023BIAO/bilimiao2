@@ -484,6 +484,81 @@ class LiveAPI {
     }
 
     /**
+     * 首页直播 Tab 顶部「我的关注 · 正在直播」：**只取顶部模块**的那一次 feed 请求
+     * （`xlive/app-interface/v2/index/feed` + `module_select=1` + `relation_page=1`）。
+     *
+     * ## 为什么不复用 [recommendFeed]（同一个端点，但请求/响应的量级完全不同）
+     * | | [recommendFeed] | 本方法 |
+     * | --- | --- | --- |
+     * | 参数 | `page=N` | `page=1` + `module_select=1` + `relation_page=1` |
+     * | 响应 | **约 290 KB**（20 张 `small_card_v1`，每条带 2~3 KB 的签名取流地址） | **约 10 KB**（只有 `my_idol_v1` + `area_entrance_v3`，实测） |
+     * | 内容 | 推荐流房间 | **我关注的、正在直播的人** |
+     *
+     * 实测（2026-09-26，登录态）：`module_select=1` 时服务端**只下发模块卡**、
+     * 一条 `small_card_v1` 都不给（这也正是 PiliPlus 刷顶部时的行为，
+     * `lib/pages/live/controller.dart:96 queryTop()` → `liveFeedIndex(pn:, moduleSelect: true)`）。
+     * 所以这条请求**只为区块服务**，与下面的推荐流列表互不干扰：
+     * 首页当前选的是哪个分区/排序都不影响它（用户要的是"关注的人在播就显示在这里"）。
+     *
+     * ## 参数出处（照 PiliPlus 抄）
+     * - `module_select=1`：`lib/http/live.dart:206`（`if (moduleSelect) 'module_select': 1`）；
+     * - `relation_page=1`：`lib/http/live.dart:210`（`if (recommend.isLogin) 'relation_page': 1`
+     *   —— 只在登录时给）。★实测**不带**它也能拿到 `my_idol_v1`，但既然 PiliPlus 登录时才给，
+     *   这里照抄；两边都通说明它不敏感，跟着参考实现走 = 少一层未知。
+     *
+     * ★未登录时服务端**不下发** `my_idol_v1`（实测 `card_list` 里只有 `area_entrance_v3`）→
+     *   `followCard == null` → 首页区块整块不显示。这就是"未登录不显示、也不报错"的实现方式。
+     *
+     * 返回壳：`ResultInfo<LiveRecommendFeed>`，页面侧读 `followCard`。
+     */
+    fun followFeed() = MiaoHttp.request {
+        url = buildRecommendUrl(page = 1, moduleSelect = true, relationPage = true)
+    }
+
+    /**
+     * 「关注直播」完整列表页：**直播站的关注列表**（`xlive/web-ucenter/user/following`）。
+     *
+     * 它返回的是"我关注的人 + 每个人在不在播"，不是"只有在播的人"——
+     * 在播的那部分靠 [com.a10miaomiao.bilimiao.comm.live.entity.LiveFollowListData.liveRooms] 过滤。
+     *
+     * ## 出处（照 PiliPlus 抄，行号已核对）
+     * - URL：`lib/http/api.dart:784-785`（`liveFollow`）；
+     * - 调用与参数：`lib/http/live.dart:259-272 liveFollow(int page)`
+     *   （`page` / `page_size: 9` / `ignoreRecord: 1` / `hit_ab: true`）；
+     * - 过滤在播：`lib/models_new/live/live_follow/data.dart:26-29`（`.where((i) => i['live_status'] == 1)`）。
+     *
+     * ## ★实测（2026-09-26，容器 curl，登录态）
+     * - `code=0`，`count=3`（关注总数）、`live_count=1`（在播数）、`list` 3 条；
+     * - ★`ignoreRecord=1` **不能省**：去掉它之后同一个账号 `live_count` 变成 **0**（判据被打没）；
+     * - `page_size` 服务端认，但**上限 10**（传 50 会被夹回 10），PiliPlus 的 9 是安全值；
+     * - 翻过末页 `code=0` + `list=[]`（不报错）；未登录 `code=-101 账号未登录`。
+     *
+     * ## 为什么要 `isWebApi = true`
+     * 这是**直播 Web 接口**（要 Cookie 登录态 + live 自己的 Referer/Origin），
+     * 与 `xlive/app-interface/…` 那条 APP 签名通道不是一回事 ——
+     * 不设它的话 MiaoHttp 会塞 `env/app-key/x-bili-mid/Authorization` 这套 APP 身份头（MiaoHttp.kt:70-79）。
+     * 也**不需要** WBI：实测不签名直接 `code=0`（`WbiSigner` 的白名单里没有这个端点，正好）。
+     *
+     * 返回壳：`ResultInfo<LiveFollowListData>`。
+     *
+     * @param page 页码，**从 1 开始**（服务端给空数组 = 到底了）
+     */
+    fun liveFollowing(page: Int) = MiaoHttp.request {
+        isWebApi = true
+        // 直播域自己的 Referer/Origin：与 danmuInfo/roomInfoByRoom 同一套（Web 端按同源请求校验）
+        headers["Referer"] = "https://live.bilibili.com/"
+        headers["Origin"] = "https://live.bilibili.com"
+        url = liveUrl(
+            FOLLOW_LIST_PATH,
+            "page" to page.toString(),
+            "page_size" to FOLLOW_PAGE_SIZE.toString(),
+            // ★1 = 忽略"看过"的记录过滤。实测去掉它 live_count 会变 0（见方法注释）
+            "ignoreRecord" to "1",
+            "hit_ab" to "true",
+        )
+    }
+
+    /**
      * 手拼推荐流的 URL。
      *
      * ★要害与 `LiveSearchAPI` 完全相同：**签名串必须与真正发出去的 query 逐字节一致**，
@@ -498,8 +573,19 @@ class LiveAPI {
      *   - 下面显式列的这几个是照 PiliPlus `lib/http/live.dart:193-215` 抄的**业务参数**。
      *     `page` 是唯一真正决定内容的那个，其余是"告诉服务端我这是个正常 App 请求"的上下文
      *     （实测去掉也能通，留着是为了行为与 PiliPlus 一致，少一层未知）。
+     *
+     * ★2026-09-26 起多两个**可选**开关（默认值与改动前完全一致 = 老调用方行为一个字节没变）：
+     *   - [moduleSelect]（`module_select=1`）→ 服务端只回模块卡（首页「我的关注」区块用它，
+     *     见 [followFeed]）。响应从约 290 KB 掉到约 10 KB（实测）；
+     *   - [relationPage]（`relation_page=1`）→ PiliPlus 在**登录时**才加的那个参数
+     *     （`lib/http/live.dart:210`）。
+     *   两个都进签名串，所以必须在 [ApiHelper.createParams] **之前**放进去 —— 见下面两行。
      */
-    private fun buildRecommendUrl(page: Int): String {
+    private fun buildRecommendUrl(
+        page: Int,
+        moduleSelect: Boolean = false,
+        relationPage: Boolean = false,
+    ): String {
         val params = ApiHelper.createParams(
             "page" to page.toString(),
             "actionKey" to "appkey",
@@ -512,6 +598,12 @@ class LiveAPI {
             "https_url_req" to "1",
             "network" to "wifi",
             "scale" to "2",
+            // ★只在真的要时才传：这两个参数会原样进签名串（getSign 对排好序的整张表算 md5），
+            //   传 "0" 与"不传"是两种不同的请求形态，所以用 buildList 按需追加，而不是恒传开关值
+            *buildList {
+                if (moduleSelect) add("module_select" to "1")
+                if (relationPage) add("relation_page" to "1")
+            }.toTypedArray(),
         )
         val query = ApiHelper.urlencode(params, isSort = true)
         return "$RECOMMEND_URL?$query"
@@ -579,5 +671,23 @@ class LiveAPI {
 
         /** 推荐流业务参数：fnval=912 是 PiliPlus 一直在用的功能位（同 `getRoomPlayInfo` 那一套） */
         private const val RECOMMEND_FNVAL = "912"
+
+        /**
+         * 「关注直播」完整列表页的 URL 路径（PiliPlus `lib/http/api.dart:784-785` 的同一条）。
+         * ★这是**直播 Web 接口**（要登录 Cookie），与 [RECOMMEND_URL] 的 APP 签名通道不是一回事。
+         */
+        private const val FOLLOW_LIST_PATH = "xlive/web-ucenter/user/following"
+
+        /**
+         * 「关注直播」列表页每页条数 = **9**，与 PiliPlus 逐字一致
+         * （`lib/http/live.dart:259-272` 里写死的 `'page_size': 9`）。
+         *
+         * ★实测服务端**认**这个参数（`page_size=1/2/3` 就回 1/2/3 条、`totalPage` 跟着变），
+         *   但**上限是 10**（传 50 会被夹回 `pageSize=10`）—— 所以 9 是"照抄且安全"的值。
+         *   为什么它比"一页 20"重要：这个接口一页里**既有在播也有没在播的人**，
+         *   在播的靠客户端筛（[com.a10miaomiao.bilimiao.comm.live.entity.LiveFollowListData.liveRooms]），
+         *   翻页要一直翻到 `count`（关注总数）为止。
+         */
+        const val FOLLOW_PAGE_SIZE = 9
     }
 }

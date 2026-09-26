@@ -5,7 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +26,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,6 +72,8 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
+import cn.a10miaomiao.bilimiao.compose.components.user.enterLiveRoom
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveFollowPage
 import cn.a10miaomiao.bilimiao.compose.pages.live.LiveSearchPage
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -81,8 +86,10 @@ import com.a10miaomiao.bilimiao.comm.live.entity.LiveStatus
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.AppStore
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
+import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
@@ -921,6 +928,16 @@ private fun LiveRoomList(
         diViewModel(key = "home-live-${liveListIdentity(parentId, areaId, sortType)}") {
             LiveRoomListViewModel(it, parentId, areaId, sortType)
         }
+    // 顶部「我的关注 · 正在直播」区块的 VM。
+    //
+    // ★为什么 key 里**没有**分区/排序（与上面那条正相反）：关注直播跟"用户在看哪个分区"毫无关系，
+    //   把分区塞进 key 只会让每次切分区都白拉一次关注列表、并且让区块闪一下。
+    //   固定 key ⇒ 切分区/换排序时 diViewModel 返回**同一个 VM**（VM 存在导航条目的 ViewModelStore 里），
+    //   既不会重新请求，也不会丢已经拿到的数据。
+    // ★它在这里（而不是在区块内部）创建：下面 SwipeToRefresh / 双击 Tab 的刷新要能一并刷新它，
+    //   放在区块里就得靠回调传出去，反而更绕。
+    val followViewModel: HomeLiveFollowViewModel =
+        diViewModel(key = HOME_LIVE_FOLLOW_VM_KEY) { HomeLiveFollowViewModel(it) }
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())
@@ -951,8 +968,11 @@ private fun LiveRoomList(
                 // 双击底部「直播」：在顶部就刷新，不在顶部先回到顶部（和首页其它 Tab 一致）。
                 // 这里只刷房间列表 —— 分类树拉不到时本组件压根不会被组合（父级走的是另一个分支），
                 // 所以不存在"顺手重试分类树"这种需求，多刷一次反而白拉十几 KB。
+                // ★关注区块跟着一起刷（用户要的是"我刚关注的人开播了，双击/下拉就能看到"）：
+                //   它是另一条独立请求，不刷它就会出现"列表是最新的、上面的关注还是十分钟前的"。
                 if (listState.firstVisibleItemIndex == 0) {
                     viewModel.refresh()
+                    followViewModel.refresh()
                 } else {
                     listState.animateScrollToItem(0)
                 }
@@ -963,7 +983,12 @@ private fun LiveRoomList(
     SwipeToRefresh(
         modifier = modifier,
         refreshing = isRefreshing,
-        onRefresh = { viewModel.refresh() },
+        onRefresh = {
+            viewModel.refresh()
+            // 下拉刷新 = "我就是要看最新的"：关注区块一起刷（用户验收步骤里那条
+            // "下拉刷新能刷出新的开播"就靠这一行）
+            followViewModel.refresh()
+        },
     ) {
         LazyVerticalGrid(
             state = listState,
@@ -977,6 +1002,24 @@ private fun LiveRoomList(
                 top = 0.dp,
             ),
         ) {
+            // ★顶部「我的关注 · 正在直播」区块：**永远是网格的第 0 项**（全宽）。
+            //   为什么放进网格里而不是固定在搜索框下面：
+            //   ① 它该跟着内容一起滚（PiliPlus 的区块也是 CustomScrollView 里的一个 sliver，
+            //      见 lib/pages/live/view.dart:63-71 的 `SliverMainAxisGroup`），
+            //      固定住会永久占掉一屏高度、把下面的直播列表挤下去；
+            //   ② 放进网格 = 天然懒加载：LazyGrid 只在它进入可视区时组合它，
+            //      滚动到别处时它连组合都没有（更不会请求）。
+            //   区块自己决定显不显示（未登录/没关注/没人开播 → 渲染 0 高度），
+            //   所以这里不需要条件判断，也就不会出现"区块空了但网格留了个洞"。
+            item(
+                key = HOME_LIVE_FOLLOW_ITEM_KEY,
+                span = { GridItemSpan(maxLineSpan) },
+            ) {
+                HomeLiveFollowBlock(
+                    viewModel = followViewModel,
+                    gridSpan = gridSpan,
+                )
+            }
             items(list, { it.roomid }) { item ->
                 LiveRoomCard(
                     item = item,
@@ -1036,10 +1079,16 @@ private fun LiveRoomList(
  * 实现上就是"父 clickable 里嵌一个子 clickable"：Compose 的指针事件从**内层往外**派发，
  * 子节点把 up 事件消费掉，父卡片的 clickable 收到的是"已被消费"的事件 → 不会再去开直播间。
  * 所以**不需要**自己算坐标、也不需要 `pointerInput` 拦截（那种写法反而会把长按/无障碍点坏）。
+ *
+ * ★2026-09-26：可见性从 `private` 放宽到 `internal` —— 「查看更多」进去的
+ *   [LiveFollowPage]（同模块、`pages/live` 包）复用的就是**这一张**卡片。
+ *   为什么要复用而不是那边再写一张：两个页面展示的是同一批字段（关注的人 + 他的直播间），
+ *   各写一张的结果一定是"首页的卡片改了、列表页的还是旧的"。
+ *   放宽可见性**不改任何行为**（同一个模块内可见，编译产物里的调用点一个没变）。
  */
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
-private fun LiveRoomCard(
+internal fun LiveRoomCard(
     item: LiveRoomItem,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
@@ -1216,3 +1265,270 @@ private val LIVE_BADGE_RED = Color(0xFFFA3E3E)
 
 /** 「轮播/未开播」角标的灰：弱化处理，一眼能和直播中区分开 */
 private val OFF_BADGE_GRAY = Color(0xFF8A8A8E)
+
+// ══════════════════════════════════════════════════════════════════════════
+// 顶部「我的关注 · 正在直播」区块（第七阶段，2026-09-26）
+//
+// 用户原话："我也想抄他这个，在我的那个搜索下面或者上面，添加我已关注的、是否已开播，
+// 开播就在这里显示。然后如果这个列表前面几个自动适配的满了的话，抄他的「查看更多」。
+// 看他怎么写，我们怎么写，直接抄。……我关注的人到底在哪？大海里面找，要么搜，真的有点麻烦。"
+//
+// 抄的是 PiliPlus 首页「直播」Tab 顶部那一条：
+//   标题行「我的关注  N人正在直播            查看更多 ›」 + 一行主播卡片
+//   （lib/pages/live/view.dart:262-303 的 `_buildFollowList` / `_buildFollowBody`），
+//   点卡片/头像 → 进他的直播间（同文件 :353 `PageUtils.toLiveRoom(item.roomid)`），
+//   「查看更多 ›」→ 完整列表页（同文件 :297 `Get.to(const LiveFollowPage())`）。
+//
+// ★与 PiliPlus 唯一**故意不同**的一处：它 `totalCount == 0` 时**仍然画标题行**
+//   （`_buildFollowList` 里标题是无条件渲染的）。用户明确要求"不要显示空标题"，
+//   所以本区块的判据是"有在播的人 且 总数 > 0"，否则整块不渲染（见 HomeLiveFollowBlock）。
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 「我的关注 · 正在直播」区块的 ViewModel。
+ *
+ * ## 数据从哪来（一条请求，与下面的直播列表完全独立）
+ * `xlive/app-interface/v2/index/feed` + `module_select=1` + `relation_page=1`
+ * → `my_idol_v1` 卡片（[LiveFollowCard]）：服务端已经筛好"我关注的、正在直播的人"，
+ * 顺带给一个 `extra_info.total_count`（"N人正在直播"的 N）。
+ * 实测这条请求只有约 10 KB（同一个端点的推荐流是约 290 KB），
+ * 详细出处与实测数据见 `LiveAPI.followFeed()` 与 `LiveFollowInfo.kt` 的类注释。
+ *
+ * ## 为什么单独一个 VM，而不是塞进 [LiveRoomListViewModel]
+ * 两者生命周期不同：列表 VM 按"分区+排序"分裂成很多个实例（切一次建一个），
+ * 而关注区块**只有一份**（跟分区无关）。塞在一起的话，切分区就会连带重新请求一次关注列表。
+ * 反过来它也不该跟着列表 VM 一起被 key(...) 重建 —— 所以它在 [LiveRoomList] 里用**固定 key** 拿。
+ *
+ * ## 未登录 / 失败 / 空的处理（用户三条要求，这里一一对上）
+ * - **未登录**：不发请求（`userStore.isLogin()` 为假直接清空并返回）→ 区块不显示；
+ * - **失败静默**：接口报错/网络异常只写一条 DEBUG 日志，**不弹任何提示**，
+ *   也**不清掉已经拿到的人**（一次网络抖动不该把用户已经看到的人抹掉）；
+ * - **没人开播 / 没关注**：接口不给 `my_idol_v1`（或 list 为空）→ 区块不显示。
+ *
+ * ## 登录态变化会自己跟上
+ * 冷启动时 [UserStore] 的登录信息可能比本 VM 晚到一步（首页先组合、登录态后恢复），
+ * 只查一次就会出现"明明是登录的、区块却一直不出来"。所以这里**订阅**登录态，
+ * 只在"登录态真的翻转"时重新拉一次（登出 → 立刻清空；登录 → 立刻补一次）——
+ * 用 [lastLogin] 做闸门，状态再怎么变也不会打成循环请求。
+ */
+private class HomeLiveFollowViewModel(
+    override val di: DI,
+) : ViewModel(), DIAware {
+
+    private val userStore: UserStore by instance()
+
+    /** 正在直播的关注（已映射成首页卡片统一吃的 [LiveRoomItem]） */
+    val items = MutableStateFlow<List<LiveRoomItem>>(emptyList())
+
+    /** 「N人正在直播」的 N（服务端给的 `extra_info.total_count`） */
+    val total = MutableStateFlow(0)
+
+    // 在途请求 + 加载代数：刷新时取消旧请求，避免慢的旧批次覆盖新数据（同 LiveRoomListViewModel）
+    private var loadJob: Job? = null
+    private val loadEpoch = AtomicLong(0)
+
+    /** 上一次发起请求时的登录态；null = 还从来没查过（首次一定会走一次 [load]） */
+    private var lastLogin: Boolean? = null
+
+    init {
+        viewModelScope.launch {
+            userStore.stateFlow.collect {
+                val login = userStore.isLogin()
+                if (login != lastLogin) load()
+            }
+        }
+    }
+
+    /** 下拉刷新 / 双击 Tab 都走这里（用户验收："下拉刷新能刷出新的开播"） */
+    fun refresh() = load()
+
+    private fun load() {
+        val login = userStore.isLogin()
+        lastLogin = login
+        if (!login) {
+            // 未登录：**一条请求都不发**（接口未登录时本来也不会给 my_idol_v1），
+            // 同时清掉旧数据 —— 用户刚登出，区块必须立刻消失，不能留着上一个人的关注
+            loadEpoch.incrementAndGet()
+            loadJob?.cancel()
+            items.value = emptyList()
+            total.value = 0
+            return
+        }
+        val epoch = loadEpoch.incrementAndGet()
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = LiveAPI()
+                    .followFeed()
+                    .awaitCall()
+                    .json<ResultInfo<LiveRecommendFeed>>()
+                if (loadEpoch.get() != epoch) return@launch
+                if (!res.isSuccess) {
+                    // 失败静默：只留一行 DEBUG 日志（用户侧"什么都没有发生"）
+                    miaoLogger().d("首页关注直播拉取失败", "code" to res.code, "message" to res.message)
+                    return@launch
+                }
+                val card = res.data?.followCard
+                // roomid<=0 的脏条目直接丢：网格/点击都以 roomid 为准，留着只会点到空白
+                val rooms = card?.rooms.orEmpty().filter { it.roomid > 0 }
+                items.value = rooms
+                total.value = card?.totalCount ?: rooms.size
+            } catch (e: Exception) {
+                // CancellationException 必须原样抛出（协程取消不是"失败"，不能吞）
+                if (e is CancellationException) throw e
+                if (loadEpoch.get() != epoch) return@launch
+                miaoLogger().d("首页关注直播拉取异常", "message" to e.message)
+            }
+        }
+    }
+}
+
+/**
+ * 区块本体：标题行（我的关注 / N人正在直播 / 查看更多 ›）+ 一行直播卡片。
+ *
+ * ★**整块不显示**的判据就一句 `items.isEmpty() || total <= 0`：
+ *   未登录、没有关注、一个人都没开播 —— 三种情况的最终结果都是"拿不到在播的人"，
+ *   全部收敛到这一个判断上，不写第二套分支（也就不会出现"某种空态漏了、标题挂在那里"）。
+ *
+ * @param gridSpan 设置里"直播列表每行卡片数"（0 = 自适应）——
+ *                 自适应时按 [FOLLOW_CARD_MIN_WIDTH] 算这一行放得下几个；
+ *                 用户显式设过就听用户的（免得"主列表 3 列、关注区块 2 列"对不齐）。
+ */
+@Composable
+private fun HomeLiveFollowBlock(
+    viewModel: HomeLiveFollowViewModel,
+    gridSpan: Int,
+) {
+    val items by viewModel.items.collectAsStateWithLifecycle()
+    val total by viewModel.total.collectAsStateWithLifecycle()
+
+    if (items.isEmpty() || total <= 0) return
+
+    val context = LocalContext.current
+    val pageNavigation: PageNavigation by rememberInstance()
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 与主网格里卡片的外边距（horizontal 10dp）对齐：区块的卡片和下面的卡片左右对齐
+            .padding(horizontal = 10.dp)
+            .padding(top = 6.dp, bottom = 2.dp),
+    ) {
+        val columns = if (gridSpan > 0) {
+            gridSpan
+        } else {
+            (maxWidth / FOLLOW_CARD_MIN_WIDTH).toInt().coerceIn(1, FOLLOW_MAX_COLUMNS)
+        }
+        val shown = items.take(columns)
+
+        // ★「查看更多 ›」= "这一行装不下"时的出口，判据是**服务端说的人数**而不是我们拿到了几个：
+        //   刚好放满（2 个在播、一行 2 个）或放不满（1 个在播）→ 不显示（用户原话：
+        //   "前面几个自动适配的满了的话……就用「查看更多」"）。
+        //   PiliPlus 同源判据：`itemCount: totalCount > listLength ? listLength + 1 : listLength`
+        //   （lib/pages/live/view.dart:322-326，总数比列表长才多插一个"更多"箭头）。
+        val hasMore = total > shown.size
+
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "我的关注",
+                    color = MaterialTheme.colorScheme.onBackground,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                // "N"用主题色、"人正在直播"用弱化色 —— 照 PiliPlus 的字色分工
+                // （lib/pages/live/view.dart:279-293：数字 colorScheme.primary、后缀 outline）
+                Text(
+                    text = total.toString(),
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    text = "人正在直播",
+                    color = MaterialTheme.colorScheme.outline,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                if (hasMore) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(onClickLabel = "查看更多关注直播") {
+                                pageNavigation.navigate(LiveFollowPage())
+                            }
+                            .padding(start = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "查看更多",
+                            color = MaterialTheme.colorScheme.outline,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(FOLLOW_CARD_GAP),
+            ) {
+                shown.forEach { item ->
+                    LiveRoomCard(
+                        item = item,
+                        modifier = Modifier.weight(1f),
+                        // ★点卡片 → **直接进他的直播间**（用户点名要的："我关注的 UP 主直播那里，
+                        //   点进头像应该是直接进入他的直播间了吧？"）。
+                        //   走 components/user/LiveBadgedAvatar.kt 里那个公开的 enterLiveRoom：
+                        //   它进的是同一个原生播放页（LivePlayerActivity），
+                        //   不在这里再抄第三份 setClassName 的 Intent。
+                        onClick = { enterLiveRoom(context, item.roomid) },
+                        // 卡片上那块「Ⓤ 名字」照旧进用户空间 —— 与下面主列表**同一张卡片的同一套交互**
+                        // （卡片本身始终是进直播间，两者互不吞点击，见 LiveRoomCard 的注释）
+                        onClickUpper = {
+                            if (item.uid > 0) {
+                                pageNavigation.navigate(UserSpacePage(id = item.uid.toString()))
+                            }
+                        },
+                    )
+                }
+                // 没放满时把剩下的列**留白**（而不是让最后一张卡片横向拉伸铺满一整行）：
+                // 这样"1 个人在播"和"2 个人在播"的卡片宽度完全一样，切换刷新时不会跳版
+                repeat(columns - shown.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/** 首页「我的关注」区块的 VM key。★固定值（不含分区/排序），见 [LiveRoomList] 里的说明 */
+private const val HOME_LIVE_FOLLOW_VM_KEY = "home-live-follow"
+
+/** 区块在网格里的 item key。★与卡片用的 roomid 不会撞：那是 Long，这是 String */
+private const val HOME_LIVE_FOLLOW_ITEM_KEY = "home-live-follow-block"
+
+/**
+ * 区块里一张卡片的**目标最小宽度**。
+ *
+ * ★为什么不直接跟主网格一样用 300dp：主网格一列就占满手机屏宽（自适应时手机就是 1 列），
+ *   而这一块要的是"一屏能扫到几个正在直播的关注"（用户原话"前面几个自动适配的"）。
+ *   150dp 在 360~430dp 的手机上正好落 **2 列 × 1 行 = 2 个**，
+ *   平板/横屏自动变 3~4 个（上限见 [FOLLOW_MAX_COLUMNS]）。
+ */
+private val FOLLOW_CARD_MIN_WIDTH = 150.dp
+
+/** 自适应时这一行最多几个：再多就不像"扫一眼"，而且「查看更多」会永远出不来 */
+private const val FOLLOW_MAX_COLUMNS = 4
+
+/** 区块里卡片之间的横向间距（主网格卡片自带 10dp 外边距，这里用同一个数量级） */
+private val FOLLOW_CARD_GAP = 10.dp

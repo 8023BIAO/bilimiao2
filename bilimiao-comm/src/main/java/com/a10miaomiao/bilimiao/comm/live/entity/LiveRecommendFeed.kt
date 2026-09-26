@@ -83,6 +83,29 @@ data class LiveRecommendFeed(
      */
     val rooms: List<LiveRoomItem>
         get() = card_list.mapNotNull { it.card_data?.small_card_v1 }.map { it.toRoomItem() }
+
+    /**
+     * 首页「我的关注 · 正在直播」那一张卡（`card_type == "my_idol_v1"`，2026-09-26 纯新增）。
+     *
+     * ★什么时候有它：**登录 + `module_select=1`** 时服务端才单独下发
+     *   （实测未登录时 `card_list` 里只有 `area_entrance_v3`）。
+     *   所以"没登录 / 没有关注 / 没人开播 → 区块整块不显示"这件事，
+     *   **null 就是那个信号**，页面侧不需要自己猜。
+     *
+     * 按 PiliPlus 的取法：`lib/pages/live/view.dart:266,303`（`item.cardData?.myIdolV1`），
+     * 它的 `LiveIndexData.fromJson` 也是"遍历 card_list 按 card_type 挑出来"
+     * （`lib/models_new/live/live_feed_index/data.dart:16-27`），与这里同构。
+     *
+     * ★[rooms] 与它互不影响：`module_select=1` 的响应里没有 `small_card_v1`（实测），
+     *   而普通 feed 响应里两者可以同时存在 —— 各取各的，谁也不会把谁挤掉。
+     */
+    val followCard: LiveFollowCard?
+        get() = card_list.firstOrNull { it.card_type == MY_IDOL_CARD_TYPE }?.card_data?.my_idol_v1
+
+    companion object {
+        /** 「我的关注」卡片的 `card_type` 字面量（PiliPlus `live_feed_index/data.dart:22` 同款） */
+        const val MY_IDOL_CARD_TYPE = "my_idol_v1"
+    }
 }
 
 /** `card_list` 的一个元素：`card_type` 决定 `card_data` 里是哪一个 key（实测有 banner_v2 / my_idol_v1 / area_entrance_v3 / small_card_v1） */
@@ -92,10 +115,18 @@ data class LiveRecommendCard(
     val card_data: LiveRecommendCardData? = null,
 )
 
-/** 卡片内容。本页只关心直播卡片 `small_card_v1`，其它 key 一律不建模（`ignoreUnknownKeys` 会跳过） */
+/**
+ * 卡片内容。本页只关心直播卡片 `small_card_v1`，其它 key 一律不建模（`ignoreUnknownKeys` 会跳过）。
+ *
+ * ★2026-09-26 起多收一个 [my_idol_v1]（首页「我的关注 · 正在直播」区块用它，
+ *   见 [LiveFollowCard]）；`banner_v2` / `area_entrance_v3` 仍然不建模
+ *   （它们对本页没有任何用处，收进来只是白解析）。
+ */
 @Serializable
 data class LiveRecommendCardData(
     val small_card_v1: LiveRecommendRoom? = null,
+    /** 首页「我的关注」卡（`module_select=1` 时单独下发）。默认 null = 这个 card_type 没来 */
+    val my_idol_v1: LiveFollowCard? = null,
 )
 
 /** 推荐流里的一张直播卡片。字段名与接口**逐字对齐**（不改名），改名统一在 [toRoomItem] 里做 */

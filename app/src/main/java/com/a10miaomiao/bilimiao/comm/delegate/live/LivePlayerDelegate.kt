@@ -25,8 +25,11 @@ import com.a10miaomiao.bilimiao.comm.delegate.player.CdnFailoverState
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.live.LiveAPI
 import com.a10miaomiao.bilimiao.comm.live.LivePageTrace
+import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuClient
 import com.a10miaomiao.bilimiao.comm.live.entity.LivePlayUrl
 import com.a10miaomiao.bilimiao.comm.live.entity.LivePlayUrlInfo
+import com.a10miaomiao.bilimiao.comm.live.entity.LiveRoomDetail
+import com.a10miaomiao.bilimiao.comm.live.entity.LiveStatus
 import com.a10miaomiao.bilimiao.comm.live.entity.fullUrls
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
@@ -139,6 +142,20 @@ class LivePlayerDelegate(
         private const val REFETCH_MIN_INTERVAL_MS = 2_000L
         private const val REFETCH_MAX_COUNT = 3
 
+        // ── 下播判定（★本轮新增：上面三个限流器都只是"降速"，窗口一过额度就回满，
+        //    没有任何一处能得出"主播已经不在了、别再换了"。判据与限频见 [LiveOfflineDetector]）──
+        /**
+         * 复查 `live_status` 用的 HTTP 限频（毫秒/次数）。
+         *
+         * 三道门缺一不可：只有**连续失败**（[LiveOfflineDetector.shouldVerify]）才问，
+         * 两次之间至少隔 [OFFLINE_VERIFY_MIN_INTERVAL_MS]，[OFFLINE_VERIFY_WINDOW_MS] 内最多
+         * [OFFLINE_VERIFY_MAX_IN_WINDOW] 次 —— 与 `LiveRoomProbe` 的"一个接口失败不代表没开播，
+         * 但也不能无限问"同一条原则。
+         */
+        private const val OFFLINE_VERIFY_WINDOW_MS = 10 * 60_000L
+        private const val OFFLINE_VERIFY_MIN_INTERVAL_MS = 45_000L
+        private const val OFFLINE_VERIFY_MAX_IN_WINDOW = 3
+
         private const val CONNECT_TIMEOUT_MS = 8_000
         private const val READ_TIMEOUT_MS = 15_000
 
@@ -214,6 +231,24 @@ class LivePlayerDelegate(
 
         /** 视频尺寸变化（UI 用它做等比缩放与 PiP 宽高比） */
         fun onVideoSizeChanged(width: Int, height: Int)
+
+        /**
+         * ★本轮新增：**确认了"主播没在播"**（有硬证据 —— 取流返回 `live_status != 1`，
+         * 或限频复查 `get_info` 明确说没在播）。
+         *
+         * 与 [onPlayStateChanged] 的 `OFFLINE` 是**两件事**，所以单独一个回调：
+         * | 回调 | 语义 | UI 该做什么 |
+         * |---|---|---|
+         * | `onPlayStateChanged(OFFLINE, msg)` | "现在没有流，转等待开播" | 顶栏文案 + 起 45s 开播轮询 + **停止一切自动追流** |
+         * | `onLiveOffline(...)` | "这件事**已经定性**为没在播/下播" | 在上述之上**再弹一次一次性提示**（用户明确要的那个弹窗） |
+         *
+         * ★默认实现为空：这样"只关心状态、不想要弹窗"的实现方（将来若有人复用本 delegate）
+         *   不会被这个新增回调**编译打断** —— 纯加法，不改既有语义。
+         *
+         * @param liveStatus 判据看到的那次 `live_status`（[LiveOfflineDetector.STATUS_UNKNOWN] = 没问到）
+         * @param source 判据来源（`getRoomPlayInfo` / `verify:get_info` / …），只给诊断用
+         */
+        fun onLiveOffline(liveStatus: Int, source: String) = Unit
     }
 
     // ── 播放器 ──────────────────────────────────────────────────────────────
@@ -354,6 +389,21 @@ class LivePlayerDelegate(
     private val lineSwitchLimiter = RateLimiter(LINE_SWITCH_WINDOW_MS, LINE_SWITCH_MIN_INTERVAL_MS, LINE_SWITCH_MAX_COUNT)
     private val refetchLimiter = RateLimiter(REFETCH_WINDOW_MS, REFETCH_MIN_INTERVAL_MS, REFETCH_MAX_COUNT)
 
+    /**
+     * ★本轮新增：**下播判据**（"这一串失败到底是下播还是抖动"）。
+     *
+     * 上面三个限流器都只解决"降速"，窗口一过额度就回满；而 Activity 的自动追流还会调
+     * [retry] 把这三个预算一起清空 —— 于是中途下播时是一条**没有终点**的换流链。
+     * [blocked] 为 true 之后，本类所有自动恢复入口（[handlePlayerError] / [handleStreamEnded] /
+     * [advanceLine] / [relaunchLoad] / [recoverBehindLiveWindow] / [startUrlCheckLoop]）一律直接返回，
+     * 恢复只剩两条：用户手动（[retry] / [start] / [switchQuality] / [switchToLine]）或
+     * Activity 的"等待开播"轮询重新 [start]（两者都会 [LiveOfflineDetector.reset]）。
+     */
+    private val offlineDetector = LiveOfflineDetector()
+
+    /** 限频 `live_status` 复查的任务（一次只有一发；新的一发前先取消旧的） */
+    private var verifyJob: Job? = null
+
     private val playerListener = object : Player.Listener {
         override fun onPlayerError(error: PlaybackException) = handlePlayerError(error)
 
@@ -365,7 +415,12 @@ class LivePlayerDelegate(
                     notifyState(LivePlayState.LOADING, "缓冲中…")
                 }
 
-                Player.STATE_READY -> notifyState(LivePlayState.PLAYING, null)
+                // ★本轮：**已经定性"没在播"时不再上报 PLAYING** —— 暂停之后播放器仍可能把
+                //   已经缓冲到的那一小段推进到 STATE_READY（`pause()` 不改 playbackState），
+                //   若照样上报，UI 会把它当成"真恢复了"：锁定被解开、弹窗被收掉、状态行显示"直播中"，
+                //   而画面其实是停住的。真正的恢复一定先经过 `load()`（它 reset 判据），
+                //   所以这一句不会挡住任何一次真的重播。
+                Player.STATE_READY -> if (!offlineDetector.latched) notifyState(LivePlayState.PLAYING, null)
 
                 Player.STATE_ENDED -> handleStreamEnded()
 
@@ -395,9 +450,20 @@ class LivePlayerDelegate(
                 "liveOffsetMs" to runCatching { player.currentLiveOffset }.getOrDefault(-1L),
             )
             if (!player.playWhenReady) {
+                offlineDetector.notePlaybackStopped(SystemClock.elapsedRealtime())
                 notifyState(LivePlayState.PAUSED, null)
             } else if (isPlaying) {
-                notifyState(LivePlayState.PLAYING, null)
+                // ★本轮：**真的在播**是唯一能"洗掉失败记账"的信号（判据见 LiveOfflineDetector.notePlaying）
+                // 同上：已定性"没在播"时既不上报 PLAYING、也不算一次"恢复"
+                // （理由见 onPlaybackStateChanged 里那句）。
+                if (!offlineDetector.latched) {
+                    offlineDetector.notePlaying(SystemClock.elapsedRealtime())
+                    notifyState(LivePlayState.PLAYING, null)
+                } else {
+                    offlineDetector.notePlaybackStopped(SystemClock.elapsedRealtime())
+                }
+            } else {
+                offlineDetector.notePlaybackStopped(SystemClock.elapsedRealtime())
             }
         }
 
@@ -635,7 +701,15 @@ class LivePlayerDelegate(
         class Offline(val liveStatus: Int) : FetchResult
 
         /** 真失败（网络、风控、解析） */
-        class Failed(val message: String) : FetchResult
+        class Failed(
+            val message: String,
+            /**
+             * ★本轮新增：这次失败是**"服务端没给流"**（`playurl_info` 为空 / 候选表为空），
+             * 而不是网络/风控/解析。只有它算"下播嫌疑"（见 [LiveOfflineDetector] 的判据表）——
+             * 断网、-352 风控、解析异常一律**不算**，否则地铁里刷一下就被报成"主播下播"。
+             */
+            val noStream: Boolean = false,
+        ) : FetchResult
     }
 
     private class FetchSnapshot(
@@ -646,15 +720,19 @@ class LivePlayerDelegate(
 
     private fun load(reason: String) {
         loadJob?.cancel()
+        // ★本轮：这是"明确的重新来一遍"（[start] / [retry] / [switchQuality] 三个公开入口都汇到这里）
+        //   ⇒ 下播判据的全部状态（锁定 / 彻底停手 / 嫌疑 / 复查预算）必须先解开，
+        //     否则用户点了「重新取流」或开播轮询发现开播之后，会被上一次的锁定卡住而"点了没反应"。
+        offlineDetector.reset()
         loadJob = scope.launch {
             notifyState(LivePlayState.RESOLVING, reason)
             when (val result = fetchWithFallback(requestedQn)) {
-                is FetchResult.Failed -> notifyState(LivePlayState.ERROR, result.message)
+                is FetchResult.Failed -> {
+                    if (result.noStream) offlineDetector.noteFetchWithoutStream(SystemClock.elapsedRealtime())
+                    notifyState(LivePlayState.ERROR, result.message)
+                }
 
-                is FetchResult.Offline -> notifyState(
-                    LivePlayState.OFFLINE,
-                    "房间未开播（live_status=${result.liveStatus}）",
-                )
+                is FetchResult.Offline -> latchOffline(result.liveStatus, "getRoomPlayInfo")
 
                 is FetchResult.Success -> {
                     applySnapshot(result.snapshot)
@@ -723,7 +801,7 @@ class LivePlayerDelegate(
             // 用字面量 1 判断"正在直播"（LiveStatus 是播放页里的私有工具，本文件没有它的 import；
             // 这里只判"服务端自己说在播"，语义最小、不引依赖）。
             return if (data.live_status == 1) {  // live_status 是 Int（1 = 正在直播）
-                FetchResult.Failed("服务端暂未下发播放地址（房间在播，稍后自动重试）")
+                FetchResult.Failed("服务端暂未下发播放地址（房间在播，稍后自动重试）", noStream = true)
             } else {
                 FetchResult.Offline(data.live_status)
             }
@@ -732,7 +810,7 @@ class LivePlayerDelegate(
         val flatCandidates = buildCandidates(playurl)
         if (flatCandidates.isEmpty()) {
             miaoLogger() error "$TAG qn=$qn 没有任何候选线路（live_status=${data.live_status}）"
-            return FetchResult.Failed("取流失败：qn=$qn 没有下发任何线路")
+            return FetchResult.Failed("取流失败：qn=$qn 没有下发任何线路", noStream = true)
         }
         return FetchResult.Success(
             FetchSnapshot(
@@ -958,6 +1036,18 @@ class LivePlayerDelegate(
 
     private fun handlePlayerError(error: PlaybackException) {
         if (released) return
+        // ★本轮：已经定性"没在播"（下播锁定 / 彻底停手）⇒ 播放器再报什么错都**不再自动恢复**。
+        //   这就是"下播之后别再换流"的收敛点：所有恢复入口（换线/重取流/回 live edge）都在这一句之后。
+        if (offlineDetector.blocked) {
+            LivePageTrace.note(
+                "offline.recovery.blocked",
+                "path" to "handlePlayerError",
+                "source" to offlineDetector.latchSource,
+                "latched" to offlineDetector.latched,
+                "gaveUp" to offlineDetector.gaveUp,
+            )
+            return
+        }
         val httpCode = findHttpResponseCode(error)
         val recovery = resolveRecovery(error.errorCode, httpCode)
         miaoLogger() error "$TAG 播放错误 ${error.errorCodeName} http=$httpCode recovery=$recovery " +
@@ -965,12 +1055,24 @@ class LivePlayerDelegate(
         // ★「设置 → 直播设置 → 自动重连」关掉（`live_auto_reconnect=false`）：
         //   任何失败都**只提示、不自动恢复** —— 换线路、重取流、回 live edge 三条路一起停，
         //   否则用户会觉得"我明明关了它还在偷偷重连"。恢复入口只剩底栏「重试」。
+        // ★本轮的"下播判定"也**必须**排在这一句之后：锁定会连带起 45s"等待开播"轮询，
+        //   那同样是一种自动恢复 —— 用户关掉自动重连时，行为要与改动前**逐字一致**（只提示）。
         if (!autoReconnect) {
             notifyState(
                 LivePlayState.ERROR,
                 "播放失败：${error.errorCodeName}（已关闭「自动重连」，可点「重试」）",
             )
             return
+        }
+        // ★本轮：把"可能是下播"的错误记账（白名单见 LiveOfflineDetector KDoc；网络抖动/风控/解析/解码
+        //   一律不算）—— 攒够次数就打一次**限频**的 live_status 复查，复查说没在播就锁定下播。
+        if (recovery == Recovery.NEXT_LINE && offlineDetector.notePlaybackError(error.errorCode, httpCode, SystemClock.elapsedRealtime())) {
+            maybeVerifyOffline("playerError")
+            if (offlineDetector.latched) return
+            if (offlineDetector.gaveUp) {
+                reportRecoveryGaveUp("playerError")
+                return
+            }
         }
         when (recovery) {
             Recovery.SEEK_TO_LIVE_EDGE -> recoverBehindLiveWindow(error)
@@ -998,6 +1100,8 @@ class LivePlayerDelegate(
      * 预算用尽后不再死磕 seek，而是退一步换线路（blbl 第 3 次也是重设源）。
      */
     private fun recoverBehindLiveWindow(error: PlaybackException) {
+        // ★本轮：已定性"没在播"时连 seek 也不做（对着一条已经结流的流回沿毫无意义）
+        if (offlineDetector.blocked) return
         // 「自动重连」关掉时连"回 live edge"也不做：它同样是"失败后的自动恢复"，
         // 只提示原因，等用户点「重试」（那时会走 retry() 把限流预算清零重来）
         if (!autoReconnect) {
@@ -1045,6 +1149,18 @@ class LivePlayerDelegate(
      */
     private fun advanceLine(auto: Boolean, reason: String) {
         if (released) return
+        // ★本轮：**自动**换线在"已定性没在播"之后一律不做 —— 这正是"无限换流"的主干路径之一：
+        //   旧代码里换完一圈会重新取流，而重新取流又会 reset 换线预算 ⇒ 圈可以无限转下去。
+        //   手动换线（switchToLine / switchToNextLine，auto=false）不受这一句约束：那是用户的明确选择。
+        if (auto && offlineDetector.blocked) {
+            LivePageTrace.note(
+                "offline.recovery.blocked",
+                "path" to "advanceLine",
+                "reason" to reason,
+                "source" to offlineDetector.latchSource,
+            )
+            return
+        }
         // ★「默认线路策略 = 固定第一条线路」（`live_line_policy` = LIVE_LINE_POLICY_FIRST）：
         //   **自动**换线一律不做 —— 这正是那个设置项的用途（排查"到底哪条线路好"时，
         //   偷偷换到别的 CDN 会让排查结论失真）。
@@ -1093,10 +1209,22 @@ class LivePlayerDelegate(
      */
     private fun handleStreamEnded() {
         if (released) return
+        // ★本轮：已经定性"没在播" ⇒ 流结束是**预期之内**的事，不再重连（这一条是"中途下播"最常走的入口：
+        //   主播一下播，CDN 会直接结掉 FLV 长连接 → media3 报 STATE_ENDED）。
+        if (offlineDetector.blocked) {
+            LivePageTrace.note(
+                "offline.recovery.blocked",
+                "path" to "handleStreamEnded",
+                "source" to offlineDetector.latchSource,
+            )
+            return
+        }
         miaoLogger() error "$TAG 流已结束（可能已下播或地址失效），line=${lineIndex + 1}/${candidates.size}"
         // ★「自动重连」关掉：不自动重连、也不报 OFFLINE ——
         //   报 OFFLINE 会被 Activity 转成"开播轮询"（那也是一种自动恢复，用户没要）。
         //   这里如实报 ERROR：底栏会留「重试」按钮，用户想恢复就自己点。
+        // ★本轮的"下播判定"同样排在这一句之后（锁定会连带起轮询，也是一种自动恢复）——
+        //   关掉自动重连时的行为必须与改动前**逐字一致**。
         if (!autoReconnect) {
             notifyState(
                 LivePlayState.ERROR,
@@ -1104,25 +1232,71 @@ class LivePlayerDelegate(
             )
             return
         }
+        // ★本轮：`STATE_ENDED` 是**最强的下播嫌疑**（直播本不该有终点）—— 记账并（攒够次数后）
+        //   打一次限频的 live_status 复查；复查说没在播就地锁定，不再走下面的重连。
+        offlineDetector.noteStreamEnded(SystemClock.elapsedRealtime())
+        maybeVerifyOffline("streamEnded")
+        if (offlineDetector.latched) return
+        if (offlineDetector.gaveUp) {
+            reportRecoveryGaveUp("streamEnded")
+            return
+        }
         if (refetchLimiter.tryAcquire()) {
             relaunchLoad("直播流已中断，正在重连…")
         } else {
-            notifyState(LivePlayState.OFFLINE, "直播可能已结束")
+            // ★本轮：预算用尽 = 本类内部的**终点**：不再自动重连，把总账记成"停手"，
+            //   报 OFFLINE 交给 Activity 的"等待开播"轮询（45s 一次的单次尝试，不再连环换流）。
+            offlineDetector.noteGaveUp("streamEnded-budget")
+            reportRecoveryGaveUp("streamEnded-budget")
         }
+    }
+
+    /**
+     * ★本轮：**"别再自动恢复了"的如实上报**（唯一收敛点）。
+     *
+     * 触发者：窗口内中断次数用尽（[LiveOfflineDetector.noteGaveUp]）/ 重取流预算用尽。
+     * 为什么报 `OFFLINE` 而不是 `ERROR`：这两个状态在 UI 侧的待遇完全不同 ——
+     * ```
+     * ERROR   → 只写一行状态文字（看门狗仍会在下一拍判"画面不出帧"→ 又去追流）
+     * OFFLINE → Activity 锁定"没在播" + 转 45s"等待开播"轮询（★本轮新增的终点）
+     * ```
+     * ★它**不**触发"主播已下播"弹窗：这里是"断得太频繁"的结论，**没有** `live_status` 硬证据，
+     *   不能对用户下"下播"的判断（弹窗只由 [latchOffline] 那条硬证据路径触发）。
+     */
+    private fun reportRecoveryGaveUp(source: String) {
+        LivePageTrace.note(
+            "offline.gaveUp",
+            "source" to source,
+            "breaks" to offlineDetector.recentBreaks,
+            "lastBreak" to offlineDetector.lastBreakKind,
+            "everPlayed" to offlineDetector.everPlayed,
+        )
+        notifyState(LivePlayState.OFFLINE, "直播流反复中断，已停止自动重连（等待开播…）")
     }
 
     /** 重新取流并从第 0 条线路起播（不 release 播放器） */
     private fun relaunchLoad(reason: String) {
         if (released) return
+        // ★本轮：已定性"没在播" ⇒ 自动重取流也停（唯一例外是用户手动 [retry] / [start]，它们走 [load]）
+        if (offlineDetector.blocked) {
+            LivePageTrace.note(
+                "offline.recovery.blocked",
+                "path" to "relaunchLoad",
+                "reason" to reason,
+                "source" to offlineDetector.latchSource,
+            )
+            return
+        }
         loadJob?.cancel()
         loadJob = scope.launch {
             notifyState(LivePlayState.RESOLVING, reason)
             when (val result = fetchWithFallback(requestedQn)) {
-                is FetchResult.Failed -> notifyState(LivePlayState.ERROR, result.message)
-                is FetchResult.Offline -> notifyState(
-                    LivePlayState.OFFLINE,
-                    "房间未开播（live_status=${result.liveStatus}）",
-                )
+                is FetchResult.Failed -> {
+                    if (result.noStream) offlineDetector.noteFetchWithoutStream(SystemClock.elapsedRealtime())
+                    notifyState(LivePlayState.ERROR, result.message)
+                }
+
+                is FetchResult.Offline -> latchOffline(result.liveStatus, "getRoomPlayInfo")
 
                 is FetchResult.Success -> {
                     applySnapshot(result.snapshot)
@@ -1149,6 +1323,8 @@ class LivePlayerDelegate(
             while (isActive) {
                 delay(URL_CHECK_INTERVAL_MS)
                 if (released) return@launch
+                // ★本轮：已定性"没在播"时地址续签毫无意义（那份地址是给一个已经不在播的房间签的）
+                if (offlineDetector.blocked) continue
                 if (!isUrlStale()) continue
                 if (!refetchLimiter.tryAcquire()) continue
                 val result = fetchWithFallback(requestedQn)
@@ -1161,6 +1337,152 @@ class LivePlayerDelegate(
                 }
             }
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // 下播判定（★本轮新增：判据在 LiveOfflineDetector，这里只做"落地的两件事"）
+    //
+    // ```
+    // 播放侧信号 ─┐
+    // 弹幕 WS ────┼→ LiveOfflineDetector 记账 ──→ ① 攒够次数 → 限频复查一次 live_status
+    // 取流结果 ───┘                                   │
+    //                                                 ├─ 明确 != 1 → latchOffline()  ⇒ 封死自动恢复 + 通知 UI
+    //                                                 └─ 拿不到    → 什么都不改（"没问到"≠"下播"）
+    // ```
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * ★本轮新增：把**弹幕 WS 的直播状态**喂给判据（零成本信号，调用方是 Activity 的弹幕订阅）。
+     *
+     * | status | 处理 |
+     * |---|---|
+     * | `LiveDanmakuClient.LIVE_STATUS_PREPARING`（`cmd=PREPARING`） | 记一次"下播嫌疑"（攒够次数触发复查） |
+     * | `LiveDanmakuClient.LIVE_STATUS_LIVE`（`cmd=LIVE`） | 嫌疑清零（真的开播了） |
+     * | `LIVE_STATUS_STOPPED`（`cmd=STOP_LIVE_ROOM_LIST`） | **刻意忽略**：那是"一批房间停播"的全局列表消息，本工程解析层没有按 room_id 过滤，拿它定性会误伤别的房间（见 [LiveOfflineDetector] 的判据表） |
+     *
+     * ★为什么值得接：主播下播时弹幕链路会先收到 `PREPARING`，比"播放器发现流断了"更早、且**不花任何请求**。
+     *   但它只当"嫌疑"—— 真正定性必须靠一次 `live_status` 复查，避免把"准备中"的瞬态误报成下播。
+     */
+    fun noteDanmakuLiveSignal(status: Int) {
+        if (released) return
+        when (status) {
+            LiveDanmakuClient.LIVE_STATUS_PREPARING -> {
+                LivePageTrace.note("offline.signal", "signal" to "danmaku.PREPARING")
+                offlineDetector.noteRoomPreparing(SystemClock.elapsedRealtime())
+                maybeVerifyOffline("danmakuPreparing")
+            }
+
+            LiveDanmakuClient.LIVE_STATUS_LIVE -> {
+                LivePageTrace.note("offline.signal", "signal" to "danmaku.LIVE")
+                offlineDetector.noteRoomLive()
+            }
+            // STOP_LIVE_ROOM_LIST / 其它：忽略（理由见 KDoc）
+            else -> Unit
+        }
+    }
+
+    /**
+     * **锁定"没在播"** —— 本轮"下播"这条线的唯一落地点。
+     *
+     * 做四件事（顺序有讲究）：
+     * 1. 记账（[LiveOfflineDetector.noteHardOffline]）⇒ [LiveOfflineDetector.blocked] 变 true，
+     *    此后所有自动恢复入口（[handlePlayerError] / [handleStreamEnded] / [advanceLine] /
+     *    [relaunchLoad] / [recoverBehindLiveWindow] / [startUrlCheckLoop]）**一律直接返回**；
+     * 2. 停掉地址续签任务（对一个已经不在播的房间续签没有意义）；
+     * 3. **把播放器停下**（`pause()`，不是 `release()`/`stop()`）—— 保留最后一帧，用户看到的是
+     *    "画面停住 + 一句明确提示"，而不是黑屏（与换线路时"保留最后一帧"的既有做法一致）；
+     * 4. 通知 UI：`OFFLINE` 状态（顶栏文案 + 转 45s 开播轮询）+ [Listener.onLiveOffline]
+     *    （Activity 弹那个一次性的"主播已下播"提示）。
+     *
+     * @param liveStatus 服务端明确给的 `live_status`（0 未开播 / 2 轮播 / 复查值）
+     * @param source 判据来源，只给诊断用
+     */
+    private fun latchOffline(liveStatus: Int, source: String) {
+        if (released) return
+        if (offlineDetector.latched) return
+        offlineDetector.noteHardOffline(liveStatus, source)
+        miaoLogger() info "$TAG 判定没在播：source=$source live_status=$liveStatus " +
+            "everPlayed=${offlineDetector.everPlayed} candidates=${candidates.size}"
+        LivePageTrace.note(
+            "offline.latch",
+            "source" to source,
+            "liveStatus" to liveStatus,
+            "everPlayed" to offlineDetector.everPlayed,
+            "breaks" to offlineDetector.recentBreaks,
+            "lastBreak" to offlineDetector.lastBreakKind,
+        )
+        refreshJob?.cancel()
+        runCatching { player.pause() }
+        notifyState(LivePlayState.OFFLINE, offlineStatusText(liveStatus, offlineDetector.everPlayed))
+        listener?.onLiveOffline(liveStatus, source)
+    }
+
+    /**
+     * 攒够失败之后打**一次**限频的 `live_status` 复查（`room/v1/Room/get_info`）。
+     *
+     * ## 为什么是 `get_info` 而不是 `getRoomPlayInfo`
+     * 后者更权威、但**要重新取一次流**（体积大、还可能顺带触发换流，与"先停下来问一句"的意图相反）；
+     * 而 `get_info` 实测免登录、无 WBI、**不吃 `room_init` 那波 412 风控**（见 `LiveAPI.roomInitResolved`
+     * 的降级链注释），字段里就有 `live_status` —— 正是"问一句"要的那一个数。
+     *
+     * ## 三档结果
+     * | 结果 | 处理 |
+     * |---|---|
+     * | 明确没在播（0/2） | [latchOffline] ⇒ 封死自动恢复 + 弹提示 |
+     * | 在播（1） | [LiveOfflineDetector.noteVerifyOnline]：只洗掉嫌疑，恢复路径照旧（真可能是线路抖动） |
+     * | 拿不到 / 异常 | 什么都不改（"没问到"不写成"下播"，与 `LiveRoomProbe.STATUS_UNKNOWN` 同一条原则） |
+     */
+    private fun maybeVerifyOffline(reason: String) {
+        if (released) return
+        val now = SystemClock.elapsedRealtime()
+        if (!offlineDetector.shouldVerify(now)) return
+        offlineDetector.noteVerifySent(now)
+        LivePageTrace.note(
+            "offline.verify.start",
+            "reason" to reason,
+            "breaks" to offlineDetector.recentBreaks,
+            "suspects" to offlineDetector.suspectCount,
+            "lastBreak" to offlineDetector.lastBreakKind,
+            "room" to roomId,
+        )
+        verifyJob?.cancel()
+        verifyJob = scope.launch {
+            val status = probeLiveStatus()
+            if (released) return@launch
+            LivePageTrace.note("offline.verify.result", "reason" to reason, "liveStatus" to (status ?: -999))
+            if (status == null) {
+                offlineDetector.noteVerifyUnknown()
+                return@launch
+            }
+            if (LiveStatus.isPlayable(status)) {
+                offlineDetector.noteVerifyOnline()
+            } else {
+                latchOffline(status, "verify:get_info")
+            }
+        }
+    }
+
+    /** 复查一次 `live_status`：**拿不到就回 null**（绝不猜、"没问到"不写成"没开播"） */
+    private suspend fun probeLiveStatus(): Int? = withContext(Dispatchers.IO) {
+        runCatching {
+            LiveAPI().roomInfo(roomId.toString()).call().json<ResponseData<LiveRoomDetail>>()
+        }.getOrNull()
+            ?.takeIf { it.isSuccess }
+            ?.data
+            ?.live_status
+    }
+
+    /**
+     * 没在播时给 UI 的那句**状态行文案**（弹窗的措辞归 Activity，见 [Listener.onLiveOffline]）。
+     *
+     * ★`live_status` 只用来**区分措辞**（未开播 / 轮播），不用来下"能不能播"的结论 ——
+     *   与 `LivePlayability` 的判据分工逐字一致；也**不会**把接口术语（`live_status=0`）写给用户看。
+     */
+    private fun offlineStatusText(liveStatus: Int, everPlayed: Boolean): String = when {
+        everPlayed -> "主播已下播（等待重新开播…）"
+        liveStatus == LiveStatus.ROUND -> "房间在轮播，没有直播信号（等待开播…）"
+        liveStatus == LiveStatus.OFF -> "主播未开播（等待开播…）"
+        else -> "暂时没有直播信号（等待开播…）"
     }
 
     // ══════════════════════════════════════════════════════════════════════

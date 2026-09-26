@@ -39,6 +39,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterRecommendSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterCommentSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.home.HomePage
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveFollowPage
 import cn.a10miaomiao.bilimiao.compose.pages.live.LiveSearchPage
 import cn.a10miaomiao.bilimiao.compose.pages.message.MessagePage
 import cn.a10miaomiao.bilimiao.compose.pages.message.ChatPage
@@ -118,6 +119,10 @@ class BilimiaoPageRoute (
         // ★ComposePage 必须在这里注册：导航是按 KClass 反查路由表的，漏了就是"点进去直接崩"
         //   （代码检查.sh 规则 C 会拦下这种漏注册）。带不带关键字都能进（keyword 有默认值）。
         composable<LiveSearchPage>()
+
+        // live（2026-09-26）：首页直播 Tab 顶部「我的关注 · N人正在直播」右侧
+        // 「查看更多 ›」进来的完整列表页。同样必须在路由表里注册（规则 C）。
+        composable<LiveFollowPage>()
 
         // auth
         composable<LoginPage>()
