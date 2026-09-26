@@ -198,7 +198,7 @@ private fun SettingPageContent(
             SettingPageLink("播放器设置", "后台/小窗、视频源、字幕、下载", "① 播放", "播放 播放器 缓冲 画质 格式 字幕 下载 小窗", viewModel::toVideoSettingPage),
             SettingPageLink("弹幕设置", "弹幕显示、样式与过滤", "① 播放", "弹幕 danmaku 显示 样式 过滤 关键词", viewModel::toDanmakuSettingPage),
             // 直播设置的搜索入口（页面级）：搜"直播 / 小窗 / 画质 / 线路 / 弹幕"都能直达
-            SettingPageLink("直播设置", "后台/小窗、默认画质、线路、直播弹幕与列表", "① 播放", "直播 live 直播间 后台 继续 小窗 pip 画中画 画质 清晰度 原画 线路 cdn 重连 弹幕 排序 卡片 列数", viewModel::toLiveSettingPage),
+            SettingPageLink("直播设置", "默认画质、线路策略、弹幕与列表", "① 播放", "直播 live 直播间 画质 清晰度 原画 高清 流畅 线路 cdn 重连 自动重连 自动旋转 旋转 横屏 竖屏 弹幕 danmaku 字号 字体 大小 不透明度 透明度 速度 移速 显示区域 范围 列表 排序 卡片 列数 每行 网格", viewModel::toLiveSettingPage),
             SettingPageLink("定时关闭", "在「播放器设置 → 播放控制设置」里", "① 播放", "定时 关闭 睡眠 停止", viewModel::toAutoStopTimerPage),
             SettingPageLink("主题", "配色与深色模式", "② 界面", "主题 配色 颜色 深色 夜间 纯黑", viewModel::toThemePage),
             SettingPageLink("首页设置", "首页入口显示", "② 界面", "首页 主页 首页入口 入口显示 卡片 列数 时光姬", viewModel::toHomeSettingPage),
@@ -271,7 +271,10 @@ private fun SettingPageContent(
             preference(
                 key = "live",
                 title = { Text("直播设置") },
-                summary = { Text("后台/小窗、默认画质、线路、直播弹幕与列表") },
+                // ★2026-09-26 用户实测纠错：副标题原来写"后台/小窗、默认画质、线路、直播弹幕与列表" ✗
+                //   —— 但"后台继续直播 / 退后台自动进小窗"这两项**当前没有任何 UI 入口**（值仍被播放页读取），
+                //   写在这里等于骗用户去点一个不存在的东西 ✗。改成与本页实际内容一致。
+                summary = { Text("默认画质、线路策略、自动重连、弹幕与列表") },
                 onClick = viewModel::toLiveSettingPage,
             )
             // 「定时关闭」搬进「播放器设置 → 播放控制设置」了（用户：在播放器点齿轮进来要能找到它），

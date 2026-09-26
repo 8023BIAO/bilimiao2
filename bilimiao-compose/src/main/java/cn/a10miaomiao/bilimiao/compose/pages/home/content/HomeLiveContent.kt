@@ -1099,7 +1099,7 @@ private fun LiveRoomCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "${NumberUtil.converString(item.online)}人气",
+                        text = "${NumberUtil.converString(item.online)}人看过",
                         color = Color.White,
                         style = MaterialTheme.typography.labelSmall,
                     )

@@ -708,7 +708,7 @@ private fun LiveRoomCard(
 private fun LiveSearchRoomItem.hotText(): String {
     val text = watched_show?.text_large.orEmpty()
     if (text.isNotBlank()) return text
-    return if (online > 0) "${NumberUtil.converString(online)}人气" else ""
+    return if (online > 0) "${NumberUtil.converString(online)}人看过" else ""
 }
 
 /** 搜到 0 条时的提示：比"空空如也"多告诉用户两件事 —— 搜的是什么词、下一步能干什么 */

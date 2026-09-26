@@ -1,5 +1,11 @@
 package cn.a10miaomiao.bilimiao.compose.pages.live
 
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,10 +58,13 @@ import androidx.compose.ui.unit.sp
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuTrace
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -857,6 +867,23 @@ class LiveDanmakuChatLog(private val capacity: Int = CHAT_MAX_LINES) {
     var pendingScrollToBottom by mutableStateOf(false)
         private set
 
+    /**
+     * ★本轮（弹幕列表动画）新增：**自动贴底的"请求票据"**，每有一条新弹幕在"用户贴着底"时到达就 +1。
+     *
+     * 为什么不能继续拿 [pendingScrollToBottom] 当触发（那是个布尔，正是"硬刷"的根源）：
+     * 面板侧要的是"**合并**地滚一次"，而不是"每来一条就滚一次"。票据是**单调递增**的，
+     * 配上 `snapshotFlow`（它天生是合并语义：收集器忙着跑上一次滚动时，中间值全部丢掉、
+     * 只在忙完后再看**当前值**一眼），就得到：
+     * - 同一帧到 10 条 → 票据只被读一次 → **一次**滚动；
+     * - 一次滚动没跑完又来 100 条 → 只补跑**一次**（滚到"此刻的最新"），绝不排队 100 次；
+     * - 阅读位置（用户上滑）不受影响：票据只在 [stickToBottom] 为真时 +1，语义一个字没改。
+     *
+     * ★为什么不直接用"列表变了"当触发：历史铺底（[addHistory]）也改列表，但它加的是**旧**弹幕、
+     *   不能打扰阅读位置 —— 走票据这条路，铺底一条都不会触发滚动（那不是"新弹幕"）。
+     */
+    var autoScrollTicket by mutableStateOf(0L)
+        private set
+
     private var nextKey = 0L
 
     /** 面板观察到的用户位置（由面板调用，主线程） */
@@ -886,7 +913,12 @@ class LiveDanmakuChatLog(private val capacity: Int = CHAT_MAX_LINES) {
         lines.add(0, LiveDanmakuChatLine(nextKey++, name, msg.text, color))
         // 丢最旧的 = 列表尾部（index 大的一端）；硬上限，见类注释第 2 条
         while (lines.size > capacity) lines.removeAt(lines.lastIndex)
-        if (stickToBottom) pendingScrollToBottom = true
+        // 贴着底 → 打两个标记：① 「↓ 回到底部」按钮的闪避（老语义，一个字没改）；
+        //                  ② 平滑贴底的票据（本轮新增，见 autoScrollTicket）
+        if (stickToBottom) {
+            pendingScrollToBottom = true
+            autoScrollTicket += 1L
+        }
     }
 
     /** 换房间/重连时清空（宿主目前没有调用点，留给后续"切房间复用宿主"的用法） */
@@ -939,6 +971,50 @@ class LiveDanmakuChatLog(private val capacity: Int = CHAT_MAX_LINES) {
 }
 
 /**
+ * 竖屏列表的"自动贴底"执行者（★本轮新增；一个面板一个，只在主线程用）。
+ *
+ * 三件事分别对应一条要求，缺一条都会出问题：
+ * 1. **平滑**：用 [LazyListState.animateScrollToItem]（LazyList 自带的平滑滚动）替掉原来的
+ *    `scrollToItem(0)` 瞬时跳 —— 用户要的"过渡感"主要就是这一下：整列**滑**上去一格，
+ *    而不是"啪"地换一屏。时长/曲线由 LazyList 按距离自己定（它不暴露 spec），
+ *    短距离（我们这里常态就是一两行）就是一次约莫几百毫秒的滑行。
+ * 2. **不误判**：[animating] 给"贴底/上滑"判定当闸门。动画期间列表必然经过
+ *    `index=1、offset>0` 的中间位置，而那是**我们自己**造成的位移；
+ *    裸判定会把它读成"用户上滑了" → `stickToBottom` 被清掉（之后的新弹幕不再自动贴底）
+ *    并且「↓ 回到底部」按钮每滚一次闪一下。收尾判定由调用方在动画结束后显式补一次。
+ * 3. **不拽人**：动画跑着的时候用户上手拖（他的 `MutatePriority` 比我们高），
+ *    `animateScrollToItem` 会抛 `CancellationException`。这里把它**认成"让位"**，
+ *    只在**本协程自己也被取消**（转屏 / 关弹幕 / 离开组合）时才继续往上抛。
+ *    ★不这么分辨的话，用户第一次上手拖就会把收集循环整条带走 —— 之后再也不自动贴底。
+ */
+private class LiveChatBottomScroller(private val listState: LazyListState) {
+
+    /** 自动贴底动画进行中：位置判定要闭嘴（见类注释第 2 条） */
+    var animating = false
+        private set
+
+    /**
+     * 平滑滚到最新（`reverseLayout` 下 index 0 = 屏幕最底）。
+     *
+     * 结束后的**贴底判定**由调用方自己按真实位置补一次（不在这里做：这个类不该知道
+     * "贴底"的判定规则/像素容差）。所以它不需要返回"跑完没跑完"——
+     * 无论哪种收场，调用方都是同一句"按真实位置收尾"。
+     */
+    suspend fun animateToBottom() {
+        animating = true
+        try {
+            listState.animateScrollToItem(0)
+        } catch (e: CancellationException) {
+            // 面板自己要走了（visible 翻 false / 组合被拆）：照旧把取消抛上去，别吞；
+            // 被用户上手拖拽抢占的另一种情况则**让位**（什么都不做，位置判定继续归用户）
+            if (!currentCoroutineContext().isActive) throw e
+        } finally {
+            animating = false
+        }
+    }
+}
+
+/**
  * 竖屏弹幕列表面板（"用户名：内容"，最新贴屏幕底，可上滑看历史）。
  *
  * ★**这个面板必须由宿主放进一个"能吃到触摸"的容器里**（见 `LiveDanmakuOverlayHost` 的长注释）：
@@ -968,43 +1044,89 @@ class LiveDanmakuChatLog(private val capacity: Int = CHAT_MAX_LINES) {
  *   组合重组 —— 这就是"不可见不额外工作"的落点。
  *   ★宿主侧对应的是 `listShown`：它由"实测矩形够不够 [CHAT_DOCKED_MIN_HEIGHT]"决定，
  *   而**不再**由"播放页给的槽 View 是否可用"决定（上一版正是后者，才有"转回竖屏列表再也不回来"）。
+ *
+ * ★本轮（2026-09-26，弹幕列表动画）在**呈现**上加了两样，**判定与布局一个字节没动**：
+ * 1. 条目动画：`Modifier.animateItem()`（新弹幕淡入、被挤上去的平滑位移、被 200 上限裁掉的淡出）；
+ * 2. 自动贴底从"瞬间跳"改成"节流的平滑滚动"（见下面的 ②）。
+ * 面板自己的淡入/淡出**不在这里**（在宿主 `LiveDanmakuOverlayHost.presentPanel`，用 View 的
+ * `alpha`/`translationY` 做）—— 因为"隐藏"这个动作是宿主写 `visibility` 的，只有它能决定
+ * "什么时候才真的 GONE"；本组合能配合的是：退场期间**别把内容拆掉**（[fadingOut]）。
+ *
+ * @param fadingOut ★本轮新增：面板**正在播退场动画**（宿主的判定已经是"不显示"，
+ *   但画面上还要淡出 `PANEL_FADE_OUT_MS` 那一会儿）。true 时即使 [visible] 已经是 false，
+ *   也把内容留在组合里 —— 不然 View 淡的是一个**空**面板（内容先没了，等于还是硬切）。
+ *   ★这期间的例外是**明说**的：内容会多订阅 [LiveDanmakuChatLog.lines] 一二百毫秒；
+ *   淡完宿主把 View 置 GONE 并把本参数置回 false，组合立刻回到"不组内容"（稳态零开销不变）。
+ *   触摸不吃（`clickable` 的 `enabled` 只认 [visible]）、effect 也不再跑（都以 [visible] 为门）。
  */
 @Composable
 fun LiveDanmakuChatPanel(
     chat: LiveDanmakuChatLog,
     visible: Boolean,
     modifier: Modifier = Modifier,
+    fadingOut: Boolean = false,
 ) {
-    if (!visible) return
+    // ★注意这个早退的判据：只看"判定"是不够的 —— 退场动画期间还要留着内容给它淡（见 fadingOut）
+    if (!visible && !fadingOut) return
 
     val density = LocalDensity.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    // 自动贴底的执行者（平滑 + 动画期间不误判"用户上滑" + 被打断时让位），见那个类的注释
+    val bottomScroller = remember(listState) { LiveChatBottomScroller(listState) }
+    // "贴底"判定的像素容差（px）：进 effect 之前算一次，别在每个位置回调里 with(density)
+    val stickTolerancePx = with(density) { CHAT_STICK_TOLERANCE.toPx() }
 
     // ① 上屏（首次 / 从横屏转回竖屏）→ 贴到最新。放在 visible 的 effect 里而不是 initial 里：
     //    面板 View 是 GONE↔VISIBLE 复用的，LazyListState 会记住上次的阅读位置，
     //    "重新上屏还停在很久以前"对用户就是"新弹幕没进来"。
+    //    ★这一条**仍然是瞬时**（scrollToItem）：刚上屏时用户没有"阅读位置"可言，
+    //      从旧位置滑过去反而像列表在自己乱跑；要的是"一睁眼就在最新"。
     LaunchedEffect(visible) {
         if (!visible) return@LaunchedEffect
         chat.onPanelOpened()
         listState.scrollToItem(0) // reverseLayout：index 0 = 最新 = 屏幕最底
     }
 
-    // ② 贴底时来新弹幕 → 滚回底部（标记在 add() 里、插入之前打好，见 pendingScrollToBottom 的注释）
-    LaunchedEffect(visible, chat.pendingScrollToBottom) {
-        if (!visible || !chat.pendingScrollToBottom) return@LaunchedEffect
-        listState.scrollToItem(0)
-        chat.consumeAutoScroll()
+    // ② 贴底时来新弹幕 → **平滑**滚回底部（★本轮：从 `scrollToItem(0)` 的瞬间跳改成动画）。
+    //    触发用票据（`autoScrollTicket`，单调递增），**不是** pendingScrollToBottom 那个布尔：
+    //    · `snapshotFlow` 天生合并 —— 同一帧到 10 条只读到一次、一次滚动没跑完时新请求
+    //      只是把值顶到最新，跑完再看一眼（**替换**，不排队、不堆积）；
+    //    · 票据只在"插入那一刻贴着底"时才 +1（`add()` 里），用户上滑看历史时**一条都不会来**。
+    LaunchedEffect(visible, listState) {
+        if (!visible) return@LaunchedEffect
+        snapshotFlow { chat.autoScrollTicket }.collect { ticket ->
+            if (ticket <= 0L) return@collect
+            // 先消费标记：动画期间到达的新请求会把票据再 +1，不会被这次消费吞掉
+            chat.consumeAutoScroll()
+            // ★不把用户拽回底部：票据是"插入那一刻"打的，排到我们时用户可能已经上滑了。
+            //   （动画本身若被用户上手拖拽抢占，bottomScroller 会**让位** —— 不跟他抢）
+            if (!chat.stickToBottom) return@collect
+            // 滚。★不管"正常跑完"还是"被用户上手拖拽抢占"，都用**真实位置**收尾一次贴底判定：
+            //   正常跑完 → 一定在 (0, 0) → 继续贴底；被抢占 → 用户在哪就是哪（他要看历史就让他看）。
+            //   不这么收尾的话，被打断的那一次会把 stickToBottom 留在 true 上（旧位置判定已经不吭声了），
+            //   下一条弹幕就会把正在看历史的用户**拽回底部**。
+            bottomScroller.animateToBottom()
+            chat.onStickinessChanged(
+                listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset <= stickTolerancePx,
+            )
+        }
     }
 
     // ③ 用户滑动 → 维护"贴底/上滑"状态（上滑 = 别打扰我；滑回底部 = 恢复自动滚动）
     LaunchedEffect(visible, listState) {
         if (!visible) return@LaunchedEffect
-        val tolerance = with(density) { CHAT_STICK_TOLERANCE.toPx() }
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
+                // ★自动贴底动画期间闭嘴：那段时间列表必然经过 `index=1、offset>0` 的中间位置，
+                //   而那是**我们自己**造成的位移。当成"用户上滑"会有两个坏结果：
+                //   ① stickToBottom 被清掉 → 之后的新弹幕不再自动贴底；
+                //   ② 「↓ 回到底部」按钮每自动滚一次就闪一下（它的判据里有 !stickToBottom）。
+                //   动画的收尾判定由 ② 在动画结束时显式补一次（所以这里闭嘴不会漏状态）。
+                if (bottomScroller.animating) return@collect
                 // reverseLayout 下"贴底" = 第一条可见项就是 index 0 且没有被滑走
-                chat.onStickinessChanged(index == 0 && offset <= tolerance)
+                chat.onStickinessChanged(index == 0 && offset <= stickTolerancePx)
             }
     }
 
@@ -1016,9 +1138,13 @@ fun LiveDanmakuChatPanel(
             // ★吃掉落在面板上的**单击**：不然点一下面板的空白处会穿透到手势层，
             //   变成"显隐控制条"（列表常驻之后"点列表空白"是高频动作，一点就闪出控制条很烦）。
             //   indication = null：不要水波纹（这是个容器，不是按钮）。
+            //   ★enabled = visible（本轮加）：退场动画期间 View 还是 VISIBLE 的，
+            //     Compose 若不放手，那 180ms 里点在面板上的那一下会被吞掉 ——
+            //     而改动前 View 是立刻 GONE，同一击会穿透到手势层。所以门只认**判定**，不认"还在不在画"。
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                enabled = visible,
                 onClick = {},
             ),
     ) {
@@ -1043,7 +1169,34 @@ fun LiveDanmakuChatPanel(
                     .padding(horizontal = 4.dp, vertical = 2.dp),
             ) {
                 items(items = chat.lines, key = { it.key }) { line ->
-                    LiveDanmakuChatRow(line)
+                    LiveDanmakuChatRow(
+                        line = line,
+                        // ★本轮：条目增删/位移的动画（`Modifier.animateItem`，Compose 1.7+ 的 API；
+                        //   本工程 foundation = 1.12.1，证据见报告 §1）。
+                        //   三个参数按位置给（`animateItem(淡入, 位移, 淡出)`），不写参数名 ——
+                        //   这个 API 的参数名在 1.7→1.8 改过（appearance/disappearance → fadeIn/fadeOut），
+                        //   位置参数对两种命名都成立：
+                        //   ① 淡入 = 190ms tween（短、克制）：新弹幕是**淡**进来的，不是"啪"一下出现；
+                        //   ② 位移 = 无回弹 spring（中低刚度）：旧条目被挤上去是"滑"不是"跳"；
+                        //   ③ 淡出 = 150ms tween（比淡入更短）：被 200 上限裁掉的那条**淡出去**，
+                        //      不是凭空消失（列表没满 200 时这条路径本来也不会走）。
+                        //   ★key 仍然是既有的单调 `line.key`：动画靠它认"这是同一条"，不能动。
+                        modifier = Modifier.animateItem(
+                            tween(
+                                durationMillis = CHAT_ITEM_FADE_IN_MS,
+                                easing = FastOutSlowInEasing,
+                            ),
+                            spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow,
+                                visibilityThreshold = IntOffset.VisibilityThreshold,
+                            ),
+                            tween(
+                                durationMillis = CHAT_ITEM_FADE_OUT_MS,
+                                easing = FastOutLinearInEasing,
+                            ),
+                        ),
+                    )
                 }
             }
             // 空列表给一句话：刚进直播间、还没收到弹幕时，别让人以为"列表坏了"
@@ -1070,8 +1223,17 @@ fun LiveDanmakuChatPanel(
                         .background(CHAT_JUMP_BG, RoundedCornerShape(10.dp))
                         .clickable {
                             // 点它 = 明确表达"回到最新"：滚到底 + 恢复自动滚动
+                            // ★走**同一个** bottomScroller（本轮改）：长距离滚动期间位置判定要闭嘴，
+                            //   不然按钮会在自己触发的滚动过程中反复"消失又出现"；
+                            //   滚完（或被打断）同样按真实位置收尾，不会留下假的"贴底"状态。
                             chat.onStickinessChanged(true)
-                            scope.launch { listState.animateScrollToItem(0) }
+                            scope.launch {
+                                bottomScroller.animateToBottom()
+                                chat.onStickinessChanged(
+                                    listState.firstVisibleItemIndex == 0 &&
+                                        listState.firstVisibleItemScrollOffset <= stickTolerancePx,
+                                )
+                            }
                         }
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
@@ -1102,7 +1264,7 @@ fun LiveDanmakuChatPanel(
  * 只换了**颜色的来源**：字号/行高/内边距/最多 4 行/省略号、列表的滚动与去重逻辑，一个字没动。
  */
 @Composable
-private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine) {
+private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine, modifier: Modifier = Modifier) {
     // 用户名色 = 当前主题色（★不要写死颜色：用户换主题后这里要跟着变）
     val unameColor = MaterialTheme.colorScheme.primary
     Text(
@@ -1120,7 +1282,7 @@ private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine) {
         // 长弹幕最多 4 行（列表是拿来扫读的，一条占满屏就失去意义了）；超出省略
         maxLines = 4,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp, vertical = 3.dp),
     )
@@ -1149,6 +1311,25 @@ private const val DEDUP_SEPARATOR = "\u0000"
 
 /** "贴底"判定的像素容差（Dp）：手指刚离开底部一点点不算"用户上滑了" */
 private val CHAT_STICK_TOLERANCE = 2.dp
+
+/**
+ * 新弹幕**淡入**的时长（ms）。★本轮新增。
+ *
+ * 取 190（用户给的 160~220 区间中段偏短）的理由：
+ * · 比 160 长一点：13sp 小字在高频房里 160ms 以内的淡入会显得"没淡开就到位了"，像闪；
+ * · 比 220 短一点：热门房每秒十几条，单条停留时间本来就只有几百毫秒，淡入再长会"糊成一片灰"；
+ * · 与滚动动画（`animateScrollToItem`）大致同量级，两者叠在一起是**一次**连贯的"滑进来"。
+ */
+private const val CHAT_ITEM_FADE_IN_MS = 190
+
+/**
+ * 被挤掉（200 上限裁掉）那一条**淡出**的时长（ms）。★本轮新增。
+ *
+ * 比淡入更短（150）：退场的东西不该比进场的东西更抢眼；而且它只在"列表满了又来了新的"时出现，
+ * 位置一般在**屏幕外**（200 条里只有十来条可见），大多数时候用户根本看不到 —— 留着这个时长
+ * 是给"列表刚好没满/刚好看得见最后一条"的场合用的（那种场合以前的"啪一下消失"最扎眼）。
+ */
+private const val CHAT_ITEM_FADE_OUT_MS = 150
 
 /**
  * 停靠列表的**最小可用高度**（宿主算出来的矩形比它矮时，宁可不显示列表、保留滚动弹幕）。

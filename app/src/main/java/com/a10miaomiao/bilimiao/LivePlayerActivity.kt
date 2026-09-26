@@ -19,6 +19,13 @@ import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Icon
+// ★本轮：「旋转」按钮在「自动旋转=开」时切出来的方向是**一次性**的，释放时机挂在"设备真的被转动"
+//   那一刻上（为什么不能用"下一个配置回调"当释放点，见 [pinOrientationByUser] /
+//   [deviceOrientationSentinel] —— `FULL_SENSOR` 读的是手机的物理姿态，电话题一交还就当场弹回去）。
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
@@ -68,17 +75,25 @@ import cn.a10miaomiao.bilimiao.compose.pages.live.LiveSettingSheetHost
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.delegate.live.LivePlayerDelegate
+// ★本轮：顶栏「在线人数」要用的两个类型 —— 都是**现成的**（`LiveAPI().roomInfo()` 的返回壳与实体，
+//   本页 `resolveRoom` 的降级链里早就在用同一条接口/同一个实体，没有新增接口也没有新增解析）。
+import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.live.LiveAPI
 import com.a10miaomiao.bilimiao.comm.live.LiveLastRoomStore
 import com.a10miaomiao.bilimiao.comm.live.LivePageTrace
 import com.a10miaomiao.bilimiao.comm.live.LivePortraitStage
 import com.a10miaomiao.bilimiao.comm.live.danmaku.ConnState
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuClient
+import com.a10miaomiao.bilimiao.comm.live.entity.LiveRoomDetail
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveRoomInitInfo
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveStatus
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
+// ★本轮：顶栏「在线人数」的数字文案复用首页直播卡片**同一个**格式化函数
+//   （`HomeLiveContent.kt` 的 `"${NumberUtil.converString(item.online)}人气"`），
+//   所以"1.2万"这个口径全 App 只有一份实现。
+import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.widget.player.PlayerViewDrawable
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -116,7 +131,9 @@ import kotlin.math.roundToInt
  * ├─ danmakuLayer（FrameLayout）              弹幕层容器 → LiveDanmakuOverlayHost（compose 模块的桥接 View）
  * ├─ TapCatcher                                手势层：单击显隐控制条 / 双击播放暂停 / 左右半区上下滑
  * ├─ hudLayer（FrameLayout）                   手势气泡层：音量/亮度（★第三批：从 Dialog 窗口搬进来的）
- * ├─ 顶栏：返回**图标** + 标题 + 状态 + **画中画图标**（第七批从底栏搬上来，见 [buildUi]）
+ * ├─ 顶栏：返回**图标** + 标题（`直播间 房间号（x.x万人在线）`）+ 状态文字
+ * │        ★状态文字**只在异常/过渡时显示**（正常播放时 `GONE`，顶栏只剩返回 + 标题）——
+ * │          见 [renderStatus]；在线人数跟着房间号写在同一个括号里，见 [renderRoomTitle]。
  * ├─ 底栏（bottomBar）：**输入条 + 五颗按钮（同一行）**（弹幕 / 画质 / **设置** / 画中画 / 旋转）
  * │        ★第八批：竖屏与横屏**同一套一行版式**（用户："把它和那个几个按钮放一起"）；
  * │          输入条**与五颗按钮同一套显隐**（点画面唤出、[CONTROLS_AUTO_HIDE_MS] 后一起消失，
@@ -278,6 +295,10 @@ import kotlin.math.roundToInt
  *    ★与「自动旋转」不打架的关键：切竖屏时同时置 [orientationPinnedByUser]（会话级），
  *    否则 [applyAutoRotatePolicy] 会在紧接着的 [onConfigurationChanged] 里把方向断言回
  *    `FULL_SENSOR` → 手机还横着 → 立刻又被转回横屏。设置键 `live_auto_rotate` 一个字节都不写。
+ *    ★★本轮修正（用户实测报的 bug）：**自动旋转=开时这个钉住是"一次性"的** ——
+ *    设备下一次真的被转动就交还给自动旋转（见 [pinOrientationByUser] / [releaseOneShotOrientationHold]），
+ *    否则"点一次旋转 / 按一次返回"就等于把自动旋转永久关掉了（用户原话："点旋转按钮之后，你旋转
+ *    方向它是不跟随的，除非你手动按那个旋转按钮才能切换方向"）。自动旋转=关时才是永久钉住。
  * 2. **顶栏返回只留图标**（用户："去掉那个顶栏的返回，只保留一个图标，就是复用我们视频播放器的
  *    那个返回图标，也就是我们其他页底栏的那个返回图标。"）：原来的「← 返回」文字按钮
  *    （`actionButton` + 主题色药丸底）换成 24dp 的
@@ -307,8 +328,12 @@ import kotlin.math.roundToInt
  *    [qualityButton]（文案「画质·原画」）→ [showStreamDialog]：一个弹窗、两段（TabLayout，
  *    清晰度 / 线路），既有行为一条不少（当前档打勾 + 主题色高亮、已请求不可用标注、线路可点选），
  *    内容高度仍按 [dialogContentMaxHeightPx] 的 **62% 真机屏幕**封顶并可滚，**没有「取消」按钮**。
- * 5. **「画中画」挪到顶栏**（[pipIconButton]）：与顶栏返回同一套风格（白色 24dp 图标、
- *    [BACK_ICON_BOX_DP]dp 点击区、borderless ripple），图标用点播顶栏那颗 `ic_player_pip`。
+ * 5. **「画中画」挪到顶栏**（★已回退，且死代码已删）：第七批曾把画中画做成**顶栏图标**
+ *    （与顶栏返回同一套风格：白色 24dp 图标、[BACK_ICON_BOX_DP]dp 点击区、borderless ripple）。
+ *    用户随后改主意 ——"为什么要把画中画移到顶栏去？简直就是没有必要" —— 画中画**留在底栏**
+ *    （[orderedBottomButtons] / [pipButton]）。那颗**从未挂载**的顶栏图标（字段、创建代码、
+ *    被注释掉的 `topBar.addView`、主题刷新那一行）已作为死代码**整体删除**：
+ *    顶栏现在只有 **返回 + 标题 + 状态文字**（状态文字仅异常时显示，见 [renderStatus]）。
  * 6. 结果：竖屏底栏 = 常驻输入条 + 3 颗（旋转 / 画质·线路 / 弹幕开）；横屏输入条与 3 颗**同一行**；
  *    **没有「更多」按钮**（用户明确反对多一步）。
  *    ★第八批把这一条也统一了（"常驻"与"竖屏两行"都作废，见下一节）。
@@ -569,13 +594,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         private const val BOTTOM_BUTTON_PADDING_H_DP = 4
 
         /**
-         * 顶栏**图标按钮**（返回 / 画中画）的点击区边长（dp）与内边距（dp）。
+         * 顶栏**图标按钮**（现在只有返回那一颗）的点击区边长（dp）与内边距（dp）。
          *
          * 40dp = 与点播播放器那颗返回（`layout_danmaku_palyer.xml` 的 `@id/back`，40×40dp）
          * 完全一致；图标本身 24dp，四周 8dp 内边距让它居中 —— 于是"图标 24 / 点击区 40"
          * 同时成立（点击区比图标大一圈，手指点得中）。
-         * ★第七批的「画中画」图标（[pipIconButton]）**用同一组数**：两颗图标同一个尺寸、
-         *   同一种 borderless ripple，用户在顶栏看到的是一套东西。
+         * ★第七批那颗「画中画」顶栏图标（曾用同一组数）已整体删除（见 [buildUi] 顶栏那一段），
+         *   这两个数现在只服务 [backButton]。
          * ★想调顶栏高度就动这两个数：顶栏高 = 点击区 + 顶栏自身 6dp×2 内边距，
          *   而竖屏视频带的顶边由 [videoBandTopPx]（顶栏底边）说话，会跟着自动重排。
          */
@@ -647,6 +672,21 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
         /** 看门狗巡检间隔（ms）：只读几个 player getter，几乎不耗电 */
         private const val LIVE_WATCHDOG_INTERVAL_MS = 5_000L
+
+        /**
+         * ★本轮：顶栏「在线人数」的刷新间隔（ms）—— **搭在看门狗那次巡检上**（[liveHealthJob]），
+         * 不新开 Job、不新开定时器。
+         *
+         * 为什么是 45s（用户要求 30~60s）：
+         * · 在线人数是"看个大概"的数字，秒级刷新没有任何意义，只会白白多打接口；
+         * · [LiveAPI.roomInfo]（`room/v1/Room/get_info`）实测**免登录、无 WBI、裸请求即 code=0**，
+         *   但 B 站对直播接口整体有风控（连"分区直播列表"都会回 -352），低频是必须的礼貌；
+         * · 45s 与"未开播轮询"的 [OFFLINE_POLL_INTERVAL_MS] 同量级，两个数字一眼能对上。
+         *
+         * ★它与看门狗**同频不同拍**：看门狗每 [LIVE_WATCHDOG_INTERVAL_MS]（5s）醒一次（只读 getter，
+         *   不联网），本项由 [ONLINE_REFRESH_INTERVAL_MS] 这个时间戳闸门压到 45s 才真发一次请求。
+         */
+        private const val ONLINE_REFRESH_INTERVAL_MS = 45_000L
 
         /** 连续缓冲超过它就认为"卡住了"（ms）。取 8s：正常换线/起播的缓冲不会这么长 */
         private const val STALL_RETRY_MS = 8_000L
@@ -724,6 +764,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         private const val DRAG_NONE = 0
         private const val DRAG_BRIGHTNESS = 1
         private const val DRAG_VOLUME = 2
+
+        /**
+         * ★本轮：「一次性方向钉住」的释放哨兵（[deviceOrientationSentinel]）用的三个数。
+         *
+         * · [DEVICE_AXIS_MARGIN]：屏幕平面上两根轴的重力分量差不到这个倍数（≈45° 边界）时，
+         *   判不出手机是横是竖 —— 按"没读到"处理；
+         * · [FLAT_GRAVITY_RATIO]：平面分量小于 `0.35g`（≈离平放 20° 以内）时同样判不出
+         *   —— 手机躺桌上时横竖本来就读不准，把噪声当成"用户转了手机"会让方向乱跳；
+         * · [DEVICE_BUCKET_CONFIRM_SAMPLES]：新档要**连续**读到几帧才算数（一帧抖动不算）。
+         *   取 2：`SENSOR_DELAY_NORMAL`（≈5Hz）下约 0.2~0.4s —— 用户转完手机，页面几乎立刻跟上。
+         */
+        private const val DEVICE_AXIS_MARGIN = 1.3f
+        private const val FLAT_GRAVITY_RATIO = 0.35f
+        private const val DEVICE_BUCKET_CONFIRM_SAMPLES = 2
 
         /**
          * 同一时刻只允许一个直播播放页。
@@ -964,20 +1018,24 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private lateinit var backButton: ImageView
 
     /**
-     * 顶栏「画中画」图标按钮（★第七批从底栏搬上来）。
+     * 底栏「画中画」文字按钮 —— **画中画唯一的入口**（用户要求留在底栏）。
      *
-     * 用户原话："画中画挪到顶栏（一颗小图标，与顶栏返回图标同一套风格：白色 24dp、40dp 点击区、
-     * borderless ripple）"。图标 = `R.drawable.ic_player_pip` —— 点播播放器**顶栏**那颗小窗按钮
-     * 用的就是它（`layout_danmaku_palyer.xml:603`），与本页顶栏返回（`ic_arrow_back_white_24dp`）
-     * 是同一种"白色 24dp 顶栏图标"风格。
-     * ★`Build.VERSION_CODES.O` 以下**隐藏**（[buildUi] 里判）：PiP 本身要 26+，
-     *   留一颗点了只弹"当前系统不支持画中画"的图标没有意义。
+     * ★第七批那颗"顶栏画中画图标"（`pipIconButton`）已**整体删除**（用户 2026-09-26 改主意：
+     *   "没必要移到顶栏"；★本轮清死代码：字段 / 创建代码 / 被注释掉的 addView / 主题刷新那一行
+     *   一起删掉，见 [buildUi] 顶栏那一段）。
      */
-    private lateinit var pipIconButton: ImageView
-    /** 底栏「画中画」文字按钮（用户要求留在底栏；与 [pipIconButton] 二选一） */
     private lateinit var pipButton: TextView
 
+    /**
+     * 顶栏标题：`直播间 房间号（x.x万人在线）`（★本轮：在线人数就写在房间号后面那个括号里）。
+     * 拼接只在 [renderRoomTitle] 一处（初值「直播间」；拿不到人数就不带括号）。
+     */
     private lateinit var titleText: TextView
+
+    /**
+     * 顶栏状态文字（播放侧 + 弹幕连接状态拼一行）—— ★本轮起**只在异常/过渡时显示**，
+     * 正常播放时 `GONE`（顶栏只剩返回 + 标题）。判定清单见 [renderStatus]。
+     */
     private lateinit var statusText: TextView
 
     /**
@@ -1056,8 +1114,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★第八批：文案从「画质·原画」**缩短成「画质」** —— 用户第 3 条给了两条路
      *   （"要么给足宽度、要么缩短为「画质」"），而这一颗要和输入框、另外四颗**挤在同一行**：
      *   5 个字的文案会把整行字号从 14sp 拖到 9sp（[applyBottomBarTextSizes] 按"最宽的文案"统一挑档）。
-     *   当前画质/线路**一个信息都没少**：顶栏状态文字 [statusText] 就是「画质 原画 ｜ 线路 1/2」，
-     *   而它和这颗按钮**同时可见**（同受 4 秒计时管），弹窗里也照样有当前档打勾 + 副标题。
+     *   当前画质/线路**一个信息都没少**：点开这颗按钮，「清晰度」段与「线路」段的副标题就是
+     *   「当前：原画（qn 10000）」「当前：线路 1/2」（[showStreamDialog]），当前档还带打勾。
+     *   ★本轮更正一句旧注释：它**不再**在顶栏状态行里出现（用户拍板"当前画质/线路从状态行去掉"，
+     *     见 [renderStatus] 的判定清单）—— 顶栏现在只在异常/过渡时显示状态文字。
      *   想改回"带当前值"：把这里与 [delegateListener] 里那处换成 `"画质·$desc"` 即可（一行）。
      */
     private lateinit var qualityButton: TextView
@@ -1082,7 +1142,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     //   · `lineButton`   —— 线路并进「画质·线路」弹窗的第二段（[showStreamDialog]）；
     //   · `sendDanmakuButton` —— 被常驻输入条 [danmakuInput] 取代；
     //   · `retryButton`  —— 「刷新」改自动（[autoRetryLiveStream]），手动入口在弹窗里；
-    //   · `pipButton`    —— ★2026-09-26 又搬回底栏了（用户："没必要移到顶栏"）；顶栏那颗 [pipIconButton] 保留代码但不再加入。
+    //   · `pipButton`    —— ★2026-09-26 又搬回底栏了（用户："没必要移到顶栏"）；顶栏那颗图标（`pipIconButton`）已整体删除（见 [buildUi] 顶栏那一段）。
 
     // ── 播放 / 弹幕 ─────────────────────────────────────────────────────────
     private var delegate: LivePlayerDelegate? = null
@@ -1161,6 +1221,32 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /** 真实房间号（room_init 换算之后；弹幕与取流都用它） */
     private var realRoomId: Long = 0L
+
+    /**
+     * 顶栏标题里那个房间号（来自 [LivePlayerDelegate.Listener.onStreamReady] 的 `info.roomId`
+     * = 真实房间号）；0 = 还没拿到 → 标题保持初值「直播间」，不带括号。
+     * ★它单独存一份而不是每次去读 `delegate?.roomId`：标题要在**在线人数回来**时重画一次
+     *   （见 [renderRoomTitle]），那条路与"取流成功"是两条时间线。
+     */
+    private var titleRoomId: Long = 0L
+
+    /**
+     * 顶栏「在线人数」（`room/v1/Room/get_info` 的 `online` 字段；**null / 0 = 没拿到**）。
+     *
+     * ★为什么用可空 + "0 也算没拿到"：接口拿不到、风控、断网时这个字段会是 0 或不返回，
+     *   而"0 人在线"在直播里几乎不存在 —— 用户点名要求**拿不到就不显示括号**
+     *   （"不要显示 0 / --"），所以渲染那一侧只认 `> 0`（见 [renderRoomTitle]）。
+     */
+    private var roomOnline: Long? = null
+
+    /**
+     * 上一次**真正发出**在线人数请求的时刻（`SystemClock.elapsedRealtime()`；0 = 还没发过）。
+     *
+     * 它是 [ONLINE_REFRESH_INTERVAL_MS] 的闸门：看门狗每 5s 醒一次，但只有这里过了 45s
+     * 才真发一次请求。★取"发出前"就写时间戳（乐观写法），这样即使请求挂在超时上，
+     * 也不会被下一次巡检再叠一发。
+     */
+    private var roomOnlineFetchedAtMs = 0L
 
     /** 当前请求的清晰度。
      * ★初值取自「设置 → 直播设置 → 默认画质」（`live_default_quality`），见 [defaultRequestedQn]：
@@ -1282,8 +1368,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private var pipExitedAtMs = 0L
 
-    /** 顶栏状态栏的"播放侧"文案；弹幕连接状态由 [danmakuStatusLabel] 拼在后面，见 [renderStatus] */
+    /**
+     * 顶栏状态行的"播放侧"文案（正常态也记，只是不显示 —— 见 [streamStatusAbnormal]）。
+     * 弹幕连接状态由 [danmakuStatusLabel] 拼在后面，见 [renderStatus]。
+     */
     private var streamStatus = "准备中…"
+
+    /**
+     * ★本轮：这条播放侧文案是不是**异常/过渡**态（true = 显示，false = 正常态、状态行整条隐藏）。
+     *
+     * 初值 true：进页面时是「准备中…」（正在解析房间/取流），属于过渡态，该显示。
+     * 两个写入口只有 [setStreamStatus]（异常）与 [setStreamStatusNormal]（正常），
+     * 判定清单写在 [renderStatus] 的 KDoc 里 —— **不要**在别处直接改这个字段。
+     */
+    private var streamStatusAbnormal = true
 
     private val hideControlsRunnable = Runnable {
         // 只有"正在播"才自动隐藏：暂停/报错时控制条要留在屏幕上；
@@ -1416,12 +1514,41 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /**
      * 用户是否**手动钉过方向**（底栏「旋转」按钮 [toggleOrientation]，或横屏按返回退出全屏
-     * [exitFullscreenToPortrait] —— 本轮起两个入口共用它）。
+     * [exitFullscreenToPortrait] —— 两个入口共用它）。
      * 置位后 [applyAutoRotatePolicy] 不再顶掉他的选择 —— 否则"点了旋转/按了返回，手机一歪又转回去"。
      * ★它是**会话级**的：不写 DataStore，`live_auto_rotate` 设置键一个字节都不动；
      *   退出直播间再进 = 设置里的自动旋转照旧生效。
+     *
+     * ★★本轮（用户实测报的 bug）起，这个标记分**两档**，由 [pinOrientationByUser] 按设置置位：
+     *
+     * | 「自动旋转」 | 置位 | 谁解开 | 用户看到的行为 |
+     * |---|---|---|---|
+     * | **关** | 永久（本次会话） | 只有退出直播间 | 「旋转」是**唯一**的方向开关：按一次切一次；手机怎么转都不跟随 |
+     * | **开** | 一次性 | **设备真的被转动**那一刻（[releaseOneShotOrientationHold]） | 这一次切换照做，之后**继续跟随** —— 不再"点一次就永久锁死" |
+     *
+     * ★旧行为（本轮修掉的 bug）：不管设置是开是关都**永久**置位，而且**全文件没有任何地方清除**
+     *   （置位只有 [toggleOrientation] 与 [exitFullscreenToPortrait] 两处）——于是自动旋转=开时
+     *   点一次「旋转」，[applyAutoRotatePolicy] 就在**每一次**转屏回调里提前 return，
+     *   方向只剩「旋转」按钮能改（用户原话："除非你手动按那个旋转按钮才能切换方向"）。
      */
     private var orientationPinnedByUser = false
+
+    /**
+     * ★本轮：**「一次性方向钉住」的释放哨兵**（[deviceOrientationSentinel]）是否已经注册在
+     * [SensorManager] 上。注册/注销一一对应（[armDeviceOrientationSentinel] /
+     * [disarmDeviceOrientationSentinel]）—— 加速度计是**系统服务**，忘记注销会一直抓着本页实例。
+     */
+    private var orientationSentinelRegistered = false
+
+    /**
+     * 钉住那一刻的设备姿态档（[deviceOrientationBucket] 的返回值；
+     * `null` = 还没读到一帧可信的 —— 比如手机正平放在桌上，那时横竖本来就读不出来）。
+     */
+    private var orientationSentinelBaseline: Int? = null
+
+    /** 连续读到的**新档**（候选；攒够 [DEVICE_BUCKET_CONFIRM_SAMPLES] 帧才算"用户真的转了手机"） */
+    private var orientationSentinelPendingBucket: Int? = null
+    private var orientationSentinelPendingSamples = 0
 
     // ══════════════════════════════════════════════════════════════════════
     // 生命周期
@@ -1778,6 +1905,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         val wasPipEntryPending = pipEntryPending
         pipEntryPending = false
         if (wasPipEntryPending) applyControlsVisibility(controlsVisible)
+        // ★本轮：真退到后台，就把"一次性方向钉住"一并交还给自动旋转（[releaseOneShotOrientationHold]）。
+        //   两个理由：① 页面都不可见了，没必要让加速度计还在后台按 5Hz 跑着等"用户转手机"；
+        //   ② 用户回来时本来就该是"跟随"（自动旋转=开），不该把一个几分钟前的钉住原样带回来。
+        //   ★只影响"自动旋转=开"那一档：=关时它在函数里被判掉（那是"唯一的方向开关"，永久有效）。
+        //   ★PiP 不走 onStop（只到 onPause），小窗里的释放由哨兵自己那条 PiP 早退兜住。
+        releaseOneShotOrientationHold("onStop")
         danmakuHost?.stop()
         // 退后台时把手势提示收掉：气泡是页内 View，留着会在回来时"凭空亮着"（旧版是 Dialog 窗口，
         // 会有同样的观感问题，只是成因不同 —— 它会在回来时重新淡入一次）
@@ -1872,6 +2005,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         volumeWriter = null
         // ★PiP 动作接收器注销（它现在是随页面注册的，所以注销点就是这里 —— 一一对应，不会漏）
         unregisterPipActionReceiver()
+        // ★本轮：方向释放哨兵的加速度计监听也要跟着页面一起收（同样一一对应）——
+        //   加速度计是**系统服务**，不注销它就一直抓着本页实例，退出直播间也回收不掉。
+        disarmDeviceOrientationSentinel()
         streamDialog = null
         // ★第十四批：直播设置弹窗的宿主也要释放（ComposeView 一 detach 就会 dispose 那份组合，
         //   弹窗的 `Dialog` 窗口随之收掉 —— 页面没了弹窗还挂在屏幕上是不可能发生的）。
@@ -2174,9 +2310,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * "按了返回，闪一下又回全屏"。所以 [exitFullscreenToPortrait] 必须**两件事一起做**：
      * ① `requestedOrientation` = [ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT]
      *    （与底栏「旋转」按钮切竖屏用的是**同一个值**：允许 180° 翻转，但不跟随重力横过去）；
-     * ② `orientationPinnedByUser = true` —— 把这个"用户当下明确要的方向"记进那个**会话级**标记，
+     * ② `orientationPinnedByUser` 置位 —— 把这个"用户当下明确要的方向"记进那个**会话级**标记，
      *    [applyAutoRotatePolicy] 见到它就提前返回（`preserveManualChoice`），不再用设置里的
      *    自动旋转覆盖用户的选择。少了②，①会被下一次转屏回调原样推翻。
+     *    ★★本轮：置位这件事改走 [pinOrientationByUser]（按设置分两档）—— 自动旋转=**开**时它是
+     *    **一次性**的：手机还横着的那一刻照旧钉得住（上面这条"闪一下又回全屏"依然修好），
+     *    但**设备下一次真的被转动**就把方向交还给自动旋转（[releaseOneShotOrientationHold]），
+     *    不再"按一次返回就永久不跟随"。自动旋转=**关**时两档合一，仍是永久钉住。
      * ★"临时"的边界（**没有**改设置）：整个动作一个字节都不写 DataStore ——
      *   `live_auto_rotate` 仍是用户设置里的那个值，钉住只活在**本页这次会话**里
      *   （与「旋转」按钮同一条生命周期：退出直播间再进 = 自动旋转照旧生效）。
@@ -2211,9 +2351,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   见 AndroidManifest.xml:87），播放/弹幕一秒都不会中断，也不需要重新取流。
      * ★控制条顺手亮一次（与 [toggleOrientation] 一样）：用户刚做过动作，得看见反馈；
      *   紧接着的 [onConfigurationChanged] 末尾也会再刷一次，幂等。
+     * ★★本轮：钉多久不再由这里写死（原来是一行 `orientationPinnedByUser = true`，**永久**）——
+     *   改走 [pinOrientationByUser]：自动旋转=开时它是**一次性**的（设备一动就交还给自动旋转，
+     *   用户"按了返回退出全屏"的效果一点不少：那一刻手机还横着，"退出全屏"照旧钉得住），
+     *   自动旋转=关时才是永久钉住。
      */
     private fun exitFullscreenToPortrait() {
-        orientationPinnedByUser = true
+        pinOrientationByUser()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
         // ★诊断日志（只读）：返回键"退出全屏"= 切竖屏并钉住
         LivePageTrace.note(
@@ -2221,6 +2365,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "requestedOrientation" to requestedOrientation,
             "landscape" to isPageLandscape(),
             "pip" to isInPictureInPictureMode,
+            "autoRotate" to autoRotateEnabled(),
         )
         showControlsTemporarily()
         // ★第十一批第 1 条：**"退出全屏"（系统返回键 / 顶栏返回图标）也要重排沉浸式** ——
@@ -2640,14 +2785,46 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         }
     }
 
-    /** 弹幕连接状态 → 顶栏短标签；没有可说的就返回 null（不占位置） */
+    /**
+     * 弹幕连接状态 → 顶栏短标签，**只回"异常/过渡"那几档**；正常态回 null（不占位置）。
+     *
+     * ★本轮（用户："顶栏正常的时候没有状态文字……'弹幕 已连接'也算正常态，隐藏"）：
+     * | 状态 | 回什么 | 为什么 |
+     * |---|---|---|
+     * | [ConnState.Connecting] | 「弹幕 连接中」 | 过渡态（刚进房/刚重连，用户能看到它在动） |
+     * | [ConnState.Connected] | **null** | ★正常态 —— 不显示 |
+     * | [ConnState.Reconnecting] | 「弹幕 重连中」 | 异常（连接已断，正在自愈） |
+     * | [ConnState.Failed] | 「弹幕 连接失败」 | 异常（B 路此后**不会**再自动重连，必须让用户看见） |
+     * | [ConnState.Idle] + 弹幕开着 | 「弹幕 未连接」 | 异常（开着却一条连接都没有） |
+     * | [ConnState.Idle] + 弹幕关着 | **null** | 正常态（用户自己在底栏关的，不用提醒） |
+     * | null（还没收到状态） | **null** | 未知不占位置 |
+     *
+     * ★诊断/兜底文案不要用这个函数（它在正常态回 null会让提示变成"未知"）——
+     *   要"无论什么状态都给一句人话"请用 [danmakuConnLabel]。
+     */
     private fun danmakuStatusLabel(): String? = when (danmakuConnState) {
+        ConnState.Connecting -> "弹幕 连接中"
+        ConnState.Connected -> null
+        ConnState.Reconnecting -> "弹幕 重连中"
+        ConnState.Failed -> "弹幕 连接失败"
+        ConnState.Idle -> if (danmakuEnabled) "弹幕 未连接" else null
+        null -> null
+    }
+
+    /**
+     * 弹幕连接状态的**完整**标签（每一档都有话，包括正常态）—— 只给"诊断/兜底提示"用。
+     *
+     * 目前唯一调用点：发弹幕失败但 `lastSendError` 也拿不到时那句
+     * `弹幕发送失败（原因未知；弹幕状态：…）`。那种时候"已连接 / 已关"恰恰是**要看的**信息，
+     * 所以不能复用 [danmakuStatusLabel]（它在正常态回 null）。
+     */
+    private fun danmakuConnLabel(): String = when (danmakuConnState) {
         ConnState.Connecting -> "弹幕 连接中"
         ConnState.Connected -> "弹幕 已连接"
         ConnState.Reconnecting -> "弹幕 重连中"
         ConnState.Failed -> "弹幕 连接失败"
         ConnState.Idle -> if (danmakuEnabled) "弹幕 未连接" else "弹幕 已关"
-        null -> null
+        null -> "未知"
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -2673,20 +2850,21 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             actualQn = info.actualQn
             actualQnDesc = info.actualQnDesc
             showLoading(false)
-            titleText.text = "直播间 ${info.roomId}"
-            val requestedHint =
-                if (info.actualQn > 0 && info.actualQn != info.requestedQn) {
-                    "（请求 ${qnDesc(info.requestedQn)}）"
-                } else {
-                    ""
-                }
-            setStreamStatus("画质 ${info.actualQnDesc}$requestedHint ｜ 线路 ${info.lineIndex + 1}/${info.lineCount}")
+            // ★本轮：标题 = `直播间 房间号（x.x万人在线）`（房间号 + 在线人数在同一个出口里拼，
+            //   见 [renderRoomTitle]）。在线人数每 45s 回来一次时会再调一次同一个函数。
+            titleRoomId = info.roomId
+            renderRoomTitle()
+            // ★★本轮（用户拍板的"减法"）：这里原来还有一句
+            //   `setStreamStatus("画质 ${info.actualQnDesc}$requestedHint ｜ 线路 …")` —— **整句删除**。
+            //   用户原话："当前画质/线路也在状态行里显示 ✗ —— 那部分去掉（画质弹窗内已有'当前：xxx'）"。
+            //   当前档位信息一个都没少：底栏「画质」那颗按钮点开的弹窗里，清晰度段与线路段的副标题
+            //   就是「当前：原画（qn 10000）」「当前：线路 1/2」（[showStreamDialog]）。
+            //   ★随之删掉的还有只为这句话服务的 `requestedHint`（"（请求 xxx）"那个后缀）——
+            //     它的另一半信息仍在：未登录被静默降级时下面那句 toast 会如实告知。
             // ★★第八批（用户实测第 3 条）：底栏那颗按钮的文案从「画质·原画」**缩短成「画质」**，
             //   所以这里**不再**把当前值写进按钮 —— 用户原话给了两条路（"要么给足宽度、要么缩短为「画质」"），
             //   而这一行现在要和输入框 + 另外三颗按钮挤在同一行：5 个字会把整行字号从 14sp 拖到 9sp
             //   （[applyBottomBarTextSizes] 按"一行里最宽的文案"统一挑一档）。
-            //   当前画质/线路**一个信息都没少**：顶上那句 `setStreamStatus("画质 … ｜ 线路 …")` 与这颗按钮
-            //   同时可见（同受 4 秒计时管），弹窗里也有当前档打勾 + 副标题（[showStreamDialog]）。
             //   ★想改回"带当前值"：把本行换成 `qualityButton.text = "画质·${info.actualQnDesc}"` 即可
             //   （下面那次 [applyBottomBarTextSizes] 会自动把整行切到放得下的那一档字号）。
             //   ★第七批：「画质」与「线路」合并成一颗，所以这里**只刷这一颗**，
@@ -2723,7 +2901,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
                 LivePlayerDelegate.LivePlayState.PLAYING -> {
                     showLoading(false)
-                    setStreamStatus("直播中")
+                    // ★本轮：「直播中」是**正常态** → 走 [setStreamStatusNormal]（状态行整条隐藏，
+                    //   顶栏只剩返回 + 房间号（在线人数））；它同时负责把上一条异常文案清掉。
+                    setStreamStatusNormal("直播中")
                     updatePlayPauseButton()
                 }
 
@@ -2866,14 +3046,72 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // 以及对「设置 → 直播设置 → 自动重连」的尊重（关掉 = 用户要完全手动）。
     // ══════════════════════════════════════════════════════════════════════
 
-    /** 看门狗：每 [LIVE_WATCHDOG_INTERVAL_MS] 巡检一次（只读几个 player getter，几乎不耗电） */
+    /**
+     * 看门狗：每 [LIVE_WATCHDOG_INTERVAL_MS] 巡检一次（只读几个 player getter，几乎不耗电）。
+     *
+     * ★本轮多挂了一件事：[refreshRoomOnlineIfDue]（顶栏在线人数）—— **搭在这一次已有巡检上**，
+     *   没有新建 Job、没有新建定时器；它自己带 [ONLINE_REFRESH_INTERVAL_MS]（45s）时间戳闸门，
+     *   所以看门狗 5s 醒一次 ≠ 5s 打一次接口，真发出去的请求仍是 45s 一次。
+     *   顺序上先刷人数、再判健康：人数那一支是"发起即返回"（内部另起一个协程等网络），
+     *   不会把同一拍的健康巡检拖在网络 IO 后面。
+     */
     private fun startLiveHealthWatchdog() {
         if (liveHealthJob?.isActive == true) return
         liveHealthJob = lifecycleScope.launch {
             while (isActive) {
                 delay(LIVE_WATCHDOG_INTERVAL_MS)
+                // ★在线人数已按用户要求移除：这行若恢复，顶栏会重新拼括号（见 renderRoomTitle 的说明）
+
+                // refreshRoomOnlineIfDue()
                 checkLiveHealthOnce()
             }
+        }
+    }
+
+    /**
+     * ★本轮：顶栏「在线人数」的刷新（用户要求"搭在已有的轮询上、30~60 秒刷一次"）。
+     *
+     * ## 数据来源：`room/v1/Room/get_info` 的 `online`
+     * 走的是 [LiveAPI.roomInfo]（**本页早就在用的同一条接口**：`resolveRoom` 的降级链第 ③ 层
+     * 就是它），解析成的 [LiveRoomDetail] 里 `online` 字段**早就声明好了** ——
+     * 本轮没有新增接口、没有新增实体、没有新增解析代码，也没有碰 `AppStore/SettingConstants`。
+     * 为什么选它而不是 `getInfoByRoom`：那一条（[LiveAPI.roomInfoByRoom]）要 WBI 签名、
+     * 按 IP 有风控（工程注释里写着"重试风暴会把正常房间也一起判成拿不到"），而它在本页的
+     * 唯一用途是"这个房间关没关弹幕"（[probeRoomDanmakuPolicy]，**每个房间只调一次**，
+     * 不该改造成轮询）。`get_info` 实测免登录、无 WBI、裸请求 code=0，是这两个候选里更耐操的一个。
+     *
+     * ## 刷新路径（★没有新开轮询）
+     * ```
+     * liveHealthJob（已有的看门狗，5s 一拍）
+     *   └─ refreshRoomOnlineIfDue()            ← 本轮唯一新增调用点
+     *        ├─ 闸门：距上次**发出**不足 ONLINE_REFRESH_INTERVAL_MS(45s) → 直接返回（不打接口）
+     *        ├─ 闸门：不在前台（PiP / 即将进 PiP / 页面没起）→ 直接返回（顶栏那时候也看不见）
+     *        └─ 过闸才 lifecycleScope.launch { withContext(IO) { LiveAPI().roomInfo(...) } }
+     * ```
+     * 时间戳在**发出前**就写（乐观），所以一次超时不会让下一次巡检再叠一发。
+     *
+     * ## 拿不到怎么办（用户要求："拿不到人数时不显示括号，不要显示 0 / --"）
+     * 失败 / `online <= 0` → **什么都不改**：上一次的值留着（数字不会跳成 0），
+     * 首次就没拿到则一直不带括号（[renderRoomTitle] 里那个 `> 0` 判断）。
+     */
+    private fun refreshRoomOnlineIfDue() {
+        val roomId = realRoomId
+        if (roomId <= 0L) return
+        // 页面没起来 / 在小窗里：顶栏看不见，没必要打接口（与本页其它网络动作同一套门控）
+        if (!pageStarted || isInPictureInPictureMode || pipEntryPending) return
+        val now = SystemClock.elapsedRealtime()
+        if (roomOnlineFetchedAtMs > 0L && now - roomOnlineFetchedAtMs < ONLINE_REFRESH_INTERVAL_MS) return
+        roomOnlineFetchedAtMs = now
+        lifecycleScope.launch {
+            val online = withContext(Dispatchers.IO) {
+                runCatching {
+                    LiveAPI().roomInfo(roomId.toString()).call().json<ResponseData<LiveRoomDetail>>()
+                }.getOrNull()?.takeIf { it.isSuccess }?.data?.online
+            }
+            if (isFinishing || isDestroyed) return@launch
+            if (online == null || online <= 0L) return@launch
+            roomOnline = online
+            renderRoomTitle()
         }
     }
 
@@ -3383,7 +3621,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // 失败：文本保留（一个字都不动），原因 = 服务端原文
             val reason = client.lastSendError?.takeIf { it.isNotBlank() }
             val message = reason
-                ?: "弹幕发送失败（原因未知；弹幕状态：${danmakuStatusLabel() ?: "未知"}）"
+                ?: "弹幕发送失败（原因未知；弹幕状态：${danmakuConnLabel()}）"
             showDanmakuInputError(message)
             toast(message)
         }
@@ -3534,8 +3772,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // 于是：
     // · 外壳 = `AutoSheetDialog`（与首页直播 Tab 的「筛选」弹窗 `HomeLiveFilterSheet` **同一套**，
     //   转屏自适应是它自带的：`DialogFullScreen` 按宿主 decorView 尺寸重设 Dialog 窗口，见那个文件）；
-    // · 内容 = `liveSettingPreferenceItems()`（**与「设置 → 直播设置」页同一份项、同一批键与默认值**，
-    //   读写口都是 `ProvidePreferenceLocals` + DataStore，所以改完立即生效、也立即落盘）；
+    // · 内容 = `liveDanmakuSettingPreferenceItems()`（★本轮起**只有弹幕 4 项**：字号 / 不透明度 /
+    //   速度 / 显示区域；这四项与「设置 → 直播设置」页的弹幕组是**同一份实现、同一批键与默认值**，
+    //   读写口都是 `ProvidePreferenceLocals` + DataStore，所以改完立即生效、也立即落盘。
+    //   ★播放类 4 项（默认画质 / 默认线路策略 / 自动重连 / 自动旋转）与「每行卡片数」按用户要求
+    //     从弹窗移除 —— 它们仍在设置页，**一个项都没少**）；
     // · 宿主 = compose 模块的 [LiveSettingSheetHost]（本页在 app 模块，**没有 Compose 编译器插件**，
     //   写不了 `@Composable`；照 [LiveDanmakuOverlayHost] 那条"View 桥"的老路）。
     //
@@ -3596,12 +3837,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * 弹窗里的项是"改一项立即写 DataStore"的，绝大多数（弹幕字号/不透明度/速度/显示区域）
      * 本来就是**订阅式**的（直播弹幕浮层 `LiveDanmakuSettings.watch()`），不需要本页做任何事。
-     * 只有两项是"本页在某个时机读一次"的，所以在关弹窗时补一次（与第二批那个原生弹窗
-     * "改动后立即生效的那份在设置弹窗里再下发一次"是同一个做法，只是那个弹窗已删）：
+     * ★本轮起弹窗里**只剩弹幕 4 项**（播放类 4 项按用户要求移除、仍在设置页），所以下面这两下
+     *   在正常情况下已经是"什么都不用做"——**保留**它们是因为：① 两处都幂等、无 IO、无副作用；
+     *   ② 万一以后播放类项回到弹窗里，"改完当场生效"这条保证不用再补一遍（与第二批那个原生弹窗
+     *   "改动后立即生效的那份在设置弹窗里再下发一次"是同一个做法，只是那个弹窗已删）：
      * · [applyPlaybackPolicyToDelegate]：自动重连 / 线路策略 → 下发给播放核心（幂等、无 IO）；
      * · [applyAutoRotatePolicy]`(preserveManualChoice = true)`：自动旋转 → 重设 `requestedOrientation`。
      *   ★带 `preserveManualChoice`：用户手动点过「旋转」之后（[orientationPinnedByUser]），
      *     这里**不许**把他的选择顶掉 —— 与 [onConfigurationChanged] 那一处调用同一个语义。
+     *     （★本轮：自动旋转=开时那个钉住是**一次性**的，设备一动就被
+     *     [releaseOneShotOrientationHold] 解开，见 [pinOrientationByUser]。）
      * ★[defaultRequestedQn]（默认画质）**不在这里重取流**：它只在"进房请求画质"那一刻有意义，
      *   正在播的流不该因为用户在设置里选了一档就当场重取（那是用户在弹窗里没要求的事）。
      */
@@ -3623,20 +3868,27 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // ══════════════════════════════════════════════════════════════════════
 
     /**
-     * 底栏「旋转」：手动把方向**钉**在当前方向的另一侧（竖↔横）。
+     * 底栏「旋转」：手动把方向切到当前方向的另一侧（竖↔横）。
      *
-     * ★它现在的语义是"手动压过自动旋转"：点了它之后 [orientationPinnedByUser] 置位，
-     *   [applyAutoRotatePolicy] 就不会再在转屏回调里把方向改回"跟随重力"
-     *   （否则用户点了旋转、手机一歪方向又跑了）。想回到自动跟随：退出重进直播间。
-     *   这与设置页那句说明一致："想固定方向，用播放页底栏的旋转按钮"。
-     * ★**同一个标记也被返回键用**（本轮）：横屏按返回 = 退出全屏 → [exitFullscreenToPortrait]
-     *   同样把方向钉到竖屏。两个入口共用 `orientationPinnedByUser` + 同一个
-     *   [ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT]，语义与"钉多久"完全一致
-     *   （会话级；退出直播间再进 = 自动旋转照旧生效）。
+     * ★★本轮重定语义（用户实测："你点旋转按钮之后，你旋转方向它是不跟随的，除非你手动按那个旋转
+     *   按钮才能切换方向。这个我觉得和那个设置页开启自动旋转冲突"）——**按设置分两档**：
+     *
+     * | 「自动旋转」 | 点这一下之后 | 手机再转 | 依据 |
+     * |---|---|---|---|
+     * | **开**（默认） | 一次性：这一次切到另一侧 | **继续跟随**（设备一动就交还给 `FULL_SENSOR`）—— 不再"一按就永久锁死" | [pinOrientationByUser] + [deviceOrientationSentinel] |
+     * | **关** | 唯一的方向开关：按一次切一次 | **不跟随**（永久钉在当前这一侧；想再切还是按它） | [pinOrientationByUser] 的永久档 |
+     *
+     * ★两个入口共用同一套"钉多久"：[exitFullscreenToPortrait]（横屏按返回 = 退出全屏）也调
+     *   [pinOrientationByUser]，切出来的"竖屏"与这里逐字相同（都是
+     *   [ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT]，允许 180° 翻转但不跟随重力横过去）。
+     * ★钉住仍然是**会话级**的：一个字节都不写 DataStore，`live_auto_rotate` 照旧是设置里那个值；
+     *   退出直播间再进 = 按设置重新定方向。
      */
     private fun toggleOrientation() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        orientationPinnedByUser = true
+        // ★本轮：以前这里是 `orientationPinnedByUser = true`（**永久**置位、且全文件没有清除点），
+        //   自动旋转=开时点一次就再也不跟随 —— 现在改走"按设置分两档"的那一个口。
+        pinOrientationByUser()
         requestedOrientation = if (landscape) {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
         } else {
@@ -3647,6 +3899,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "orientation.toggle",
             "configLandscape" to landscape,
             "requestedOrientation" to requestedOrientation,
+            "autoRotate" to autoRotateEnabled(),
             "page" to (if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"),
         )
         showControlsTemporarily()
@@ -3683,14 +3936,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * @param preserveManualChoice true = 用户在本次会话里**手动定过方向**（点过底栏「旋转」[toggleOrientation]，
      *   或按过返回键退出全屏 [exitFullscreenToPortrait]），不要顶掉他的选择
      *   （[onConfigurationChanged] 走这条；[onCreate] 走 false，进房必须按设置定方向）
+     *   ★本轮起"钉住"分两档（见 [pinOrientationByUser]）：自动旋转=**关**时它是永久钉住；
+     *   自动旋转=**开**时它只是"这一次切换"的钉子 —— [deviceOrientationSentinel] 会在设备真的被
+     *   转动的那一刻解开它（[releaseOneShotOrientationHold] → 回到本函数 → `FULL_SENSOR` 继续跟随）。
      */
     private fun applyAutoRotatePolicy(preserveManualChoice: Boolean = false) {
         if (preserveManualChoice && orientationPinnedByUser) {
-            // ★诊断日志（只读）
+            // ★诊断日志（只读）：这一条在"自动旋转=开 + 刚点过旋转/按过返回"时也会出现 ——
+            //   那是**意料之中**的：那一次切换正靠它挡住"被配置回调原样弹回去"，
+            //   设备一动就会走 [releaseOneShotOrientationHold] 把方向交还给自动旋转。
             LivePageTrace.note(
                 "orientation.policy.skip",
                 "reason" to "pinnedByUser",
                 "preserveManualChoice" to preserveManualChoice,
+                "autoRotate" to autoRotateEnabled(),
                 "requestedOrientation" to requestedOrientation,
             )
             return
@@ -3739,6 +3998,199 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private fun autoRotateEnabled(): Boolean =
         SettingPreferences.liveSettings().autoRotate
 
+    // ══════════════════════════════════════════════════════════════════════
+    // ★本轮：「旋转」按钮 / 返回键钉的方向，钉多久（自动旋转=开 → 一次性；关 → 永久）
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * ★本轮：把"用户手动定方向"这件事按当前的「自动旋转」设置记下来
+     * （[toggleOrientation] 与 [exitFullscreenToPortrait] 两个入口共用 —— 切方向的**执行**仍然
+     * 各走各的既有路径，本函数只管"钉多久"这一件事）。
+     *
+     * | 「自动旋转」 | 置位 | 谁解开 | 用户看到的行为 |
+     * |---|---|---|---|
+     * | **关** | [orientationPinnedByUser] 永久置位（会话级） | 只有退出直播间 | 「旋转」是**唯一**的方向开关：按一次切一次，手机怎么转都不跟随 |
+     * | **开** | 置位 **+ 武装 [deviceOrientationSentinel]** | **设备真的被转动**那一刻（[releaseOneShotOrientationHold]） | 这一次切换照做（不会被紧接着的配置回调弹回去），之后**继续跟随** |
+     *
+     * ★为什么"开"这一档非要盯设备姿态不可：钉住与
+     *   [ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR] 天生互斥 —— `FULL_SENSOR` 读的是
+     *   **手机此刻的物理姿态**，所以"钉一次、下一个配置回调就复位"等于没钉：手机还竖着的时候
+     *   把方向交还回去，系统会立刻把刚切出来的横屏**原样弹回去**（用户看到的是"点了旋转，
+     *   闪一下又回来"）。这不是推测 —— 第六批修的就是同一机制的**反方向**（不钉住时
+     *   "按了返回、闪一下又回全屏"，正是用户真机实测报上来的），见 [handleBack] 的 KDoc。
+     *   所以"交还"的时机只能是"**手机自己动了**"。
+     */
+    private fun pinOrientationByUser() {
+        orientationPinnedByUser = true
+        if (autoRotateEnabled()) {
+            armDeviceOrientationSentinel()
+        } else {
+            // 自动旋转=关：钉住就是"唯一的方向开关"，永久有效，不需要（更不该有）哨兵
+            disarmDeviceOrientationSentinel()
+        }
+    }
+
+    /**
+     * ★本轮新增：**「一次性方向钉住」的释放哨兵** —— 只盯一件事：钉住之后，设备姿态有没有真的变过。
+     *
+     * ## 它读什么
+     * 加速度计（[Sensor.TYPE_ACCELEROMETER]）的**粗档姿态**：[deviceOrientationBucket] 把一帧读数
+     * 归成 `竖 / 倒竖 / 横 / 倒横` 四档（平放与 45° 边界上的读数一律忽略），第一帧可信读数就是
+     * "钉住那一刻手机的姿态"（[orientationSentinelBaseline]）。之后**连续**
+     * [DEVICE_BUCKET_CONFIRM_SAMPLES] 帧读到**另一个档**，就认定用户自己转了手机 →
+     * [releaseOneShotOrientationHold] 把方向交还给「自动旋转」。
+     *
+     * ## ★★三条纪律（一条都不能破）
+     * · **PiP 里一条方向都不推导**（铁律）：回调第一句就判 [isInPictureInPictureMode]，命中直接
+     *   释放并停表 —— 小窗里"窗口方向 ≠ 设备方向"，钉住本来也没有意义；
+     * · **只在"自动旋转=开 且 刚手动钉过一次"这段窗口里注册**，一释放就注销：不常驻、不轮询；
+     *   "自动旋转=关"那一档的钉住是**永久**的，压根不走这条路（见 [pinOrientationByUser]）；
+     * · 释放只做一件事 —— 调 [applyAutoRotatePolicy]（**复用既有那条策略口**，不另写一套方向逻辑）。
+     */
+    private val deviceOrientationSentinel = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            // 没钉住（或已被释放）时它不该还在听 —— 兜底停表，绝不留一个空转的传感器
+            if (!orientationPinnedByUser) {
+                disarmDeviceOrientationSentinel()
+                return
+            }
+            // ★铁律：PiP 里不按设备方向推导
+            if (isInPictureInPictureMode) {
+                releaseOneShotOrientationHold("pip")
+                return
+            }
+            val bucket = deviceOrientationBucket(event) ?: return
+            val baseline = orientationSentinelBaseline
+            if (baseline == null) {
+                // 第一帧可信读数 = "钉住那一刻手机的姿态"；手机平放时会一直读不到，那就先不定基线
+                orientationSentinelBaseline = bucket
+                orientationSentinelPendingBucket = null
+                orientationSentinelPendingSamples = 0
+                return
+            }
+            if (bucket == baseline) {
+                orientationSentinelPendingBucket = null
+                orientationSentinelPendingSamples = 0
+                return
+            }
+            if (orientationSentinelPendingBucket == bucket) {
+                orientationSentinelPendingSamples++
+            } else {
+                orientationSentinelPendingBucket = bucket
+                orientationSentinelPendingSamples = 1
+            }
+            if (orientationSentinelPendingSamples >= DEVICE_BUCKET_CONFIRM_SAMPLES) {
+                releaseOneShotOrientationHold("deviceRotated")
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
+    }
+
+    /**
+     * 武装释放哨兵（幂等）：把基线重置成"还没读到"，并在需要时注册加速度计。
+     *
+     * ★注册失败（没有加速度计 / 被系统挡住）时**绝不**留一个永远解不开的钉住 ——
+     *   当场把方向交还给自动旋转：宁可退回"跟随"，也不要退回用户投诉的那个"永久锁死"。
+     */
+    private fun armDeviceOrientationSentinel() {
+        orientationSentinelBaseline = null
+        orientationSentinelPendingBucket = null
+        orientationSentinelPendingSamples = 0
+        // ★铁律：PiP 里不按设备方向推导 —— 不注册，也不留下"没人能释放"的钉住
+        if (isInPictureInPictureMode) {
+            releaseOneShotOrientationHold("pip")
+            return
+        }
+        if (orientationSentinelRegistered) return
+        val manager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val sensor = manager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (manager == null || sensor == null) {
+            releaseOneShotOrientationHold("sentinelUnavailable")
+            return
+        }
+        orientationSentinelRegistered = manager.registerListener(
+            deviceOrientationSentinel,
+            sensor,
+            SensorManager.SENSOR_DELAY_NORMAL,
+        )
+        if (!orientationSentinelRegistered) {
+            releaseOneShotOrientationHold("sentinelUnavailable")
+            return
+        }
+        // ★诊断日志（只读）：哨兵武装（"点了旋转之后还跟不跟随"从这一行往下看）
+        LivePageTrace.note(
+            "orientation.sentinel.arm",
+            "requestedOrientation" to requestedOrientation,
+            "landscape" to isPageLandscape(),
+        )
+    }
+
+    /** 注销释放哨兵（幂等）；加速度计是系统服务，注册与注销必须一一对应 */
+    private fun disarmDeviceOrientationSentinel() {
+        orientationSentinelBaseline = null
+        orientationSentinelPendingBucket = null
+        orientationSentinelPendingSamples = 0
+        if (!orientationSentinelRegistered) return
+        orientationSentinelRegistered = false
+        (getSystemService(Context.SENSOR_SERVICE) as? SensorManager)
+            ?.unregisterListener(deviceOrientationSentinel)
+    }
+
+    /**
+     * 释放「一次性方向钉住」：把方向交还给「自动旋转」那条**既有**策略（[applyAutoRotatePolicy]）。
+     *
+     * 触发点只有三类，都在"用户确实又动过手机 / 钉住已经没有意义 / 根本没法监听"里：
+     * · [deviceOrientationSentinel] 读到设备姿态真的变了（用户自己转了手机）；
+     * · 进出小窗（PiP 里方向判据一律早退）；
+     * · 传感器不可用（宁可退回"跟随"，也不留一个解不开的钉住）。
+     *
+     * ★「自动旋转=**关**」时它是空操作：那一档的钉住就是"唯一的方向开关"，
+     *   只能靠"再按一次旋转"或"退出直播间"改，不会被设备姿态解开。
+     */
+    private fun releaseOneShotOrientationHold(reason: String) {
+        disarmDeviceOrientationSentinel()
+        if (!orientationPinnedByUser || !autoRotateEnabled()) return
+        orientationPinnedByUser = false
+        // ★诊断日志（只读）：一次性钉住被释放
+        LivePageTrace.note(
+            "orientation.hold.release",
+            "reason" to reason,
+            "pip" to isInPictureInPictureMode,
+            "landscape" to isPageLandscape(),
+        )
+        // ★★只调这一个口：方向该是什么仍然由 [applyAutoRotatePolicy] 说了算
+        //   （自动旋转=开 → `FULL_SENSOR`，即用户要的"继续跟随"）
+        applyAutoRotatePolicy()
+    }
+
+    /**
+     * 一帧加速度计读数 → **设备姿态粗档**：`0`=竖 `1`=倒竖 `2`=横 `3`=倒横；
+     * `null` = 这一帧读不出可信的横竖，调用方按"没读到"处理。
+     *
+     * 只看重力在**屏幕平面**上那两根轴的分量（x = 屏幕向右、y = 屏幕向上；z = 屏幕法线）：
+     * 哪根轴的 |分量| 明显更大就是哪一族（[DEVICE_AXIS_MARGIN]），符号决定正反。两种帧返回 null：
+     * · **平放**（屏幕大致朝上/朝下）：平面分量小于 [FLAT_GRAVITY_RATIO]×g ——
+     *   手机躺桌上时横竖本来就读不准，把噪声当成"用户转了手机"会让方向乱跳；
+     * · **45° 边界**：两根轴的分量太接近（手机正斜着）—— 同样是噪声。
+     *
+     * ★分四档（而不是只分竖/横）是为了让**任意 90° 以上的真实转动**都能被认出来：
+     *   竖↔横、竖↔倒竖、横↔倒横都会换档；同一档内的小晃动不会换档。
+     *   符号只用来分"正/反"，不参与任何"哪边算竖屏"的判定（那是 [isPageLandscape] 的事）。
+     */
+    private fun deviceOrientationBucket(event: SensorEvent): Int? {
+        val values = event.values
+        if (values.size < 3) return null
+        val x = values[0]
+        val y = values[1]
+        val ax = abs(x)
+        val ay = abs(y)
+        if (maxOf(ax, ay) < SensorManager.GRAVITY_EARTH * FLAT_GRAVITY_RATIO) return null
+        if (ax > ay * DEVICE_AXIS_MARGIN) return if (x > 0f) 2 else 3
+        if (ay > ax * DEVICE_AXIS_MARGIN) return if (y > 0f) 0 else 1
+        return null
+    }
+
     /**
      * 用户点底栏「画中画」手动进小窗（与"退后台自动进"是两条路，见 [onUserLeaveHint]）。
      *
@@ -3755,9 +4207,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             toast("当前系统不支持画中画")
             return
         }
-        // ★第七批：已经在小窗里时什么都不做。
-        //   触发路径变了 —— 「画中画」按钮从底栏搬到了**顶栏**（[pipIconButton]），
-        //   而顶栏在 PiP 期间也会按 4 秒计时露出来，用户点一下不该再发一次进入请求
+        // ★已经在小窗里时什么都不做。
+        //   「画中画」的入口是**底栏**那颗按钮（[pipButton] → [orderedBottomButtons]），
+        //   它在 PiP 期间不显示；而顶栏会按 4 秒计时露出来，用户点一下不该再发一次进入请求
         //   （再进一次必然失败，紧接着的恢复分支还会白闪一次控制条）。
         if (isInPictureInPictureMode) return
         // 进 PiP 前先把弹窗/手势提示收掉：清晰度/线路是**独立窗口**的 Dialog，在 PiP 里会浮成
@@ -4349,32 +4801,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             setTextColor(Color.WHITE)
             textSize = 12f
             maxLines = 1
-            // 状态串变长了（画质 + 线路 + 弹幕状态），宁可截断也不要换行把顶栏撑高
+            // ★本轮起它**只在异常/过渡时可见**（正常播放时 `GONE`，顶栏只剩返回 + 标题，
+            //   见 [renderStatus]）；异常文案仍然可能很长（播放失败原因 / 追流提示），
+            //   所以照旧"宁可截断也不要换行"——顶栏高度必须稳定（它决定竖屏视频带的顶边）。
             ellipsize = TextUtils.TruncateAt.END
             setShadowLayer(4f, 0f, 0f, Color.BLACK)
             text = "准备中…"
         }
-        // ★第七批：「画中画」从底栏搬到顶栏（用户："「画中画」挪到顶栏（一颗小图标，与顶栏返回图标
-        //   同一套风格：白色 24dp、40dp 点击区、borderless ripple）"）。
-        //   · 图标 = `R.drawable.ic_player_pip`：点播播放器**顶栏**那颗小窗按钮用的就是它
-        //     （`layout_danmaku_palyer.xml:603`），24dp、白色描边外框 + 右下角实心小窗，
-        //     与左边那颗 `ic_arrow_back_white_24dp` 是同一种"白色 24dp 顶栏图标"；
-        //   · 尺寸/点击区/反馈**复用返回键那两个常量与同一个属性**（[BACK_ICON_BOX_DP] /
-        //     [BACK_ICON_PADDING_DP] / `selectableItemBackgroundBorderless`）——
-        //     用户要的"同一套风格"就是这三件事同时一致；
-        //   · 点击走 [enterPipMode]（与原来底栏那颗按钮同一个实现，一行未改）；
-        //   · 26 以下直接 `GONE`：PiP 本身要 26+，留一颗点了只弹"当前系统不支持画中画"的图标没有意义。
-        pipIconButton = ImageView(this).apply {
-            setImageResource(R.drawable.ic_player_pip)
-            contentDescription = "画中画"
-            scaleType = ImageView.ScaleType.CENTER
-            val pad = dpToPx(BACK_ICON_PADDING_DP)
-            setPadding(pad, pad, pad, pad)
-            selectableItemBackgroundBorderlessRes().takeIf { it != 0 }
-                ?.let { setBackgroundResource(it) }
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) visibility = View.GONE
-            setOnClickListener { enterPipMode() }
-        }
+        // ★顶栏现在只有三样东西：返回图标（固定 [BACK_ICON_BOX_DP]dp）、标题（`weight=1`）、
+        //   状态文字（正常态 **GONE**，见 [renderStatus]）。
+        //   LinearLayout 第一趟只量"没有 weight 的孩子"，`weight=1` 的标题最后拿剩下的 ——
+        //   所以真正会被挤的始终是标题（它本来就带省略号），返回图标一定拿得到自己的位置。
+        // ★第七批那颗「顶栏画中画图标」（`pipIconButton`）**已整体删除**：用户 2026-09-26 改主意
+        //   （"没必要移到顶栏"）→ 画中画回到 [orderedBottomButtons] 留在底栏；本轮把**从未挂载**的
+        //   图标创建代码与那段被注释掉的 `topBar.addView(…)` 一起删掉，不留死代码。
         // ★返回按钮的点击区是**正方形**（图标居中，见上面那段）：用显式 LayoutParams 交给 LinearLayout，
         //   否则它会按 `wrap_content` 量成"图标 + 内边距"（那一量出来比 40dp 小一圈，
         //   手指能点到的范围也跟着缩）。
@@ -4387,15 +4827,6 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         topBar.addView(statusText)
-        // ★画中画图标放在**最后**（最右）。顺序有讲究：LinearLayout 第一趟只量"没有 weight 的孩子"
-        //   （返回图标、状态文字、这颗图标），weight=1 的标题最后拿剩下的 —— 所以真正会被挤的
-        //   始终是标题（它本来就带省略号），而这颗固定 40dp 的图标一定拿得到自己的位置。
-        // ★顶栏那颗画中画图标**不再加入**（用户 2026-09-26："没必要移到顶栏"）→ 画中画回到 [orderedBottomButtons]。
-        //   创建代码与字段保留，想回退只需把下面三行取消注释。
-        // topBar.addView(
-        //     pipIconButton,
-        //     LinearLayout.LayoutParams(dpToPx(BACK_ICON_BOX_DP), dpToPx(BACK_ICON_BOX_DP)),
-        // )
         rootLayout.addView(
             topBar,
             FrameLayout.LayoutParams(
@@ -4770,7 +5201,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ★第七批从这里**删掉**的按钮（连同它们的字段）：`retryButton`「刷新」（改自动追流，
      *   手动入口在「画质·线路」弹窗里）、`sendDanmakuButton`「发弹幕」（变成输入条本身）。
-     *   「画中画」第七批曾搬到顶栏 [pipIconButton]，用户随后改主意，**又回到了底栏**（本清单里那颗）。
+     *   「画中画」第七批曾搬到顶栏（那颗图标已作为死代码删除），用户随后改主意，**又回到了底栏**（本清单里那颗）。
      * ★「设置」自己也有过一轮反复：第二批从底栏**删掉**（用户当时："用户想设置自己退出来再去设置"），
      *   ★第十四批用户明确要求**加回来**（文案与位置都点名了）—— 键与设置项一直没有变过，
      *   变的只是入口；现在两个入口（本页弹窗 + 「设置 → 直播设置」页）共用同一份项
@@ -5222,14 +5653,101 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         selectableItemBackgroundRes().takeIf { it != 0 }?.let { setBackgroundResource(it) }
     }
 
+    /**
+     * 播放侧状态文案 = **异常/过渡**（★本轮：正常态不再往状态行写东西）。
+     *
+     * 用户原话（本轮）："正常播放的时候，这个状态就不要显示了……顶栏就只剩返回和房间号。"
+     * 所以本函数**只**用于"此刻值得用户看一眼"的那几档（缓冲中 / 正在追流 / 已暂停 /
+     * 弹幕断开 / 未开播 / 播放失败 …），全量清单见 [renderStatus] 的 KDoc。
+     *
+     * ★正常态请用 [setStreamStatusNormal]（它会让状态行整条隐藏）。分成两个入口而不是
+     *   "在调用点自己判断要不要显示"：显示与否是 [renderStatus] **一处**的决定，
+     *   调用点只需要回答"我这句话是正常态还是异常态"。
+     */
     private fun setStreamStatus(text: String) {
         streamStatus = text
+        streamStatusAbnormal = true
         renderStatus()
     }
 
-    /** 顶栏状态 = 播放侧文案 ｜ 弹幕连接状态（后者拿不到就不显示，不占位置） */
+    /**
+     * 正常态文案（★本轮新增）：记下来但**不显示** —— 顶栏状态行只在异常/过渡时出现。
+     *
+     * 目前唯一的调用点是"真的在播"（`LivePlayState.PLAYING` → 「直播中」）：
+     * 它同时承担**清掉上一条异常文案**的职责（追流成功后状态行要自己消失，
+     * 而不是把"线路异常，正在切换…"一直挂在顶栏上）。
+     */
+    private fun setStreamStatusNormal(text: String) {
+        streamStatus = text
+        streamStatusAbnormal = false
+        renderStatus()
+    }
+
+    /**
+     * 顶栏状态行（[statusText]）—— ★本轮起**只在异常/过渡时显示**，正常播放时 `GONE`。
+     *
+     * ## 判定清单（"显示"= 异常或过渡，"隐藏"= 正常）
+     * | 显示（异常 / 过渡） | 出处 |
+     * |---|---|
+     * | 正在解析房间… / 正在获取直播流… / 起播中… | [startResolveAndPlay] / delegate 的 LOADING |
+     * | 缓冲中… | delegate 的 `STATE_BUFFERING`（只在出过画面之后才报） |
+     * | 正在切换清晰度… / 正在切换线路… / **线路异常，正在切换…** | [showStreamDialog] / delegate [delegateListener] 的 LOADING 文案 |
+     * | 正在回到直播最新进度… / 重连中… / 正在重新获取直播流… | delegate 的 behind-live-window / 重连 / 重取流 |
+     * | 所有线路均失败… / 线路反复失败… / 已固定线路 1… | delegate 的换线预算用尽与"固定第一条"策略 |
+     * | 已暂停 | [delegateListener] 的 PAUSED（用户主动暂停，必须看得见） |
+     * | 房间未开播，45s 后自动重试… / 房间未开播（live_status=…） | 未开播轮询 / OFFLINE |
+     * | 播放失败：… / 房间号无法识别 | ERROR / 房间号解析失败 |
+     * | 自动追流已暂停（5 分钟内已追 3 次） | [autoRetryLiveStream] 的预算用尽 |
+     * | 弹幕 连接中 / 重连中 / 连接失败 / 未连接 | [danmakuStatusLabel]（★断开侧异常；已连接是正常态，不显示） |
+     * | **隐藏（正常）** | 出处 |
+     * |---|---|
+     * | 直播中 | PLAYING → [setStreamStatusNormal] |
+     * | 画质 … ｜ 线路 … | ★**本轮整条删除**（用户："那部分去掉，画质弹窗里已经有'当前：xxx'"）—— 现在 [onStreamReady] 一个字都不写状态行，当前画质/线路只在「画质 · 线路」弹窗的副标题里 |
+     * | 弹幕 已连接 | [danmakuStatusLabel] 返回 null（正常态不占位置） |
+     *
+     * ## 为什么用 `GONE` 而不是"写空串"
+     * 状态行是 [topBar]（LinearLayout）里唯一**没有 weight** 的文字：`GONE` 之后它彻底不参与
+     * 测量，`weight=1` 的标题自动吃掉整行（顶栏高度不变 —— `maxLines=1` 本来也不会换行，
+     * 所以"顶栏底边 = 竖屏视频带顶边"那条不变式不受影响，见 [videoBandTopPx]）。
+     */
     private fun renderStatus() {
-        statusText.text = listOfNotNull(streamStatus, danmakuStatusLabel()).joinToString(" ｜ ")
+        val parts = buildList {
+            if (streamStatusAbnormal) add(streamStatus)
+            danmakuStatusLabel()?.let { add(it) }
+        }
+        statusText.text = parts.joinToString(" ｜ ")
+        statusText.visibility = if (parts.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /**
+     * 顶栏标题 = `直播间 房间号（x.x万人在线）`（★本轮：在线人数就写在房间号后面的括号里）。
+     *
+     * ## 三档（用户要求："拿不到人数时**不显示括号**，不要显示 0 / --"）
+     * ```
+     * 还没拿到房间号（titleRoomId == 0）→ 保持初值「直播间」
+     * roomOnline == null 或 <= 0        → 「直播间 8178490」（不带括号）
+     * roomOnline > 0                    → 「直播间 8178490（1.2万人在线）」
+     * ```
+     *
+     * ## 数字口径与首页直播卡片**完全一致**
+     * `NumberUtil.converString(online)` —— 与首页直播卡片人气文案同一句
+     * （`HomeLiveContent.kt`：`"${NumberUtil.converString(item.online)}人气"`）：
+     * ≥1 万显示 `x.x万`（保留 1 位小数）、≥1 亿显示 `x.x亿`、不足 1 万就是原数字。
+     * 本页**不自己写格式化**，也不在文案里加"人气/看过"这类另一种口径的说法。
+     *
+     * 两个入口：① [LivePlayerDelegate.Listener.onStreamReady]（拿到真实房间号）；
+     * ② [refreshRoomOnlineIfDue]（每 45s 刷新一次人数）。两处都只调本函数，不各写一份拼接。
+     */
+    private fun renderRoomTitle() {
+        if (!::titleText.isInitialized) return
+        val roomId = titleRoomId
+        if (roomId <= 0L) return
+        // ★★2026-09-26 用户实测回退：**在线人数不加了**。
+        //   原因：`get_info` 的 `online` 在部分房间给出的其实是"**看过的人次**"（用户实测某房间显示 7 千，
+        //   而该房间实际在线远不止/或根本不是一个量级），拿它当"实时在线"会**骗人** ✗。
+        //   而真正可靠的实时在线只在那几个被风控挡住的接口里（`getInfoByRoom` 等，App 外一律 -352 ✗）。
+        //   ⇒ 宁可不显示：顶栏回到「直播间 房间号」，不再拼括号（也就不用发那次 45s 一次的请求 ✓）。
+        titleText.text = "直播间 $roomId"
     }
 
     private fun showLoading(show: Boolean) {
@@ -5576,6 +6094,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 "applied" to appliedBottomBarInsetPx,
                 "barTop" to (if (::bottomBar.isInitialized) bottomBar.top else -1),
             )
+            // ★★本案修复（**键盘收起后竖屏弹幕列表消失**）：**内边距没变 ≠ 几何没变**。
+            //   这里是"IME insets 变了、窗口尺寸一个像素都没变"那条路上**唯一**的播放页入口
+            //   （`page=1264x2800` + `ime=1031` 的真机日志可证），而它原来在这条分支里**直接 return**
+            //   —— 于是这次 insets 回调在播放页这侧"该重新量的底栏顶边"一次都不量。
+            //   现在无论内边距写不写，都安排一次"落定后再推"（[scheduleLiveListGeometrySettle]）：
+            //   · 它会**重新量**一次竖屏版式（底栏顶边 → 列表槽）并**主动推**宿主，不依赖任何重组时机；
+            //   · 幂等：几何没变时 [measurePortraitStage]/[applyListSlot] 与宿主侧一个字节都不写；
+            //   · 不是逐帧轮询：它只在"insets 变化"这个事件上排队，且每次都被重置成"最后一帧之后一次"。
+            scheduleLiveListGeometrySettle()
             return
         }
         appliedBottomBarInsetPx = bottomExtra
@@ -6097,11 +6624,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   它**不再有主题色药丸底**（原来那颗「← 返回」文字按钮才有），所以这里只把**点击反馈底**
         //   按当前主题重新解一次（深浅色切换后 ripple 颜色跟着换）。图标本身是写死的白色，
         //   压在黑色蒙层上深浅色下都看得清，不需要跟着主题刷（选型理由见 [buildUi] 顶栏那一段）。
-        //   ★第七批：顶栏那颗「画中画」图标（[pipIconButton]）是**同一套风格**，
-        //   所以这里也走同一句（同一个属性、同一个刷法），两颗图标的反馈色永远一致。
+        //   ★第七批那颗「顶栏画中画图标」已整体删除，顶栏图标只剩返回这一颗（见 [buildUi]）。
         selectableItemBackgroundBorderlessRes().takeIf { it != 0 }?.let { ripple ->
             backButton.setBackgroundResource(ripple)
-            if (::pipIconButton.isInitialized) pipIconButton.setBackgroundResource(ripple)
         }
         progressBar.indeterminateTintList = ColorStateList.valueOf(accentColor())
         orderedBottomButtons().forEach { applyBottomButtonStyle(it) }

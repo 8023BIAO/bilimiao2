@@ -29,6 +29,15 @@ import me.zhanghai.compose.preference.switchPreference
  * 用户就会看到"设置页是 15sp、弹窗里是 20sp"这种自相矛盾）。所以项本身只留这一份
  * （方案 A：抽成可复用 composable），[LiveSettingPage] 与播放页弹窗都只是**调用**它。
  *
+ * ★★本轮（2026-09-26 用户拍板"弹窗瘦身"）：两个入口不再展示**同一批**项，而是同一份定义的
+ *   **两个子集**（见 [liveDanmakuSettingPreferenceItems] 的 KDoc）：
+ * ```
+ * liveSettingPreferenceItems()        设置页：播放 4 + 弹幕 4 + 直播列表 1 = 9 项（一个不少）
+ * liveDanmakuSettingPreferenceItems() 播放页弹窗：只有弹幕 4 项
+ * ```
+ *   ★弹幕那一组仍然**只有一份实现**（[liveDanmakuPreferenceItems]），两个入口都调它；
+ *     播放类 4 项**没删**，只是不在弹窗里出现 —— 设置页照旧全部展示。
+ *
  * ★**键与默认值仍然只在 `SettingPreferences` / `SettingConstants` 里定义**：本文件一个字符串键、
  *   一个默认值都没有新写，全部引用现成常量（`SettingPreferences.xxx.name` +
  *   `SettingConstants.xxx_DEFAULT`），读写口仍然只有 `ProvidePreferenceLocals` 那一套。
@@ -38,12 +47,51 @@ import me.zhanghai.compose.preference.switchPreference
  *   共同的部分只是"有哪些项"。
  */
 internal fun LazyListScope.liveSettingPreferenceItems() {
+    // ★顺序 = 设置页上的顺序，一个字节都没动（播放 → 弹幕 → 直播列表）
+    livePlayPreferenceItems()
+    liveDanmakuPreferenceItems()
+    liveBrowsePreferenceItems()
+}
 
-    // ===== 播放 =====
+/**
+ * ★★本轮（2026-09-26）：**播放页底栏「设置」弹窗**只要「直播弹幕」这一组（用户拍板的"减法"）。
+ *
+ * 用户原话（本轮）：
+ * > "播放页「设置」弹窗瘦身：只保留弹幕相关的项（字号 / 不透明度 / 速度 / 显示区域），
+ * >  播放类 4 项（默认画质 / 默认线路策略 / 自动重连 / 自动旋转）从弹窗移除 ——
+ * >  它们仍在「设置 → 直播设置」页，设置页一个项都不能少。"
+ *
+ * 于是两个入口是**同一份项定义的两个子集**（不是两份拷贝）：
+ * ```
+ * liveSettingPreferenceItems()          → 设置页：播放 4 + 弹幕 4 + 直播列表 1（= 9 项，一个不少）
+ * liveDanmakuSettingPreferenceItems()   → 播放页弹窗：弹幕 4 项（唯一实现 [liveDanmakuPreferenceItems]）
+ * ```
+ * ★为什么播放类 4 项从弹窗移除：它们都是"**进房前/播放策略**"类的设置（默认画质、默认线路策略、
+ *   自动重连、自动旋转），在弹窗里改完当场也只对**下一次**起播/恢复生效，放在"直播间里随手调"的
+ *   弹窗里既占地方又容易让人以为"改了没反应"；而弹幕那 4 项是**看直播时随时想调**的东西
+ *   （字号/不透明度/速度/显示区域），改完当场生效 —— 这正是弹窗该干的事。
+ * ★播放类 4 项**一个都没少**：它们仍在设置页（[livePlayPreferenceItems]），播放页也照旧读同一批键。
+ */
+internal fun LazyListScope.liveDanmakuSettingPreferenceItems() {
+    liveDanmakuPreferenceItems()
+}
+
+// ===== 播放 =====
+/**
+ * 「直播播放」那一组（4 项：默认画质 / 默认线路策略 / 自动重连 / 自动旋转）。
+ *
+ * ★★本轮起它**只在「设置 → 直播设置」页出现**：播放页底栏「设置」弹窗按用户要求瘦身成
+ *   只剩弹幕 4 项（见 [liveDanmakuSettingPreferenceItems]），但这四项**没有删**。
+ */
+private fun LazyListScope.livePlayPreferenceItems() {
+
     // ★本组原来有 7 项，上一轮按"别处有更顺手的入口就别在这儿重复"删掉 3 项：
     //   「后台继续直播」(`live_background_play`)、「退后台自动进小窗」(`live_pip_on_background`)、
     //   「双击暂停」(`live_double_tap_pause`) —— 三个键与默认值、读取逻辑一个字没动，
-    //   它们的入口在播放页底栏「设置」浮层里（A 路），本页只是不再显示（详见 LiveSettingPage 文件头 KDoc）。
+    //   本页只是不再显示（详见 LiveSettingPage 文件头 KDoc）。
+    //   ★本轮更正一句旧注释：它们**不在**播放页底栏「设置」弹窗里（那个弹窗现在只有弹幕 4 项），
+    //     当前全工程**没有**这三项的 UI 入口 —— 值仍被播放页读取（后台继续直播 / 退后台进小窗 /
+    //     双击暂停），要改只能改默认值常量或另开入口。
     preferenceCategory(
         key = "live_play",
         title = {
@@ -100,15 +148,26 @@ internal fun LazyListScope.liveSettingPreferenceItems() {
         },
         summary = {
             if (it) {
-                Text("竖着拿就竖屏看，横过来自动全屏（默认开）。想固定方向，用播放页底栏的旋转按钮")
+                // ★2026-09-26 语义更新（与直播页「旋转」按钮对齐）：开着的时候点一次旋转 =
+                //   先切到另一个方向停住，**手机再转一下就继续跟随**（不再永久锁死 ✗）。
+                Text("竖着拿就竖屏看，横过来自动全屏（默认开）。底栏「旋转」可临时切一次，之后仍跟随手机方向")
             } else {
-                Text("不跟随重力感应；屏幕方向由播放页底栏的旋转按钮手动切换")
+                Text("不跟随重力感应；屏幕方向由播放页底栏的旋转按钮手动切换（此时它是唯一的方向开关）")
             }
         },
         defaultValue = SettingConstants.LIVE_AUTO_ROTATE_DEFAULT,
     )
+}
 
-    // ===== 弹幕 =====
+// ===== 弹幕 =====
+/**
+ * 「直播弹幕」那一组（4 项：弹幕字号 / 弹幕不透明度 / 弹幕速度 / 弹幕显示区域）。
+ *
+ * ★★这一组是**两个入口共用**的那一份：设置页（[liveSettingPreferenceItems]）与
+ *   播放页底栏「设置」弹窗（[liveDanmakuSettingPreferenceItems]）都调它 ——
+ *   所以"弹窗里改"与"设置页里改"永远是同一批键、同一批档位、同一批文案。
+ */
+private fun LazyListScope.liveDanmakuPreferenceItems() {
     // ★这一组就是**直播自己的那一套**（用户原话："就让直播的那个弹幕成另一套吧"）：
     //   字号、不透明度、速度、显示区域四项全部写 `live_danmaku_*` 键，只对直播生效，
     //   读取方都是 `LiveDanmakuSettings.from()`（→ 直播弹幕浮层）。
@@ -200,8 +259,14 @@ internal fun LazyListScope.liveSettingPreferenceItems() {
     //   → 直播弹幕**不做任何关键词过滤**，那行说明里描述的"共用一份词表"已不成立，
     //     留着只会教用户去点播里改一个对直播毫无作用的开关。
     //     「直播弹幕」这一组现在**每一项都是直播自己的**（`live_danmaku_*`），组内零点播耦合。
+}
 
-    // ===== 浏览页 =====
+// ===== 浏览页 =====
+/**
+ * 「直播列表」那一组（1 项：每行卡片数）—— **只在「设置 → 直播设置」页出现**
+ * （播放页弹窗按用户要求只剩弹幕 4 项）。
+ */
+private fun LazyListScope.liveBrowsePreferenceItems() {
     // ★本组原来的「默认排序」(`live_sort_type`) 上一轮整项移出设置页：用户要求挪到首页
     //   直播 Tab 的底栏筛选弹窗里（在列表上调比"藏进设置里"顺手得多）。键与默认值
     //   （"online"）/ 读取口 `Values.sortTypeOrOnline` 一个字没动，写入方由 B 路在筛选弹窗里接

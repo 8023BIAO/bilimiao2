@@ -994,7 +994,7 @@ private fun LiveSearchEmptyHint(keyword: String) {
 private fun LiveSearchRoomItem.hotText(): String {
     val text = watched_show?.text_large.orEmpty()
     if (text.isNotBlank()) return text
-    return if (online > 0) "${NumberUtil.converString(online)}人气" else ""
+    return if (online > 0) "${NumberUtil.converString(online)}人看过" else ""
 }
 
 /** 「直播中」角标底色：B 站直播的粉（比主题色更能一眼认出"这是直播"） */

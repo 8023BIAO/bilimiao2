@@ -9,6 +9,7 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
+import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -18,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.appColorScheme
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -212,6 +214,10 @@ import kotlin.math.roundToInt
  *
  * ★同时保留的既有约定（一条都没改）：横屏 / PiP / 听音频 / 关弹幕 → 列表不显示、仍是滚动弹幕；
  *   竖屏列表在屏上时滚动弹幕整体让位；矩形不写死任何 dp 留白。
+ * ★本轮（弹幕列表动画）只在**呈现**上加过渡：面板显隐从"GONE/VISIBLE 硬切"改成
+ *   淡入淡出 + 轻微绘制位移（[presentPanel]；只动 alpha/translationY，layoutParams 一个字节没动），
+ *   列表条目的增删/位移交给 Compose 的 `Modifier.animateItem`，自动贴底从"瞬间跳"改成节流的平滑滚动。
+ *   [listShown] 的判定、矩形计算、scroll 弹幕让位这条链**一个字都没改**。
  *
  * ### 数据来源与性能（★本轮两条改动：横屏也累积 + 进房铺历史）
  * - 数据**只读复用** `client.messages`（`DANMU_MSG`）——不新开连接、不改协议、不加第二个订阅者：
@@ -223,6 +229,8 @@ import kotlin.math.roundToInt
  *   累积代价 = 一次 `SnapshotStateList` 插入 + 200 条硬上限的裁剪；面板不在屏上时
  *   **没有任何组合在订阅** `chat.lines`（`LiveDanmakuChatPanel(visible = false)` 第一句就 return），
  *   所以"不可见 = 不干活"仍然成立（唯一多出来的就是那次 O(200) 的插入，与热门房 30 条/秒同阶可忽略）。
+ *   ★本轮唯一的时间例外：**退场那 180ms**（[PANEL_FADE_OUT_MS]）里内容还留在组合里给它淡
+ *   （`fadingOut = true`）；淡完置 GONE 并把 `fadingOut` 放回 false，立刻回到上面这条不变式。
  * - ★**进房铺一次"最近的历史弹幕"**：`client.fetchHistory()`（PiliPlus 同款接口
  *   `xlive/web-room/v1/dM/gethistory`，出处见 [LiveDanmakuHistoryAPI] 的类注释）成功后
  *   `chat.addHistory(...)` 把它们接到列表**更旧的那一端**（不打扰用户当前阅读位置）；
@@ -316,6 +324,32 @@ class LiveDanmakuOverlayHost(
      * ★不能直接用"竖屏"当这个信号：注入的目标/地方大小都要等实测（见 [refreshDockedPanel]）。
      */
     private val listShown = mutableStateOf(false)
+
+    /**
+     * 面板**正在播退场动画**（★本轮新增；纯粹是"呈现"层，与 [listShown] 的**判定**分开）。
+     *
+     * 为什么需要一个跟 [listShown] 分开的信号：面板的隐藏原来就是一句 `visibility = GONE`（硬切），
+     * 而 GONE 的 View 一个像素都不画 —— 想让"淡出"看得见，就得在判定已经变成"不显示"之后，
+     * 再让 View 和它那份内容多活 [PANEL_FADE_OUT_MS]（淡完才 GONE）。所以：
+     * - [listShown]（判定）**一个字节都没改**：它照样是"该不该显示"的唯一答案，滚动弹幕让位
+     *   （`rollingVisible = !listShown`）也照样看它；
+     * - 本状态只决定"这一会儿还要不要画"，并且原样传给面板的 `fadingOut`（让组合别把内容拆掉，
+     *   否则淡的是一个空面板）。退出动画一结束就置回 false → 组合回到"不组内容"
+     *   （"不可见不订阅 chat.lines"这条稳态不变式仍然成立）。
+     * ★只在主线程读写（`refreshDockedPanel` / `presentPanel` / 动画回调）。
+     */
+    private val panelFadingOut = mutableStateOf(false)
+
+    /**
+     * 面板**正在播进场动画**（★与 [panelFadingOut] 对称；纯呈现层，不需要进组合，所以是普通字段）。
+     *
+     * 存在理由：[presentPanel] 会被**每次布局**叫到（`chromeGeneration` 每变一次就一次），
+     * 而进场动画跑着的时候面板正好是 `VISIBLE + alpha<1 + translationY≠0` —— 不认这个标记的话
+     * 每次布局都会 `cancel()` 再从头播一次，键盘/转屏这类"连续几十帧都在布局"的过渡里，
+     * 200ms 的淡入会被拖成四五百毫秒（不闪，但时长就不是我们说的那个数了）。
+     * ★只在主线程读写（`presentPanel` 与它的动画结束回调）。
+     */
+    private var panelEntering = false
 
     /**
      * 竖屏判定。★用**宿主自身的尺寸**（高 > 宽）而不是 `Configuration.orientation`：
@@ -602,11 +636,43 @@ class LiveDanmakuOverlayHost(
      * 这里给播放页一个**不依赖重组时机**的同步入口，把"面板底边 = 底栏顶边"这条不变式立刻兑现。
      *
      * ★只重算**几何**，不重新判断"该不该显示"：那个判断要用组合里的弹幕开关/设置（`settings.visible`
-     *   与 `active`），宿主不在这里猜。面板没在屏上时直接返回 —— 没有需要对齐的东西。
+     *   与 `active`），宿主不在这里猜。
+     *
+     * ★★本案修复（**键盘收起后竖屏弹幕列表消失**）：**面板此刻没在屏上 ≠ 没有事要做**。
+     *
+     * 原来这里第二句就是 `if (!listShown.value) return` —— 于是"重新上屏"这件事**没有任何人负责**：
+     * ```
+     * 显隐的唯一判定点 = 组合里的 LaunchedEffect(listSupported, listWanted, chromeGeneration)
+     *                    → refreshDockedPanel(listSupported)   ← 三把钥匙
+     * ```
+     * 而"输入法 insets 变了、**窗口尺寸一个像素都没变**"这条路上（真机日志：`page=1264x2800`
+     * 且 `ime=1031`）三把钥匙一把都不会动：`listSupported`（弹幕开关/竖屏/可见都没变）、
+     * `listWanted`（常驻 true）、`chromeGeneration`（只在**布局回调里发现几何签名变了**时才 +1）。
+     * 只要过渡途中被算过一次"地方不够"（`rect.height < 96dp` → `listShown=false` → 面板 GONE，
+     * 真机日志里这类中间态是常态：`videoRect=0,0,1264,2800` 且 `slotHeight=0`），
+     * 这次收敛就**永远只是几何**、再也不会把面板亮回来 —— 只能靠转屏把 `portrait` 翻一遍
+     * （它是 `listSupported` 的输入）才恢复，正是用户看到的"转个屏再转回来又出现了"。
+     *
+     * 所以：面板不在屏上、但**宿主自己的门都还允许显示**时，把 [chromeGeneration] +1，
+     * 让组合在下一帧用**同一次判定**（`refreshDockedPanel(listSupported)`）重新判一遍显隐 ——
+     * 判定仍然在组合里、用的是组合里的弹幕开关，宿主一个门都没新加。
+     * · 为什么非要走组合：`settings.visible` / `active` 只有组合里有，宿主在这里猜必然猜错
+     *   （关着弹幕的房间会被这条路径亮出来）；
+     * · 幂等：几何与开关都没变时 [refreshDockedPanel] 一个字节都不写（`listShown` 等值写入不失效、
+     *   `layoutParams`/`visibility` 都先比对），代数 +1 只表示"请重新求值一次"；
+     * · 不是逐帧/定时轮询：调用点只有播放页"几何落定"那一次（[notifyPortraitListGeometryChanged]
+     *   的既有语义），见 `LivePlayerActivity.scheduleLiveListGeometrySettle`。
      */
     fun notifyPortraitListGeometryChanged() {
-        if (!listShown.value) return
-        refreshDockedPanel(true)
+        if (listShown.value) {
+            // 在屏上：只重算几何（原有语义：把"面板底边 = 底栏顶边"立刻兑现）
+            refreshDockedPanel(true)
+            return
+        }
+        // 不在屏上：关着弹幕的房间 / 用户不想看 / 非竖屏 / PiP / 注入目标没就绪 —— 都不必惊动组合
+        if (!listWanted.value || !isDanmakuListAvailable()) return
+        // 代数 +1 = "请组合按当前几何重新判一次显隐"（判定只在组合里做，见上面的说明）
+        chromeGeneration.value += 1
     }
 
     /**
@@ -839,6 +905,9 @@ class LiveDanmakuOverlayHost(
             pictureFallback = null
             dockedRect = DockedRect(0, 0)
             listShown.value = false
+            // ★本轮：旧面板（连同它的组合）已经不在屏上了，退场动画的"呈现"状态一并清掉
+            panelFadingOut.value = false
+            panelEntering = false
         }
         val host = resolveChromeHost() ?: return
         // 解析回来还是那个"不在窗口里"的目标（页面正在拆 / 还没挂上）：等它自己回来，
@@ -904,6 +973,9 @@ class LiveDanmakuOverlayHost(
                     LiveDanmakuChatPanel(
                         chat = chat,
                         visible = listShown.value,
+                        // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
+                        //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。
+                        fadingOut = panelFadingOut.value,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -942,7 +1014,9 @@ class LiveDanmakuOverlayHost(
             // 横屏 / PiP / 听音频 / 弹幕关着：列表整体不参与（滚动弹幕接管，见组合里的 rollingVisible）
             dockedRect = DockedRect(0, 0)
             listShown.value = false
-            panel?.visibility = View.GONE
+            // ★本轮：GONE 不再"当场"写 —— 交给呈现层淡出去（180ms 后自己 GONE）。
+            //   几何照旧：这里连 layoutParams 都不碰（原来也只写 visibility）。
+            presentPanel(panel, false)
             return
         }
         // 注入目标/面板还没就绪：等下一次 chromeGeneration（注入成功、锚点 layout、任何一次布局都会来）
@@ -953,7 +1027,8 @@ class LiveDanmakuOverlayHost(
         val minPx = (CHAT_DOCKED_MIN_HEIGHT.value * resources.displayMetrics.density).roundToInt()
         val shown = listWanted.value && rect.height >= minPx
         listShown.value = shown
-        p.visibility = if (shown) View.VISIBLE else View.GONE
+        // ★本轮：显隐都走呈现层（淡入淡出 + 轻微位移；只动 alpha/translationY，不动布局）
+        presentPanel(p, shown)
         if (!shown) return
         // 注入的 View 是后加的、本来就在最上面；显式再提一次，防止播放页以后往 content 里加别的东西
         p.bringToFront()
@@ -964,6 +1039,102 @@ class LiveDanmakuOverlayHost(
             lp.height = rect.height
             p.layoutParams = lp
         }
+    }
+
+    /**
+     * 面板显隐的**呈现层**（★本轮新增）：把"该不该显示"（[listShown]，判定）翻成"View 长什么样"。
+     *
+     * ## 只做 alpha + translationY，**一个字节的布局都不碰**
+     * - `alpha`：绘制属性；
+     * - `translationY`：**绘制期**的画布平移（`View.draw` 里的事），不参与 measure/layout、
+     *   不改 View 的 bounds（`getLocationInWindow` 之外没有任何几何读法会看到它），
+     *   更不会进 [layoutSignature]；
+     * - "面板底边 = 底栏顶边"这条契约由 [refreshDockedPanel] 写进 layoutParams 的 rect 保证，
+     *   本函数**不读也不写 layoutParams / visibility 之外的高度**；动画收尾时 `translationY` 归 0
+     *   （= 面板正好落在 rect 上），所以"键盘收起后列表消失"那一类几何回归在这条路上没有入口。
+     *
+     * ## 时长与曲线
+     * 进 200ms / 出 180ms（用户给的 180~240 区间），缓动 `PathInterpolator(0.4, 0, 0.2, 1)`
+     * —— 和 Compose 的 `FastOutSlowInEasing` 是**同一条贝塞尔**，所以面板的过渡和列表条目的
+     * 淡入是同一套"手感语言"（一个减速落位、一个平滑滑行）。
+     *
+     * ## 退出为什么要"晚一点再 GONE"
+     * GONE 的 View 一个像素都不画，所以"淡出"必须发生在 GONE **之前**：先
+     * `panelFadingOut = true`（组合那边据此把内容留住，见 `LiveDanmakuChatPanel(fadingOut = …)`），
+     * 再动画到 alpha=0，最后才 `visibility = GONE` + 复位。动画结束回调里有两道闸：
+     * ① 期间又被要求显示（`listShown` 已经是 true）→ 什么都不做；② 面板已经换成别的实例 → 也不动。
+     *
+     * ## 幂等（两个方向都要）
+     * 这个方法会被**每次布局**（`chromeGeneration`）叫到，所以：
+     * - 已经在停靠位且完全不透明 → 直接返回，不写任何东西；
+     * - 进场动画跑着（[panelEntering]）→ 不重启，让它按 [PANEL_FADE_IN_MS] 走完；
+     * - 出场动画跑着（[panelFadingOut]）→ 不重启，让它按 [PANEL_FADE_OUT_MS] 淡完再 GONE。
+     * 不幂等的话，"每次布局重启一次动画"会把时长拖长，比硬切还难看。
+     */
+    private fun presentPanel(panel: View?, shown: Boolean) {
+        if (panel == null) {
+            // 还没建（或刚被摘掉）：呈现状态跟着判定走，等建出来时 presentPanel 会把它摆对
+            panelFadingOut.value = false
+            panelEntering = false
+            return
+        }
+        val slidePx = (PANEL_SLIDE_DP.value * resources.displayMetrics.density)
+        if (shown) {
+            panelFadingOut.value = false
+            // 已经在屏上、而且已经落到停靠位：什么都不做（幂等，避免每次布局重启动画）
+            if (panel.visibility == View.VISIBLE && panel.alpha == 1f && panel.translationY == 0f) {
+                panelEntering = false
+                return
+            }
+            // 进场动画跑着（同一趟过渡里被后续布局又调到一次）：别重启，让它按 200ms 走完
+            if (panelEntering && panel.visibility == View.VISIBLE) return
+            panelEntering = false
+            panel.animate().cancel()
+            if (panel.visibility != View.VISIBLE) {
+                // 从"不在屏上"进来：先摆成"透明 + 略高一点"，再滑进停靠位
+                panel.alpha = 0f
+                panel.translationY = -slidePx
+                panel.visibility = View.VISIBLE
+            }
+            panelEntering = true
+            panel.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(PANEL_FADE_IN_MS)
+                .setInterpolator(PANEL_TRANSITION_INTERPOLATOR)
+                .withEndAction { panelEntering = false }
+                .start()
+            return
+        }
+        // ── 要收起来 ──
+        // 不管走哪条路，进场动画都到此为止（下面要么复位、要么换成出场动画）
+        panelEntering = false
+        if (panel.visibility != View.VISIBLE) {
+            // 早就是 GONE（大多数调用都是这种）：复位即可，不启动任何动画
+            panelFadingOut.value = false
+            panel.alpha = 1f
+            panel.translationY = 0f
+            return
+        }
+        // 已经在淡出了（比如"当前几何不够高"这条路上每次布局都会来一次）：别重启，让它淡完
+        if (panelFadingOut.value) return
+        panelFadingOut.value = true
+        panel.animate().cancel()
+        panel.animate()
+            .alpha(0f)
+            .translationY(-slidePx)
+            .setDuration(PANEL_FADE_OUT_MS)
+            .setInterpolator(PANEL_TRANSITION_INTERPOLATOR)
+            .withEndAction {
+                // ★两道闸见方法注释；`listPanel === panel` 顺带挡住"旧面板的收尾动作打到新面板上"
+                if (!listShown.value && listPanel === panel) {
+                    panel.alpha = 1f
+                    panel.translationY = 0f
+                    panel.visibility = View.GONE
+                    panelFadingOut.value = false
+                }
+            }
+            .start()
     }
 
     /**
@@ -1189,6 +1360,11 @@ class LiveDanmakuOverlayHost(
     /** 摘掉注入的面板（不碰锚点：锚点属于播放页，由 [release] 统一清） */
     private fun removeChromeViews() {
         listPanel?.let { panel ->
+            // ★本轮：正在播的显隐动画必须在这里收掉 —— View 要摘了，它的动画结束回调
+            //   （会把 View 置 GONE / 复位 alpha）不该再有任何机会跑到
+            panel.animate().cancel()
+            panel.alpha = 1f
+            panel.translationY = 0f
             (panel.parent as? ViewGroup)?.removeView(panel)
             // 摘掉即销毁这份组合（ComposeView 的默认策略是 detach 时 dispose，这里显式再来一次，
             // 幂等）；留着会让"列表不可见时也在订阅 chat.lines"变成真话
@@ -1200,6 +1376,8 @@ class LiveDanmakuOverlayHost(
         pictureFallback = null
         dockedRect = DockedRect(0, 0)
         listShown.value = false
+        panelFadingOut.value = false
+        panelEntering = false
         chromeGeneration.value += 1
     }
 
@@ -1259,3 +1437,36 @@ private const val MAX_CHROME_SCAN_DEPTH = 3
 
 /** "贴底"判定的像素容差（px）：底栏底边与容器底边对齐时可能有 1px 的取整差 */
 private const val BOTTOM_SNAP_TOLERANCE_PX = 1
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 面板显隐的过渡参数（★本轮新增；只影响**呈现**，见 [LiveDanmakuOverlayHost.presentPanel]）
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 面板进场时长（ms）：用户给的 180~240 区间取中段。
+ * 比条目淡入（190ms）略长一点点 —— 一"块"面比一"行"字需要一个更缓的落位。
+ */
+private const val PANEL_FADE_IN_MS = 200L
+
+/**
+ * 面板退场时长（ms）：比进场短一点（"该走的东西别赖着"）。
+ * ★它同时是"View 延迟 GONE"的时长：GONE 就写在这条动画的结束回调里，两者不可能对不上。
+ */
+private const val PANEL_FADE_OUT_MS = 180L
+
+/**
+ * 面板显隐时那点"轻微位移"（Dp）—— 只是**绘制**位移（`View.translationY`），不动布局。
+ * 取 6dp：够看出"是滑进来的"（约 2~3mm），又不至于让"面板底边=底栏顶边"在过渡里显得在跳。
+ */
+private val PANEL_SLIDE_DP = 6.dp
+
+/**
+ * 面板过渡的缓动曲线：`PathInterpolator(0.4f, 0f, 0.2f, 1f)`。
+ *
+ * 这三个数就是 Material 的 "fast out slow in"，也正是 Compose 侧 `FastOutSlowInEasing`
+ * （`CubicBezierEasing(0.4f, 0f, 0.2f, 1f)`）的同一条曲线 —— 面板淡入淡出与列表条目动画
+ * 用的是**同一套手感**，不是两套各写各的。
+ * ★用平台自带的 `android.view.animation.PathInterpolator`（API 21+，本工程 minSdk 24），
+ *   不引 `androidx.interpolator` 那个 artifact（少一个依赖）。
+ */
+private val PANEL_TRANSITION_INTERPOLATOR = PathInterpolator(0.4f, 0f, 0.2f, 1f)

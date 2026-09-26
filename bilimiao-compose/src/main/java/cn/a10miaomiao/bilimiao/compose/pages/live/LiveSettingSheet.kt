@@ -24,7 +24,7 @@ import androidx.core.content.ContextCompat
 import cn.a10miaomiao.bilimiao.compose.appColorScheme
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
-import cn.a10miaomiao.bilimiao.compose.pages.setting.liveSettingPreferenceItems
+import cn.a10miaomiao.bilimiao.compose.pages.setting.liveDanmakuSettingPreferenceItems
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.store.AppStore
@@ -41,10 +41,27 @@ private const val SHEET_THEME_FALLBACK_COLOR = 0xFF2196F3.toInt()
 
 /**
  * ★★第十四批：直播播放页底栏「设置」按钮弹出来的**直播设置弹窗**（Compose）+ 它的 View 桥。
+ * ★本轮起弹窗**只放弹幕 4 项**，标题也改成「弹幕设置」——见下面"弹窗瘦身"那一段。
  *
  * ## 用户原话（2026-09-26）
  * > "我们在直播间底栏，画质的后面、PIP 的中间添加一个按钮，就是设置。就是会弹出直播间的设置选项、
  * >  设置页。**记得用我的那个自定义的全屏弹窗，不管你怎么转屏，它都会自己适配。就是我的那个底栏筛选的那个弹窗。**"
+ *
+ * ## ★★本轮（2026-09-26 晚）"弹窗瘦身"：它现在只有**弹幕 4 项**
+ * 用户原话：
+ * > "播放页「设置」弹窗瘦身：只保留弹幕相关的项（字号 / 不透明度 / 速度 / 显示区域），
+ * >  播放类 4 项（默认画质 / 默认线路策略 / 自动重连 / 自动旋转）从弹窗移除 ——
+ * >  它们仍在「设置 → 直播设置」页，设置页一个项都不能少。"
+ * 落点（本文件三处 + `LiveSettingPreferences.kt` 一处）：
+ * ```
+ * 标题        「直播设置」 → 「弹幕设置」
+ * 说明文案     与设置页"同一批设置" → 明说弹窗只有弹幕四项、播放类四项在设置页
+ * 内容项       liveSettingPreferenceItems()        （全量 9 项）
+ *          →  liveDanmakuSettingPreferenceItems()  （只有弹幕 4 项）
+ * ```
+ * ★**底栏那颗「设置」按钮保留**（用户明确要求）；设置页**一个项都不少**（仍是播放 4 + 弹幕 4 +
+ *   直播列表 1 = 9 项）—— 两个入口共用同一份项定义的两个子集，见
+ *   [cn.a10miaomiao.bilimiao.compose.pages.setting.liveDanmakuSettingPreferenceItems] 的 KDoc。
  *
  * ## 宿主用的是哪一套：与「底栏筛选弹窗」**同一个**
  * ```
@@ -59,8 +76,9 @@ private const val SHEET_THEME_FALLBACK_COLOR = 0xFF2196F3.toInt()
  * 本文件**不新造任何弹窗样式**：外壳就是 `AutoSheetDialog`，排版也与
  * `HomeLiveFilterSheet` 一致（`Column(fillMaxWidth)` → 可滚动内容吃 `weight(1f)`
  * → 底部一行按钮钉在下面；横向 16dp 内边距由标题与底部按钮各自带，条目自带 ——
- * 与「设置 → 直播设置」页逐像素同款）。差别只有两处，都是内容决定的：
- *   ① 内容项来自 [liveSettingPreferenceItems]（设置项，不是筛选 chip）；
+ * 条目本身与「设置 → 直播设置」页逐像素同款）。差别只有两处，都是内容决定的：
+ *   ① 内容项来自 [cn.a10miaomiao.bilimiao.compose.pages.setting.liveDanmakuSettingPreferenceItems]
+ *      （设置项，不是筛选 chip；本轮起是其中的**弹幕那一组**）；
  *   ② 底部只有一个「完成」——设置是**改一项立即生效并落盘**的，没有"待确认"这一说
  *      （筛选弹窗要「重置/取消/确定」是因为那三个条件要一起提交）。
  *
@@ -80,9 +98,12 @@ private const val SHEET_THEME_FALLBACK_COLOR = 0xFF2196F3.toInt()
  *   的门控）、进小窗时也会把已经打开的这个弹窗关掉 —— 小窗里没有它的位置。
  *
  * ## 设置项本身
- * 全部来自 [liveSettingPreferenceItems]（`LiveSettingPreferences.kt`）：**与「设置 → 直播设置」页
- * 是同一份项、同一批键、同一批默认值、同一套读写口**（`ProvidePreferenceLocals` +
+ * 来自 [cn.a10miaomiao.bilimiao.compose.pages.setting.liveDanmakuSettingPreferenceItems]
+ * （`LiveSettingPreferences.kt` 里**唯一的**那一组弹幕项）：**与「设置 → 直播设置」页的弹幕组是同一份项、
+ * 同一批键、同一批默认值、同一套读写口**（`ProvidePreferenceLocals` +
  * `rememberPreferenceFlow(dataStore)`），见那个函数的 KDoc。本文件一个键名都没写。
+ * ★本轮起它只展示**弹幕 4 项**（字号 / 不透明度 / 速度 / 显示区域）：播放类 4 项与「每行卡片数」
+ *   不在弹窗里，但**都在设置页**（用户要求"设置页一个项都不能少"）。
  */
 class LiveSettingSheetHost(
     context: Context,
@@ -192,13 +213,14 @@ private fun LiveSettingSheet(onDismiss: () -> Unit) {
                     //   也是这么排的），再给 Column 加一层就会让"标题在 16dp、条目文字在 32dp"，
                     //   两处对不齐。这样排出来与「设置 → 直播设置」页逐像素同款。
                     Text(
-                        text = "直播设置",
+                        text = "弹幕设置",
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "与「设置 → 直播设置」是同一批设置：改一项立即生效，也会存下来",
+                        text = "字号 / 不透明度 / 速度 / 显示区域，改一项立即生效，也会存下来。" +
+                            "画质、线路、自动重连、自动旋转在「设置 → 直播设置」里",
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -210,7 +232,14 @@ private fun LiveSettingSheet(onDismiss: () -> Unit) {
                             .fillMaxWidth()
                             .weight(1f),
                     ) {
-                        liveSettingPreferenceItems()
+                        // ★本轮（2026-09-26 用户拍板"弹窗瘦身"）：**只出弹幕那一组**（4 项）。
+                        //   原来这里调的是 `liveSettingPreferenceItems()`（= 设置页的全量 9 项：
+                        //   播放 4 + 弹幕 4 + 直播列表 1），所以弹窗里还混着「默认画质 / 默认线路策略 /
+                        //   自动重连 / 自动旋转 / 每行卡片数」——用户要求把播放类 4 项从弹窗移除
+                        //   （它们仍在「设置 → 直播设置」页，**一个都没少**），弹窗只留
+                        //   字号 / 不透明度 / 速度 / 显示区域。两个入口现在共用**同一份**弹幕项实现
+                        //   （`liveDanmakuPreferenceItems()` 那一支，见 LiveSettingPreferences.kt 的 KDoc）。
+                        liveDanmakuSettingPreferenceItems()
                         // 最后一项与底部按钮之间的呼吸位（列表最后一行贴着按钮会看着很挤）
                         item("sheet_bottom") {
                             Spacer(modifier = Modifier.height(8.dp))
