@@ -541,6 +541,7 @@ class MainActivity
         //   "有 Activity resume / 直播间销毁"两个触发点上做 —— 判据（前台是主界面、
         //   没有活着的直播间、记录还在、取走即消费）全部在 LiveLastRoomStore 里，见它的 KDoc。
         LiveLastRoomStore.onHostForeground(this)
+        // [hermes-fix 2026-09-26] onTaskRemoved 是 Service 回调；Activity 无此回调，记录作废改在 PlaybackService
     }
 
     override fun onStop() {

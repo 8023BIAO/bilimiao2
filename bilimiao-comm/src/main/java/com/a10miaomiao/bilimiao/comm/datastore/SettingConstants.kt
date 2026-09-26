@@ -137,8 +137,12 @@ object SettingConstants {
     //   而且读取方（播放页 onStop/onUserLeaveHint/手势层、弹幕链路、首页列表）全都没动。
     /** 后台继续直播：默认**关**（退后台 = 暂停），与 LivePlayerActivity.onStop 的现有行为一致 */
     const val LIVE_BACKGROUND_PLAY_DEFAULT = false
-    /** 退后台自动进 PIP 小窗：默认**开**，与 LivePlayerActivity.onUserLeaveHint 的现有行为一致 */
-    const val LIVE_PIP_ON_BACKGROUND_DEFAULT = true
+    /**
+     * 退后台自动进 PIP 小窗：默认**关**（[A2-fix 2026-09-26] 用户要求"只有点小窗按钮才有小窗"）。
+     * 直播页 [enterPipMode] 的手动按钮不受本值影响；[LivePlayerActivity.onUserLeaveHint] 的
+     * 自动进入分支因默认关闭而不再触发。旧版本若曾显式写过 true，仍按持久化值走。
+     */
+    const val LIVE_PIP_ON_BACKGROUND_DEFAULT = false
     /** 自动重连：默认开，与 LivePlayerDelegate 现有的失败换线/重取流行为一致 */
     const val LIVE_AUTO_RECONNECT_DEFAULT = true
     /**

@@ -2015,6 +2015,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         )
     }
 
+    // [hermes-fix 2026-09-26] onTaskRemoved 是 Service 回调；Activity 无此回调，记录作废改在 PlaybackService
     override fun onDestroy() {
         // ★诊断日志（只读）
         LivePageTrace.note(
@@ -3980,23 +3981,25 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * （本轮之前底栏「设置」弹窗里还有一项「显示弹幕」也调它；那个弹窗已按用户要求删掉，
      *   所以现在只剩这一条调用链，语义更干净：**本页开关就是本页开关**。）
      *
-     * ★只改本页状态，**一行 DataStore 都不写**：它是"临时关一下"，
-     *   想持久化请去「设置 → 直播设置」（那边的 `live_danmaku_enable` 是同一个语义位的键）。
+     * ★[A2-fix 2026-09-26] 开关状态现在会**持久化到直播自己的键** `live_danmaku_enable`：
+     *   用户实测"直播间把弹幕关掉，退出重进又自己开"不能接受；不再另加设置入口（做减法），
+     *   底栏这颗按钮本身就是入口。
      *
      * ★★**绝不回写点播弹幕设置**（用户明确要求："直播里关弹幕不许写 `default_danmaku_show`"）★★
-     *   本函数一行 DataStore 都不写，这是**刻意的**：
-     *   · 直播弹幕的可见性本来就 = 点播那三层开关 ∩ `live_danmaku_enable`
-     *     （见 `LiveDanmakuSettings.from()` 的 `visible`）。往点播的 `default_danmaku_show`
-     *     写一次 false，用户点播那边的弹幕会**跟着消失**，而直播页没有把它恢复回来的入口 ——
-     *     那是"我只是在直播里关一下弹幕，结果点播也坏了"的经典事故；
-     *   · 本页**不提供**持久化入口（写键的地方在设置页），所以这条事故路径从源头就断了。
+     *   · 直播弹幕的可见性只认直播自己的 `live_danmaku_enable`（见 `LiveDanmakuSettings.from()`）；
+     *   · 往点播的 `default_danmaku_show` 写一次 false，用户点播那边的弹幕会**跟着消失** ——
+     *     那是"我只是在直播里关一下弹幕，结果点播也坏了"的经典事故，所以这里始终只写 live_ 键。
      */
     private fun applyDanmakuEnabled(enabled: Boolean) {
         danmakuEnabled = enabled
-        // 说明：底栏开关是**会话级**的（本轮按用户要求删掉了底栏「设置」弹窗，而 live_danmaku_enable
-        //   的写入点原本就在那个弹窗里；设置页那一行也早已删显示）。要恢复"记住开关状态"很容易：
-        //   在这里把 enabled 写进 SettingPreferences.LiveDanmakuEnable 即可 —— 但**绝不能**碰点播的
-        //   default_danmaku_show（在直播间关弹幕不该把点播也关掉）。当前按"会话级"交付，等用户确认。
+        // [A2-fix 2026-09-26] 记住开关状态：只写 `live_danmaku_enable`，绝不碰点播弹幕键。
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                SettingPreferences.edit(this@LivePlayerActivity) { prefs ->
+                    prefs[SettingPreferences.LiveDanmakuEnable] = enabled
+                }
+            }
+        }
         danmakuLayer.visibility = if (enabled) View.VISIBLE else View.GONE
         if (enabled) danmakuHost?.start() else danmakuHost?.stop()
         updateDanmakuButton()

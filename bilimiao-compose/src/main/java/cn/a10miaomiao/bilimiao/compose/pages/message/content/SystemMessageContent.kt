@@ -54,6 +54,7 @@ import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.kongzue.dialogx.dialogs.MessageDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
@@ -90,6 +91,11 @@ private class SystemMessageContentModel(
      */
     private var cursor: Long? = null
 
+    /** 当前在途请求；刷新/翻页先取消它，避免旧响应拼进新列表（A5-fix 2026-09-26） */
+    private var loadJob: Job? = null
+    /** 请求代次：只有最新一代的响应/收尾允许碰 UI 状态（A5-fix 2026-09-26） */
+    private var loadEpoch = 0
+
     init {
         loadData()
     }
@@ -99,46 +105,56 @@ private class SystemMessageContentModel(
      *
      * @param nextCursor null = 拉第一页（首次进入 / 下拉刷新）；非 null = 拉下一页
      */
-    fun loadData(nextCursor: Long? = null) = viewModelScope.launch(Dispatchers.IO) {
-        try {
-            list.loading.value = true
-            list.fail.value = ""   // 开始加载就清掉上一次的失败提示，否则重试成功后它还挂在列表底部
-            val res = BiliApiService.messageApi
-                .sysNotify(nextCursor)
-                .awaitCall()
-                .json<ResultInfo<List<SystemMessageInfo>>>()
-            if (res.isSuccess) {
-                val items = res.data
-                if (items == null) {
-                    list.fail.value = "未登录账号或加载失败"
-                    return@launch
-                }
-                if (nextCursor == null) {
-                    // 首屏 = 用户已经看到最新通知：把服务端游标推到最新的一条（等价 PiliPlus 的 update_cursor），
-                    // 顺便清 Tab 红点。它失败只影响"红点灭不灭"，不该影响列表，所以单独 try 在里面。
-                    markRead(items.firstOrNull()?.cursor)
-                    list.data.value = items
+    fun loadData(nextCursor: Long? = null) {
+        val epoch = ++loadEpoch
+        loadJob?.cancel()
+        list.loading.value = true
+        list.fail.value = ""   // 开始加载就清掉上一次的失败提示，否则重试成功后它还挂在列表底部
+        loadJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = BiliApiService.messageApi
+                    .sysNotify(nextCursor)
+                    .awaitCall()
+                    .json<ResultInfo<List<SystemMessageInfo>>>()
+                // A5-fix：旧请求即便晚到也不能再改列表；真取消走异常分支，这里兜住极端时序
+                if (epoch != loadEpoch) return@launch
+                if (res.isSuccess) {
+                    val items = res.data
+                    if (items == null) {
+                        list.fail.value = "未登录账号或加载失败"
+                        return@launch
+                    }
+                    if (nextCursor == null) {
+                        // 首屏 = 用户已经看到最新通知：把服务端游标推到最新的一条（等价 PiliPlus 的 update_cursor），
+                        // 顺便清 Tab 红点。它失败只影响"红点灭不灭"，不该影响列表，所以单独 try 在里面。
+                        markRead(items.firstOrNull()?.cursor)
+                        list.data.value = items
+                    } else {
+                        list.data.value = list.data.value + items
+                    }
+                    cursor = items.lastOrNull()?.cursor
+                    // 这个接口没有 is_end 之类的"到底了"标志，只能按"这一页是空的"判定
+                    list.finished.value = items.isEmpty()
                 } else {
-                    list.data.value = list.data.value + items
+                    list.fail.value = res.message.ifBlank { "加载失败，重试" }
                 }
-                cursor = items.lastOrNull()?.cursor
-                // 这个接口没有 is_end 之类的"到底了"标志，只能按"这一页是空的"判定
-                list.finished.value = items.isEmpty()
-            } else {
-                list.fail.value = res.message.ifBlank { "加载失败，重试" }
+            } catch (e: Exception) {
+                if (epoch != loadEpoch) return@launch
+                e.printStackTrace()
+                // ★ 断网（UnknownHostException）也要落到"失败态"：
+                //   兄弟那几个 Tab 在这里会把断网静默掉，于是列表显示成 ListStateBox 的"空空如也"，
+                //   用户会以为"真的没有通知"。系统通知宁可明确给出"加载失败，重试"。
+                list.fail.value = when (e) {
+                    is java.net.UnknownHostException -> "网络不可用，请检查网络后重试"
+                    else -> e.message ?: "加载失败，重试"
+                }
+            } finally {
+                // A5-fix：只有最新一代负责收尾，避免旧请求把新请求的 loading/refreshing 提前关掉
+                if (epoch == loadEpoch) {
+                    list.loading.value = false
+                    isRefreshing.value = false
+                }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            // ★ 断网（UnknownHostException）也要落到"失败态"：
-            //   兄弟那几个 Tab 在这里会把断网静默掉，于是列表显示成 ListStateBox 的"空空如也"，
-            //   用户会以为"真的没有通知"。系统通知宁可明确给出"加载失败，重试"。
-            list.fail.value = when (e) {
-                is java.net.UnknownHostException -> "网络不可用，请检查网络后重试"
-                else -> e.message ?: "加载失败，重试"
-            }
-        } finally {
-            list.loading.value = false
-            isRefreshing.value = false
         }
     }
 

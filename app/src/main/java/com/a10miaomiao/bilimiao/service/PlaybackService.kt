@@ -570,6 +570,8 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
         // 用户决定（2026-09-16）：不再区分后台播放开关 —— 划掉最近任务就**彻底收摊**。
         // 之前的"保活"太刁钻：后台还在放、通知栏还在，但重进 App 接不上画面，
         // 用户还以为杀掉了其实没杀。现在一律：停播 + 释放播放器 + 撤通知 + 断会话。
+        // [hermes-fix 2026-09-26] 划掉最近任务时同步作废"上次停在哪个直播间"记录（Activity 无 onTaskRemoved 回调）
+        com.a10miaomiao.bilimiao.comm.live.LiveLastRoomStore.onTaskRemoved(this)
         teardownSession()
     }
 

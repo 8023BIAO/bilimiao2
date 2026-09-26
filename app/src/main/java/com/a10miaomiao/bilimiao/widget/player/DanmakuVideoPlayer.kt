@@ -338,6 +338,12 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
             -1L
         }
         if (pos < 0L) return
+        // ★真实位置已经追到显式 seek 目标附近：target 退役，之后完全信底层
+        if (lastSeekTargetMs >= 0L && mCurrentState == CURRENT_STATE_PLAYING &&
+            kotlin.math.abs(pos - lastSeekTargetMs) <= 1_000L
+        ) {
+            lastSeekTargetMs = -1L
+        }
         // 重新 prepare / surface 重建的瞬间会短暂读到 0：账本里明明有真实位置，就别把弹幕时间拽回片头
         if (pos == 0L && lastGoodPositionMs > 3_000L) return
         val prevPos = danmakuSamplePosMs
@@ -368,18 +374,13 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
                 "SAMPLE pos=$pos clock=${danmakuNowMs()} drift=$drift rate=$rate state=$mCurrentState"
             )
         }
-        // 约 1 秒记一次账就够
-        if (nowWall - lastGoodUpdateAt < 1000L) return
-        lastGoodUpdateAt = nowWall
-        if (mCurrentState == CURRENT_STATE_PLAYING) {
-            if (pos > lastGoodPositionMs) lastGoodPositionMs = pos
-            // 投递槽跟着播放位置走：任何时刻被重建都能接着"当前位置"播。
-            // 两个例外：① prepare 进行中（槽正被 GSY 消费，插进来会把落点写成 0）；
-            //          ② 有显式落点（换清晰度/换语言/重试投递的），盖掉就是"换清晰度从头播"
-            if (pos > 0L && !isPreparing) {
-                mCurrentPosition = pos
-                if (pendingSeekMs <= 0L) mSeekOnStart = pos
-            }
+        // ★★[减法 2026-09-26] 原来这里每秒把 pos 写进 GSY 的 mCurrentPosition / mSeekOnStart 做“保鲜”。
+        //   实测副作用：暂停后往回拖进度条时，底层位置还没刷新，这一秒一次的写入会把用户刚拖到的
+        //   新落点盖成旧位置；随后点播放/重新 prepare 就被拽回去。这正是“拖到已播放过的位置再播放
+        //   又被拉回”的根因，整段删除。
+        //   账本只在**确实在往前走、且没有待落地的显式 seek 目标**时更新，作为 prepare 的兜底。
+        if (advancing && lastSeekTargetMs < 0L && pos > lastGoodPositionMs) {
+            lastGoodPositionMs = pos
         }
     }
 
@@ -394,12 +395,16 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     }
 
     /**
-     * 重设时钟：把当前时间锚在 [anchorMs]（<=0 表示"当前推算值"）并换成新斜率 [rate]。
+     * 重设时钟：把当前时间锚在 [anchorMs] 并换成新斜率 [rate]。
      * 换斜率必须先锚一次，否则刚过去的那段时间会被新斜率重算 —— 那就是一次跳变。
+     *
+     * ★[A4-fix 2026-09-26] 原来用 `> 0L` 判断，等于把 0ms 当成"当前推算值"：
+     *   暂停态把进度拖回 0:00 / 从头重播时，时钟锚不回 0，弹幕时间轴会停在旧位置。
+     *   现在调用方要"当前推算值"必须显式传 `danmakuNowMs()`；[anchorMs] < 0 才走兜底。
      */
     private fun setDanmakuClock(anchorMs: Long, rate: Float) {
         val now = android.os.SystemClock.uptimeMillis()
-        val anchor = if (anchorMs > 0L) anchorMs else danmakuNowMs()
+        val anchor = if (anchorMs >= 0L) anchorMs else danmakuNowMs()
         danmakuPosMs = anchor
         danmakuPosAtUptimeMs = now
         danmakuClockRate = if (rate.isFinite()) rate.coerceIn(0f, 4f) else 1f
@@ -426,12 +431,13 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
      * 采样侧打 SAMPLE（播放器位置/我们的时间/状态），弹幕线程侧打 TICK（它每帧读到的时间 + 线程名）。
      * 排查完把这个常量改 false 即可（不会有人看到输出）。
      */
-    private val DANMAKU_CLOCK_LOG = true
+    // [A6-fix 2026-09-26] release 常开调试日志已关闭；排查弹幕时钟时临时改 true 即可。
+    private val DANMAKU_CLOCK_LOG = false
     private var danmakuLogAt = 0L
     private var danmakuTickCount = 0
 
     /**
-     * 把弹幕时间**立刻**钉在 [positionMs] 上（<=0 时退回"现在推算到的位置"，保持连续），
+     * 把弹幕时间**立刻**钉在 [positionMs] 上（允许 0ms；<0 才退回"现在推算到的位置"），
      * 斜率保持不变 —— 用于"时间轴突变"的瞬间（seek、暂停/恢复），别等下一拍采样。
      */
     private fun anchorDanmakuSnapshot(positionMs: Long) {
@@ -476,17 +482,6 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
      * 所以账本由我们记（暂停/退出/seek/播放中都记），槽只当"投递给 GSY 的通道"。
      */
     private var lastGoodPositionMs = 0L
-    private var lastGoodUpdateAt = 0L
-
-    /**
-     * "正在 prepare" 标记。
-     * 弹幕计时器跑在弹幕渲染线程上，能在 `super.startAfterPrepared()` 的
-     * `setStateAndUi(PLAYING)` 与紧随其后的 `seekTo(mSeekOnStart)` 之间插进来 ——
-     * 那时新播放器刚起、位置还是 0 附近，它会把投递槽写成 0/小值，
-     * 于是"换清晰度从 0 开始播"。prepare 期间一律不许计时器碰槽。
-     */
-    @Volatile
-    private var isPreparing = false
 
     /**
      * 用户的"暂停意图"。
@@ -498,36 +493,44 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     private var userPaused = false
 
     /**
-     * "下一次 prepare 必须落在这里"的**显式投递位**（一次性）。
+     * ★[2026-09-26 修 "拖回 0 又被拉回来 / 弹幕从旧位置开始"] 用户最近一次**显式 seek 的目标**（ms）；
+     * -1 = 没有待落地的显式跳转。
      *
-     * 为什么不能直接用 GSY 的 `mSeekOnStart` 存：那个槽还有别的写者 ——
-     * 计时器保鲜（播放中每秒写当前位置）、`armResumeSlot()` 补空、`seekTo()` 同步。
-     * 换清晰度/换语言时它们会在 prepare 之前把显式落点盖成"当前位置"甚至 0，
-     * 结果就是**换个清晰度从头播**（实机回归 2026-09-17）。
-     * 所以显式落点单独存一格，只有 prepare 消费它，其它写者一律绕开。
+     * 为什么需要它：GSY/底层播放器在"暂停中 seek"或"seek 请求还没落地"时，
+     * `getCurrentPositionWhenPlaying()` 可能还返回**旧位置**（实测：4~5s 暂停后拖回 0，
+     * 底层短暂还报 4~5s）。原来的 `resumePosition` 直接信这个旧值，于是：
+     * · 点播放时 `armSeekOnPrepare(旧位置)` / `danmakuOnResume` 又把进度和弹幕层拽回旧位置；
+     * · 拖到 0 后弹幕一条不显示，直到视频走到旧位置（短视频看起来就是"一直没有弹幕"）。
+     * 用户刚拖到的目标是最新意图，必须优先于底层尚未刷新的旧位置；等真实位置追到目标附近再清掉。
      */
-    private var pendingSeekMs = 0L
+    private var lastSeekTargetMs = -1L
 
     /** 显式投递"下次 prepare 的落点"（换清晰度 / 换语言 / 重试 / 续播 / 点播放用） */
     fun armSeekOnPrepare(posMs: Long) {
         if (posMs > 0L) {
-            pendingSeekMs = posMs
+            // ★[减法] 显式落点只留 lastSeekTargetMs 一份；prepare 时再写给 GSY 的 mSeekOnStart。
+            lastSeekTargetMs = posMs
             mSeekOnStart = posMs
-            // 兜底：万一这次 prepare 没把落点应用下去（seek 被底层吞掉/顺序错位），
-            // 0.8s 后检查一次"位置是不是掉到 0 附近"，是就拽回账本位置
-            scheduleRestartGuard()
         }
     }
 
-    /** 账本里的续播位置（播放器还活着就以底层真实位置为准；它返回 0 时还能兜住 mCurrentPosition） */
+    /**
+     * 账本里的续播位置。
+     *
+     * 优先级：用户最近一次显式 seek 的目标（含 0） > 下一次 prepare 的显式落点 > 底层真实位置 > 账本。
+     * [A-fix 2026-09-26] 暂停态 seek 后底层可能还报旧位置，不能再无条件信它，否则会把进度条/
+     * 弹幕层拽回旧位置（详见 [lastSeekTargetMs] 的注释）。
+     */
     val resumePosition: Long
-        get() = currentPositionWhenPlaying.takeIf { it > 0L } ?: lastGoodPositionMs
+        get() = when {
+            lastSeekTargetMs >= 0L -> lastSeekTargetMs
+            else -> currentPositionWhenPlaying.takeIf { it > 0L } ?: lastGoodPositionMs
+        }
 
     /** 记一笔账（暂停 / 退出 / 播放中都调），保证任何时刻都有位置可投递 */
     fun noteResumePosition(posMs: Long) {
         if (posMs > 0L) {
             lastGoodPositionMs = posMs
-            lastGoodUpdateAt = System.currentTimeMillis()
         }
     }
 
@@ -540,7 +543,7 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
      * 已有值不覆盖：GSY 自己刚写的值比账本更新。
      */
     fun armResumeSlot() {
-        val pos = currentPositionWhenPlaying.takeIf { it > 0L } ?: lastGoodPositionMs
+        val pos = resumePosition
         if (pos <= 0L) return
         if (mCurrentPosition <= 0L) mCurrentPosition = pos
         if (mSeekOnStart <= 0L) mSeekOnStart = pos
@@ -550,7 +553,7 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     fun resetRestartGuard() {
         lastGoodPositionMs = 0L
         userPaused = false
-        pendingSeekMs = 0L
+        lastSeekTargetMs = -1L
         // 连 GSY 的"prepare 后定位"一起清掉，否则残留值会漏到下一个视频
         mSeekOnStart = 0L
         // 弹幕的"准备后再跳"锚点同理：不清的话，上一个视频那次 seek 会把新视频的弹幕起点也拽过去
@@ -558,28 +561,16 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         // ★ 弹幕时钟也要复位：不复位的话新视频开头那几拍仍按上一个视频的时间在画，
         //   要等采样发现"漂了 2 秒"才对齐 —— 那一下就是换集时的弹幕错乱
         resetDanmakuClock()
-        removeCallbacks(restartGuardRunnable)
     }
 
-    /** 同一个视频的重载（换清晰度 / 换语言 / 网络重试）：只撤掉待执行的兜底检查，账本留着 */
+    /** 同一个视频的重载（换清晰度 / 换语言 / 网络重试）：只保留显式落点，不做任何兜底拽回 */
     fun resetRestartGuardKeepPosition() {
-        removeCallbacks(restartGuardRunnable)
+        // ★[减法 2026-09-26] restartGuard 已删除；这个空实现保留给 PlayerDelegate2 的既有调用。
     }
 
     /** 用户明确要播（重播 / 重试 / 通知栏播放）：清掉"暂停意图"，否则 prepare 完会被按回暂停 */
     fun clearPausedIntent() {
         userPaused = false
-    }
-
-    private val restartGuardRunnable = Runnable {
-        val p = try { currentPosition } catch (_: Exception) { 0L }
-        val state = mCurrentState
-        val shouldRestore = lastGoodPositionMs > 0L &&
-            p < 3_000L &&
-            (state == CURRENT_STATE_PLAYING || state == CURRENT_STATE_PAUSE)
-        if (shouldRestore) {
-            try { seekTo(lastGoodPositionMs) } catch (_: Exception) {}
-        }
     }
 
     /**
@@ -593,10 +584,10 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
      *     （GSY 默认 mStartAfterPrepared=true，重建后会自己播起来）。
      */
     override fun startAfterPrepared() {
-        // 显式落点优先级最高：换清晰度/换语言/重试/点播放投递的位置必须落到这一帧上
-        if (pendingSeekMs > 0L) {
-            mSeekOnStart = pendingSeekMs
-            pendingSeekMs = 0L
+        // 显式落点优先级最高：换清晰度/换语言/重试/点播放投递的位置必须落到这一帧上。
+        // ★[减法] 不再从 pendingSeekMs 里搬，直接就是用户/调用方刚给的目标（含 0）。
+        if (lastSeekTargetMs >= 0L) {
+            mSeekOnStart = lastSeekTargetMs
         }
         // 位置已经贴着结尾了就别投递：seek 到末尾会立刻 STATE_ENDED 再走一遍播放完成（连播死循环）
         val totalDuration = try { duration } catch (_: Exception) { 0L }
@@ -608,20 +599,17 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         //   （onAutoCompletion 的 historyReport / seekTo 覆写都会写它），
         //   这里不加判断地回填，等于把刚清掉的末尾落点又填回去 →
         //   定位到片尾立刻 STATE_ENDED → 用户看到"点重新播放闪一下就又结束了"（实机回归 2026-09-21）。
-        if (mSeekOnStart <= 0L && lastGoodPositionMs > 0L && !isNearEnd(lastGoodPositionMs)) {
+        // ★[减法 2026-09-26] 有显式目标（含 0）时绝不能再用 lastGoodPositionMs 兜底：
+        //   否则用户刚拖到 0:00 会被“上次播放点的记忆”（例如 48s）顶回去。
+        if (lastSeekTargetMs < 0L && mSeekOnStart <= 0L && lastGoodPositionMs > 0L && !isNearEnd(lastGoodPositionMs)) {
             mSeekOnStart = lastGoodPositionMs
         }
         if (userPaused) {
             mPauseBeforePrepared = true
         }
-        isPreparing = true
         // GSY 会在 super 里消费掉 mSeekOnStart（内部走 getGSYVideoManager().seekTo(...)），先记下来
         val seekOnPrepare = mSeekOnStart
-        try {
-            super.startAfterPrepared()
-        } finally {
-            isPreparing = false
-        }
+        super.startAfterPrepared()
         // ★ 补一次"快照 + 弹幕重锚"：GSY 这条路上是 `getGSYVideoManager().seekTo(mSeekOnStart)` —— 走**管理器**、
         //   不经过我们的 seekTo 覆写，所以"续播 / 换清晰度 / 网络重试"时 syncDanmakuSeek 一次都不会跑：
         //   弹幕层既不重锚定（渲染起点还停在 0），又要等下一拍心跳（非播放态间隔 1000ms）快照才追上 →
@@ -635,17 +623,11 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
         }
         // GSY 在 mPauseBeforePrepared 分支里会紧接着 onVideoPause()，而此时 seek 可能还没落地，
         // 它读到的 0 会被写进 mCurrentPosition（= 下一次续播位置）→ 用账本补回来
-        if (mCurrentPosition <= 0L && lastGoodPositionMs > 0L) {
+        if (lastSeekTargetMs < 0L && mCurrentPosition <= 0L && lastGoodPositionMs > 0L) {
             mCurrentPosition = lastGoodPositionMs
         }
-    }
-
-    /** 启动动作（点播放/回前台续播）后挂一次检查 */
-    private fun scheduleRestartGuard() {
-        if (lastGoodPositionMs <= 0L) return
-        removeCallbacks(restartGuardRunnable)
-        // 0.8s：够晚（避免播放还没起来误判），又尽量早（别让用户看见那一下）
-        postDelayed(restartGuardRunnable, 800)
+        // prepare 已按 mSeekOnStart 落点：显式 seek 目标退役，之后交给真实位置
+        lastSeekTargetMs = -1L
     }
 
     /** 听视频（仅音频）：黑掉画面继续放声音。刻意不碰 surface/播放器，避免 GSY 因 surface 变化误暂停 */
@@ -2671,7 +2653,8 @@ initDanmakuTouchListener()
         // 账本：GSY 的 onVideoPause() 只在底层 isPlaying() 为真时才写 mCurrentPosition
         // （源码 v13.0.0:518-531），暂停中/缓冲中调用它等于什么都没记 —— 所以这里自己记一笔
         userPaused = true
-        noteResumePosition(currentPositionWhenPlaying)
+        // 用 resumePosition：暂停前若刚做过显式 seek，底层可能还没刷新，别把旧位置记进账本
+        noteResumePosition(resumePosition)
         danmakuOnPause()
         videoPlayerCallBack?.onVideoPause()
     }
@@ -2680,6 +2663,8 @@ initDanmakuTouchListener()
         userPaused = false
         super.onVideoResume(isResume)
         danmakuOnResume()
+        // 已经按 lastSeekTargetMs / resumePosition 启动过弹幕层：显式 target 退役
+        lastSeekTargetMs = -1L
         videoPlayerCallBack?.onVideoResume(isResume)
     }
 
@@ -2695,13 +2680,12 @@ initDanmakuTouchListener()
     override fun seekTo(position: Long) {
         super.seekTo(position)
         if (position >= 0L) {
+            // 用户刚拖到的位置是最新意图：底层可能还没刷新，先钉在账上（含 0，0 也要作数）
+            lastSeekTargetMs = position
             lastGoodPositionMs = position
-            lastGoodUpdateAt = System.currentTimeMillis()
             mSeekOnStart = position
             mCurrentPosition = position
-            // 用户/我们自己刚定的位置就是新意图：显式落点作废，之前挂的兜底检查也撤掉
-            pendingSeekMs = 0L
-            removeCallbacks(restartGuardRunnable)
+            // 用户/我们自己刚定的位置就是新意图：不再有别的落点/兜底会覆盖它
             // ★ 弹幕层也要跟着跳（详见 syncDanmakuSeek）
             syncDanmakuSeek(position)
         }
@@ -2734,7 +2718,12 @@ initDanmakuTouchListener()
     ) {
         if (positionMs < 0L) return
         val prepared = mHadPlay && mDanmakuView.isPrepared
-        val alreadyThere = prepared &&
+        // ★[A-fix 2026-09-26] 0ms 永远要显式重锚 DFM：不能因为"我们的时钟本来就是 0"就跳过。
+        //   用户拖回开头后弹幕层一个都不显示、直到视频走到旧位置的那类 bug，
+        //   根因就是 DFM 的渲染窗口起点可能还停在旧位置，而快照时钟看起来已经归零。
+        //   竞品 PiliPlus 每次 seek 都 `danmakuController?.clear()`（controller.dart:1055），
+        //   我们这里用 DFM 自带的 seek 重锚等价处理；仅对 0 强制，避免正常小范围 seek 多锚。
+        val alreadyThere = prepared && positionMs > 0L &&
             kotlin.math.abs(positionMs - danmakuClockBefore) <= NEAR_DANMAKU_SEEK_MS
         // ① 时间立刻跟到新位置（斜率不变：暂停中就是冻住，播放中继续按倍速走）
         anchorDanmakuSnapshot(positionMs)
@@ -2773,7 +2762,6 @@ initDanmakuTouchListener()
             ) {
                 try { seekTo(pos) } catch (_: Exception) {}
             }
-            scheduleRestartGuard()
         }
     }
 
@@ -2783,16 +2771,22 @@ initDanmakuTouchListener()
         // 只是让底层 start() —— 底层播放器若已被重建，位置就是 0，只有 mSeekOnStart 能在
         // 随后那次 prepare 里救回来，所以先把槽补好。
         if (mCurrentState == CURRENT_STATE_PAUSE) {
-            armResumeSlot()
-            // 用显式落点：点播放后若内部重新 prepare，位置必须落到点播放前那一帧
-            if (posBefore > 0L) armSeekOnPrepare(posBefore)
+            if (lastSeekTargetMs >= 0L) {
+                // ★[A-fix] 用户刚拖到某个位置（含 0），暂停态底层可能还没落地：start 前再钉一次，
+                //   绝不让旧位置把进度条/弹幕层拽回去。
+                try { gsyVideoManager.seekTo(lastSeekTargetMs) } catch (_: Exception) {}
+                mCurrentPosition = lastSeekTargetMs
+                mSeekOnStart = lastSeekTargetMs
+            } else {
+                armResumeSlot()
+                // 用显式落点：点播放后若内部重新 prepare，位置必须落到点播放前那一帧
+                if (posBefore > 0L) armSeekOnPrepare(posBefore)
+            }
         }
         super.clickStartIcon()
         if (mCurrentState == CURRENT_STATE_PLAYING) {
             // 用户明确要播：清掉"暂停意图"，否则下次 re-prepare 会被按回暂停
             userPaused = false
-            // 点播放后 GSY 可能已经偷偷从 0 重新 prepare（见 restartGuardRunnable 注释）
-            if (posBefore > 0L) scheduleRestartGuard()
             // PlaybackService 状态已在 onVideoResume / setStateAndUi 中同步
             danmakuOnResume()
         } else if (mCurrentState == CURRENT_STATE_PAUSE) {
@@ -2908,7 +2902,9 @@ initDanmakuTouchListener()
     protected fun danmakuOnResume() {
         // ★ 恢复：从冻住的那一帧**接着走**（不重新对齐播放器位置），斜率回到当前倍速
         //（PiliPlus 的 `_ticker.start()`）。位置与播放器之间那点差交给采样的斜率微调慢慢吃掉。
-        val pos = currentPositionWhenPlaying
+        // ★[A-fix] 用 resumePosition：用户刚 seek 过的目标优先于底层可能还没刷新的旧位置；
+        //   否则拖回 0 后弹幕层会从旧位置开始（表现：拖回开头后一直没弹幕，直到视频走到旧位置）。
+        val pos = resumePosition
         setDanmakuClock(danmakuNowMs(), currentPlaybackSpeed())
         scheduleDanmakuSnapshot()
         if (mDanmakuView != null && mDanmakuView.isPrepared) {

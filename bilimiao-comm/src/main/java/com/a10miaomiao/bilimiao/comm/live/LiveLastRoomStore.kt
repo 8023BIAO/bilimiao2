@@ -270,7 +270,13 @@ object LiveLastRoomStore {
             "restore" to pending.restore,
             "livePageCount" to livePageCount,
         )
-        if (!memoryAuthoritative) seedFromDataStore(host)
+        // ★★2026-09-26 用户实测严重 bug 回退："任务被划掉 / 进程被杀之后再打开 App，
+        //   它又把那个直播间拉回来了 —— 保活强得离谱"。根因就是下面这次**冷启动补读**：
+        //   记录是持久化到 DataStore 的，进程没了它还在 → 重开必然恢复 ✗。
+        //   用户要的只是"**切到别的 App 再回来还在直播间**" ✓，不是"杀掉还能复活" ✗。
+        //   ⇒ 冷启动一律不补读；本进程写过的记录才作数（memoryAuthoritative = true）。
+        //   真要恢复"被系统回收后重开"的场景，请先与用户确认语义再加回来。
+        memoryAuthoritative = true
     }
 
     /**
@@ -316,6 +322,19 @@ object LiveLastRoomStore {
             "prevRestore" to pending.restore,
         )
         publish(Pending(room, restore = true))
+    }
+
+    /**
+     * ★2026-09-26 用户实测：从最近任务里**划掉** App（任务被移除）时，记录必须作废 ——
+     * 否则下次打开又会把那个直播间拉回来（"保活强得离谱" ✗）。
+     *
+     * [hermes-fix 2026-09-26] 由 `PlaybackService.onTaskRemoved()` 调用（同步、极轻）。
+     */
+    fun onTaskRemoved(context: Context) {
+        ensureAttached(context.applicationContext)
+        memoryAuthoritative = true
+        clear()
+        LivePageTrace.note("lastRoom.taskRemoved", "room" to (pending.roomId ?: "-"))
     }
 
     /** 清掉记录（"应当恢复"作废） */
