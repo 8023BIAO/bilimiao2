@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Kotlin
+.kotlin/
+
+# 构建产物与签名（避免误传仓库）
+*.apk
+*.aab
+*.keystore
+*.jks
+*.b64
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# AI 规则文件：含本机路径/局域网信息，只留本地，不进仓库
+/AGENTS.md

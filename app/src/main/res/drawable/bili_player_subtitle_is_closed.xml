@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 字幕关：字幕框 + 小写「a」+ 叉角标 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:pathData="M22,13.8 L22,7.5 Q22,4.5 19,4.5 L5,4.5 Q2,4.5 2,7.5 L2,16.5 Q2,19.5 5,19.5 L13.2,19.5" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M6.70,12.60 a3.50,3.50 0 1,0 7.00,0 a3.50,3.50 0 1,0 -7.00,0 Z" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M13.7,9.4 L13.7,14.6 Q13.7,16.4 15.6,16.4" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M15.70,19.40 a3.90,3.90 0 1,0 7.80,0 a3.90,3.90 0 1,0 -7.80,0 Z M16.49,17.71 L21.29,22.51 L22.71,21.09 L17.91,16.29 Z M21.29,16.29 L16.49,21.09 L17.91,22.51 L22.71,17.71 Z" android:fillColor="#FFFFFF" android:fillType="evenOdd" />
+</vector>

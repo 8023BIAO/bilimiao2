@@ -1,0 +1,780 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <FrameLayout
+        android:id="@+id/surface_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center">
+
+    </FrameLayout>
+
+    <!-- 听视频：黑掉画面只放音频（盖在 surface 上、弹幕层之下，不碰 surface 避免 GSY 误暂停） -->
+    <FrameLayout
+        android:id="@+id/audio_only_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_player_audio_only_on"
+                android:contentDescription="听视频中" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="听视频中"
+                android:textColor="#CCFFFFFF"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <master.flame.danmaku.ui.widget.DanmakuView
+        android:id="@+id/danmaku_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="false"
+        android:longClickable="false"
+        android:focusable="false"
+        android:focusableInTouchMode="false" />
+
+    <!-- 【已移除】new_danmaku_view — 新弹幕引擎已废弃 -->
+
+    <RelativeLayout
+        android:id="@+id/thumb"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentEnd="true"
+        android:layout_alignParentBottom="true"
+        android:background="#000000"
+        android:scaleType="fitCenter" />
+
+    <LinearLayout
+        android:id="@+id/layout_bottom"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:background="@drawable/gradient_reverse"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="invisible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/current"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="12dp"
+                android:text="00:00"
+                android:textColor="#ffffff" />
+
+            <SeekBar
+                android:id="@+id/progress"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_weight="1.0"
+                android:background="@null"
+                android:max="100"
+                android:maxHeight="4dp"
+                android:minHeight="4dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:progressDrawable="@drawable/layer_progress"
+                android:thumb="@drawable/video_seek_thumb" />
+
+            <TextView
+                android:id="@+id/total"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginRight="8dp"
+                android:text="00:00"
+                android:textColor="#ffffff" />
+
+            <TextView
+                android:id="@+id/auto_stop_timer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginRight="8dp"
+                android:text=""
+                android:textColor="#ff6666"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/send_danmaku_mini"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:paddingRight="8dp"
+                android:src="@drawable/ic_baseline_send_24"
+                app:tint="@color/white"
+                android:contentDescription="发送弹幕按钮"/>
+
+            <ImageView
+                android:id="@+id/fullscreen"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:paddingRight="12dp"
+                android:src="@drawable/ic_player_portrait_fullscreen"
+                android:contentDescription="全屏切换按钮"/>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/layout_full_mode_bottom"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/buttom_play"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginLeft="10dp"
+                android:layout_marginRight="20dp"
+                android:background="@null"
+                android:gravity="center"
+                android:src="@drawable/bili_player_play_can_play" />
+
+            <!-- 弹幕输入药丸：底色是固定的半透明白（shape_send_danmaku_bg #AAFFFFFF，压在视频上），
+                 所以字色必须**固定为深色**；原来没写 textColor → 深色主题下取到近白色的主题字色，
+                 白字压白药丸 = 看不见（审计发现） -->
+            <TextView
+                android:id="@+id/send_danmaku"
+                android:layout_width="0dp"
+                android:layout_height="30dp"
+                android:layout_weight="1"
+                android:text="发送弹幕"
+                android:textColor="#FF212121"
+                android:background="@drawable/shape_send_danmaku_bg"
+                android:gravity="center" />
+
+<!--            <FrameLayout-->
+<!--                android:layout_width="match_parent"-->
+<!--                android:layout_height="wrap_content"-->
+<!--                android:layout_weight="1"-->
+<!--                android:orientation="horizontal"></FrameLayout>-->
+
+            <LinearLayout
+                android:id="@+id/subtitle_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:id="@+id/subtitle_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/bili_player_subtitle_is_open" />
+
+                <TextView
+                    android:id="@+id/subtitle_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="字幕开"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
+            </LinearLayout>
+
+            <!-- AI 原声翻译开关：只在视频有 AI 翻译语言时才显示（代码里控制 visibility） -->
+            <LinearLayout
+                android:id="@+id/ai_translate_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/ai_translate_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/ic_player_ai_translate_off" />
+
+                <TextView
+                    android:id="@+id/ai_translate_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AI翻译"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
+            </LinearLayout>
+
+            <!-- 听视频（仅音频）开关 -->
+            <!-- 截图 -->
+            <LinearLayout
+                android:id="@+id/screenshot_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:id="@+id/screenshot_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/ic_player_screenshot" />
+
+                <TextView
+                    android:id="@+id/screenshot_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="截图"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/danmaku_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:id="@+id/danmaku_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/bili_player_danmaku_is_open" />
+
+                <TextView
+                    android:id="@+id/danmaku_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="弹幕开"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
+            </LinearLayout>
+
+
+            <!--
+              弹幕设置：从「更多」菜单搬到这里（用户要求：挨着弹幕开关，少点两步）。
+              图标用底栏那套官方规格（60x40 画布 / strokeWidth 3），和邻居一致。
+            -->
+            <LinearLayout
+                android:id="@+id/danmaku_setting_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:id="@+id/danmaku_setting_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/ic_player_danmaku_setting" />
+
+                <TextView
+                    android:id="@+id/danmaku_setting_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="弹幕设置"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
+            </LinearLayout>
+
+            <!--
+              清晰度：★ 不放图标了，直接显示**当前清晰度的文字**（用户要求："不要图标了，
+              直接显示目前选择的是什么文字"）。
+              理由：画质这东西任何图标都要靠猜（清/HD/钻石/竖条/马赛克都试过），
+              而"1080P"三个字是一眼就懂、不用翻译的。
+              做法对齐顶栏的倍速（play_speed_value 直接显示 x1.0）：
+              上面一行 = 当前清晰度（代码里 setQualityValue 写入），下面一行 = 「清晰度」标签。
+              高度仍占 20dp + 3dp 间距，和左右邻居的图标完全对齐。
+            -->
+            <LinearLayout
+                android:id="@+id/quality"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:foreground="?attr/selectableItemBackground"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/quality_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:text="—"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/quality_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="清晰度"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+            </LinearLayout>
+
+            <!--
+              画面比例（原「更多」菜单 → 画面比例）：不常用，但仍然放进底栏（只有全屏才出现，
+              竖屏不会占地方）。规格同底栏其它图标。
+            -->
+            <LinearLayout
+                android:id="@+id/screen_scale_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:id="@+id/screen_scale_switch_icon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/ic_player_screen_scale" />
+
+                <TextView
+                    android:id="@+id/screen_scale_switch_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="画面比例"
+                    android:textColor="@android:color/white"
+                    android:textSize="@dimen/default_tiny_text_size" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/lock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:foreground="?attr/selectableItemBackground"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <ImageView
+                    android:layout_width="wrap_content"
+                    android:layout_height="20dp"
+                    android:layout_marginBottom="3dp"
+                    android:src="@drawable/ic_player_locked_2" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="锁定"
+                    android:textColor="#ffffff"
+                    android:textSize="@dimen/default_tiny_text_size" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/bottom_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@id/layout_bottom"
+        android:layout_centerHorizontal="true"
+        android:layout_margin="5dp"
+        android:padding="5dp"
+        android:gravity="center"
+        android:textSize="16sp"
+        />
+
+    <!-- ★ 还原屏幕按钮（双指变形后显示） -->
+    <TextView
+        android:id="@+id/restore_scale"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:layout_above="@id/layout_bottom"
+        android:layout_marginBottom="4dp"
+        android:gravity="center"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:text="还原屏幕"
+        android:textSize="13sp"
+        android:textColor="@android:color/white"
+        android:background="@drawable/shape_restore_scale_btn"
+        android:visibility="gone" />
+
+    <ProgressBar
+        android:id="@+id/bottom_progressbar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="1.5dp"
+        android:layout_alignParentBottom="true"
+        android:max="100"
+        android:progressDrawable="@drawable/shape_bottom_progress" />
+
+    <ImageView
+        android:id="@+id/back_tiny"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_marginLeft="6dp"
+        android:layout_marginTop="6dp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/layout_top"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/video_title_bg"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:paddingLeft="10dp"
+            android:src="@drawable/ic_close_white_24dp"
+            android:contentDescription="退出按钮"/>
+
+        <!--
+          标题：**不再显示**（用户要求，对齐官方播放器）。
+          理由：播放器里这行字怎么都看不全（单行滚动也得几秒才滚完），还压着画面；
+          真想知道标题的人会去详情页看（详情页有完整标题 + 简介）。
+          做法：控件**保留但 invisible**（不是 GONE）——
+            · 保留：画中画窗口的标题就是从这个 TextView 的 text 读的（PicInPicHelper），
+              删了 PiP 就没标题；GSY 的 setUp 照样往里 setText，不受 visibility 影响；
+            · invisible 而不是 GONE：右侧按钮（听视频/空降/倍速/更多）位置不变，不会突然挤到左边。
+          marquee 那几个属性留着：以后想把标题放回来，改一行 visibility 就能继续滚。
+        -->
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="marquee"
+            android:marqueeRepeatLimit="marquee_forever"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:paddingLeft="10dp"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:visibility="invisible" />
+
+        <LinearLayout
+            android:id="@+id/cast_btn_layout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:layout_marginHorizontal="10dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/cast_btn_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="投屏"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/expand_btn_layout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:layout_marginHorizontal="10dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/expand_btn_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="选集"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/chapter_btn_layout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:layout_marginHorizontal="10dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/chapter_btn_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="章节"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+        <!--
+          听视频（仅音频）：进顶栏、紧挨空降助手两个按钮的左边（用户在底栏点的位置够不着 + 图标风格不统一）。
+          位置：XML 里放在 chapter_btn_layout 之后、play_speed 之前；空降两个按钮是运行时插在
+          chapter_btn_layout 后面的，所以最终顺序 = [听视频] [盾·空降] [盾·提交]。
+          样式与空降盾牌一致：24dp 纯白实心图标 + 10dp 内边距。
+        -->
+        <LinearLayout
+            android:id="@+id/audio_only_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/audio_only_switch_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:src="@drawable/ic_player_audio_only_on"
+                android:contentDescription="听视频（仅音频）" />
+
+        </LinearLayout>
+
+        <!--
+          小窗播放：原来只藏在「更多」菜单里（要点两下），这里给一个直接按钮。
+          样式跟邻居一致：24dp 实心图标 + 10dp 内边距（和听视频、空降盾牌同款）。
+          位置：紧跟在听视频之后 → 实际顺序 [听视频][盾·提交][ADS][小窗][倍速][⋮]。
+        -->
+        <LinearLayout
+            android:id="@+id/pip_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/pip_switch_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:src="@drawable/ic_player_pip"
+                android:contentDescription="小窗播放" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/play_speed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:layout_marginHorizontal="10dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <TextView
+                android:visibility="gone"
+                android:id="@+id/play_speed_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="倍速："
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/play_speed_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="x1.0"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+        <!--
+          播放设置：原来藏在 ⋮ 菜单里，这里直接给个按钮（更常用，所以放顶栏）。
+          样式与邻居一致（24dp 图标 + 10dp 内边距）。
+          ★ 原来的 ⋮（更多）按钮已按用户要求去掉：菜单里的项都搬到按钮上了。
+        -->
+        <LinearLayout
+            android:id="@+id/video_setting_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/video_setting_switch_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:src="@drawable/ic_player_video_setting"
+                android:contentDescription="播放设置" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <moe.codeest.enviews.ENDownloadView
+        android:id="@+id/loading"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_centerHorizontal="true"
+        android:layout_centerVertical="true"
+        android:visibility="invisible" />
+
+    <moe.codeest.enviews.ENPlayView
+        android:id="@+id/start"
+        android:layout_width="60dp"
+        android:layout_height="60dp"
+        android:layout_centerHorizontal="true"
+        android:layout_centerVertical="true"
+        android:layout_gravity="center_vertical"
+        android:contentDescription="播放或暂停按钮"/>
+
+
+    <ImageView
+        android:id="@+id/small_close"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
+        android:paddingLeft="10dp"
+        android:paddingTop="10dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_close_white_24dp"
+        android:visibility="gone"
+        android:contentDescription="关闭按钮"/>
+
+    <ImageView
+        android:id="@+id/lock_screen"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
+        android:layout_alignParentRight="true"
+        android:layout_centerVertical="true"
+        android:layout_marginRight="50dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/unlock"
+        android:visibility="gone"
+        android:contentDescription="锁定按钮"/>
+
+    <RelativeLayout
+        android:id="@+id/layout_lock_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/unlock_left"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_alignParentLeft="true"
+            android:layout_centerVertical="true"
+            android:layout_marginLeft="5dp"
+            android:src="@drawable/shape_unlock"
+            android:contentDescription="解锁按钮1"/>
+
+        <ImageView
+            android:id="@+id/unlock_right"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_alignParentRight="true"
+            android:layout_centerVertical="true"
+            android:layout_marginRight="10dp"
+            android:src="@drawable/shape_unlock"
+            android:contentDescription="解锁按钮2"/>
+
+    </RelativeLayout>
+
+    <FrameLayout
+        android:id="@+id/layout_drag_bar"
+        android:layout_width="match_parent"
+        android:layout_height="24dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/drag_bar"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@drawable/shape_small_drag_bar"
+            android:scaleType="center"
+            />
+
+        <ImageView
+            android:id="@+id/hold_up"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/shape_player_hold_up"
+            android:scaleType="center"
+            android:layout_marginEnd="0dp"
+            android:layout_gravity="end|center_vertical"
+            android:contentDescription="挂起按钮"/>
+
+    </FrameLayout>
+
+
+    <LinearLayout
+        android:id="@+id/speed_tips"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/shape_player_speed_tips_bg"
+        android:layout_centerHorizontal="true"
+        android:padding="10dp"
+        android:layout_marginTop="40dp"
+        android:visibility="gone">
+        <ImageView
+            android:id="@+id/speed_tips_icon"
+            android:layout_width="30dp"
+            android:layout_height="20dp"
+            android:layout_marginRight="5dp"
+            android:src="@drawable/shape_player_speed_tips_icon"
+            />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="倍速播放中"
+            android:textColor="@color/white"/>
+    </LinearLayout>
+
+</RelativeLayout>

@@ -1,0 +1,135 @@
+package cn.a10miaomiao.bilimiao.compose.pages.article
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cn.a10miaomiao.bilimiao.compose.base.ComposePage
+import androidx.activity.compose.BackHandler
+import cn.a10miaomiao.bilimiao.compose.common.diViewModel
+import cn.a10miaomiao.bilimiao.compose.common.localContainerView
+import cn.a10miaomiao.bilimiao.compose.common.foundation.LocalSeekEnabled
+import cn.a10miaomiao.bilimiao.compose.common.foundation.pagerTabIndicatorOffset
+import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
+import cn.a10miaomiao.bilimiao.compose.pages.community.MainReplyListPageContent
+import cn.a10miaomiao.bilimiao.compose.pages.community.MainReplyViewModel
+import com.a10miaomiao.bilimiao.store.WindowStore
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import org.kodein.di.compose.rememberInstance
+
+@Serializable
+class ArticleReaderPage(
+    val id: Long,
+) : ComposePage() {
+
+    @Composable
+    override fun Content() {
+        val articleVM: ArticleReaderViewModel = diViewModel(
+            key = "article_reader_$id"
+        ) { ArticleReaderViewModel(it, id) }
+
+        val windowStore: WindowStore by rememberInstance()
+        val windowState by windowStore.stateFlow.collectAsStateWithLifecycle()
+        val contentInsets = windowState.getContentInsets(localContainerView())
+        val innerPadding = contentInsets.toPaddingValues()
+
+        val article by articleVM.article.collectAsStateWithLifecycle()
+        val replyCount = article?.replyCount ?: 0
+        // 本页两个入口共用：opus 长 id 是**动态**，cv 小 id 才是专栏
+        val articleTabTitle = if (id >= 1_000_000_000_000L) "动态" else "专栏"
+        val tabs = remember(replyCount, articleTabTitle) {
+            listOf("article" to articleTabTitle, "reply" to "评论($replyCount)")
+        }
+        val pagerState = rememberPagerState(pageCount = { tabs.size })
+        val coroutineScope = rememberCoroutineScope()
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+        ) {
+            TabRow(
+                selectedTabIndex = pagerState.currentPage,
+                modifier = Modifier.padding(
+                    top = innerPadding.calculateTopPadding(),
+                    start = innerPadding.calculateLeftPadding(LayoutDirection.Ltr),
+                    end = innerPadding.calculateRightPadding(LayoutDirection.Ltr),
+                ),
+                containerColor = MaterialTheme.colorScheme.surface,
+                indicator = { tabPositions ->
+                    TabRowDefaults.PrimaryIndicator(
+                        Modifier.pagerTabIndicatorOffset(pagerState, tabPositions),
+                    )
+                },
+            ) {
+                tabs.forEachIndexed { index, tab ->
+                    val selected = pagerState.currentPage == index
+                    Tab(
+                        selected = selected,
+                        onClick = {
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(index)
+                            }
+                        },
+                        text = {
+                            Text(
+                                text = tab.second,
+                                color = if (selected)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    )
+                }
+            }
+
+            // 返回导航：在"评论"tab时返回切换到"专栏"tab
+            BackHandler(
+                enabled = pagerState.currentPage > 0
+            ) {
+                coroutineScope.launch { pagerState.animateScrollToPage(0) }
+            }
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                when (page) {
+                    0 -> ArticleReaderContent(
+                        viewModel = articleVM,
+                        bottomPadding = contentInsets.bottomDp.dp + windowStore.bottomAppBarHeightDp.dp,
+                    )
+                    1 -> CompositionLocalProvider(LocalSeekEnabled provides false) {
+                        // opus 评论 id/type 在数据加载后才知道（comment_id_str + type 11）
+                        val cid = articleVM.commentId.ifBlank { id.toString() }
+                        val replyVM: MainReplyViewModel = diViewModel(
+                            key = "article_reply_$cid"
+                        ) { MainReplyViewModel(it, cid, type = articleVM.replyType) }
+                        MainReplyListPageContent(
+                            headerContent = {},
+                            viewModel = replyVM,
+                            pageTitle = "评论",
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

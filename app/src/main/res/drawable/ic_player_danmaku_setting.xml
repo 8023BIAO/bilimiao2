@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 弹幕设置：弹幕本体 + 六角螺母角标（六角形＝本套的「设置」记号） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:pathData="M22,13.8 L22,7.5 Q22,4.5 19,4.5 L5,4.5 Q2,4.5 2,7.5 L2,16.5 Q2,19.5 5,19.5 L13.2,19.5" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M4.6,8.8 L11.6,8.8 M14.6,8.8 L19.4,8.8 M4.6,13.6 L9.6,13.6" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M23.90,19.40 L21.75,23.12 L17.45,23.12 L15.30,19.40 L17.45,15.68 L21.75,15.68 Z M18.10,19.40 a1.50,1.50 0 1,0 3.00,0 a1.50,1.50 0 1,0 -3.00,0 Z" android:fillColor="#FFFFFF" android:fillType="evenOdd" />
+</vector>

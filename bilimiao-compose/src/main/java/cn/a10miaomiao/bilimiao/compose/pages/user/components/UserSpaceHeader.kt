@@ -1,0 +1,416 @@
+package cn.a10miaomiao.bilimiao.compose.pages.user.components
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AssistChip
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cn.a10miaomiao.bilimiao.compose.R
+import cn.a10miaomiao.bilimiao.compose.components.image.previewer.ImagePreviewer
+import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
+import cn.a10miaomiao.bilimiao.compose.components.image.provider.localImagePreviewerController
+import cn.a10miaomiao.bilimiao.compose.components.image.viewer.ModelProcessor
+import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
+import cn.a10miaomiao.bilimiao.compose.components.user.UserLevelIcon
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.TransformItemView
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.VerticalDragType
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberPreviewerState
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberTransformItemState
+import cn.a10miaomiao.bilimiao.compose.pages.user.UserArchiveViewModel
+import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpaceViewModel
+import com.a10miaomiao.bilimiao.comm.live.entity.LiveUserStatus
+import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
+import com.a10miaomiao.bilimiao.comm.toast
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
+import com.bumptech.glide.integration.compose.GlideImage
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/**
+ * 用户空间顶部的大头像。
+ *
+ * ★为什么改成走 [LiveBadgedAvatar]（而不是原来的裸 GlideImage）：
+ *   用户在播时要在这张脸上挂「直播中」+ 涟漪，点头像直接进直播间。
+ *   头像本体（带图片预览器缩放层的那一坨）通过 `avatarContent` 槽位原样传进去，
+ *   所以**图片预览器的行为一点没变**，只是外面多了一层"在播装饰 + 点击路由"。
+ *
+ * ★为什么 [rippleActive] 要由外面传进来：
+ *   这个头像是跟着 `ChainScrollableLayout` 一起上滑淡出的（UserSpacePage 里算的 alpha），
+ *   滚上去之后虽然还在组合树里，但已经看不见了 —— 这时必须把涟漪停掉，
+ *   否则就是白白烧电。传 false 时 LiveBadgedAvatar 内部**整个动画节点都不进组合树**。
+ *
+ * ★为什么 [liveStatus] 是"外面塞进来"而不是自己去查：
+ *   这个页面的首屏接口 `x/v2/space` 本来就返回了 `live.liveStatus` / `live.roomid`
+ *   （见 SpaceInfo.LiveInfo 的注释），一份数据两用，**一次额外请求都不用发**。
+ */
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+private fun UserFaceImage(
+    face: String,
+    liveStatus: LiveUserStatus?,
+    rippleActive: Boolean,
+) {
+    val previewerController = localImagePreviewerController()
+    val previewerState = rememberPreviewerState(
+        verticalDragType = VerticalDragType.Down,
+        pageCount = { 1 },
+        getKey = { face },
+    )
+    val itemState = rememberTransformItemState(
+        intrinsicSize = Size(200f, 200f),
+    )
+    LiveBadgedAvatar(
+        face = face,
+        size = 80.dp,
+        liveStatus = liveStatus,
+        animateRipple = rippleActive,
+        // 没在播时点头像 = 原来的"看大图"；在播时被"进直播间"顶掉（用户要的就是这个）
+        onClick = {
+            previewerController.enterTransform(
+                previewerState,
+                listOf(
+                    PreviewImageModel(
+                        originalUrl = UrlUtil.autoHttps(face),
+                        previewUrl = UrlUtil.autoHttps(face) + "@200w_200h",
+                        height = 200f,
+                        width = 200f
+                    )
+                ),
+            )
+        },
+        avatarContent = {
+            TransformItemView(
+                key = face,
+                itemState = itemState,
+                transformState = previewerState,
+            ) {
+                GlideImage(
+                    modifier = Modifier.fillMaxSize()
+                        .clip(CircleShape),
+                    model = UrlUtil.autoHttps(face) + "@200w_200h",
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+private fun UserNameBox(
+    userName: String,
+    sign: String,
+    level: Int,
+    silence: Int,
+    officialVerify: Boolean,
+    officialVerifyTitle: String,
+    officialVerifyIcon: String,
+) {
+    Column {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = userName,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            UserLevelIcon(
+                modifier = Modifier
+                    .padding(start = 5.dp)
+                    .size(24.dp, 18.dp),
+                level = level,
+            )
+        }
+        if (officialVerify) {
+            Row(
+                modifier = Modifier.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlideImage(
+                    model = UrlUtil.autoHttps(officialVerifyIcon),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .padding(end = 2.dp)
+                        .size(16.dp),
+                )
+                Text(
+                    officialVerifyTitle,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+        Text(
+            text = sign,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        if (silence == 1) {
+            Text(
+                "⚠ 该账号封禁中",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NumBox(
+    num: String,
+    title: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .widthIn(min = 60.dp)
+            .padding(horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top,
+    ) {
+        Text(text = num, color = MaterialTheme.colorScheme.onBackground)
+        Text(text = title, fontSize = 12.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.outline)
+    }
+}
+
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+fun UserSpaceHeader(
+    modifier: Modifier = Modifier,
+    isLargeScreen: Boolean = false,
+    /**
+     * 头像上的涟漪要不要动。
+     *
+     * ★为什么由外面算：头部是跟着 `ChainScrollableLayout` 上滑淡出的
+     *   （UserSpacePage 里那个 `alpha`），滚出视野后它**仍在组合树里**，
+     *   LazyColumn 那种"回收即停"的省电机制在这里不生效 ——
+     *   所以把"可见性"从调用方显式传进来，看不见就别烧电。
+     */
+    rippleActive: Boolean = true,
+    viewModel: UserSpaceViewModel,
+    archiveViewModel: UserArchiveViewModel,
+) {
+    val detailData = viewModel.detailData.collectAsStateWithLifecycle().value ?: return Box {}
+    val cardData = detailData.card
+    // 在播状态直接来自本页首屏接口的 `live` 对象（一次额外请求都不用发，见 SpaceInfo.LiveInfo）
+    val liveStatus = remember(cardData.mid, detailData.live) {
+        LiveUserStatus.of(
+            uid = cardData.mid,
+            liveStatus = detailData.live.liveStatus,
+            roomId = detailData.live.roomid,
+        )
+    }
+    val location = cardData.space_tag?.firstOrNull {
+        it.type == "location"
+    }?.title ?: ""
+    val officialVerify = cardData.official_verify
+
+    val seriesList = archiveViewModel.seriesList.collectAsStateWithLifecycle().value
+    val seriesTotal = archiveViewModel.seriesTotal.collectAsStateWithLifecycle().value
+
+    Box(
+        modifier = modifier,
+    ) {
+        GlideImage(
+            model = UrlUtil.autoHttps(detailData.images.imgUrl),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .height(120.dp)
+                .fillMaxWidth()
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 80.dp, start = 10.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 5.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                UserFaceImage(
+                    face = cardData.face,
+                    liveStatus = liveStatus,
+                    rippleActive = rippleActive,
+                )
+                if (isLargeScreen) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(top = 45.dp, start = 10.dp), // 120 - 80
+                    ) {
+                        UserNameBox(
+                            userName = cardData.name,
+                            sign = cardData.sign,
+                            level = cardData.level_info.current_level,
+                            officialVerify = officialVerify.title.isNotBlank(),
+                            officialVerifyTitle = officialVerify.title,
+                            officialVerifyIcon = officialVerify.icon,
+                            silence = cardData.silence,
+                        )
+                    }
+                }
+                Row(
+                    Modifier.padding(top = 45.dp), // 120 - 80
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    NumBox(
+                        num = NumberUtil.converString(cardData.fans),
+                        title = "粉丝",
+                        onClick = viewModel::toFans,
+                    )
+                    VerticalDivider(Modifier.height(20.dp))
+                    NumBox(
+                        num = NumberUtil.converString(cardData.attention),
+                        title = "关注",
+                        onClick = {
+                            if (viewModel.isSelf || viewModel.userStore.isLogin()) {
+                                viewModel.toFollow()
+                            } else {
+                                toast("请先登录")
+                            }
+                        },
+                    )
+                    VerticalDivider(Modifier.height(20.dp))
+                    NumBox(
+                        num = NumberUtil.converString(cardData.likes.like_num),
+                        title = "获赞",
+                        onClick = viewModel::showLikeInfo,
+                    )
+                }
+            }
+            if (!isLargeScreen) {
+                UserNameBox(
+                    userName = cardData.name,
+                    sign = cardData.sign,
+                    level = cardData.level_info.current_level,
+                    officialVerify = officialVerify.title.isNotBlank(),
+                    officialVerifyTitle = officialVerify.title,
+                    officialVerifyIcon = officialVerify.icon,
+                    silence = cardData.silence,
+                )
+            }
+            Row(
+                modifier = Modifier.padding(top = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "UID:${cardData.mid}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+
+                Text(
+                    text = location,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+
+            }
+
+            val seriesHeight = 36.dp
+            if (seriesList.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier
+                        .padding(top = 5.dp)
+                        .fillMaxWidth()
+                        .height(seriesHeight)
+                        .clip(RoundedCornerShape(4.dp)),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    contentPadding = PaddingValues(end = 10.dp),
+                ) {
+                    items(seriesList, { it.param }) {
+                        AssistChip(
+                            onClick = { archiveViewModel.toSeriesDetail(it) },
+                            label = {
+                                Text(
+                                    text = it.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = when(it.type) {
+                                        "series" -> Icons.AutoMirrored.Default.List
+                                        "season" -> Icons.AutoMirrored.Default.Article
+                                        else -> Icons.AutoMirrored.Default.ViewList
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                            modifier = Modifier.height(seriesHeight),
+                        )
+                    }
+                    if (seriesTotal > seriesList.size) {
+                        item {
+                            AssistChip(
+                                onClick = archiveViewModel::toSeriesList,
+                                label = {
+                                    Text(
+                                        text = "更多合集",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                },
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                },
+                                modifier = Modifier.height(seriesHeight),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

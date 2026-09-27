@@ -1,0 +1,628 @@
+package cn.a10miaomiao.bilimiao.compose.pages.article
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.graphics.Typeface
+import android.net.Uri
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StrikethroughSpan
+import android.text.style.StyleSpan
+import android.text.style.UnderlineSpan
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
+import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
+import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
+import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
+import org.kodein.di.compose.rememberInstance
+import cn.a10miaomiao.bilimiao.compose.components.image.ImagesGrid
+import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
+import cn.a10miaomiao.bilimiao.compose.components.image.provider.localImagePreviewerController
+import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.TransformItemView
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.VerticalDragType
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberPreviewerState
+import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberTransformItemState
+import com.a10miaomiao.bilimiao.comm.mypage.myMenu
+import com.a10miaomiao.bilimiao.comm.utils.HtmlTagHandler
+import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
+import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
+import com.bumptech.glide.integration.compose.GlideImage
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.min
+
+/** 专栏头部日期格式：提到文件级，避免每次重组都 new 一个（只用主线程，无并发问题） */
+private val ARTICLE_DATE_FORMAT = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+fun ArticleReaderContent(
+    viewModel: ArticleReaderViewModel,
+    bottomPadding: androidx.compose.ui.unit.Dp = 32.dp,
+) {
+    val context = LocalContext.current
+    // 两个入口共用本页：opus id（长 id）= 动态；专栏 cv id = 专栏。
+    // 文案跟着走，否则"点动态进来标题写着专栏"。
+    val isOpus = viewModel.articleId >= 1_000_000_000_000L
+    val pageLabel = if (isOpus) "动态" else "专栏"
+    val articleUrl = if (isOpus) {
+        "https://t.bilibili.com/${viewModel.articleId}"
+    } else {
+        "https://www.bilibili.com/read/cv${viewModel.articleId}"
+    }
+
+    val menu = rememberMyMenu {
+        myItem {
+            key = 1
+            iconFileName = "ic_baseline_open_in_browser_24"
+            title = "浏览器打开"
+        }
+        myItem {
+            key = 2
+            iconFileName = "ic_baseline_content_copy_24"
+            title = "复制链接"
+        }
+    }
+    val configId = PageConfig(title = pageLabel, menu = menu)
+    PageListener(configId = configId) { _, item ->
+        when (item.key) {
+            1 -> {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(articleUrl))
+                context.startActivity(intent)
+            }
+            2 -> {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("${pageLabel}链接", articleUrl))
+                android.widget.Toast.makeText(context, "已复制链接", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val article by viewModel.article.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+
+    if (isLoading && article == null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    if (error != null && article == null) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = error ?: "加载失败",
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Surface(
+                    onClick = { viewModel.loadArticle() },
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                ) {
+                    Text(
+                        text = "重试",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    val data = article ?: return
+
+    SwipeToRefresh(
+        refreshing = isRefreshing,
+        onRefresh = { viewModel.refresh() },
+    ) {
+        SelectionContainer(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = bottomPadding)
+            ) {
+                // Banner
+                if (data.bannerUrl.isNotBlank()) {
+                    item {
+                        val imageUrl = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
+                            if (data.bannerUrl.startsWith("//")) "https:${data.bannerUrl}" else data.bannerUrl
+                        )
+                        GlideImage(
+                            model = imageUrl,
+                            contentDescription = data.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp),
+                        )
+                    }
+                }
+
+                // Title
+                item {
+                    Text(
+                        text = data.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                }
+
+                // Author row
+                item {
+                    Surface(
+                        onClick = { viewModel.toAuthorPage() },
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val faceUrl = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
+                                if (data.authorFace.startsWith("//")) "https:${data.authorFace}" else data.authorFace
+                            )
+                            GlideImage(
+                                model = faceUrl,
+                                contentDescription = data.authorName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape),
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = data.authorName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Row {
+                                    Text(
+                                        text = "阅读 ${NumberUtil.converString(data.viewCount.toString())}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    if (data.publishTime > 0) {
+                                        val dateStr = ARTICLE_DATE_FORMAT.format(Date(data.publishTime * 1000))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = dateStr,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = "${data.words}字",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // Stats — 放在作者信息下方
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        StatItem("阅读", NumberUtil.converString(data.viewCount.toString()))
+                        StatItem("点赞", NumberUtil.converString(data.likeCount.toString()))
+                        StatItem("收藏", NumberUtil.converString(data.favoriteCount.toString()))
+                        StatItem("评论", NumberUtil.converString(data.replyCount.toString()))
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Content paragraphs
+                itemsIndexed(data.paragraphs) { _, paragraph ->
+                    when (paragraph) {
+                        is ArticleParagraph.TextParagraph -> TextParagraphItem(paragraph)
+                        is ArticleParagraph.ImageParagraph -> ImageParagraphItem(paragraph)
+                    }
+                }
+
+                // End spacer
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun TextParagraphItem(paragraph: ArticleParagraph.TextParagraph) {
+    val align = when (paragraph.align) {
+        "center" -> TextAlign.Center
+        "right" -> TextAlign.End
+        else -> TextAlign.Start
+    }
+
+    val pageNavigation: PageNavigation by rememberInstance()
+    // 富文本节点点击处理：
+    //   at://{mid} → @用户空间；https:// → 内置浏览器；bilibili:// → 应用内路由
+    val linkInteractionListener = remember {
+        LinkInteractionListener { linkAnnotation ->
+            val link = (linkAnnotation as? LinkAnnotation.Clickable)?.tag ?: return@LinkInteractionListener
+            when {
+                link.startsWith("at://") -> {
+                    val mid = link.removePrefix("at://")
+                    pageNavigation.navigateByUri(Uri.parse("bilibili://space/$mid"))
+                }
+                link.startsWith("http://") || link.startsWith("https://") -> {
+                    pageNavigation.launchWebBrowser(link)
+                }
+                link.startsWith("bilibili://") || link.startsWith("bilimiao://") -> {
+                    pageNavigation.navigateByUri(Uri.parse(link))
+                }
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        contentAlignment = when (align) {
+            TextAlign.Center -> Alignment.Center
+            TextAlign.End -> Alignment.CenterEnd
+            else -> Alignment.CenterStart
+        }
+    ) {
+        Text(
+            text = buildAnnotatedString {
+                paragraph.nodes.forEach { node ->
+                    if (node.text.contains('<')) {
+                        val spanned = HtmlTagHandler.fromHtml(node.text)
+                        // 深色主题下正文里的深色字（<font color="#333333">）会变成黑底黑字 →
+                        // 这里把 onSurface 传进去，让太暗的字色被替换掉（与 parseNodeColor 同一套规则）
+                        val annotated = spannedToAnnotatedString(
+                            spanned,
+                            node.fontSize,
+                            darkThemeFallback = if (isSystemInDarkTheme()) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                null
+                            },
+                        )
+                        if (annotated.text.isBlank() && node.text.isNotBlank()) {
+                            append(node.text
+                                .replace(Regex("<[^>]+>"), "")
+                                .replace("&nbsp;", " ")
+                                .replace("&lt;", "<")
+                                .replace("&gt;", ">")
+                                .replace("&amp;", "&")
+                            )
+                        } else {
+                            append(annotated)
+                        }
+                    } else {
+                        val isRich = node.nodeKind.isNotBlank() && node.nodeKind != "formula"
+                        // 富文本节点用主题色高亮（纯文本类型除外），网页链接加 🔗、抽奖加 🎁
+                        val prefix = when (node.nodeKind) {
+                            "RICH_TEXT_NODE_TYPE_WEB" -> "\uD83D\uDD17"
+                            "RICH_TEXT_NODE_TYPE_LOTTERY" -> "\uD83C\uDF81"
+                            else -> ""
+                        }
+                        val textColor = if (
+                            isRich && node.nodeKind != "RICH_TEXT_NODE_TYPE_TEXT"
+                        ) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            parseNodeColor(node.color)
+                        }
+                        val style = SpanStyle(
+                            color = textColor,
+                            fontSize = node.fontSize.sp,
+                            fontWeight = if (node.bold) FontWeight.Bold else FontWeight.Normal,
+                            fontStyle = if (node.italic) FontStyle.Italic else FontStyle.Normal,
+                            textDecoration = if (node.underline) TextDecoration.Underline else TextDecoration.None,
+                        )
+                        val clickable = node.atMid.isNotBlank() || node.jumpUrl.isNotBlank()
+                        if (clickable) {
+                            val tag = if (node.atMid.isNotBlank()) "at://${node.atMid}"
+                            else node.jumpUrl
+                            withLink(
+                                LinkAnnotation.Clickable(
+                                    tag = tag,
+                                    styles = TextLinkStyles(style = style),
+                                    linkInteractionListener = linkInteractionListener,
+                                )
+                            ) {
+                                append(prefix + node.text)
+                            }
+                        } else {
+                            withStyle(style) {
+                                append(prefix + node.text)
+                            }
+                        }
+                    }
+                }
+            },
+            textAlign = align,
+            lineHeight = (17 * 1.6).sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * @param darkThemeFallback 非 null 时（= 当前是深色主题），把亮度太低的文字色换成它，
+ *   避免 `<font color="#333333">` 这类正文在深色背景上不可见。
+ */
+private fun spannedToAnnotatedString(
+    spanned: Spanned,
+    baseFontSize: Int,
+    darkThemeFallback: Color? = null,
+): AnnotatedString {
+    return buildAnnotatedString {
+        val text = spanned.toString()
+        append(text)
+        spanned.getSpans(0, spanned.length, Any::class.java).forEach { span ->
+            val start = spanned.getSpanStart(span)
+            val end = spanned.getSpanEnd(span)
+            if (start < 0 || end <= start || start >= text.length || end > text.length) return@forEach
+            when (span) {
+                is StyleSpan -> {
+                    val fw = when (span.style) {
+                        Typeface.BOLD, Typeface.BOLD_ITALIC -> FontWeight.Bold
+                        else -> FontWeight.Normal
+                    }
+                    val fs = when (span.style) {
+                        Typeface.ITALIC, Typeface.BOLD_ITALIC -> FontStyle.Italic
+                        else -> FontStyle.Normal
+                    }
+                    addStyle(SpanStyle(fontWeight = fw, fontStyle = fs), start, end)
+                }
+                is ForegroundColorSpan -> {
+                    val spanColor = Color(span.foregroundColor)
+                    addStyle(
+                        SpanStyle(
+                            color = darkThemeFallback?.let { adaptDarkTextColor(spanColor, it) }
+                                ?: spanColor
+                        ),
+                        start,
+                        end,
+                    )
+                }
+                is AbsoluteSizeSpan -> {
+                    addStyle(SpanStyle(fontSize = span.size.sp), start, end)
+                }
+                is RelativeSizeSpan -> {
+                    addStyle(SpanStyle(fontSize = (baseFontSize * span.sizeChange).sp), start, end)
+                }
+                is UnderlineSpan -> {
+                    addStyle(SpanStyle(textDecoration = TextDecoration.Underline), start, end)
+                }
+                is StrikethroughSpan -> {
+                    addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), start, end)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
+internal fun ImageParagraphItem(paragraph: ArticleParagraph.ImageParagraph) {
+    val pictures = paragraph.pics
+    if (pictures.isEmpty()) return
+
+    // 单图：保持"整宽大图 + 点开单图预览"的老样子
+    if (pictures.size == 1) {
+        val pic = pictures[0]
+        val imageUrl = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
+            if (pic.url.startsWith("//")) "https:${pic.url}" else pic.url
+        )
+        val imgWidth = if (pic.width > 0) pic.width else 600
+        val imgHeight = if (pic.height > 0) pic.height else 400
+        val aspectRatio = if (pic.width > 0 && pic.height > 0) {
+            pic.width.toFloat() / pic.height.toFloat()
+        } else {
+            16f / 9f
+        }
+        val previewerController = localImagePreviewerController()
+        val imageModel = PreviewImageModel(
+            previewUrl = imageUrl,
+            originalUrl = imageUrl,
+            width = imgWidth.toFloat(),
+            height = imgHeight.toFloat(),
+        )
+        val previewerState = rememberPreviewerState(
+            verticalDragType = VerticalDragType.Down,
+            pageCount = { 1 },
+            getKey = { imageUrl },
+        )
+        val itemState = rememberTransformItemState(
+            intrinsicSize = Size(imgWidth.toFloat(), imgHeight.toFloat()),
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        previewerController.enterTransform(
+                            state = previewerState,
+                            models = listOf(imageModel),
+                            index = 0,
+                        )
+                    },
+            ) {
+                TransformItemView(
+                    key = imageUrl,
+                    itemState = itemState,
+                    transformState = previewerState,
+                ) {
+                    GlideImage(
+                        model = imageUrl,
+                        contentDescription = paragraph.caption.ifBlank { "图片" },
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(aspectRatio),
+                    )
+                }
+            }
+            if (paragraph.caption.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = paragraph.caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        return
+    }
+
+    // 多图（图文动态/多图专栏）：一个段落里的整组图用九宫格铺开 ——
+    // 与动态卡片、评论图片同一个 ImagesGrid，点任意一张进预览器还能左右翻整组
+    val imageModels = remember(pictures) {
+        pictures.map { pic ->
+            val url = com.a10miaomiao.bilimiao.comm.utils.UrlUtil.autoHttps(
+                if (pic.url.startsWith("//")) "https:${pic.url}" else pic.url
+            )
+            val imgWidth = if (pic.width > 0) pic.width else 600
+            val imgHeight = if (pic.height > 0) pic.height else 400
+            val w = min(600, imgWidth)
+            val h = w * imgHeight / imgWidth
+            PreviewImageModel(
+                previewUrl = url + "@${w}w_${h}h",
+                originalUrl = url,
+                width = imgWidth.toFloat(),
+                height = imgHeight.toFloat(),
+            )
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        ImagesGrid(imageModels)
+        if (paragraph.caption.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = paragraph.caption,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatItem(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun parseNodeColor(hexColor: String): Color {
+    if (hexColor.isBlank()) return MaterialTheme.colorScheme.onSurface
+    val isDarkTheme = isSystemInDarkTheme()
+    val fallback = MaterialTheme.colorScheme.onSurface
+    val parsed = runCatching {
+        val colorStr = hexColor.removePrefix("#")
+        when (colorStr.length) {
+            6 -> Color(android.graphics.Color.parseColor("#$colorStr"))
+            8 -> Color(android.graphics.Color.parseColor("#$colorStr"))
+            else -> null
+        }
+    }.getOrNull() ?: return fallback
+    // 暗色主题下，深色文字（如 #333333）不可见 → 用 onSurface 代替
+    return if (isDarkTheme) adaptDarkTextColor(parsed, fallback) else parsed
+}
+
+/**
+ * 深色主题下，亮度太低的文字色换成 [fallback]（否则黑底黑字看不见）。
+ * `parseNodeColor` 与 `spannedToAnnotatedString` 共用这一套阈值。
+ */
+private fun adaptDarkTextColor(color: Color, fallback: Color): Color {
+    val luminance = 0.299f * color.red + 0.587f * color.green + 0.114f * color.blue
+    return if (luminance < 0.4f) fallback else color
+}

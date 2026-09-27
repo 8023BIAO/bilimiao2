@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 及以下的备份规则（android:fullBackupContent）。
+
+  背景：android:allowBackup="true" 且**没有任何规则文件**时，云备份/换机迁移会把
+  shared_prefs 和 files 全部搬走 —— 其中包括登录凭据（files/auth_hd、Cookie 仓库）。
+  这些数据一旦恢复到另一台设备（或出现在用户的 Google Drive 备份里），等于账号被复制一份。
+  这里只排除**凭据/指纹/日志**，设置项（DataStore）仍然正常备份和恢复。
+
+  ★ 新增规则时注意：Android 12+ 走 data_extraction_rules.xml，两份文件要同步改。
+-->
+<full-backup-content>
+    <!-- 登录凭据（AES 加密，密钥由 buvid 派生） -->
+    <exclude domain="file" path="auth_hd" />
+    <!-- Cookie 仓库：含 SESSDATA / bili_jct / buvid3 等 -->
+    <exclude domain="sharedpref" path="bilimiao_cookie_store.xml" />
+    <exclude domain="sharedpref" path="bilimiao_web_cookie.xml" />
+    <!-- buvid 本身（也是 auth_hd 的密钥材料） -->
+    <exclude domain="sharedpref" path="bilimiao.xml" />
+    <!-- 游客身份/指纹备份 -->
+    <exclude domain="sharedpref" path="bilimiao_guest_backup.xml" />
+    <exclude domain="sharedpref" path="bilimiao_guest_fingerprint.xml" />
+    <!-- 反诈检测记录（含评论正文、rpid）与诊断日志 -->
+    <exclude domain="sharedpref" path="antifraud_last_result.xml" />
+    <exclude domain="file" path="antifraud_diag.log" />
+    <exclude domain="file" path="error_logs" />
+</full-backup-content>
