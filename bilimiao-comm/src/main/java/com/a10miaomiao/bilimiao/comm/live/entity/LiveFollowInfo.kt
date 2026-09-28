@@ -111,8 +111,10 @@ data class LiveIdolRoom(
     val area_v2_name: String = "",
     val area_v2_parent_id: Long = 0,
     val area_v2_parent_name: String = "",
-    /** 本接口实测不返回 `live_status`；默认 [LiveStatus.LIVE]（"它列出来的就是在播的"，与 getRoomList 同一个理由） */
-    val live_status: Int = LiveStatus.LIVE,
+    // ★2026-09-29 删除：`live_status`（本接口实测**不返回**该字段，默认值 LIVE 只是为了喂卡片角标）。
+    //   角标已按用户要求整体删除、[toRoomItem] 也不再映射它，全仓已无读者 ⇒ 一并删掉。
+    //   （注意：[LiveFollowRoom.live_status] **不能删** —— 它是 [LiveFollowListData.liveRooms]
+    //     "只列在播的人"的过滤判据。）
 )
 
 /** [LiveIdolRoom] → 首页直播卡片统一吃的 [LiveRoomItem]（UI 一行都不用为"关注"特判） */
@@ -129,7 +131,6 @@ fun LiveIdolRoom.toRoomItem(): LiveRoomItem = LiveRoomItem(
     area_name = area_v2_name.ifBlank { area_name },
     parent_id = area_v2_parent_id,
     parent_name = area_v2_parent_name,
-    live_status = live_status,
 )
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -242,5 +243,4 @@ fun LiveFollowRoom.toRoomItem(): LiveRoomItem = LiveRoomItem(
     area_id = area_id,
     area_name = area_name_v2.ifBlank { area_name },
     parent_id = parent_area_id,
-    live_status = live_status,
 )

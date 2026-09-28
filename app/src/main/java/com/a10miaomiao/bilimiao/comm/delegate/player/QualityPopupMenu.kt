@@ -7,13 +7,11 @@ import android.view.ContextThemeWrapper
 import androidx.appcompat.widget.PopupMenu
 import com.a10miaomiao.bilimiao.R
 import com.a10miaomiao.bilimiao.comm.delegate.player.entity.PlayerSourceInfo
-import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.utils.setCheckMarkTint
 
 class QualityPopupMenu(
     private val activity: Activity,
     private val anchor: View,
-    private val userStore: UserStore,
     private val list: List<PlayerSourceInfo.AcceptInfo>,
     private val value: Int,
     private val themeColor: Int,

@@ -675,7 +675,6 @@ class PlayerController(
         val popup = QualityPopupMenu(
             activity = activity,
             anchor = view,
-            userStore = userStore,
             list = sourceInfo.acceptList,
             value = delegate.quality,
             themeColor = player?.themeColor ?: 0,

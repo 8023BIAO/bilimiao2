@@ -8,13 +8,13 @@ import kotlinx.serialization.Serializable
  * ★实测（2026-02，容器内 curl）：该接口**返回的字段就下面这些**（一次性把所有 key 打出来核对过），
  *   没有 `live_status`、没有 `live_time`、没有 `watched_show`。这一点很关键：
  *
- *   - **`live_status` 接口不给**。所以 [live_status] 的默认值是 [LiveStatus.LIVE]：
- *     这个接口是"按分区取**正在直播**的房间"，列表里的房间本来就是在播的，
- *     默认值 = 事实；哪天后端真把这个字段补上，解析出来就能自动生效（UI 侧的"未开播/轮播"
- *     角标逻辑见 HomeLiveContent.kt 的 LiveRoomCard，不需要再改）。
  *   - **`uname`/`face` 接口给**（这正是它比 `get_info` 好用的地方：`room/v1/Room/get_info`
  *     实测不返回主播名，要主播信息还得再打一次 h5 接口 —— 列表页一次就能拿到卡片要的全部字段，
  *     35 个房间不用发 35 次请求）。
+ *   - **`live_status` 接口不给**：这里原先声明过一个默认 [LiveStatus.LIVE] 的字段，只服务卡片
+ *     左上角那颗「直播中」角标；角标 2026-09-29 已按用户要求整体删除（列表条条都是直播，
+ *     角标不携带信息），字段随之删掉 —— 全仓已无读取点。哪天真要区分"未开播/轮播"，
+ *     按 git 历史把它连同当时的实测结论取回来即可。
  *
  * 封面字段有 4 个（`user_cover`/`cover`/`system_cover`/`show_cover`）：
  * 实测 `user_cover == cover`，`system_cover` 是系统截的**关键帧**（直播没封面时用它）。
@@ -51,8 +51,6 @@ data class LiveRoomItem(
     val area_v2_name: String = "",
     val area_v2_parent_id: Long = 0,
     val area_v2_parent_name: String = "",
-    /** 开播状态。★接口当前不返回该字段 → 取默认值 [LiveStatus.LIVE]，详见类注释 */
-    val live_status: Int = LiveStatus.LIVE,
 ) {
     /**
      * 卡片要用的封面地址：优先主播自传封面，没有就用系统关键帧。

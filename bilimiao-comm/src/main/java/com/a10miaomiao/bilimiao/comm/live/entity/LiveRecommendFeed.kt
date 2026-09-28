@@ -43,8 +43,6 @@ import kotlinx.serialization.Serializable
  * | `area_id` / `area_name` | 同名 | 卡片上的分区角标直接用 `area_name`（实测 20/20 非空，如 292/火影忍者手游） |
  * | `parent_area_id` / `parent_area_name` | `parent_id` / `parent_name` | 推荐流用的是带 `_area_` 的这一套名字，语义与 `getRoomList` 的 `parent_id/parent_name` 完全一致（顶级分区，如 3/手游），所以在这里就地改名对齐 |
  * | `uid`/`uname`/`face`/`cover`/`system_cover`/`title`/`online` | 同名 | 实测 20/20 都非空、`uid > 0`（卡片上"点 UP 名进空间"照常可用） |
- * | `live_status` | 同名 | **推荐流绝大多数条目不给这个字段** → 映射时按 [LiveStatus.LIVE] 兜底（够用：推荐流只推在播的房间）；哪天真给了，这里会自动生效，卡片不用改 |
- *
  * ## 刻意**没有**建模的字段（以及为什么）
  * - `link`：推荐流的 `link` 是一整条**带签名 CDN 参数的播放器 URL**（单条 2~3KB，`expires` 秒级过期），
  *   与 [LiveRoomItem.link] 文档里"形如 `/5050` 的站内路径"**不是一回事**；页面跳转走的是
@@ -177,6 +175,4 @@ fun LiveRecommendRoom.toRoomItem(): LiveRoomItem = LiveRoomItem(
     area_name = area_name.orEmpty(),
     parent_id = parent_area_id ?: 0,
     parent_name = parent_area_name.orEmpty(),
-    // 推荐流只推在播的房间；字段真给了就按它显示（轮播/未开播会自己亮灰角标）
-    live_status = live_status ?: LiveStatus.LIVE,
 )
