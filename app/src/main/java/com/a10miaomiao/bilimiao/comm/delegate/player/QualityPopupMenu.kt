@@ -20,8 +20,6 @@ class QualityPopupMenu(
 ) {
     private var qualityListener: ((Int) -> Unit)? = null
     private var popupMenu = PopupMenu(ContextThemeWrapper(activity, com.a10miaomiao.bilimiao.R.style.Theme_Bilimiao), anchor)
-    val MAX_QUALITY_NOT_LOGIN = 48 // 48[480P 清晰]
-    val MAX_QUALITY_NOT_VIP = 80 // 80[1080P 高清]
     private var currentValue = value
 
     init {

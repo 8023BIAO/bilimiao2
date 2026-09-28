@@ -3804,7 +3804,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ## 一个弹窗、两段（[LiveListDialog] 的 `segments`）
      * | 段 | 标题 | 内容 | 点一条做什么 |
      * |---|---|---|---|
-     * | 0 | 清晰度 | `desc（服务端未提供 · 可能拿不到）?（qn N）` + 说明行 | 换档 → `requestedQn = qn` + `delegate.switchQuality(qn)`；点**已请求但服务端没给**的那一档 → 只 toast 指向「重新取流」（**不重复取流**） |
+     * | 0 | 清晰度 | `desc（qn N）` + 说明行（只列服务端本次下发的档位） | 换档 → `requestedQn = qn` + `delegate.switchQuality(qn)`；点**已请求但服务端没给**的那一档 → 只 toast 指向「重新取流」（**不重复取流**） |
      * | 1 | 线路 | `线路 N　desc` + 说明行 | `delegate.switchToLine(index)` |
      *
      * 两段的既有行为**一条没少**（原来两个弹窗各自的那套原样搬过来）：
@@ -3842,26 +3842,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         val pickers = ArrayList<(Int) -> Unit>(2)
         val segments = ArrayList<Segment>(2)
         if (qualities.isNotEmpty()) {
-            // ★标注规则（只标"比服务端可用的最高档还高"的档）：
-            //   `accepted = false` 只表示这一档**不在服务端这次下发的 `accept_qn` 里**，
-            //   **不等于"需要大会员"** —— 抓包样本里 150 高清 / 80 流畅 也常在 accept_qn 之外，
-            //   但它们只是"低于服务端愿意列的最高档"，通常照样能拿，标它们就是误报。
-            //   所以只对**高于 maxAcceptedQn** 的档加后缀（那才是真正"服务端这次没给"的部分）。
-            //   设置页那套"(需大会员)"是另一种语义（设置里选了这档、实际要会员才生效），不要照抄。
-            //   ★`acceptedSet` 为空时 delegate 会把所有档都算 accepted（见 `buildQualities`），
-            //   这里的 maxAcceptedQn 就是最高档 ⇒ 一个后缀都不会加（退化态下不误标）。
-            //   ★`?: Int.MAX_VALUE`（**不是 0**）：万一服务端给的 accept_qn 非空却没有任何正值（例如只回 [0]），
-            //   delegate 侧就没有任何一档算 accepted ⇒ maxAcceptedQn 取 0 会让 "qn > 0" 恒真、8 档全带后缀，
-            //   正好是本节要避免的误标；取 MAX_VALUE = "一档都没被接受时不标任何档"。
-            //   （8 份抓包样本 + 8 次实测里 accept_qn 恒为正，这是防御性写法。）
-            val maxAcceptedQn = qualities.filter { it.accepted }.maxOfOrNull { it.qn } ?: Int.MAX_VALUE
+            // ★列表就是"服务端本次下发的档位"（`livePlayerDelegate.buildQualities()` 只收 accept_qn），
+            //   服务端没给的档位不显示、也不需要任何"可能拿不到"的标注 —— 用户口径：
+            //   "它给我们什么，就去选择什么。"
             val entries = qualities.map { option ->
                 val isPlayingNow = option.qn == actualQn
                 val requestedButUnavailable = option.qn == requestedQn && !isPlayingNow
-                val notOfferedHint =
-                    if (!option.accepted && option.qn > maxAcceptedQn) "（服务端未提供 · 可能拿不到）" else ""
                 Entry(
-                    label = "${option.desc}$notOfferedHint（qn ${option.qn}）",
+                    label = "${option.desc}（qn ${option.qn}）",
                     note = when {
                         isPlayingNow -> "当前正在播放"
                         requestedButUnavailable -> "已请求 · 当前不可用（需登录或大会员）"

@@ -190,16 +190,10 @@ class LivePlayerDelegate(
 
     /**
      * 一档清晰度：qn + 中文描述（如 10000 原画 / 250 超清）。
-     *
-     * @param accepted 这一档在服务端 `accept_qn` 里（= 房间能力内、服务端明确接受过）。
-     *   `false` = 它只出现在服务端下发的全表 `g_qn_desc` 里，能不能真的拿到要看账号能力
-     *   （未登录 / 无大会员时服务端会静默降级）—— UI 用它加一句标注，**不阻止用户选**。
-     *   ★默认 true：本类此前只有 `qn`/`desc` 两个字段，默认值让既有构造点不必逐个改
-     *   （全仓只有 [buildQualities] 一处构造，见该函数）。
-     *   ★★短路口径：服务端**一个 accept_qn 都没给**（拿不到房间能力表）时恒为 `true` ——
-     *   "没有能力信息" ≠ "这一档拿不到"，此时不做能力判断、UI 也不加标注。
+     * ★列表里只会出现**服务端本次下发的档位**（见 [buildQualities]），
+     *   所以不需要任何"这一档能不能拿到"的标记 —— 服务端没给的档位根本不列出来。
      */
-    data class LiveQualityOption(val qn: Int, val desc: String, val accepted: Boolean = true)
+    data class LiveQualityOption(val qn: Int, val desc: String)
 
     /**
      * 一条线路（给 UI 渲染"线路选择"列表用）。
@@ -898,17 +892,13 @@ class LivePlayerDelegate(
             ?: 0
 
     /**
-     * 清晰度菜单数据：候选集 = `g_qn_desc` ∪ `accept_qn`，描述取自 `g_qn_desc`，按 qn 从高到低。
+     * 清晰度菜单数据：**只列服务端本次下发的档位**（`accept_qn`），描述取自 `g_qn_desc`，按 qn 从高到低。
      *
-     * ★为什么取并集（用户反馈）：服务端在 `g_qn_desc` 里**早就下发了全 8 档**
-     *   （30000 杜比 / 20000 4K / 15000 2K / 10000 原画 / 400 蓝光 / 250 超清 / 150 高清 / 80 流畅），
-     *   此前只用 `accept_qn`（房间"已接受"的档位，匿名抓包实测只有 3~4 档）→ 菜单里看不到更高的档位。
-     *   这里只是把**服务端已经下发的档位如实展示**：拿不到的档位服务端会照旧按账号能力降级
-     *   （见 [fetchWithFallback] 退到 250/150），没有任何绕过/伪造签名的行为。
-     * · `accept_qn` 必须并进来：它是"服务端明确接受"的唯一凭据（某些房间的 400 只在这里）。
-     * · `accepted` 标记这档在不在 `accept_qn` 里，供 UI 标注"可能拿不到"，不参与取流决策。
-     *
-     * ★`g_qn_desc` 是**房间能力全表**，不等于"你能拿到"；"你能拿到"看 [LiveStreamInfo.actualQn]。
+     * ★用户拍板的口径："它给我们什么，就去选择什么……它都没给我们，我们还去显示？"
+     *   所以候选集就是服务端明确接受的那一份（`accept_qn`）；服务端没给的档位**不列**。
+     * · `g_qn_desc`（房间能力全表）只用来取**中文描述**，以及 `accept_qn` 为空时的**兜底**
+     *   （那种情况下列全表总比列空菜单强 —— 这是本函数一直以来的兜底，不是"多列档位"）。
+     * · 谁"实际能拿到"仍然看 [LiveStreamInfo.actualQn]（未登录/无大会员时服务端静默降级，如实显示）。
      */
     private fun buildQualities(playurl: LivePlayUrl): List<LiveQualityOption> {
         val descMap = playurl.g_qn_desc.associate { it.qn to it.desc }
@@ -918,15 +908,11 @@ class LivePlayerDelegate(
             .firstOrNull { it.accept_qn.isNotEmpty() }
             ?.accept_qn
             .orEmpty()
-        val acceptedSet = acceptQn.toSet()
-        // 并集：全表 ∪ 服务端明确接受的档位；两边都空时结果为空（与改前一致）
-        return (descMap.keys + acceptQn).filter { it > 0 }
+        val qns = if (acceptQn.isNotEmpty()) acceptQn else descMap.keys.toList()
+        return qns.filter { it > 0 }
+            .distinct()
             .sortedDescending()
-            // ★`acceptedSet` 为空（服务端一个 accept_qn 都没给）时**不做能力判断**：全按可用处理。
-            //   否则 8 档会全部标成 accepted=false，UI 会给每一档（连正在播的那一档）都加
-            //   "可能拿不到"—— 拿不到可用列表 ≠ 这一档拿不到，那是纯粹的误导。
-            .map { qn -> LiveQualityOption(qn, descMap[qn] ?: qn.toString(),
-                accepted = acceptedSet.isEmpty() || qn in acceptedSet) }
+            .map { qn -> LiveQualityOption(qn, descMap[qn] ?: qn.toString()) }
     }
 
     private fun applySnapshot(snapshot: FetchSnapshot) {

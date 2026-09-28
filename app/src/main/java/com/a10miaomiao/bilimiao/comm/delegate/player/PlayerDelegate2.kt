@@ -295,11 +295,7 @@ class PlayerDelegate2(
 //     /** AI 原声翻译可选语言（HTTP playurl 的 language.items；gRPC 取流拿不到，需单独补一次） */
 //     private var availableLanguages: List<PlayerSourceInfo.LanguageInfo> = emptyList()
 
-    // 未登陆：48[480P 清晰]及以下
-    // 已登陆无大会员：80[1080P 高清]及以下
-    // 大会员：无限制
-    val MAX_QUALITY_NOT_LOGIN = 48 // 48[480P 清晰]
-    val MAX_QUALITY_NOT_VIP = 80 // 80[1080P 高清]
+    // 画质**不做本地会员限制**：服务端 `accept_quality` 下发哪些档就列哪些（见 QualityPopupMenu.initMenu()）
     var quality = 64 // 默认[高清 720P]
     var fnval = 4048 // 视频格式: 0:flv,1:mp4,4048:dash
 
