@@ -125,7 +125,8 @@ import java.util.concurrent.atomic.AtomicLong
  *   + [ListStateBox] + [SwipeToRefresh] + 加载代数丢弃过期响应）。
  * - **房间卡片的信息层次**：PiliPlus `lib/pages/live_search/widgets/live_search_room.dart`
  *   —— 封面上一行渐变条：左边主播名、右边人气文案（`watched_show.text_large`），下面标题两行。
- *   我们只多加了用户点名要的「直播中」角标（PiliPlus 靠进详情页才知道开播状态）。
+ *   （★2026-09-29：我们原先多挂的那颗「直播中」角标已删除，现在与 PiliPlus 一致 ——
+ *    这些列表条条都是直播，角标不携带信息、还挡住封面左上角，用户要求全删。）
  *
  * ## 搜索历史：和全站搜索**分开存**（第四阶段改动）
  * 本页历史落在自己的库/表 `LiveSearchHistory_db` / `LiveSearchHistory`（[LiveSearchHistoryDB]），
@@ -788,13 +789,14 @@ private fun LiveSearchHistoryPanel(
  * 信息层次照 PiliPlus `live_search_room.dart`：
  * ```
  * ┌───────────────┐
- * │直播中          │  ← 角标（我们要的，PiliPlus 没有）
  * │   （封面）      │
  * │ 主播名    [人气]│  ← 底部渐变条 + 右下角人气胶囊
  * ├───────────────┤
  * │ 标题（最多两行） │
  * └───────────────┘
  * ```
+ * ★2026-09-29：封面左上角那颗「直播中」角标已删除（用户："还有这个直播中，我建议也全删了吧"）——
+ *   这一屏搜出来的**条条都是直播**，角标不携带信息，还挡住封面左上角；现在与 PiliPlus 的信息层次一致。
  * 人气文案直接用接口给的 `watched_show.text_large`（"15.5万人气"/"9.9万人看过"）——
  * 它是服务端算好的，用 `online` 自己拼会在"人看过"的房间里显示错含义（实测两种都有）。
  *
@@ -810,7 +812,7 @@ private fun LiveSearchHistoryPanel(
  * ## 两个点击区（与首页直播 Tab 的 `HomeLiveContent.kt`、全站搜索直播 Tab 同一套写法）
  * ```
  * ┌───────────────────────┐
- * │直播中          （封面）│  ┐
+ * │                （封面）│  ┐
  * │  主播名        [人气]  │  ├─ 点这里 → 进直播间（onClick）
  * ├───────────────────────┤  ┘
  * │ 标题（最多两行）        │  ┘
@@ -854,17 +856,8 @@ private fun LiveRoomCard(
                 loading = placeholder(R.drawable.bili_default_placeholder_img_tv),
                 failure = placeholder(R.drawable.bili_fail_placeholder_img_tv),
             )
-            Text(
-                text = "直播中",
-                // 底色是 primary，前景必须 onPrimary（深色主题下 primary 是浅色，白字看不见）
-                color = MaterialTheme.colorScheme.onPrimary,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+            // ★2026-09-29：封面左上角的「直播中」角标已删除（用户："还有这个直播中，我建议也全删了吧"）
+            //   —— 搜索结果的条条都是直播，角标不携带信息、还挡封面左上角。
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomStart)

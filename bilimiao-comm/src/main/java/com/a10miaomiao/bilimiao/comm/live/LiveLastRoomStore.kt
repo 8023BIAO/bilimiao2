@@ -122,6 +122,29 @@ object LiveLastRoomStore {
     /** 活着的直播间实例数（onCreate +1 / onDestroy -1）。> 0 = "还有一个直播间在（比如 PiP 小窗）" */
     @Volatile private var livePageCount = 0
 
+    /**
+     * ★task-55：**整任务已被划掉**（`PlaybackService.onTaskRemoved` → [onTaskRemoved]）之后，抑制补记。
+     *
+     * 为什么需要它：本任务给直播页加了"**系统清栈也要记得住**"的补记（见
+     * `LivePlayerActivity.onDestroy`）—— 那一刻页面同样 `isFinishing == true`，与"任务被划掉"
+     * 在页面侧**不可区分**。而任务移除时 [onTaskRemoved] 会 `clear()`；如果"服务先收到 onTaskRemoved、
+     * 页面随后才 onDestroy"，补记就会把刚清掉的账又记回来 ⇒ 用户划掉 App 再打开又冒出直播间
+     * （正是他骂过的"保活强得离谱"）。所以这里留一个抑制位：任务被划掉的这一刻起不再记账，
+     * 直到**有新的直播间页面被创建**（[onLivePageCreated] 复位 = 新的一局）。
+     *
+     * ★只在主线程读写（服务回调与页面钩子都在主线程），与既有字段同一套约定。
+     */
+    @Volatile private var taskRemovedSuppressRecord = false
+
+    /**
+     * ★task-55：账本里现在**有没有**"应当恢复"的记录（只读）。
+     *
+     * 给直播页在"系统清栈"那一刻判"要不要补记"用：账本非空通常意味着"用户确实是带着直播间
+     * 离开 App 的"（按 Home / PiP 那条路，[onLivePageLeavingApp] 已经记过），那种情况**不补记** ——
+     * 保持"同一时刻只有一条账"这条既有契约，PiP 叉小窗等路径的行为才一个字节都不变。
+     */
+    fun hasPendingRestore(): Boolean = pending.usable
+
     /** 当前 resumed 的 Activity 类名；null = 进程里没有前台页面（App 在后台） */
     @Volatile private var resumedActivity: String? = null
 
@@ -194,6 +217,9 @@ object LiveLastRoomStore {
     fun onLivePageCreated(context: Context) {
         ensureAttached(context)
         livePageCount++
+        // ★task-55：新的一局（有直播间页面被创建）→ 解除"整任务被划掉"的补记抑制
+        //   （见 [taskRemovedSuppressRecord]：那个抑制位只为挡住"任务移除那一瞬"的补记）
+        taskRemovedSuppressRecord = false
         // ★事件级诊断日志（2026-09-26，纯观测、不改逻辑；见 [LivePageTrace]）
         LivePageTrace.note(
             "lastRoom.pageCreated",
@@ -345,6 +371,15 @@ object LiveLastRoomStore {
             LivePageTrace.note("lastRoom.record.skip", "reason" to "blankRoom")
             return
         }
+        // ★task-55 保护②：整任务刚被划掉 ⇒ 不再记账（见 [taskRemovedSuppressRecord]）
+        if (taskRemovedSuppressRecord) {
+            LivePageTrace.note(
+                "lastRoom.record.skip",
+                "reason" to "taskRemoved",
+                "room" to room,
+            )
+            return
+        }
         if (pending.usable && pending.roomId == room) {
             LivePageTrace.note("lastRoom.record.skip", "reason" to "alreadyRecorded", "room" to room)
             return
@@ -368,6 +403,10 @@ object LiveLastRoomStore {
     fun onTaskRemoved(context: Context) {
         ensureAttached(context.applicationContext)
         memoryAuthoritative = true
+        // ★task-55 保护②：先立起抑制位，再清账 —— 顺序不能反：
+        //   紧随其后的 `LivePlayerActivity.onDestroy`（同一趟任务移除）会尝试补记，
+        //   抑制位必须已经在，否则刚清掉的账会被记回来（"划掉 App 又冒出直播间"）。
+        taskRemovedSuppressRecord = true
         clear()
         LivePageTrace.note("lastRoom.taskRemoved", "room" to (pending.roomId ?: "-"))
     }

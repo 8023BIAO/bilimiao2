@@ -83,7 +83,6 @@ import com.a10miaomiao.bilimiao.comm.live.LiveAPI
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveAreaGroup
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveRecommendFeed
 import com.a10miaomiao.bilimiao.comm.live.entity.LiveRoomItem
-import com.a10miaomiao.bilimiao.comm.live.entity.LiveStatus
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.AppStore
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
@@ -1053,13 +1052,16 @@ private fun LiveRoomList(
  * 为什么不能复用点播的 `VideoItemBox`：
  *   1. 它是**横排**卡片（左边 140x85 封面 + 右边文字），封面比例写死 140:85；直播卡片是
  *      PiliPlus/斗鱼/虎牙那种**竖排**卡片：封面在上（16:9）、标题和 UP 主在下；
- *   2. 它封面右下角放的是"视频时长"，直播没有时长、要放的是**实时人气**；
- *   3. 它没有"直播中"角标的位置（时长角标占着右上/右下）。
+ *   2. 它封面右下角放的是"视频时长"，直播没有时长、要放的是**实时人气**。
  *   硬套只会把它改成"既能点播又能直播"的四不像，所以另写一个，和它的取舍是"宁可多一个卡片，
  *   不要把点播卡片的语义搅浑"。
  *
- * 卡片信息层次（照 PiliPlus 的 `LiveCardVApp`）：封面 16:9 / 左上"直播中"角标 /
- * 右下人气 / 标题 1 行 / 分区名 + UP 名 1 行。
+ * 卡片信息层次（照 PiliPlus 的 `LiveCardVApp`）：封面 16:9 / 右下人气 / 标题 1 行 / 分区名 + UP 名 1 行。
+ *
+ * ★2026-09-29：封面左上角那颗「直播中 / 轮播 / 未开播」角标（`LiveStatusBadge`）**整体删除** ——
+ *   用户原话："还有这个直播中，我建议也全删了吧"（理由：这些列表条条都是直播，角标不携带信息、
+ *   还挡住封面左上角）。代价：推荐流里"轮播/未开播"不再有文字区分（首页列表本身只列在播房间，
+ *   这个区分本来也只有推荐流偶尔用得上），用户明确接受。
  *
  * ★第六阶段：这张卡片现在被**本页的两条数据源共用**（「全部/分区」的 `getRoomList` 与新增的
  *   「推荐」流），首页里**只此一份**直播卡片 —— 推荐流那边靠实体映射
@@ -1070,7 +1072,7 @@ private fun LiveRoomList(
  * ## 两个点击区（第四阶段补：用户问"点圈起来的 UP 名能不能进他的空间"）
  * ```
  * ┌───────────────────────┐
- * │直播中          （封面）│  ┐
+ * │                （封面）│  ┐
  * │                1.2万人气│  ├─ 点这里 → 进直播间（onClick）
  * ├───────────────────────┤  ┘
  * │ 标题一行               │  ┘
@@ -1098,7 +1100,7 @@ internal fun LiveRoomCard(
     val context = LocalContext.current
     // 跟随全局「不显示封面」开关（设置→内容与评论），和 VideoItemBox/MiniVideoItemBox 保持一套行为：
     // 用户开了省流，直播这边还在哗哗下封面图，属于"设置时灵时不灵"。
-    // 注意藏掉封面**不影响**角标和人气的显示 —— 卡片仍然能看出"这是直播、多少人看"。
+    // 注意藏掉封面**不影响**人气的显示 —— 卡片仍然能看出"多少人看"。
     val dataStore = remember { SettingPreferences.run { context.dataStore } }
     val hideCover by remember {
         dataStore.data.map { it[SettingPreferences.VideoHideCover] ?: false }
@@ -1129,12 +1131,8 @@ internal fun LiveRoomCard(
                     failure = placeholder(R.drawable.bili_fail_placeholder_img_tv),
                 )
             }
-            LiveStatusBadge(
-                status = item.live_status,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp),
-            )
+            // ★封面左上角的「直播中」角标已删除（2026-09-29，用户："这些列表条条都是直播，
+            //   角标不携带信息、还挡住封面左上角"）—— 见 LiveRoomCard 的 KDoc 与下方墓碑注释。
             // 右下角：实时人气（没拿到就不显示这一块，不要显示"0人气"——那是在撒谎）
             if (item.online > 0) {
                 Row(
@@ -1222,49 +1220,10 @@ internal fun LiveRoomCard(
     }
 }
 
-/**
- * 开播状态角标。
- *
- * ★数据从哪来：`room/v1/Area/getRoomList` **实测不返回 `live_status`**（见 LiveRoomItem 的注释），
- *   此时实体里的默认值是 [LiveStatus.LIVE] —— 这个接口本来就只列正在直播的房间，默认值即事实。
- *   哪天后端把字段补上，这里不用改代码就会自动区分出"轮播/未开播"（用户要求：这类房间要有区分标记）。
- *   "数据里能拿到就做"这句就是这么落的：**能区分就一定区分，拿不到就绝不假装**。
- *
- * ★第六阶段：「推荐」流的条目走的是同一张卡片、同一个角标 —— 推荐流的实体映射
- *   （LiveRecommendFeed.kt 的 `toRoomItem()`）也是"接口给了就按它显示、没给才按在播兜底"，
- *   所以这个角标在两条数据源下的语义完全一致，不需要为推荐另写一套。
- */
-@Composable
-private fun LiveStatusBadge(
-    status: Int,
-    modifier: Modifier = Modifier,
-) {
-    val text = when (status) {
-        LiveStatus.LIVE -> "直播中"
-        LiveStatus.ROUND -> "轮播"
-        else -> "未开播"
-    }
-    val color = when (status) {
-        // 「直播中」跟主题走（规则 7：要强调就用 primary）—— 不再每个页面各写一套写死的红
-        LiveStatus.LIVE -> MaterialTheme.colorScheme.primary
-        // 「轮播/未开播」是弱化态：用主题的容器色，别再写死一个灰（规则 6）
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
-    Text(
-        text = text,
-        modifier = modifier
-            .background(color = color, shape = RoundedCornerShape(4.dp))
-            .padding(horizontal = 5.dp, vertical = 1.dp),
-        // 底色是 primary 时前景必须 onPrimary（深色主题下 primary 是浅色，白字看不见）；
-        // 弱化态同理用 onSurfaceVariant —— 两档都跟主题，浅色/深色都可读
-        color = if (status == LiveStatus.LIVE) {
-            MaterialTheme.colorScheme.onPrimary
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        style = MaterialTheme.typography.labelSmall,
-    )
-}
+// ★2026-09-29 删除：`LiveStatusBadge`（封面左上角的「直播中 / 轮播 / 未开播」角标）已整体删除。
+//   理由见上方 `LiveRoomCard` 的 KDoc：这些列表条条都是直播，角标不携带信息、还挡住封面左上角。
+//   全仓不再有第二种"卡片开播状态角标"（直播搜索页 / 全站搜索直播 Tab 的同款角标同一批删掉）。
+//   不要再加回来；真要恢复"轮播/未开播"的区分，先找用户确认。
 
 /** B 站图片处理后缀：672x378 = 16:9，和 VideoItemBox 用的是同一套 */
 private const val COVER_SIZE_SUFFIX = "@672w_378h_1c_"

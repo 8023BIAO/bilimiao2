@@ -29,6 +29,7 @@ import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerDelegate2
 import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerLauncher
 import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerSource
 import com.a10miaomiao.bilimiao.comm.delegate.theme.ThemeDelegate
+import com.a10miaomiao.bilimiao.comm.live.LivePageTrace
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.ScreenDpiUtil
 import com.a10miaomiao.bilimiao.store.Store
@@ -147,6 +148,13 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
 
         // ③ 委托初始化：注册 PiP、控制器、字幕、弹幕设置入口等（与 MainActivity 里的调用同一份代码）
         playerDelegate.onCreate(savedInstanceState)
+        // ★task-55 取证（与直播页 `LivePage.onCreate` 分隔行对称）：放在 delegate 初始化**之后** ——
+        //   本方法里的 `playerDelegate` 是 `by lazy`，日志不能把它提前构造出来（那属于改行为）。
+        noteVPage(
+            "vpage.onCreate",
+            "savedState" to (savedInstanceState != null),
+            "configOrientation" to resources.configuration.orientation,
+        )
 
         // ④ 主题色跟随 App 设置（与 MainActivity 的 applyAppBarTheme 同一来源，只取播放器要用的主色）
         lifecycleScope.launch {
@@ -170,6 +178,8 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
 
         // ⑦ 开始播放（数据源/网络/缓存/弹幕/清晰度全部走原有逻辑，一个字没改）
         playerDelegate.openPlayer(source)
+        // ★task-55 取证：把"这一趟播的是哪个视频"记下来（`aid` 就是它；上面 `vpage.onCreate` 时还没有）
+        noteVPage("vpage.source", "sourceId" to source.id, "sourceTitle" to source.title)
         // 把列表状态种进本页的 PlayListStore：合集/播单自动连播要用（播放器侧只读不写，快照足够）
         val playList = VideoPlayerLauncher.consumePendingPlayList()
         if (playList.isNotEmpty()) {
@@ -200,6 +210,13 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // ★task-55 取证：与直播页对称 —— 记下"重进软件/换视频"这一趟系统投进来的 intent 长什么样
+        noteVPage(
+            "vpage.onNewIntent",
+            "action" to (intent.action ?: "-"),
+            "flags" to intent.flags,
+            "data" to (intent.data?.toString() ?: "-"),
+        )
         // 本页已在栈顶时又收到一次"打开视频"（例：小窗浮在详情页上，详情页又点了别的视频；
         // 或系统回收重建的窗口期里详情页重新触发了自动播放）。
         // manifest 里声明了 singleTop，所以这里可以就地换源，而不是叠出第二个播放器。
@@ -219,11 +236,13 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
 
     override fun onStart() {
         super.onStart()
+        noteVPage("vpage.onStart")
         playerDelegate.onStart()
     }
 
     override fun onResume() {
         super.onResume()
+        noteVPage("vpage.onResume")
         playerDelegate.onResume()
         // Android 12+：把「退后台自动进小窗」的开关重新断言一次。
         // 为什么要每次回来都断言：PiP 里的动作按钮刷新（PicInPicHelper.updatePictureInPictureActions）
@@ -233,17 +252,25 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
 
     override fun onPause() {
         super.onPause()
+        noteVPage("vpage.onPause")
         playerDelegate.onPause()
     }
 
     override fun onStop() {
         super.onStop()
+        noteVPage("vpage.onStop")
         // 与 MainActivity 完全同一条路径：保存进度 / 非后台播放模式则暂停 / 设置打开时兜底进 PiP。
         // 注意：**进 PiP 不会触发 onStop**（PiP 里只是 onPause），所以小窗里照常播。
         playerDelegate.onStop()
     }
 
     override fun onDestroy() {
+        // ★task-55 取证：点播页**被销毁**时也要能看到（与直播页对称）——
+        //   尤其是 `isFinishing == true` 时打调用栈，用来回答"点播是不是也被系统清栈了"。
+        noteVPage("vpage.onDestroy")
+        if (isFinishing) {
+            noteVPage("vpage.onDestroy.finishing.stack", "stack" to Throwable().stackTraceToString())
+        }
         // 系统回收（不是用户主动退出）：把源存回进程，万一页面被重建还能接着播
         // （续播位置由 PlayerDelegate2 从 PlaybackService/本地记录里取，不靠这里）
         if (!isFinishing) {
@@ -255,11 +282,37 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        // ★task-55 取证：与直播页的"记账点"对称 —— 看**点播这条路到底有没有 onUserLeaveHint**
+        //   （直播页在系统小窗里它不触发，正是账本没记上的原因）。
+        noteVPage("vpage.onUserLeaveHint")
         // 用户"正要离开"（划回桌面/按 Home）的最后时刻再断言一次 autoEnter：
         // 比只在 onResume 断言更稳（期间可能被 PiP 动作按钮刷新覆盖过参数）
         if (!isFinishing) {
             applyAutoEnterPip()
         }
+    }
+
+    /**
+     * ★task-55：点播页的**对称取证日志**（事件名统一 `vpage.*`，走同一个 `LivePageTrace` 通道/同一个
+     * `live_debug.log` 文件）。目的只有一个：让用户按同样三条路径（小窗→全屏 / 桌面图标 / 最近任务）
+     * 跑一遍，就能和直播页 `LivePageActivity` 的日志逐条对照，回答"**为什么点播没事**"：
+     * · 若点播页**也被销毁**（`vpage.onDestroy.finishing.stack` 出现）⇒ 差异在"它被销毁后能回来"
+     *   （`VideoPlayerLauncher.stashPendingSource` + `PlaybackService` + `PlayerDelegate2` 那套）；
+     * · 若点播页**没被销毁** ⇒ 差异在任务/窗口语义，要看 `taskId` 与两条路的 flags。
+     *
+     * **纯观测**：只读本页字段（`aid` = 当前视频 id，还没有源时为 `-`），不改任何行为。
+     */
+    private fun noteVPage(event: String, vararg extra: Pair<String, Any?>) {
+        LivePageTrace.note(
+            event,
+            "aid" to runCatching { playerDelegate.playerSource?.id ?: "-" }.getOrDefault("-"),
+            "multiWindow" to runCatching { isInMultiWindowMode }.getOrDefault(false),
+            "pip" to runCatching { isInPictureInPictureMode }.getOrDefault(false),
+            "isFinishing" to isFinishing,
+            "isChangingConfigurations" to isChangingConfigurations,
+            "taskId" to taskId,
+            *extra,
+        )
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -278,8 +331,33 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        // ★task-55 取证：与直播页 `pip.modeChanged` 对称（点播这条路是真 PiP，不是系统小窗）
+        noteVPage(
+            "vpage.pip.modeChanged",
+            "newPip" to isInPictureInPictureMode,
+            "orientation" to newConfig.orientation,
+        )
         // 委托侧会：注册/注销 PiP 动作广播、隐藏控制器、把播放器按全屏排版（PiP 窗口只显示播放器）
         playerDelegate.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    }
+
+    /**
+     * ★task-55 取证：与直播页的 `multiwindow.changed1/2` 对称 —— 看**系统小窗（多窗口）**这条路上
+     * 点播页会不会收到多窗口形态回调、以及那一刻的标志位。**只记日志**。
+     */
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode)
+        noteVPage("vpage.multiwindow.changed1", "multiWindow" to isInMultiWindowMode)
+    }
+
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        noteVPage(
+            "vpage.multiwindow.changed2",
+            "multiWindow" to isInMultiWindowMode,
+            "orientation" to newConfig.orientation,
+            "screenLayout" to newConfig.screenLayout,
+        )
     }
 
     override fun onBackPressed() {

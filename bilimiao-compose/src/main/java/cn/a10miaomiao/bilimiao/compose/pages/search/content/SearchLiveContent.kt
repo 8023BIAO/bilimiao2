@@ -541,16 +541,18 @@ internal fun SearchLiveContent(
  *   `HomeLiveContent.kt` 的 LiveSearchEntry → `LiveSearchPage`）。只改一份 = 漏一半。
  *   将来若要统一，应抽成公共组件（已写进交付报告的风险项）。
  *
- * 信息层次（用户点名要的四样：封面 / 标题 / UP / 人气，外加"直播中"角标）：
+ * 信息层次（用户点名要的四样：封面 / 标题 / UP / 人气）：
  * ```
  * ┌───────────────┐
- * │直播中          │  ← 角标：接口语义就是"搜出来的都是正在直播的"
  * │   （封面）      │  ┐
  * │ 主播名    [人气]│  ├ 底部渐变条 + 右下角人气胶囊
  * ├───────────────┤  ┘
  * │ 标题（最多两行） │
  * └───────────────┘
  * ```
+ * ★2026-09-29：封面左上角那颗「直播中」角标已删除（用户："还有这个直播中，我建议也全删了吧"）——
+ *   这一屏搜出来的条条都是直播，角标不携带信息、还挡住封面左上角。`LiveSearchPage.kt` 那份
+ *   同款角标**同批删掉**（两份卡片一直是"同步改"的约定，见上）。
  *
  * ★人气的位置为什么是"叠在封面右下角"、而不是跟在主播名后面（用户实测反馈的修复点）：
  *   原来人气是底部渐变条 Row 里的第三个孩子（名字 / Spacer / 人气），位置由名字宽度决定；
@@ -561,7 +563,7 @@ internal fun SearchLiveContent(
  * ## 两个点击区（与首页直播 Tab 的 `HomeLiveContent.kt` 同一套写法）
  * ```
  * ┌───────────────────────┐
- * │直播中          （封面）│  ┐
+ * │                （封面）│  ┐
  * │  主播名        [人气]  │  ├─ 点这里 → 进直播间（onClick）
  * ├───────────────────────┤  ┘
  * │ 标题                   │  ┘
@@ -607,17 +609,8 @@ private fun LiveRoomCard(
                 loading = placeholder(R.drawable.bili_default_placeholder_img_tv),
                 failure = placeholder(R.drawable.bili_fail_placeholder_img_tv),
             )
-            Text(
-                text = "直播中",
-                // 底色是 primary，前景必须 onPrimary（深色主题下 primary 是浅色，白字看不见）
-                color = MaterialTheme.colorScheme.onPrimary,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+            // ★2026-09-29：封面左上角的「直播中」角标已删除（角标不携带信息、还挡封面左上角）；
+            //   `LiveSearchPage.kt` 里的同款角标同批删除，两份卡片保持"同步改"的约定。
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomStart)

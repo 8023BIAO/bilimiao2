@@ -1442,6 +1442,27 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private var pipEntryPending = false
 
     /**
+     * ★task-55：**用户主动退出本页**的一次性标记（[exitPage] 里在 `finish()` 之前置位）。
+     *
+     * 为什么要它：本轮给 [onDestroy] 加了"**系统清栈也要记得住**"的补记（那一刻同样
+     * `isFinishing == true`，页面侧无法与"系统清栈"区分）。这个标记就是那道分界线 ——
+     * 用户按返回 / 点顶栏返回退出直播间时**绝不许**把直播间记回来（否则"正常退出后再进 App
+     * 又被自动开一个直播间"，那是用户明确骂过的行为）。
+     */
+    private var userExitedPage = false
+
+    /**
+     * ★task-55：**本次会话进过 PiP** 的一次性标记（`onPictureInPictureModeChanged(true)` 里置位）。
+     *
+     * 为什么需要它：PiP 小窗被用户叉掉时本页同样 `isFinishing == true`、且"手动点底栏「画中画」"
+     * 那条路**账本本来就是空的**（用户没离开 App，[onUserLeaveHint] 没记）—— 没有这个标记，
+     * 新的补记就会把"手动进 PiP 再叉掉小窗"从既有的"**不**恢复"变成"下次进 App 自动开直播间"，
+     * 与既有设计（报告 §6 E4b / S6a-S6b）冲突。有了它，PiP 这条路**一个字节都不变**。
+     * （"带着直播间离开 App 进 PiP"那条路本来就由 [onUserLeaveHint] 记过账，与本标记无关。）
+     */
+    private var pipEnteredThisSession = false
+
+    /**
      * ★★第十批：**刚刚退出小窗**的时刻（`SystemClock.elapsedRealtime()`；0 = 没在过渡窗口里）。
      *
      * ## 为什么需要它（本轮修复 ④，见报告 ②-3）
@@ -1664,10 +1685,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         LivePageTrace.section(
             "LivePage.onCreate",
             "room" to (intent?.getStringExtra(EXTRA_ROOM_ID) ?: "-"),
+            // ★task-55：taskId 用来和 `vpage.*`（点播页）做**任务归属对比** ——
+            //   "为什么点播没事"要么是"没被销毁"，要么是"任务/窗口语义不同"，这个数一眼分得清。
+            "taskId" to taskId,
             "savedState" to (savedInstanceState != null),
             "configOrientation" to resources.configuration.orientation,
             "landscape" to isPageLandscape(),
             "pip" to isInPictureInPictureMode,
+            "multiWindow" to runCatching { isInMultiWindowMode }.getOrDefault(false),
         )
 
         // ★「回 App 仍停在直播间」的**确定性**实现（2026-09-26 本轮，见 [LiveLastRoomStore] 的 KDoc）：
@@ -2164,6 +2189,44 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   · 直播间自己回到全屏前台（人已经在里面了）。
         //   本方法顺带做两件事：直播间实例计数 -1，以及**再判一次**"该不该恢复"
         //   （这样"PiP 小窗被系统收掉"与"主界面 resume"谁先谁后都恰好恢复一次）。
+        //
+        // ══════════════════════════════════════════════════════════════════
+        // ★★task-55：**系统清栈也要记得住**（vc192 取证日志定论的那条路）
+        //
+        // 病灶（真实日志）：系统小窗里 App **一直可见** ⇒ `onUserLeaveHint` 从不触发 ⇒ 账本**从没记上**；
+        // 而"点桌面图标回 App"时 MainActivity（`singleTask`）会把它上面的直播间页面**整段清掉**
+        // （取证：`onDestroy.finishing.stack` = `ActivityThread.handleDestroyActivity`，
+        // **不是**我们调 `finish()`；`host.onNewIntent flags=0x10200000` = NEW_TASK|RESET_TASK_IF_NEEDED）
+        // ⇒ 页面没了、账本又是空的 ⇒ `restore.skip reason=noPending` ⇒ 落回直播 Tab、直播间消失。
+        // 所以这里**补记一次**：紧接着的 [LiveLastRoomStore.onLivePageDestroyed] 会 `evaluateRestore()`，
+        // 那一刻主界面已在前台、`livePageCount` 刚归零，四判据齐 ⇒ 直播间被自动开回来。
+        //
+        // ★五条反向保护（逐条对应到下面的条件，一条都不许松）：
+        //   ① 用户按返回 / 顶栏返回主动退出 → [userExitedPage]（[exitPage] 里置位）⇒ 不补记；
+        //   ② 整个任务被划掉 → 账由 `PlaybackService.onTaskRemoved` 清掉，且 store 侧
+        //      `taskRemovedSuppressRecord` 会挡住这一瞬的补记 ⇒ 不复活；
+        //   ③ PiP 叉掉小窗（含"手动点底栏画中画再叉掉"）→ [pipEnteredThisSession] ⇒ 不补记，
+        //      那条路的既有语义（"手动进 PiP 不记账"、"带着直播间离开 App 才记账"）一字不变；
+        //   ④ 配置变更重建 → [isChangingConfigurations] ⇒ 不补记；
+        //   ⑤ `NEW_TASK` 拉起逻辑在 `LiveLastRoomStore.evaluateRestore` 里，一字未动。
+        // ★"账本为空"这一条（[LiveLastRoomStore.hasPendingRestore]）是给 PiP/按 Home 那条路让路的：
+        //   那种情况**本来就记过账**，补记只会在同一刻覆盖它 —— 保持"同一时刻只有一条账"。
+        // ══════════════════════════════════════════════════════════════════
+        if (isFinishing &&
+            !userExitedPage &&                                  // ①
+            !isChangingConfigurations &&                        // ④
+            rawRoomId.isNotBlank() &&
+            !pipEnteredThisSession &&                           // ③
+            !LiveLastRoomStore.hasPendingRestore()              // 已有账不覆盖（PiP / 按 Home 那条路）
+        ) {
+            LivePageTrace.note(
+                "onDestroy.recordForSystemClear",
+                "room" to rawRoomId,
+                "taskId" to taskId,
+                "multiWindow" to runCatching { isInMultiWindowMode }.getOrDefault(false),
+            )
+            LiveLastRoomStore.onLivePageLeavingApp(applicationContext, rawRoomId)
+        }
         LiveLastRoomStore.onLivePageDestroyed(applicationContext)
         inputErrorHideRunnable = null
         gestureHud.hide()
@@ -2352,6 +2415,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // 底部按钮，还有顶部的状态栏各种信息按钮，因为它会挡住 PIP 的大部分视觉"）。
         if (isInPictureInPictureMode) {
             pipEntryPending = true
+            // ★task-55 保护③：本会话进过 PiP —— [onDestroy] 的补记要绕过这条路（理由见字段 KDoc）
+            pipEnteredThisSession = true
             // PiP 里误触手势会同时改系统音量和画面亮度，很难发现，直接收起手势层
             gestureHud.hide()
             // ★第十四批：**进小窗必须把直播设置弹窗收掉** —— 用户明确要求"PiP 里不弹"。
@@ -6788,6 +6853,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "isFinishing" to isFinishing,
         )
         returnToLiveGuard.disarm()
+        // ★task-55 保护①：用户主动退出的一次性标记 —— [onDestroy] 的"系统清栈补记"必须能分辨
+        //   "用户自己退的"和"系统把页面清掉的"。置位必须在 `finish()` 之前（onDestroy 是紧接着来的）。
+        userExitedPage = true
         // ★「记住离开时的位置」：用户**主动收摊** → 清掉"应当恢复"的记录。
         //   这条是"正常退出直播间后再回软件不该自动开"的实现；也是"点播页退桌面 → 回软件
         //   不该被拉去直播"那条红线的第一道保证（见 [LiveLastRoomStore] 的清理规则）。
