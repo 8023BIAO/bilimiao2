@@ -380,7 +380,7 @@ fun MyBottomSheet(
      *
      * 为什么必须能传进来：贴底弹窗里的页面走的是**这个函数自己那份** `PageNavigation`，
      * 它绕过了浮层对页面发的那份（`LocalPageNavigation`）—— 不把闸门一起传下去，
-     * 弹窗里点到"空间流程外"的目的地就会撞进浮层那张小路由表（destination not found → 抛）。
+     * 弹窗里点到"空间流程外"的目的地就会**在浮层里**打开（视频会在看不见的地方播）。
      * 语义与 [PageNavigation.routeGate] 完全一致。
      */
     routeGate: ((ComposePage) -> Boolean)? = null,

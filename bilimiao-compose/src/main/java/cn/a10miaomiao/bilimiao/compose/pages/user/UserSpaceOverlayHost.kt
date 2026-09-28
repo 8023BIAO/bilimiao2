@@ -36,11 +36,10 @@ import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import cn.a10miaomiao.bilimiao.compose.BilimiaoTheme
 import cn.a10miaomiao.bilimiao.compose.MyBottomSheet
+import cn.a10miaomiao.bilimiao.compose.MyNavHost
 import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.LocalContainerView
@@ -92,13 +91,15 @@ import kotlin.reflect.KClass
  *    （`LiveSpaceLauncher.open` + finish），**最坏结果是"返回落到直播 Tab"，绝不是闪退**。
  *
  * ## 导航：空间流程内留在浮层，其它交回主界面
- * 浮层自己的 NavHost **只注册 UP 空间流程内的目的地**（[SPACE_FLOW_ROUTES]，白名单与注册表一一对应）。
- * 交给页面的那份 [PageNavigation] 带一个**闸门**（`PageNavigation.routeGate`，task-26 新加的 seam）：
+ * 浮层自己的 NavHost 复用主界面那张**整张**路由表（[MyNavHost]），但交给页面的那份 [PageNavigation]
+ * 带一个**闸门**（`PageNavigation.routeGate`，task-26 新加的 seam），由 [SPACE_FLOW_ROUTES] 决定去留：
  * · 命中白名单 → 返回 false，照常在**浮层内**导航；
  * · 其它任何目的地（视频详情 / 动态详情 / 番剧 / 播放列表 / 私信…）→
  *   `mainNavigation.navigate(page)`（主界面那份，闭包捕获）+ 下一帧 `onExitToMainHost()`，
  *   浮层关闭、直播页 finish，主界面停在目标页 —— 效果与改动前一致。
  *   这样也**不需要** `PlaybackHandoffPlayerDelegate`：浮层里永远不会去播视频。
+ *   （注册整表而不是只注册空间那一支，是为了让"表外目的地"也解析得到，
+ *   把"去哪"完全交给闸门 —— 不会出现 destination not found 崩溃。）
  *
  * ## 返回键
  * 浮层**不覆写** `LocalOnBackPressedDispatcherOwner`（保持宿主的 = 直播页）：系统返回键由直播页
@@ -367,7 +368,11 @@ class UserSpaceOverlayHost private constructor(
                                 // ★顺序坑（蓝图 §2.4）：控制器必须在 NavHost 组合之前交给 PageNavigation，
                                 //   否则有页面在组合期读 `getCurrentVideoId()` → 拿到 null → error(...)。
                                 navController = nav
-                                SpaceFlowNavHost(
+                                // ★复用主界面那张**整张**路由表（`MyNavHost` → `BilimiaoPageRoute`）：
+                                //   · 表外的目的地也解析得到 → 没有 "destination not found" 这条崩路；
+                                //   · "留在浮层还是交回主界面"由闸门 + [SPACE_FLOW_ROUTES] 决定，
+                                //     与"注册了什么"解耦（见 gateRoute）。
+                                MyNavHost(
                                     navController = nav,
                                     startRoute = UserSpacePage(id = mid.toString()),
                                 )
@@ -382,7 +387,7 @@ class UserSpaceOverlayHost private constructor(
                                 page = bottomSheetPage,
                                 onClose = { bottomSheetState.close() },
                                 // ★闸门也要传进贴底弹窗：弹窗里的页面走的是它自己那份 PageNavigation，
-                                //   不传的话"空间外"的目的地会撞进浮层的小路由表（destination not found → 抛）。
+                                //   不传的话"空间外"的目的地会在**浮层里**打开（视频会在看不见的地方播）。
                                 routeGate = { route -> gateRoute(route) },
                             )
                         }
@@ -394,44 +399,13 @@ class UserSpaceOverlayHost private constructor(
 }
 
 /**
- * 浮层自己的**小路由表**：只注册 UP 空间流程内的目的地。
+ * "属于 UP 空间流程"的目的地白名单（**闸门的唯一判据**）。
  *
- * 为什么不复用主界面那张整表（`MyNavHost`）：
- * · 浮层只需要空间这一支；注册整表 = 把"视频详情 / 点播播放器"也搬进浮层，与"不要在浮层里播视频"冲突；
- * · 表外的目的地由 `PageNavigation.routeGate` 交回主界面（见 [UserSpaceOverlayHost.gateRoute]），
- *   所以**不存在** "destination not found" 这条崩路。
- *
- * ★与 [SPACE_FLOW_ROUTES] 是**同一份清单的两半**（注册 + 判定），增删目的地必须同时改两处。
- */
-@Composable
-private fun SpaceFlowNavHost(
-    navController: NavHostController,
-    startRoute: Any,
-) {
-    NavHost(
-        navController = navController,
-        startDestination = startRoute,
-    ) {
-        composable<UserSpacePage>()
-        composable<UserSpaceSearchPage>()
-        composable<UserFollowPage>()
-        composable<SearchFollowPage>()
-        composable<UserBangumiPage>()
-        composable<UserLikeArchivePage>()
-        composable<UserFavouritePage>()
-        composable<UserFavouriteDetailPage>()
-        composable<UserSeasonDetailPage>()
-        composable<UserMedialistPage>()
-        composable<EditProfilePage>()
-        composable<MyFollowerPage>()
-        // 自己的空间里那两条"我的…"（UserSpaceViewModel 在 vmid == 自己时走 pages.mine）
-        composable<MyFollowPage>()
-        composable<MyBangumiPage>()
-    }
-}
-
-/**
- * "属于 UP 空间流程"的目的地白名单（与 [SpaceFlowNavHost] 的注册表一一对应）。
+ * 浮层的 NavHost 用的是**整张路由表**（[MyNavHost] → `BilimiaoPageRoute`）：
+ * · 表外的目的地也"解析得到"，因此不存在 "destination not found" 那条崩路；
+ * · 但"要不要留在浮层"由本白名单决定 —— 不在里面的目的地一律由
+ *   `PageNavigation.routeGate` 交回主界面（见 [UserSpaceOverlayHost.gateRoute]），
+ *   所以浮层里永远不会真的渲染视频详情 / 点播播放器。
  *
  * 用 `KClass` 而不是路由字符串判定：type-safe 路由的 `destination.route` 是
  * "包名.类名/{参数}" 这种模式串，字符串比对面窄易错；页面对象在这里是**真实例**，
