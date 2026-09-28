@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import bilibili.app.dynamic.v2.UpListItem
 import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.common.constant.PageTabIds
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
@@ -113,6 +114,23 @@ private fun DynamicPageContent(
     val selectedUpper by viewModel.selectedUpper.collectAsStateWithLifecycle()
     val saveableStateHolder = rememberSaveableStateHolder()
 
+    /**
+     * UP 栏点头像（用户拍板的**字面语义**）：
+     * - 未选中这个 UP → 筛选他的动态（[DynamicViewModel.selectUpper]）；
+     * - **已选中（含进页面自动选中的第 1 个）再点一次 → 进他的用户空间**（[DynamicViewModel.toUserSpace]）。
+     *
+     * ★为什么判据只比 `uid`：`selectedUpper` 可能来自三条路（首屏自动选的第 1 个、用户点选、
+     *   「我的动态」合成的自己那条），比对象/名字都会漏；uid 是这三条路共有的稳定标识。
+     * ★为什么提成一个 lambda 给两栏共用：宽栏/窄栏是同一交互的两种排版，写两份一定会漂移（规则 15）。
+     */
+    val onUpperClick: (UpListItem) -> Unit = { up ->
+        if (selectedUpper?.uid == up.uid) {
+            viewModel.toUserSpace(up.uid)
+        } else {
+            viewModel.selectUpper(up)
+        }
+    }
+
     val tabs = listOf(TAB_VIDEO, TAB_UP)
     val pagerState = rememberPagerState(pageCount = { tabs.size })
 
@@ -190,7 +208,7 @@ private fun DynamicPageContent(
                                 viewModel.selectMyDynamics(userInfo)
                                 scope.launch { pagerState.animateScrollToPage(1) }
                             },
-                            onSelected = viewModel::selectUpper,
+                            onSelected = onUpperClick,
                             showAllHeader = true,
                         )
                     } else {
@@ -205,7 +223,7 @@ private fun DynamicPageContent(
                                 viewModel.selectMyDynamics(userInfo)
                                 scope.launch { pagerState.animateScrollToPage(1) }
                             },
-                            onSelected = viewModel::selectUpper,
+                            onSelected = onUpperClick,
                         )
                     }
                 }

@@ -59,21 +59,28 @@ import com.bumptech.glide.integration.compose.GlideImage
 import com.bumptech.glide.integration.compose.placeholder
 
 /**
- * 「直播中」头像 —— UP 头像 + 直播中标签 + 向外扩散的涟漪，点一下直接进直播间。
+ * 「直播中」头像 —— UP 头像 + 直播中标签 + 向外扩散的涟漪；**默认**点一下（头像/药丸）直接进直播间，
+ * 传 `liveClickOnAvatar = false` 时点击交给外层行（动态页 UP 栏用它做"点哪都算行点击"）。
  *
  * ## 为什么做成一个独立 Composable
- * 用户空间顶部头像、关注列表、动态卡片作者、粉丝列表……这些地方的头像**长得不一样、
- * 拿数据的方式也不一样**（有的是 Glide 直出、有的外面还套着图片预览器的缩放层），
+ * 目前在用它的地方是**两处**（2026-09-28 收口后）：动态页 UP 栏的头像（宽/窄两套布局）、
+ * 用户空间顶部大头像。这些地方的头像**长得不一样、拿数据的方式也不一样**
+ * （有的是 Glide 直出、有的外面还套着图片预览器的缩放层），
  * 但"在播要挂标记 + 涟漪 + 点了进直播间"这件事完全一样。
  * 所以这里不接管头像的绘制（可以用 [avatarContent] 槽位自己画），
  * 只负责**在已有头像上叠三件事**：涟漪层、标签层、点击路由。
+ *
+ * ★**不要**再把它挂到"动态卡片的作者头像 / 关注列表 / 粉丝列表"上：用户 2026-09-28 明确要求
+ *   "直播标记只留用户空间顶部头像 + 动态页 UP 栏头像"（当时空间动态列表里每条动态都亮涟漪，
+ *   正是 `DynamicModuleAuthorBox` 传了 uid 造成的）。新增接入点先想清楚是不是用户要的那两处。
  *
  * ## 三层结构（顺序即绘制顺序，都在一个不自裁剪的 Box 里）
  * ```
  * Box(size = 头像尺寸)            ← 故意**不裁剪**：涟漪要能扩散到头像外面
  *  ├─ LiveRipple（仅 isLive 且 animateRipple）  圆环，画在头像底下
  *  ├─ Box(clip = CircleShape).clickable        头像本体 + 圆形水波纹反馈
- *  └─ LiveLabel「直播中」                       画在最上层，自带点击
+ *  │                                            （`liveClickOnAvatar = false` 时这一层**没有** clickable）
+ *  └─ LiveLabel「直播中」                       画在最上层；点击同样受 `liveClickOnAvatar` 门控
  * ```
  * ★为什么涟漪层和"可点击的头像层"要拆成两个兄弟节点：
  *   若把 `clip(CircleShape)` 和绘制涟漪写在同一层，涟漪会被圆裁掉、全都看不见；
@@ -178,7 +185,14 @@ fun LiveBadgedAvatar(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .offset(y = 2.dp)
-                    .clickable(onClick = toLiveRoom),
+                    .then(
+                        // ★门控（动态页 UP 栏要的口子）：只有"点头像 = 进直播间"的调用方，药丸才自带点击。
+                        //   传 liveClickOnAvatar = false 的调用方要的是"点哪都算整行的点击"
+                        //   （筛选该 UP / 已选中再点进他的空间，见 DynamicUpperList）——
+                        //   药丸若照旧自己吃掉点击，行上的 clickable 就收不到，点药丸 = 没反应。
+                        //   默认 true ⇒ 现有调用点（用户空间顶部等）的行为逐字不变。
+                        if (liveClickOnAvatar) Modifier.clickable(onClick = toLiveRoom) else Modifier
+                    ),
             )
         }
     }

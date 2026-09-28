@@ -5,11 +5,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
@@ -25,7 +28,6 @@ import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
-import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
@@ -33,8 +35,11 @@ import com.a10miaomiao.bilimiao.comm.mypage.myMenu
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.UserStore
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.comm.toast
+import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
+import com.bumptech.glide.integration.compose.GlideImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -213,6 +218,7 @@ private class UserFollowPageViewModel(
     }
 }
 
+@OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun UserFollowPageContent(
     viewModel: UserFollowPageViewModel,
@@ -279,14 +285,17 @@ private fun UserFollowPageContent(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // 在播的 UP 会挂「直播中」+ 涟漪，点头像直接进直播间。
-                    // ★这一屏所有头像的查询会被 LiveStatusCache 合并成**一条**请求，
-                    //   而且滑出屏幕的 item 根本不会被组合 → 自然"离屏不请求"。
-                    LiveBadgedAvatar(
-                        face = follow.face,
-                        size = 40.dp,
-                        mid = follow.mid,
-                        onClick = { viewModel.toUserDetailPage(follow.mid) },
+                    // ★裸头像（不再挂「直播中」+ 涟漪）：用户 2026-09-28 拍板"直播标记只留两处"
+                    //   —— 用户空间顶部大头像 + 动态页 UP 栏头像。关注列表一屏十几个头像，
+                    //   全都在扩散涟漪太吵；uid 不再传，标记与在播查询一起消失（连带的"一屏一条请求"也没了）。
+                    //   点头像仍进他的空间 —— 整个 Row 已经挂着 clickable，行为不变。
+                    GlideImage(
+                        model = UrlUtil.autoHttps(follow.face) + "@200w_200h",
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape),
                     )
                     Column(
                         modifier = Modifier

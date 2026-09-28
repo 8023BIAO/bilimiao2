@@ -6,11 +6,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -27,7 +30,6 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
-import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import cn.a10miaomiao.bilimiao.compose.components.status.BiliFailBox
 
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
@@ -35,8 +37,11 @@ import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.comm.toast
+import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
+import com.bumptech.glide.integration.compose.GlideImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -177,6 +182,7 @@ data class FollowerListResult(
     val total: Int = 0,
 )
 
+@OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun MyFollowerContent(viewModel: MyFollowerViewModel) {
     PageConfig(title = if (viewModel.isOwner) "我的粉丝" else "TA的粉丝")
@@ -219,13 +225,18 @@ private fun MyFollowerContent(viewModel: MyFollowerViewModel) {
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // 在播的 UP 挂「直播中」+ 涟漪，点头像直接进直播间（其余区域仍进用户空间）
-                LiveBadgedAvatar(
-                    face = follower.face,
-                    size = 40.dp,
-                    // 粉丝列表的 mid 是 Long（接口给的是数字），组件收 String，顺手转一下
-                    mid = follower.mid.takeIf { it > 0 }?.toString(),
-                    onClick = { viewModel.toUserSpace(follower.mid) },
+                // ★裸头像（不再挂「直播中」+ 涟漪）：用户 2026-09-28 拍板"直播标记只留两处"
+                //   —— 用户空间顶部大头像 + 动态页 UP 栏头像。粉丝列表整屏都是头像，
+                //   一起扩散涟漪的观感是"满屏都在动"；这里连 uid 都不再传，标记与在播查询一起消失。
+                //   点头像仍进他的空间（右边那块文字区是同一个动作，与改动前一致，两处都留着）。
+                GlideImage(
+                    model = UrlUtil.autoHttps(follower.face) + "@200w_200h",
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable { viewModel.toUserSpace(follower.mid) },
                 )
                 Column(
                     modifier = Modifier

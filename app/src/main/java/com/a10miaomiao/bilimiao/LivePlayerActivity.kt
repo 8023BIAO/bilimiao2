@@ -57,6 +57,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatTextView
@@ -84,6 +85,7 @@ import com.a10miaomiao.bilimiao.comm.live.LiveLastRoomStore
 import com.a10miaomiao.bilimiao.comm.live.LivePageTrace
 import com.a10miaomiao.bilimiao.comm.live.LivePortraitStage
 import com.a10miaomiao.bilimiao.comm.live.LiveSpaceLauncher
+import com.a10miaomiao.bilimiao.comm.live.SpaceOverlayHandle
 import com.a10miaomiao.bilimiao.comm.live.danmaku.ConnState
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuClient
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveMessage
@@ -277,7 +279,8 @@ import kotlin.math.roundToInt
  *    override an existing binding.` —— 浮层里 `subDI` 的 override 校验），删掉就是最划算的修法。
  *    ★`comm.live.LiveSpaceLauncher` 与它在 `ComposeFragment` 里的注册**故意留着**（第五批时它是
  *    无人调用的兜底，删它会牵动 compose 侧，风险更大；★第十五批第 5 条起它**重新有了调用端** ——
- *    顶栏标题点击进主播空间，见 [openAnchorSpace]）。
+ *    顶栏标题点击进主播空间，见 [openAnchorSpace]；★第十六批起它同时承载"页内浮层"那条主路
+ *    （`createOverlay`）与这条路作为兜底）。
  * 2. **删掉「听音频」功能**（按钮 / 状态 / 全部分支 / 音频舞台 / `LiveAudioService` / Manifest 条目）。
  * 3. **PiP 期间顶栏与底栏一律不可见**（用户："PIP 模式下，我想让它隐藏那个底部按钮，还有顶部的
  *    状态栏各种信息按钮"）：收口成一个门控 [controlsAllowed]（= 不在 PiP 且没有"即将进入 PiP"），
@@ -463,6 +466,37 @@ import kotlin.math.roundToInt
  *    所以从用户空间返回会落回直播 Tab 而不是原直播间 —— 第五批删掉的页内浮层
  *    （`UserSpaceOverlayHost`）本来就是为了解决它；本批只把"点标题能进去"这条最小闭环接上
  *    （用户要的就是"点击去 UP 的主页"），要不要恢复"返回还在直播间"另开一批再定。
+ *    ★★**第十六批已把这条代价消掉**（用户随后就报了这个"返回落到直播 TAB"），见下。
+ *
+ * ## 第十六批（本轮：把"点标题进 UP 空间"的返回栈理成一条线）
+ * 用户原话："点直播间标题进 UP 主页，返回为什么是回到直播 TAB，不是直播间？……
+ * 路线还是要理成一条线的，不要再搞任何负优化。"
+ *
+ * **做法 = 页内浮层（复刻第五批那份 `UserSpaceOverlayHost`，但这次不让任何人反向依赖）**：
+ * ```
+ * 点标题 → LiveSpaceLauncher.createOverlay(this, uid)      ← comm 桥上的"浮层工厂"（task-26/27 冻结的接口）
+ *   ├─ 拿到 handle → attachSpaceOverlay(handle)            ← 铺在 rootLayout 最上层（铺满 + Z 最高 + 可点）
+ *   │    直播页**不 finish、不 pause/stop** ⇒ 播放器/弹幕/音频一行不动，返回时直播间还在播
+ *   │    返回键分层：浮层开着 → 先给浮层（它内部退一层 / 退到底就只关浮层，**绝不 exitPage**）
+ *   │                浮层关了 → 再按才走既有 handleBack（退出直播间）
+ *   └─ 拿不到（没注册工厂 / compose 侧构造抛异常）→ 兜底：open(uid) + exitPage()（= 第十五批那条路）
+ * ```
+ * 1. **桥 API（comm 侧，task-27）**：`SpaceOverlayHandle` / `SpaceOverlayFactory` /
+ *    [LiveSpaceLauncher.registerOverlay] / `unregisterOverlay` / `createOverlay`；
+ *    `createOverlay` **内部 `runCatching`、任何异常返回 null** —— 这是本轮的安全底线：
+ *    compose 侧那套浮层要自己拼 `subDI`（历史上正是它抛 `StartupException: Binding
+ *    AppCompatActivity must override an existing binding.` 把用户崩过），DI 出问题只能退化成
+ *    旧行为，**绝不许"点一下标题"变成闪退**。
+ * 2. **直播页侧（task-27）**：三段式 [openAnchorSpace]（浮层 → 挂不上 → 兜底）、
+ *    [attachSpaceOverlay]（挂载，自己也 runCatching）、[closeSpaceOverlay]（幂等收口）、
+ *    [spaceOverlayBack]（返回键状态机）、[handOffToMainHost]（浮层把导航交回主界面时：
+ *    先关浮层、再 [exitPage]，**不再调 `open()`**）。
+ * 3. **必关浮层的六个时机**（一条都不能漏，漏了就是"看不见的浮层盖着直播间"或组合树泄漏）：
+ *    [spaceOverlayBack] / [handOffToMainHost] / [onStop] / [onPictureInPictureModeChanged]`(true)` /
+ *    [onDestroy] / [onNewIntent] 的"同房间复用"分支（最后一个是为了修"复用把本页提到前台、
+ *    浮层还盖着 = 点了没反应"的既有坑）。
+ * 4. **没动的**：`LiveLastRoomStore` / `ReturnToLiveGuard` 的所有调用、[onStop] 的播放策略、
+ *    PiP 参数、手势层、状态栏逻辑 —— 浮层是纯 View 层叠加，本页全程 RESUMED，那些机制零参与。
  */
 class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
@@ -648,6 +682,19 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          */
         private const val BACK_ICON_BOX_DP = 40
         private const val BACK_ICON_PADDING_DP = 8
+
+        /**
+         * ★task-27：**页内 UP 空间浮层**的 Z（`View.elevation`，px 之外的单位无关 —— 它只比大小）。
+         *
+         * 这一个数同时决定两件事，所以两件都要成立：
+         * ① **画在最上面**：本页所有图层（弹幕 / 手势 / 气泡 / 顶栏 / 底栏 / 缓冲圈）都没有设过
+         *    elevation（全仓 `grep elevation LivePlayerActivity.kt` 只有这一处），24f 稳稳在它们之上；
+         * ② **触摸先收到**：`ViewGroup` 派发触摸时按 Z 从高到低找孩子（`buildOrderedChildList`），
+         *    所以浮层一铺满，手势层 [TapCatcher] 与底栏那几颗按钮就都收不到事件了 ——
+         *    "浮层盖住后不许再误触亮度/音量/弹幕"这件事由这个数 + 铺满 LayoutParams 一起保证。
+         * 值取 24f 是沿用第五批那份浮层（`UserSpaceOverlayHost`）的既有量级，观感无变化。
+         */
+        private const val UP_SPACE_OVERLAY_ELEVATION = 24f
 
         /**
          * 弹幕输入条那条**失败提示**（[danmakuInputError]）自动收起的时长（ms）。
@@ -1285,6 +1332,28 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private var anchorUid: Long = 0L
 
     /**
+     * ★task-27：当前开着的**页内「UP 空间浮层」**句柄（null = 没开）。
+     *
+     * 浮层是"直播页自己视图树最上层的一块全屏 View"（[attachSpaceOverlay]），
+     * 于是**本页不 finish、不 pause/stop** —— 播放器/弹幕/音频一行都不动，
+     * 用户从 UP 空间返回时看到的是**还在播**的直播间（这正是本任务要根治的 bug）。
+     *
+     * ★它和 [anchorUid] 同一批：都是"顶栏标题点击"这条链上的状态。
+     * ★唯一写点：[attachSpaceOverlay] 挂上、[closeSpaceOverlay] 清掉（其余地方只读）。
+     */
+    private var spaceOverlay: SpaceOverlayHandle? = null
+
+    /**
+     * ★task-27：**浮层开着时的系统返回回调**（默认 `disabled` —— 不改变本页既有的返回语义）。
+     *
+     * 本页的返回一直是"直接覆盖 [onBackPressed]，没有注册任何回调"（见那里的 KDoc），
+     * 所以这个回调**不是**靠平台派发决定的，而是 [onBackPressed] 里显式先问它一次
+     * （`isEnabled == true` 才走 dispatcher）—— 这样"浮层开着"与"浮层没开"两条路仍然只有一个入口，
+     * 而"浮层开着时按返回**绝不**退出直播间"这件事只由这一个回调表达（见 [spaceOverlayBack]）。
+     */
+    private var spaceBackCallback: OnBackPressedCallback? = null
+
+    /**
      * 顶栏「在线人数」（`room/v1/Room/get_info` 的 `online` 字段；**null / 0 = 没拿到**）。
      *
      * ★为什么用可空 + "0 也算没拿到"：接口拿不到、风控、断网时这个字段会是 0 或不返回，
@@ -1709,6 +1778,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   按"当前形态"定下来（此刻尺寸还没量出来，[isPageLandscape] 会退回 configuration 兜底）。
         syncImmersivePolicy()
 
+        // ★task-27：注册"浮层开着时"的系统返回回调（**默认 disabled**，语义见 [spaceBackCallback] /
+        //   [spaceOverlayBack]）。放这么早与 PiP 接收器改随生命周期注册是同一条理由：
+        //   注册成本几乎为零，"提前挂上"能一次性消掉"某条路径没来得及注册"的时序问题。
+        //   `addCallback(this, …)` 的第二个参数是 LifecycleOwner —— 页面销毁时 androidx 自己会摘掉。
+        spaceBackCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() = spaceOverlayBack()
+        }.also { onBackPressedDispatcher.addCallback(this, it) }
+
         rawRoomId = readRoomIdFromIntent().orEmpty()
         if (rawRoomId.isBlank()) {
             // ★诊断日志（只读）
@@ -1833,7 +1910,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // 复用路径来的（同房间被 REORDER_TO_FRONT 拉回前台）：什么都不做，继续播原来那一路流。
         // ★判据用这个 extra 而不是"房间号字符串相等"：复用允许"短号 1 → 真实号 5440"这种写法，
         //   字符串是不同的，但房间其实是同一个（见 [reuseExistingSameRoomInstance]）。
-        if (intent.getBooleanExtra(EXTRA_REUSE_ATTEMPTED, false)) return
+        if (intent.getBooleanExtra(EXTRA_REUSE_ATTEMPTED, false)) {
+            // ★task-27 顺手补的既有坑（侦察发现、旧实现没处理）：这条复用**不重建**本实例，
+            //   只把它提到前台 —— 如果此刻正盖着 UP 空间浮层，用户看到的就是"点了一下没反应"
+            //   （浮层还占着整屏）。复用语义 = 回到**直播间本体**，所以在这里把浮层收掉。
+            closeSpaceOverlay()
+            return
+        }
         // ★诊断日志（只读）
         LivePageTrace.note(
             "onNewIntent",
@@ -1983,6 +2066,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     override fun onStop() {
         super.onStop()
+        // ★task-27：**退后台先收浮层**（必关时机之一，见 [closeSpaceOverlay]）——
+        //   用户带着浮层退到后台，回来应该落在**直播间本体**（还在播），而不是"浮层盖着一个
+        //   谁也不知道的直播间"；也别给返回栈留一层看不见的空间页。
+        //   放在 super 之后、下面那堆记录/播放策略**之前**：本函数其余的账一个字不动。
+        closeSpaceOverlay()
         // ★诊断日志（只读）
         LivePageTrace.note(
             "onStop.enter",
@@ -2080,6 +2168,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     // [hermes-fix 2026-09-26] onTaskRemoved 是 Service 回调；Activity 无此回调，记录作废改在 PlaybackService
     override fun onDestroy() {
+        // ★task-27：**销毁兜底关浮层**（必关时机之一）—— 系统回收 / 换房 recreate / 正常退出
+        //   都会走到这里。不关的话整棵 Compose 组合树与它抓着的 store、ViewModel 一起泄漏
+        //   （旧实现就栽在这条上）。回调字段一并置空：dispatcher 那边由 LifecycleOwner 自动摘。
+        closeSpaceOverlay()
+        spaceBackCallback = null
         // ★诊断日志（只读）
         LivePageTrace.note(
             "onDestroy.enter",
@@ -2299,6 +2392,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // PiP 窗口里没有点按钮的空间：**顶栏与底栏一起收起来**（用户："PIP 模式下，我想让它隐藏那个
         // 底部按钮，还有顶部的状态栏各种信息按钮，因为它会挡住 PIP 的大部分视觉"）。
         if (isInPictureInPictureMode) {
+            // ★task-27：**进小窗必须把 UP 空间浮层收掉**（必关时机之一）——
+            //   小窗里摆一屏空间 UI 既不合适也没法用；而 PiP 只走 onPause、**不走 onStop**，
+            //   所以不能指望 [onStop] 那一处，必须在这里显式收（与上面收直播设置弹窗同一条理由）。
+            closeSpaceOverlay()
             pipEntryPending = true
             // PiP 里误触手势会同时改系统音量和画面亮度，很难发现，直接收起手势层
             gestureHud.hide()
@@ -2505,15 +2602,169 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   **独立窗口**、自己先吃掉返回键，弹幕宿主 `LiveDanmakuOverlayHost` 里也没有 BackHandler。
      *   ★另一个方向的保险（已核对 androidx.activity 1.13.0 字节码）：`OnBackPressedDispatcher`
      *   只有在**存在已启用的回调**时才会往 `OnBackInvokedDispatcher` 注册平台回调
-     *   （`OnBackInvokedInput.updateBackInvokedCallbackState(hasEnabledHandlers)`），
-     *   本页一个回调都没注册 → 平台返回仍然走框架默认（`Activity.onBackPressed()`）→ 就是下面这个覆盖。
+     *   （`OnBackInvokedInput.updateBackInvokedCallbackState(hasEnabledHandlers)`）。
+     *   ★task-27 起本页**注册了一个回调**（[spaceBackCallback]：默认 `disabled`，只在 UP 空间浮层
+     *   开着时 enable）—— 默认态下"零个 enabled 回调"这个前提没变，平台返回照旧走框架默认
+     *   （`Activity.onBackPressed()`）→ 就是下面这个覆盖；只有浮层开着时才由那个回调先接一手。
      *   将来若有 Compose 侧注册 BackHandler，它会**先**拿到返回（弹层先关），这是期望行为。
      * ★`onBackPressed()` 自 API 33 起被标记 deprecated，但仍是"没有注册回调"时的唯一入口；
      *   与工程里既有的点播播放页写法一致，等整体迁到 `OnBackPressedCallback` 时两个页面一起迁。
+     *
+     * ★★task-27（**返回键分层**）：浮层开着时这里把返回先交给那个回调，浮层没开时与改动前逐字一致：
+     * ```
+     * 浮层开着 → onBackPressedDispatcher.onBackPressed() → [spaceOverlayBack]
+     *            · onBack()==true  → 浮层自己退了一层（本页不动）
+     *            · onBack()==false → 只关浮层（**本页不退、还在播**）
+     * 浮层没开 → [handleBack]（横屏先退全屏、竖屏才退直播间，一行没改）
+     * ```
+     * ★为什么不直接调 [spaceOverlayBack]：注册回调是 task-26/27 冻结的接口，"谁先拿到返回"
+     *   只由 dispatcher 这一处定义；将来整体迁到 `OnBackPressedCallback` 时这条分层天然成立。
      */
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
+        if (spaceBackCallback?.isEnabled == true) {
+            onBackPressedDispatcher.onBackPressed()
+            return
+        }
         handleBack()
+    }
+
+    /**
+     * ★task-27：浮层开着时的那次系统返回（由 [spaceBackCallback] → dispatcher 转发过来）。
+     *
+     * 状态机只有两档，**两条都不退出直播间**：
+     * ```
+     * ① [SpaceOverlayHandle.onBack] 返回 true  → 浮层自己消费掉了（它内部退了一层 / 关了自己的弹窗），
+     *                                            本页什么都不做；
+     * ② 返回 false（或句柄已经空了）           → 浮层退到底 → 只 [closeSpaceOverlay]（摘 view + dispose），
+     *                                            本页仍然活着、还在播；**再按一次返回**才走 [handleBack]
+     * ```
+     * ★这里**绝不**调 [exitPage] / `finish()` —— 那正是用户报的"点标题进 UP 主页、返回却落到直播 Tab"
+     *   的老病根（只有 [openAnchorSpace] 的第 ② 段兜底才需要退出本页）。
+     * ★`onBack()` 包一层 `runCatching`：compose 侧那份浮层内部出问题，最坏只能是"这次返回没被消费 →
+     *   关浮层"，绝不许把本页崩掉（与 [LiveSpaceLauncher.createOverlay] 的"绝不抛"同一条底线）。
+     */
+    private fun spaceOverlayBack() {
+        val handle = spaceOverlay
+        if (handle != null && runCatching { handle.onBack() }.getOrDefault(false)) return
+        closeSpaceOverlay()
+    }
+
+    /**
+     * ★task-27：把浮层挂到本页视图树**最上层**（[openAnchorSpace] 第 ① 段；同一时刻只允许一个）。
+     *
+     * ```
+     * rootLayout(FrameLayout) 最后 addView + bringToFront + elevation = UP_SPACE_OVERLAY_ELEVATION
+     *   ├─ 铺满（MATCH_PARENT×2）：连顶栏/底栏那两块也盖住 → 底栏按钮点不到
+     *   ├─ Z 最高 + isClickable：手势层 [TapCatcher] 收不到触摸 → 亮度/音量不会被误触
+     *   └─ 返回回调 enable：按返回先给浮层（见 [onBackPressed]）
+     * ```
+     * 这里**不碰**播放器、不 finish、不动 `LiveLastRoomStore` / `ReturnToLiveGuard` —— 本页全程
+     * RESUMED，直播间一直在播（这正是本方案存在的理由）。
+     *
+     * @return true = 挂上了（[spaceOverlay] 已就位、返回回调已启用）；false = 这一步失败（调用方走兜底）
+     */
+    private fun attachSpaceOverlay(handle: SpaceOverlayHandle): Boolean = runCatching {
+        val view = handle.view
+        // 防御一：契约要求 view 是新的、没有 parent；万一它已经挂在别处（compose 侧复用了一个 view），
+        //   直接 addView 会抛 IllegalStateException —— 先摘下来，别让"点一下标题"崩在这里。
+        (view.parent as? ViewGroup)?.removeView(view)
+        // 防御二：显式声明"这一层可点" —— 没被浮层内容接住的触摸在这里就被吃掉，
+        //   不会漏给下面同父容器、Z 更低的手势层/底栏。
+        view.isClickable = true
+        view.elevation = UP_SPACE_OVERLAY_ELEVATION
+        rootLayout.addView(
+            view,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        view.bringToFront()
+        spaceOverlay = handle
+        spaceBackCallback?.isEnabled = true
+        LivePageTrace.note("title.overlay.open", "room" to rawRoomId, "uid" to anchorUid)
+        true
+    }.getOrElse { e ->
+        // 挂不上就当作"没有浮层"：把可能已经加上去的 view 摘掉、句柄收掉，交给调用方走兜底 ——
+        // "点标题"最坏的结果是退回旧路，不是闪退（与 createOverlay 的 runCatching 同一条底线）。
+        LivePageTrace.note(
+            "title.overlay.fail",
+            "room" to rawRoomId,
+            "err" to e.javaClass.simpleName,
+        )
+        runCatching { (handle.view.parent as? ViewGroup)?.removeView(handle.view) }
+        runCatching { handle.dispose() }
+        false
+    }
+
+    /**
+     * ★task-27：关掉页内 UP 空间浮层（**幂等**；没开时零开销）。
+     *
+     * 调用点（一条都不能漏，漏了就是"浮层盖着看不见的直播间"或泄漏整棵组合树）：
+     * | 时机 | 为什么 |
+     * |---|---|
+     * | [spaceOverlayBack] | 用户按返回退到底 = 回直播间本体（**不是**退出直播间） |
+     * | [handOffToMainHost] | 浮层把导航交回主界面，本页马上要 finish |
+     * | [onStop] | 真退后台：回来应该落在**直播间本体**，返回栈里不留一层看不见的浮层 |
+     * | [onPictureInPictureModeChanged]`(true)` | 小窗里不摆一屏空间 UI（PiP 只走 onPause、不走 onStop，必须显式收） |
+     * | [onDestroy] | 兜底：系统回收 / 换房 recreate 时绝不把浮层与它的组合树留成泄漏 |
+     * | [onNewIntent] 的复用分支 | 别处又点进**同一个房间**、本实例被提到前台（不重建）—— 浮层还盖着就表现为"点了没反应" |
+     *
+     * ★顺序：**先摘 view、再 dispose**（dispose 是 compose 侧拆组合树，先让它脱离视图树更安全）。
+     * ★`dispose` 包 `runCatching`：它万一抛，最坏后果只是浮层多留一帧，绝不许连累本页
+     *   （onStop / onDestroy 都会走到这条路上）。
+     */
+    private fun closeSpaceOverlay() {
+        val handle = spaceOverlay
+        spaceOverlay = null
+        // 返回回调跟着浮层一起失效 —— "浮层开着"这件事只由它表达（见 [spaceBackCallback]）
+        spaceBackCallback?.isEnabled = false
+        if (handle == null) return
+        LivePageTrace.note("title.overlay.close", "room" to rawRoomId)
+        val view = handle.view
+        runCatching { (view.parent as? ViewGroup)?.removeView(view) }
+        runCatching { handle.dispose() }
+    }
+
+    /**
+     * ★task-27：浮层把一次"离开 UP 空间流程"的导航交回本页
+     * （就是传给 [LiveSpaceLauncher.createOverlay] 的 `onExitToMainHost`）。
+     *
+     * 典型场景：用户在空间里点了一个视频 —— 点播播放器的宿主在主界面视图树上，浮层里放不下，
+     * 所以浮层把这次导航委托给**主界面**的 `PageNavigation`，然后要求本页让位。
+     *
+     * ## 顺序推演（为什么"先关浮层、再 exitPage"，以及**为什么不用再调 open()**）
+     * ```
+     * 浮层点击 → 本回调
+     *   → rootLayout.post {            ← ① 延迟一帧（理由见下）
+     *       closeSpaceOverlay()       ← ② 摘 view + dispose（浮层那边已经把导航交给主界面了）
+     *       exitPage()                ← ③ disarm 守卫 + 清"回 App 恢复"记录 + finish 本页
+     *     }                              ⇒ 主界面露出来，且它已经停在目标页上
+     * ```
+     * · **为什么不用再调 `LiveSpaceLauncher.open(uid)`**：[open] 的语义是"让主界面导航到用户空间"，
+     *   而这一次导航**浮层自己已经做完了**（它持的就是主界面那套 `PageNavigation`）。再调一次等于
+     *   把用户空间又压一层、返回时多退一次 —— 纯粹的负优化。
+     * · **为什么延迟一帧**：本回调是从浮层**自己的点击事件**里回来的；当场 `removeView`/`dispose`
+     *   等于在 Compose 正在派发事件的过程中拆掉它自己的组合树（旧实现
+     *   `PlaybackHandoffPlayerDelegate` 用的也是"`post` 一帧后再做"）。等这一帧过去，
+     *   事件派发已经结束，摘它才是安全的。
+     * · **[exitPage] 而不是裸 `finish()`**：本页是**用户主动离开**，必须撤掉 `ReturnToLiveGuard`
+     *   的武装与 `LiveLastRoomStore` 的"应当恢复"记录，否则用户之后从桌面回软件会被自动拉回
+     *   直播间（那是他没做的动作）。
+     */
+    private fun handOffToMainHost() {
+        if (isFinishing || isDestroyed) return
+        LivePageTrace.note(
+            "title.handoff",
+            "room" to rawRoomId,
+            "overlay" to (spaceOverlay != null),
+        )
+        rootLayout.post {
+            if (isFinishing || isDestroyed) return@post
+            closeSpaceOverlay()
+            exitPage()
+        }
     }
 
     /**
@@ -3836,7 +4087,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ## 一个弹窗、两段（[LiveListDialog] 的 `segments`）
      * | 段 | 标题 | 内容 | 点一条做什么 |
      * |---|---|---|---|
-     * | 0 | 清晰度 | `desc（qn N）` + 说明行 | `requestedQn = qn` + `delegate.switchQuality(qn)` |
+     * | 0 | 清晰度 | `desc（服务端未提供 · 可能拿不到）?（qn N）` + 说明行 | 换档 → `requestedQn = qn` + `delegate.switchQuality(qn)`；点**已请求但服务端没给**的那一档 → 只 toast 指向「重新取流」（**不重复取流**） |
      * | 1 | 线路 | `线路 N　desc` + 说明行 | `delegate.switchToLine(index)` |
      *
      * 两段的既有行为**一条没少**（原来两个弹窗各自的那套原样搬过来）：
@@ -3874,11 +4125,26 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         val pickers = ArrayList<(Int) -> Unit>(2)
         val segments = ArrayList<Segment>(2)
         if (qualities.isNotEmpty()) {
+            // ★标注规则（只标"比服务端可用的最高档还高"的档）：
+            //   `accepted = false` 只表示这一档**不在服务端这次下发的 `accept_qn` 里**，
+            //   **不等于"需要大会员"** —— 抓包样本里 150 高清 / 80 流畅 也常在 accept_qn 之外，
+            //   但它们只是"低于服务端愿意列的最高档"，通常照样能拿，标它们就是误报。
+            //   所以只对**高于 maxAcceptedQn** 的档加后缀（那才是真正"服务端这次没给"的部分）。
+            //   设置页那套"(需大会员)"是另一种语义（设置里选了这档、实际要会员才生效），不要照抄。
+            //   ★`acceptedSet` 为空时 delegate 会把所有档都算 accepted（见 `buildQualities`），
+            //   这里的 maxAcceptedQn 就是最高档 ⇒ 一个后缀都不会加（退化态下不误标）。
+            //   ★`?: Int.MAX_VALUE`（**不是 0**）：万一服务端给的 accept_qn 非空却没有任何正值（例如只回 [0]），
+            //   delegate 侧就没有任何一档算 accepted ⇒ maxAcceptedQn 取 0 会让 "qn > 0" 恒真、8 档全带后缀，
+            //   正好是本节要避免的误标；取 MAX_VALUE = "一档都没被接受时不标任何档"。
+            //   （8 份抓包样本 + 8 次实测里 accept_qn 恒为正，这是防御性写法。）
+            val maxAcceptedQn = qualities.filter { it.accepted }.maxOfOrNull { it.qn } ?: Int.MAX_VALUE
             val entries = qualities.map { option ->
                 val isPlayingNow = option.qn == actualQn
                 val requestedButUnavailable = option.qn == requestedQn && !isPlayingNow
+                val notOfferedHint =
+                    if (!option.accepted && option.qn > maxAcceptedQn) "（服务端未提供 · 可能拿不到）" else ""
                 Entry(
-                    label = "${option.desc}（qn ${option.qn}）",
+                    label = "${option.desc}$notOfferedHint（qn ${option.qn}）",
                     note = when {
                         isPlayingNow -> "当前正在播放"
                         requestedButUnavailable -> "已请求 · 当前不可用（需登录或大会员）"
@@ -3896,6 +4162,38 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             )
             pickers.add { index ->
                 val option = qualities.getOrNull(index) ?: return@add
+                // ★点的是"正在播、而且已经就是我们请求的那一档" → 真没别的可做（delegate 也会直接
+                //   return），所以连"正在切换清晰度…"都不写：那句话永远不会兑现，状态栏会一直卡着它。
+                //   ★这一支只挡"完全冗余"的那一下；"正在播但不是我们请求的档"仍然走下面的正常路径
+                //   （它会真的再取一次流，把 requestedQn 落到实际在播的档上）。
+                if (option.qn == actualQn && option.qn == requestedQn) return@add
+                // ★修"点了没反应"：服务端**静默降级**后（例如请求原画、实际只给超清），
+                //   delegate 的 requestedQn 会一直停在用户当时选的那一档，而实际在播的是更低档；
+                //   此时再点这一档，`delegate.switchQuality(qn)` 会因为 `qn == requestedQn`
+                //   直接 return —— 界面上只留下一句永远不会兑现的"正在切换清晰度…"。
+                //   这里给一句**明确、可行动**的话，而不是把每一次点击都变成重新取流
+                //   （那样会打风控）：这一支**一个网络请求都不发**，只 toast + 记日志。
+                //   真正的"再试一次"仍然走本弹窗里既有的「重新取流」
+                //   （[retryPlayback] → `delegate.retry()`，它本来就不受防抖/预算限制）。
+                //   注：Activity 的 [requestedQn] 与 delegate 内部那份始终同步（起播/切档/重试同源）。
+                if (option.qn == requestedQn && option.qn != actualQn) {
+                    // 已经播起来了就如实说"只给到哪一档"；一帧都还没拿到（整链失败）时说"还没拿到"，
+                    // 不能拼出"只给到「0」"这种看不懂的话
+                    val tail = if (actualQn > 0) {
+                        val delivered = actualQnDesc.ifBlank { actualQn.toString() }
+                        "服务端当前只给到「$delivered」"
+                    } else {
+                        "当前还没拿到「${option.desc}」这一档"
+                    }
+                    toast("$tail；想再试一次请点「重新取流」")
+                    // ★诊断日志（只读）：点了"已请求但服务端没给"的那一档（不再重复取流）
+                    LivePageTrace.note(
+                        "switch.quality.sameRequested",
+                        "qn" to option.qn,
+                        "actualQn" to actualQn,
+                    )
+                    return@add
+                }
                 requestedQn = option.qn
                 setStreamStatus("正在切换清晰度…")
                 // ★切画质 = 重新取流 + 换 MediaSource（不 release 播放器，保留最后一帧）
@@ -6652,29 +6950,44 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★第十五批第 5 条：顶栏标题点击 = 打开**当前房间主播的用户空间**
      * （接线在 [buildUi] 的 [titleText] 那一段）。
      *
-     * ## 跳转走的是现成的注册桥
-     * 用户空间是 compose 模块的 `UserSpacePage`（Compose 页面，只活在主界面的 NavHost 里），
+     * ## ★task-27：三段式（主路 = 页内浮层，兜底 = 今天的 open+exitPage）
+     * ```
+     * ① uid <= 0                      → toast + return（一字未改）
+     * ② 先试浮层 LiveSpaceLauncher.createOverlay(this, uid) { handOffToMainHost() }
+     *      拿到 handle 且挂得上 → return（**不 finish、不 pause/stop**：返回时直播间还在播）
+     *      拿不到 / 挂不上      → ③
+     * ③ 今天那条兜底：LiveSpaceLauncher.open(uid) + exitPage()（**逐字保留**）
+     * ```
+     * 为什么把浮层放主路：用户原话 ——"点直播间标题进 UP 主页，返回为什么是回到直播 TAB，
+     * 不是直播间？路线还是要理成一条线的"。浮层是**本页视图树最上层的一块全屏 View**
+     * （[attachSpaceOverlay]），于是本页全程 RESUMED、播放器/弹幕/音频一行不动，
+     * 一次返回就回到**还在播**的原直播间（返回键分层见 [onBackPressed]）。
+     * 为什么兜底必须留着：[createOverlay] 的实现在 compose 侧（它要自己拼 `subDI`，
+     * 历史上正是它抛异常把用户崩过）—— 拿不到就只能退化成"导航主界面 + 结束本页"，
+     * 宁可返回栈不完美，也绝不出现"点了没反应"。
+     *
+     * ## 跳转为什么都走 [LiveSpaceLauncher]（而不是直播页自己 startActivity）
+     * 用户空间是 compose 模块的 `UserSpacePage`（Compose 页面，只活在 NavHost 里），
      * 而那份 `PageNavigation` 句柄**只活在 `ComposeFragment` 的根组合里**，app 侧拿不到
-     * （`grep -rn "pageNavigation" app/src` 的**代码**引用数为 0），所以全工程唯一的跨模块入口就是
-     * [LiveSpaceLauncher] —— 实现在 `ComposeFragment` 里注册（见那座桥的 KDoc）。
-     * 这里**不新写一套 startActivity**、也不开第二份跳转，只调用它。
+     * （`grep -rn "pageNavigation" app/src` 的**代码**引用数为 0），所以全工程唯一的跨模块入口
+     * 就是这座桥（浮层与兜底两条路都用它）。这里**不新写一套 startActivity**、也不开第二份跳转。
      * ★别再写"app 不能 import compose"（2026-09-28 复核反证）：`app/build.gradle.kts` 里就有
      *   `implementation(project(":bilimiao-compose"))`，app 侧多处直接 import
      *   `cn.a10miaomiao.bilimiao.compose.*`（`MainActivity` / `MainUi` / `PlayerController`）——
      *   缺的是"导航句柄"，不是"依赖方向"。
      *
-     * ## 为什么跳成功之后要走 [exitPage]（而不是只 finish）
-     * 那座桥的实现是"把**主界面**的 NavHost 导航到用户空间"，而本页正压在主界面之上：
+     * ## 兜底那条为什么成功之后要走 [exitPage]（而不是只 finish）
+     * 兜底走的是"把**主界面**的 NavHost 导航到用户空间"，而本页正压在主界面之上：
      * 不结束自己，用户看到的就是"点了标题什么都没发生"，退出去才发现主界面早换了页。
      * ★用 [exitPage] 而不是裸 `finish()`：它是本页**用户主动离开直播间**的唯一出口，
      *   除了 finish 还负责撤掉「回 App 仍停在直播间」的武装与记录（[LiveLastRoomStore]）——
      *   漏了它，用户从 UP 空间退到桌面再回软件**会被自动拉回直播间**，那不是他点标题的意图。
      *
-     * ## uid 没拿到 / 桥没注册时怎么处理
-     * 两条都只 toast 一句、**留在直播间**（绝不崩、绝不拿 0 去开空白空间、绝不发空 Intent）：
+     * ## uid 没拿到 / 两条路都不可用时怎么处理
+     * 都只 toast 一句、**留在直播间**（绝不崩、绝不拿 0 去开空白空间、绝不发空 Intent）：
      * · [anchorUid] = 0（进房解析被风控挡掉，且那之后也没补上）→ 提示稍后再试；
-     * · `LiveSpaceLauncher.open` 返回 false（主界面的 ComposeFragment 还没组合 / 导航抛异常，
-     *   见那座桥的 KDoc）→ 同样提示，用户再点一次即可。
+     * · 浮层拿不到（桥没注册浮层工厂 / compose 侧构造失败）→ 自动落兜底，用户无感；
+     * · `LiveSpaceLauncher.open` 也返回 false（主界面 ComposeFragment 还没组合 / 导航抛异常）→ 提示稍后再试。
      */
     private fun openAnchorSpace() {
         val uid = anchorUid
@@ -6684,6 +6997,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             toast("还没拿到主播信息，稍后再试")
             return
         }
+        // 同一时刻只允许一个浮层（正常路径到不了这里：浮层铺满后标题已经被它盖住了）
+        if (spaceOverlay != null) return
+
+        // ★① 主路：页内浮层。两道"绝不抛"：createOverlay 内部 runCatching（桥的底线），
+        //   attachSpaceOverlay 自己 runCatching（挂载这一步的底线）—— 任何一步失败都只是回退到 ②。
+        val handle = LiveSpaceLauncher.createOverlay(this, uid) { handOffToMainHost() }
+        if (handle != null && attachSpaceOverlay(handle)) return
+
+        // ★② 兜底：今天那条路（**逐字保留**：导航主界面 + 结束本页）。代价是"从 UP 空间返回
+        //   落到直播 Tab"，但至少空间打得开 —— 这是浮层建不出来时唯一可接受的结果。
         if (!LiveSpaceLauncher.open(uid)) {
             toast("打不开主播空间，稍后再试")
             return
@@ -6694,7 +7017,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 用户主动离开直播间（顶栏返回图标 / 系统返回键走到的那条路 —— 两条都经 [handleBack] 分级，
      * 只有"竖屏下按返回"与"小窗里按返回"会走到这里；
-     * ★第十五批起**顶栏标题点击进 UP 空间**也走这里，见 [openAnchorSpace]）。
+     * ★第十五批起**顶栏标题点击**也可能走到这里，但第十六批把口径收紧了 ——
+     * **[spaceOverlayBack]（浮层那条主路）永不调用本函数**（返回时直播间还在播，这正是本轮要的效果），
+     * 只有这两条会走：· [openAnchorSpace] 第 ② 段兜底（浮层建不出来）；· [handOffToMainHost]）。
      *
      * ★必须显式解除「回 App 仍停在直播间」的武装（[ReturnToLiveGuard]）：
      *   用户是**主动收摊**，下次再进 App 不该被自动弹一个直播间出来 ——

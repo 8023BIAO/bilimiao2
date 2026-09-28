@@ -98,6 +98,7 @@ import cn.a10miaomiao.bilimiao.compose.components.dialogs.MessageDialogState
 import cn.a10miaomiao.bilimiao.compose.components.image.MyImagePreviewer
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.ImagePreviewerProvider
 import cn.a10miaomiao.bilimiao.compose.pages.home.HomePage
+import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpaceOverlayHost
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -204,7 +205,26 @@ class ComposeFragment : Fragment(), MyPage, DIAware, OnBackPressedDispatcherOwne
                     LiveSpaceLauncher.register { mid ->
                         pageNavigation.navigate(UserSpacePage(id = mid.toString()))
                     }
-                    onDispose { LiveSpaceLauncher.unregister() }
+                    // ★task-26：**页内浮层**工厂（与上面那条老桥并列，**不删老桥**——它是兜底）。
+                    //   为什么在这里注册：浮层要拿"本 Fragment 这份 DI + 这份 pageNavigation"，
+                    //   而它们都只活在这个根组合里（app 侧拿不到）。工厂被直播页调用时：
+                    //   · parentDi      = 本 Fragment 的 di（往上还挂着 MainActivity 的 DI：Store/播放器委托）；
+                    //   · mainNavigation = 本 Fragment 的 pageNavigation（浮层里点到"空间流程外"的目的地时，
+                    //     由浮层把这次导航交给它，见 UserSpaceOverlayHost.gateRoute）。
+                    //   工厂自己 runCatching → null（构造失败就返回 null，直播页自动走老路，绝不闪退）。
+                    LiveSpaceLauncher.registerOverlay { activity, mid, onExitToMainHost ->
+                        UserSpaceOverlayHost.create(
+                            activity = activity,
+                            mid = mid,
+                            parentDi = di,
+                            mainNavigation = pageNavigation,
+                            onExitToMainHost = onExitToMainHost,
+                        )
+                    }
+                    onDispose {
+                        LiveSpaceLauncher.unregister()
+                        LiveSpaceLauncher.unregisterOverlay()
+                    }
                 }
                 CompositionLocalProvider(
                     LocalContainerView provides container,
@@ -355,13 +375,23 @@ fun MyBottomSheet(
     container: ViewGroup?,
     page: ComposePage,
     onClose: () -> Unit,
+    /**
+     * ★task-26：页内浮层专用（默认 `null` = 主界面那份**逐字不变**）。
+     *
+     * 为什么必须能传进来：贴底弹窗里的页面走的是**这个函数自己那份** `PageNavigation`，
+     * 它绕过了浮层对页面发的那份（`LocalPageNavigation`）—— 不把闸门一起传下去，
+     * 弹窗里点到"空间流程外"的目的地就会撞进浮层那张小路由表（destination not found → 抛）。
+     * 语义与 [PageNavigation.routeGate] 完全一致。
+     */
+    routeGate: ((ComposePage) -> Boolean)? = null,
 ) {
     val parentPageNavigation by rememberInstance<PageNavigation>()
-    val pageNavigation = remember(parentPageNavigation, onClose) {
+    val pageNavigation = remember(parentPageNavigation, onClose, routeGate) {
         PageNavigation(
             navHostController = { parentPageNavigation.hostController },
             launchUrl = parentPageNavigation::launchWebBrowser,
             onClose = onClose,
+            routeGate = routeGate,
         )
     }
     val pageConfigState = remember {

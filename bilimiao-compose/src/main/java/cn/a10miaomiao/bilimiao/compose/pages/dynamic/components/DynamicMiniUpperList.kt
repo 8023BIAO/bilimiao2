@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import bilibili.app.dynamic.v2.UpListItem
 import cn.a10miaomiao.bilimiao.compose.common.localPageNavigation
+import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import cn.a10miaomiao.bilimiao.compose.pages.mine.MyFollowPage
 import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
@@ -127,24 +128,30 @@ fun DynamicMiniUpperList(
                     Box(
                         modifier = Modifier
                             .size(56.dp)
-                            .clip(CircleShape)
+                            // ★故意不用 .clip(CircleShape)：它会把 LiveBadgedAvatar 的涟漪裁掉
+                            //   （涟漪画在头像之外，见那边的 KDoc）。选中底色改用
+                            //   background(color, shape = CircleShape)，圆还是一样大，但不裁子节点。
                             .background(
-                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                else Color.Transparent
+                                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                else Color.Transparent,
+                                shape = CircleShape,
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        GlideImage(
-                            model = item.face,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .border(
-                                    width = if (isSelected) 3.dp else 0.dp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    shape = CircleShape
-                                )
+                        LiveBadgedAvatar(
+                            face = item.face,
+                            size = 48.dp,
+                            // uid 有效才查在播状态（脏数据 uid<=0 传 null = 不请求、不挂标记）
+                            mid = item.uid.takeIf { it > 0 }?.toString(),
+                            // 与宽栏一致：点哪都算整行点击（筛选 / 已选中再点进空间，见 DynamicPage）
+                            liveClickOnAvatar = false,
+                            onClick = null,
+                            // 选中描边从 GlideImage 挪到本组件外层：只 border、不 clip（clip 会裁涟漪）
+                            modifier = Modifier.border(
+                                width = if (isSelected) 3.dp else 0.dp,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                shape = CircleShape,
+                            ),
                         )
                     }
                     Spacer(modifier = Modifier.size(4.dp))

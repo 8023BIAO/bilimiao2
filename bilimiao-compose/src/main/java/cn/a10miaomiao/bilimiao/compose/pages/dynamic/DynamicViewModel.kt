@@ -11,6 +11,7 @@ import bilibili.app.dynamic.v2.UpListItem
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.pages.home.HomePage
 import cn.a10miaomiao.bilimiao.compose.pages.user.FollowingsInfo
+import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
@@ -152,6 +153,18 @@ class DynamicViewModel(
 
     fun selectUpper(item: UpListItem) {
         _selectedUpper.value = item
+    }
+
+    /**
+     * 进这个 UP 的用户空间 —— 动态页 UP 栏"已选中再点一次"的落点（见 `DynamicPage` 的 `onUpperClick`）。
+     *
+     * ★为什么放在 VM 而不是在 Composable 里直接 `pageNavigation.navigate(...)`：
+     *   本页进用户空间的写法只留一处（与 [selectMyDynamics] 同源），Composable 只负责"点了几次"。
+     * ★uid <= 0 直接返回：`UserSpacePage(id = "0")` 会打开一个空白的空间页，比"没反应"更糟。
+     */
+    fun toUserSpace(uid: Long) {
+        if (uid <= 0L) return
+        pageNavigation.navigate(UserSpacePage(id = uid.toString()))
     }
 
     fun selectMyDynamics(userInfo: UserInfo?) {

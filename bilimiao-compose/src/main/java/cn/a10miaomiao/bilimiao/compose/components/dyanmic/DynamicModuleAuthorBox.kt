@@ -7,15 +7,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import cn.a10miaomiao.bilimiao.compose.common.localPageNavigation
-import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
+import com.bumptech.glide.integration.compose.GlideImage
 
 /**
  * 动态作者
@@ -40,8 +46,6 @@ fun DynamicModuleAuthorBox(
     DynamicModuleAuthorBox(
         name = authorData.name,
         face = authorData.face,
-        // 传 uid 进去，作者头像才会去查"在不在播"并挂「直播中」+涟漪（见 LiveBadgedAvatar）
-        mid = authorData.mid.takeIf { it > 0 }?.toString(),
         labelText = author.ptimeLabelText,
         locationText = author.ptimeLocationText,
         showUserInfo = showUserInfo,
@@ -49,6 +53,7 @@ fun DynamicModuleAuthorBox(
     )
 }
 
+@OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun DynamicModuleAuthorBox(
     name: String,
@@ -57,11 +62,6 @@ fun DynamicModuleAuthorBox(
     locationText: String,
     showUserInfo: Boolean = true,
     onClick: (() -> Unit)? = null,
-    /**
-     * 作者 uid。给了才查在播状态 —— 别的调用方（比如视频列表卡片）只有名字和头像，
-     * 传 null 就退化成原来的纯头像，行为不变。
-     */
-    mid: String? = null,
 ) {
     Row(
         modifier = Modifier
@@ -73,12 +73,19 @@ fun DynamicModuleAuthorBox(
             .padding(10.dp)
     ) {
         if (showUserInfo) {
-            LiveBadgedAvatar(
-                face = face,
-                size = 40.dp,
-                mid = mid,
-                // 没在播时点头像 = 原来的"进他空间"；在播时被"进直播间"顶掉
-                onClick = onClick,
+            // ★裸头像，**不再**挂「直播中」+ 涟漪：用户 2026-09-28 拍板"直播标记只留两处"
+            //   （用户空间顶部大头像 + 动态页 UP 栏头像）。动态卡片作者头像当初挂标记的后果是
+            //   "UP 空间动态列表里每条动态的作者头像都在扩散涟漪"，一屏全是动画。
+            //   这里连 uid 都不再传 —— 曾经的 `mid` 形参是"查在播状态"的唯一开关，
+            //   现在没有任何调用方需要它，留着就是死参数（规则 15：做减法，不留第二种写法）。
+            //   点击行为不变：整行（含这颗头像）由上面 Row 的 clickable 负责进他的空间。
+            GlideImage(
+                model = UrlUtil.autoHttps(face) + "@200w_200h",
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape),
             )
             Column(
                 modifier = Modifier.padding(start = 5.dp),
