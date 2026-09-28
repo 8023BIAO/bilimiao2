@@ -16,9 +16,12 @@ import android.net.Uri
  *
  * 于是 `LiveBadgedAvatar()` / `LiveRipple()` / `LiveLabel()` / `rememberLiveStatus()` /
  * `rememberIsResumed()` 连同涟漪的全部动画常量一起删除；三个调用点（动态页 UP 栏宽屏/窄屏、
- * 用户空间顶部大头像）都改回了裸头像。「直播中」现在**只剩一处**：直播页
- * 「我的关注 · 正在直播」区块卡片上那颗角标（`HomeLiveContent.kt` 里 `LiveStatusBadge`
- * 自己的实现，与本文件无关）。
+ * 用户空间顶部大头像）都改回了裸头像。
+ * ★2026-09-29 状态（本轮更正）：当时写的"「直播中」只剩关注区块那一处角标"**也已不成立** ——
+ *   那颗角标（`HomeLiveContent.kt` 的 `LiveStatusBadge`，以及直播搜索 / 全站搜索直播 Tab 的同款）
+ *   同一批被用户点名删掉了（原话："还有这个直播中，我建议也全删了吧"）。
+ *   ⇒ **全工程现在没有任何「直播中」药丸/角标**，本文件是"进直播间"的唯一入口 [enterLiveRoom]。
+ *   详情与删除记录见 `HomeLiveContent.kt` 里 `LiveRoomCard` 的 KDoc。
  *
  * ## 为什么 `enterLiveRoom` 留在这里、文件名也不改
  * 它是三处（`HomeLiveContent` / `HistoryPage` / `LiveFollowPage`）共用的公开函数，

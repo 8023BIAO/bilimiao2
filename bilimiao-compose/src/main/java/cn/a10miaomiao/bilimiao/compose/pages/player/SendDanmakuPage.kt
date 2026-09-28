@@ -10,14 +10,11 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +41,7 @@ import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSendButton
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
@@ -271,23 +269,18 @@ internal fun SendDanmakuPageContent(
                 Box(
                     modifier = Modifier.padding(end = 5.dp)
                 ) {
-                    Button(
-                        modifier = Modifier.width(80.dp),
+                    // 统一发送按钮（`components/input/MiaoInputBar.kt`，与私信/评论区**同一份实现**）：
+                    // **不填充**（TextButton）+ 小飞机 + 文案「发送」。用户原话："评论区的发送按钮、
+                    // 准备发送弹幕的那个……不应该填充"。
+                    // · 宽度用 `widthIn(min = 80.dp)` 而不是 `width(80.dp)`：trailingIcon 槽位原来就是
+                    //   80dp，这里保持同样的占位，同时大字体下允许它自己长宽（不会把"发送"截掉）。
+                    // · loading 时按钮内部自己画 16dp 转圈（原来那颗是 30dp 的，形态随统一实现）。
+                    // · 发送逻辑 / 字数上限 / 空内容守卫都在 ViewModel 里，这里一行没碰。
+                    MiaoSendButton(
                         onClick = viewModel::sendDanmaku,
-                        enabled = !loading,
-                    ) {
-                        if (loading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(30.dp),
-                                strokeWidth = 3.dp
-                            )
-                        } else {
-                            Text(
-                                text = "发送",
-                                maxLines = 1,
-                            )
-                        }
-                    }
+                        loading = loading,
+                        modifier = Modifier.widthIn(min = 80.dp),
+                    )
                 }
             }
         )
