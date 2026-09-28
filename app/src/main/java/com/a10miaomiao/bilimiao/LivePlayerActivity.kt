@@ -1817,6 +1817,21 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // ★task-53 取证：**入口先记一条**（上面那条 `onNewIntent` 只在"非复用"分支里写，
+        //   而"同房间复用把本页拉回前台"恰恰是我们最想看清的一条路）。
+        LivePageTrace.note(
+            "onNewIntent.enter",
+            "action" to (intent.action ?: "-"),
+            "flags" to intent.flags,
+            "data" to (intent.data?.toString() ?: "-"),
+            "reuseAttempted" to intent.getBooleanExtra(EXTRA_REUSE_ATTEMPTED, false),
+            "newRoom" to (intent.getStringExtra(EXTRA_ROOM_ID) ?: "-"),
+            "curRoom" to rawRoomId,
+            "multiWindow" to isInMultiWindowMode,
+            "pip" to isInPictureInPictureMode,
+            "isFinishing" to isFinishing,
+            "isChangingConfigurations" to isChangingConfigurations,
+        )
         // 复用路径来的（同房间被 REORDER_TO_FRONT 拉回前台）：什么都不做，继续播原来那一路流。
         // ★判据用这个 extra 而不是"房间号字符串相等"：复用允许"短号 1 → 真实号 5440"这种写法，
         //   字符串是不同的，但房间其实是同一个（见 [reuseExistingSameRoomInstance]）。
@@ -1968,6 +1983,26 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private var resumePlayIntent = false
 
+    /**
+     * ★task-53 取证：**本页原来没有重写 `onPause`** —— 这里只加一条日志（`super` 之后什么都不做），
+     * 用于"系统把小窗往全屏/后台收"这一趟的时序（`onPause → onStop → onDestroy` 的顺序与标志位）。
+     * ★它不含任何行为改动。
+     */
+    override fun onPause() {
+        super.onPause()
+        LivePageTrace.note(
+            "onPause.enter",
+            "room" to rawRoomId,
+            "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
+            "pip" to (runCatching { isInPictureInPictureMode }.getOrDefault(false)),
+            "isFinishing" to isFinishing,
+            "isChangingConfigurations" to isChangingConfigurations,
+            "pipEntryPending" to pipEntryPending,
+            "controlsVisible" to controlsVisible,
+            "isPlaying" to (delegate?.isPlaying == true),
+        )
+    }
+
     override fun onStop() {
         super.onStop()
         // ★诊断日志（只读）
@@ -1977,6 +2012,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "isFinishing" to isFinishing,
             "isChangingConfigurations" to isChangingConfigurations,
             "pip" to isInPictureInPictureMode,
+            // ★task-53 取证：小窗/分屏下这一条 + `onPause` 那条是判断"系统在收窗口"的直接证据
+            "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
             "isPlaying" to (delegate?.isPlaying == true),
             "delegate" to (delegate != null),
             "autoRetryOnNextResume" to autoRetryOnNextResume,
@@ -2082,8 +2119,25 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "room" to rawRoomId,
             "isFinishing" to isFinishing,
             "isChangingConfigurations" to isChangingConfigurations,
+            "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
+            "pip" to (runCatching { isInPictureInPictureMode }.getOrDefault(false)),
             "page" to (if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"),
         )
+        // ★★task-53 取证（**决定性的一条**）：`isFinishing == true` = 这个页面是**被 finish 掉的**
+        //   （而不是配置变更重建）。把当前调用栈记下来就能分辨是谁干的：系统按任务栈清理
+        //   （`ActivityThread` → `handleDestroyActivity` 里带 `removeActivityFromHistory`/
+        //   `finishActivityLocked` 这类帧）还是 App 自己调了 `finish()`。
+        //   ★读法提醒：`Throwable()` 抓的是**销毁这一步**的栈（AMS/ActivityThread 的销毁路径），
+        //   它能回答"哪种销毁"；"我们哪一行调的 finish"要靠 `exitPage.enter` /
+        //   `back.handleBack`（两条自带 `from=` 的日志）与 `reuse` 分支的日志交叉对照。
+        if (isFinishing) {
+            LivePageTrace.note(
+                "onDestroy.finishing.stack",
+                "room" to rawRoomId,
+                "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
+                "stack" to Throwable().stackTraceToString(),
+            )
+        }
         pollJob?.cancel()
         danmakuStateJob?.cancel()
         // ★本轮：弹幕流里的"直播状态"订阅也要收（它抓着 delegate 与本页实例）
@@ -2291,6 +2345,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "pipEntryPending" to pipEntryPending,
             "isPlaying" to (delegate?.isPlaying == true),
             "controlsVisible" to controlsVisible,
+            // ★task-53 取证：PiP 与"系统小窗（多窗口）"是两回事，两个标志位一起记才分得清
+            "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
         )
         // PiP 窗口里没有点按钮的空间：**顶栏与底栏一起收起来**（用户："PIP 模式下，我想让它隐藏那个
         // 底部按钮，还有顶部的状态栏各种信息按钮，因为它会挡住 PIP 的大部分视觉"）。
@@ -2398,6 +2454,40 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         }
     }
 
+    /**
+     * ★task-53 取证：**多窗口形态变化**（本页原来完全没处理过多窗口，也就没有这个回调）。
+     * 这里**只记日志**：用户现场说的"从小窗里点打开全屏窗口"正是这条回调 —— 有了它就能看出
+     * 系统到底有没有把 `onMultiWindowModeChanged(false)` 派发到本页、以及那一刻的标志位。
+     *
+     * 两个重载都覆盖：API 26+ 系统走两参版本；API 24/25 只有一参版本（26+ 的两参默认实现会回调一参，
+     * 所以真机上可能看到两条 `multiwindow.changed*` —— 那正是"哪个重载被调用"的证据，不是重复 bug）。
+     */
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode)
+        LivePageTrace.note(
+            "multiwindow.changed1",
+            "multiWindow" to isInMultiWindowMode,
+            "pip" to (runCatching { isInPictureInPictureMode }.getOrDefault(false)),
+            "isFinishing" to isFinishing,
+            "isChangingConfigurations" to isChangingConfigurations,
+            "room" to rawRoomId,
+        )
+    }
+
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig)
+        LivePageTrace.note(
+            "multiwindow.changed2",
+            "multiWindow" to isInMultiWindowMode,
+            "orientation" to newConfig.orientation,
+            "screenLayout" to newConfig.screenLayout,
+            "pip" to (runCatching { isInPictureInPictureMode }.getOrDefault(false)),
+            "isFinishing" to isFinishing,
+            "isChangingConfigurations" to isChangingConfigurations,
+            "room" to rawRoomId,
+        )
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // 返回键分级（本轮新增）
     // ══════════════════════════════════════════════════════════════════════
@@ -2447,6 +2537,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   也是"全屏时返回 = 退出全屏"）。
      */
     private fun handleBack() {
+        // ★task-53 取证：**谁按的返回**（`from` = 直接调用方：onBackPressed / 顶栏返回图标那一段）。
+        //   与下面的 [exitPage] 日志配合，就能把"页面被 finish"追到具体入口。
+        LivePageTrace.note(
+            "back.handleBack",
+            "from" to callerTag(),
+            "room" to rawRoomId,
+            "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
+            "pip" to (runCatching { isInPictureInPictureMode }.getOrDefault(false)),
+            "landscape" to isPageLandscape(),
+            "isFinishing" to isFinishing,
+        )
         if (isInPictureInPictureMode) {
             exitPage()
             return
@@ -2457,6 +2558,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         }
         exitPage()
     }
+
+    /**
+     * ★task-53 取证专用：返回**本函数的直接调用方**（`类名.方法#行`），给日志里的 `from=` 用。
+     *
+     * 索引说明：`stackTrace[0]` = callerTag 自己、`[1]` = 调它的那个函数（handleBack / exitPage）、
+     * `[2]` = 真正想知道的调用方。**只读、零副作用**，不改任何行为。
+     */
+    private fun callerTag(): String =
+        Throwable().stackTrace.getOrNull(2)?.let {
+            "${it.className.substringAfterLast('.')}.${it.methodName}#${it.lineNumber}"
+        } ?: "-"
 
     /**
      * "退出全屏" = 把方向切回竖屏并**钉住**（为什么必须钉、钉多久，见 [handleBack]）。
@@ -6665,10 +6777,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private fun exitPage() {
         // ★诊断日志（只读）：用户主动退出直播间（"回 App 恢复"记录的清理点之一）
+        //   ★task-53 取证：`from` 是**谁调用了 exitPage**（handleBack = 返回键/顶栏返回图标；
+        //   别的字符串 = 代码里另一条路）—— 配合 `onDestroy.finishing.stack` 就能钉死"谁杀掉了直播间"。
         LivePageTrace.note(
             "exitPage",
+            "from" to callerTag(),
             "room" to rawRoomId,
             "pip" to isInPictureInPictureMode,
+            "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
             "isFinishing" to isFinishing,
         )
         returnToLiveGuard.disarm()

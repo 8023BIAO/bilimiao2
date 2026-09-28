@@ -57,10 +57,15 @@ object LivePageTrace {
 
     /**
      * ★**总开关**：`false` = logcat 与文件**都不写**（一个布尔全局关掉）。
-     *   默认 `true`（本轮用户明确要求"加上去"）。
+     *
+     * ★★**2026-09-29 task-53 临时打开取证**（用户现场："系统小窗里的直播间，不管从桌面图标 /
+     *   最近任务 / 小窗里点全屏，都会把直播间杀掉、落回直播 Tab；点播完全正常 —— 你可以加个 log 调查"）：
+     *   这一轮**只取证、不改行为**，所以置为 `true`。
+     *   **★下一轮定位完记得改回 `false`**（正式包每事件一次 logcat + 一次落盘；文件有 512KB 滚动上限，
+     *   不会写满存储）。
      */
     @Volatile
-    var enabled: Boolean = false
+    var enabled: Boolean = true
 
     /** 文件通道开关（[enabled] 为 true 时才有意义）；关掉 = 只留 logcat。 */
     @Volatile

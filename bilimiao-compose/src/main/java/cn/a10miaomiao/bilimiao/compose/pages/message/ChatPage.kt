@@ -51,6 +51,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.input.MiaoInputField
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoInputToolButton
 import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSendButton
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.image.ImagesGrid
@@ -878,18 +879,20 @@ private fun ChatSendPanel(vm: ChatViewModel) {
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Bottom,
         ) {
-            IconButton(
+            // 表情 / 图片两颗工具按钮：与评论区**同一份实现**（`MiaoInputToolButton`，线框图标 + 44dp）
+            MiaoInputToolButton(
+                icon = Icons.Outlined.EmojiEmotions,
+                contentDescription = "表情",
+                active = showEmoji.value,
                 onClick = { showEmoji.value = !showEmoji.value },
-                modifier = Modifier.size(44.dp),
-            ) {
-                Icon(
-                    Icons.Outlined.EmojiEmotions, "表情",
-                    tint = if (showEmoji.value) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            )
             // 发图片：图标/位置与评论区发图那颗按钮对齐（表情在左、图片其次）
-            IconButton(
+            MiaoInputToolButton(
+                icon = Icons.Outlined.Image,
+                contentDescription = "添加图片",
+                enabled = !vm.isUploadingImage.value && !vm.isSending.value,
+                // 压缩 + 上传期间转圈：这里没有缩略图预览条，得让用户看到"在传"
+                loading = vm.isUploadingImage.value,
                 onClick = {
                     // 选图前先收起表情面板，避免两个面板叠在一起（评论区同一个约定）
                     showEmoji.value = false
@@ -897,19 +900,7 @@ private fun ChatSendPanel(vm: ChatViewModel) {
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
-                enabled = !vm.isUploadingImage.value && !vm.isSending.value,
-                modifier = Modifier.size(44.dp),
-            ) {
-                if (vm.isUploadingImage.value) {
-                    // 压缩 + 上传期间转圈：这里没有缩略图预览条，得让用户看到"在传"
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        Icons.Outlined.Image, "添加图片",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            )
             Spacer(Modifier.weight(1f))
             // 统一发送按钮：**不填充**（TextButton）+ 小飞机 + 文案「发送」（与评论区那颗是**同一份实现**）。
             // 原来这里是 primaryContainer 的填充块：深色档 primaryContainer ≈ tone 30，与近黑 sheet 几乎同色，

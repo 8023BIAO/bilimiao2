@@ -252,6 +252,11 @@ object LiveLastRoomStore {
      *   这时这次 stop 同样是"用户离开直播间"，记录必须留下，否则系统把直播间窗口收掉之后
      *   就无处可恢复（用户实测："系统小窗 → 回桌面 → 回软件，直播间消失、只剩直播 Tab"）。
      *   ★PiP 不走这个例外（它有自己的记录点与判据），那条路行为一个字节不变。
+     *   ★复核 R1（task-53 补记）：桌面/自由窗口环境（Samsung DeX / ChromeOS 桌面模式）下
+     *   `isInMultiWindowMode` **可能恒为 true** —— 那里"App 内切页"与"窗口被收起"本来就分不清，
+     *   于是这道门在那种环境下**语义被弱化**（几乎总按"离开直播间"记）。这是**有意接受**的偏保守：
+     *   多记一次只会让"回 App 仍在直播间"更愿意发生，不会误杀正在看的直播间
+     *   （恢复判据② `livePageCount == 0` 仍然拦着双开）。
      */
     fun onLivePageStopped(context: Context, roomId: String, inMultiWindow: Boolean = false) {
         ensureAttached(context)
@@ -603,9 +608,11 @@ object LiveLastRoomStore {
                 //   回调）。前台落到集合里还剩下的那个页面上，"小窗被系统收掉"那一刻
                 //   [evaluateRestore] 才拿得到宿主（否则直接以 "no host" 跳过 = 用户实测的 bug）。
                 //   单窗口下集合此时为空 ⇒ 行为与改动前逐字一致（前台清空）。
-                val next = resumedSet.firstOrNull()
+                val next = nextHostFromResumed()
                 resumedHost = next
                 resumedActivity = next?.javaClass?.name
+                // ★task-53 取证：登记"前台交给了谁"（多窗口下这个决定直接决定恢复能不能触发）
+                LivePageTrace.note("lastRoom.paused.fallback", "next" to (resumedActivity ?: "-"))
             }
         }
 
@@ -613,10 +620,28 @@ object LiveLastRoomStore {
             // 直播间自己的 stop 由页面钩子（onLivePageStopped）处理，这里只管"别的页面"
             if (activity.javaClass.name == LIVE_PLAYER_ACTIVITY) return
             // 还有前台页面 = App 内部切页，不算"离开 App"
-            if (resumedActivity != null) return
+            if (resumedActivity != null) {
+                // ★task-53 取证：这条"不清记录"的早退原来没有日志 —— 它决定记录留不留
+                LivePageTrace.note(
+                    "lastRoom.clear.skip",
+                    "reason" to "anotherPageResumed",
+                    "activity" to activity.javaClass.name,
+                    "resumed" to resumedActivity,
+                )
+                return
+            }
             // 直播间还活着（典型 = 用户带着它进了 PiP 小窗，App 退后台时小窗还在桌面上）
             // → 这次退后台仍然是"从直播间离开的"，记录必须留着
-            if (livePageCount > 0) return
+            if (livePageCount > 0) {
+                // ★task-53 取证：同上，补全决策点
+                LivePageTrace.note(
+                    "lastRoom.clear.skip",
+                    "reason" to "livePageAlive",
+                    "activity" to activity.javaClass.name,
+                    "livePageCount" to livePageCount,
+                )
+                return
+            }
             // 走到这里 = App 从**非直播间**页面退到后台（点播页 / 直播 Tab / 设置页…）
             // → 上次那条"应当恢复"不再代表用户离开时的位置，作废
             //   （用户实测过的那条："在点播页退桌面 → 回软件，被拉去直播间" ✗）
@@ -640,10 +665,22 @@ object LiveLastRoomStore {
             // 直播间：前台若正是它，落到"此刻还 RESUMED 的另一个页面"（多窗口：小窗被系统收掉时
             // 主界面通常还在前台，[evaluateRestore] 需要它当宿主）。
             if (resumedHost === activity) {
-                val next = resumedSet.firstOrNull()
+                val next = nextHostFromResumed()
                 resumedHost = next
                 resumedActivity = next?.javaClass?.name
+                // ★task-53 取证：直播间销毁后"前台交给了谁"（决定 evaluateRestore 走哪条分支）
+                LivePageTrace.note("lastRoom.destroyed.fallback", "next" to (resumedActivity ?: "-"))
             }
         }
+
+        /**
+         * ★task-53（复核 R2 的一行加固）：从"仍 RESUMED 的页面集合"里挑下一个前台宿主，**优先主界面**
+         * （[HOST_ACTIVITY]）。为什么必须挑：`Set.firstOrNull()` 的遍历顺序**未定义**，多窗口下集合里
+         * 可能同时有"主界面"和"直播间/别的页面"，随便挑一个会让恢复判据①（前台必须是主界面）
+         * **时而通过时而跳过**（间歇性故障）。挑不到主界面时退回集合里任意一个 —— 那种情况下判据①
+         * 本来就不会通过，取值只影响日志与"守卫"的可见性。
+         */
+        private fun nextHostFromResumed(): Activity? =
+            resumedSet.firstOrNull { it.javaClass.name == HOST_ACTIVITY } ?: resumedSet.firstOrNull()
     }
 }

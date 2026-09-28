@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -147,6 +149,56 @@ fun MiaoSendButton(
             )
             Spacer(Modifier.width(4.dp))
             Text(text = text, fontSize = 14.sp)
+        }
+    }
+}
+
+/** 输入条上工具按钮（表情 / 图片）的尺寸：44dp（M3 最小可点区，两处统一用这一档） */
+private val ToolButtonSize = 44.dp
+
+/**
+ * 输入条上的**工具按钮**（表情 / 图片选择）：私信与评论区**共用这一份**（AGENTS §2.15）。
+ *
+ * 用户原话（2026-09-29）："图标的表情和图片为什么不一样？我想用那个私信界面的那两个……
+ * 私信界面的那个笑脸和那个图片按钮稍微大一点，它们应该用的是同一张图片去做按钮的吧？"
+ * ⇒ 两处的差别只有两点，都在这里定死：
+ * · **线框图标**（图标由调用方传 `Icons.Outlined.*`，两处传同一对）；
+ * · **[IconButton] + 44dp**（原来是 `TextButton(size(44.dp))`，视觉上图标偏小）；
+ * 颜色规则：默认 `onSurfaceVariant`（规则 7 的次要图标色），**激活时 `primary`**（表情面板展开）。
+ *
+ * @param active 该工具当前处于展开/激活态（表情面板开着）→ 图标转 `primary`
+ * @param loading 正在上传：图标换成转圈（私信发图期间用；数量/预览条仍由各页面自己管）
+ */
+@Composable
+fun MiaoInputToolButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(ToolButtonSize),
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
         }
     }
 }

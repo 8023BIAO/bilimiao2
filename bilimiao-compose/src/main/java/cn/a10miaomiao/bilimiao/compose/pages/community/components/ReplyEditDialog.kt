@@ -32,11 +32,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -46,7 +45,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -84,6 +82,7 @@ import cn.a10miaomiao.bilimiao.compose.components.dialogs.AnyPopDialogProperties
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.DirectionState
 import cn.a10miaomiao.bilimiao.compose.components.input.MiaoInputField
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoInputToolButton
 import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSendButton
 import cn.a10miaomiao.bilimiao.compose.pages.community.ReplyEditParams
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
@@ -574,7 +573,8 @@ fun ReplyEditDialog(
     }
 }
 
-private val circleButtonSize = 44.dp
+// ★删除（task-54）：`circleButtonSize`（原来给两颗工具按钮的 TextButton 用）——
+//   现在那两颗按钮走统一实现 `MiaoInputToolButton`，尺寸由它内部的 44dp 决定，这里不再需要。
 private val minInputHeight = 90.dp
 private val emotePanelHeight = 300.dp
 
@@ -625,33 +625,21 @@ private fun ReplyTextToolbar(
         modifier = modifier,
         verticalAlignment = Alignment.Bottom
     ) {
-        TextButton(
+        // 表情 / 图片两颗工具按钮：与私信**同一份实现**（`MiaoInputToolButton`，**线框**图标 + 44dp + 同 tint）
+        // 用户原话："图标的表情和图片为什么不一样？我想用那个私信界面的那两个"——这里就是那一套。
+        MiaoInputToolButton(
+            icon = Icons.Outlined.EmojiEmotions,
+            contentDescription = "emoji表情",
+            active = visibleEmoji,
             onClick = onEmojiClick,
-            modifier = Modifier.then(Modifier.size(circleButtonSize)),
-        ) {
-            Icon(
-                imageVector = Icons.Default.Mood,
-                contentDescription = "emoji表情",
-                tint = if (visibleEmoji) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    // 规则 7：次要文字/图标走 onSurfaceVariant（原来用 onBackground，与私信那条不一致）
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-        }
+        )
         // 评论配图：只有一级评论能带图（楼中楼服务端不支持）
         if (canUploadImage) {
-            TextButton(
+            MiaoInputToolButton(
+                icon = Icons.Outlined.Image,
+                contentDescription = "添加图片",
                 onClick = onImageClick,
-                modifier = Modifier.then(Modifier.size(circleButtonSize)),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Image,
-                    contentDescription = "添加图片",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            )
         }
         if (uploadingCount > 0) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -668,11 +656,14 @@ private fun ReplyTextToolbar(
             }
         }
         Spacer(Modifier.weight(1f))
-        // ★统一发送按钮（`MiaoInputBar.kt`，与私信那颗是**同一份实现**）：
-        //   文案「发布」→「发送」（用户点名）、小飞机图标（原来就有，保留）、**不填充**（原来也是 TextButton）。
+        // ★统一发送按钮（`MiaoInputBar.kt`，与私信那颗是**同一份实现**，只是文案不同）：
+        //   · 评论区 = **「发布」**（用户 2026-09-29 要求改回来："要发布的文字那里改成「发布」，不是「发送」"）；
+        //   · 私信 = 「发送」（`MiaoSendButton` 的默认文案，见 ChatPage）。
+        //   不填充、小飞机图标两处一致。
         MiaoSendButton(
             onClick = onSendClick,
             loading = loading,
+            text = "发布",
         )
     }
 }
