@@ -189,7 +189,15 @@ class ComposeFragment : Fragment(), MyPage, DIAware, OnBackPressedDispatcherOwne
                 composeNav = rememberNavController()
                 // ★直播播放页「UP主」按钮 → 用户空间的**注册桥**（全工程唯一注册点，见 LiveSpaceLauncher）。
                 //   为什么注册在这里：直播页在 app 模块、用户空间是 compose 模块的 Compose 页面，
-                //   两边唯一的共同可见点就是 comm 模块的 LiveSpaceLauncher（app 反向 import compose 会成环）。
+                //   app 侧**拿不到本 Fragment 的 `pageNavigation`**（它绑在这个 Fragment 的 subDI 上，
+                //   不是全局 DI，app 解析不到），两边唯一的共同可见点就是 comm 模块的 LiveSpaceLauncher。
+                //   ★别再写"app 反向 import compose 会成环"：app 本来就
+                //     `implementation(project(":bilimiao-compose"))`（app/build.gradle.kts:152），
+                //     缺的是**导航句柄**、不是依赖方向。2026-09-28 已纠正的同款错论据是**两处**：
+                //     本处，以及 `LivePlayerActivity` 那座桥的 KDoc。
+                //     ★另外三处写着"成环"的别一起改 —— 它们说的是**反方向**（compose 不能 import app 的类，
+                //     反向引用确实会成环编译不过），说法成立：`LiveBadgedAvatar`、`HomeLiveContent`、
+                //     `SearchLiveContent` 里那几处同类说明。
                 //   为什么用 DisposableEffect：页面在时挂上实现、Fragment 销毁时注销 ——
                 //   注销后直播页的 open() 会返回 false，由它自己 toast 兜底，不会静默失败。
                 DisposableEffect(pageNavigation) {

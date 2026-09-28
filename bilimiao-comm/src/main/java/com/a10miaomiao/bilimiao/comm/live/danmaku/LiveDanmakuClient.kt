@@ -1505,12 +1505,19 @@ class LiveDanmakuClient(private val roomId: Long) {
         private const val MAX_TEXT_LENGTH = 60
 
         /**
-         * **发送**弹幕的本地长度上限。
+         * **发送**弹幕的本地长度上限（UTF-16 码元）—— ★**全工程唯一的那个数**。
          *
-         * 收弹幕用 60（宽进严出，界面别被撑破），发送用 40（B 站老爷上限）——
+         * 收弹幕用 [MAX_TEXT_LENGTH] 60（宽进严出，界面别被撑破），发送用 40（B 站老爷上限）——
          * 超过直接拒绝而不是截断：截断会让用户以为整句发出去了（见 [sanitizeSendText]）。
+         *
+         * ★第十五批起它**同时**是直播页输入框 `InputFilter.LengthFilter` 的上限
+         *   （`LivePlayerActivity.buildUi` 里 danmakuInput 那一句）：输入时就打不进超长文本，
+         *   不会再出现"输完 100 多个字才被告知发不了"。所以它必须是 **public 的 `const val`**
+         *   （app 模块按 `LiveDanmakuClient.MAX_SEND_TEXT_LENGTH` 读），**不许在别处再写一份 40**；
+         *   下面 [sanitizeSendText] 那道校验原样保留 —— 输入框之外（回显、将来的其它调用方）
+         *   仍然要靠它兜底。
          */
-        private const val MAX_SEND_TEXT_LENGTH = 40
+        const val MAX_SEND_TEXT_LENGTH = 40
 
         /** 去重窗口与容量（见 [isDuplicate]） */
         private const val DEDUP_WINDOW_MS = 2_000L

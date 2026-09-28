@@ -33,6 +33,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
+import android.text.InputFilter
 import android.text.InputType
 import android.text.TextUtils
 import android.util.Rational
@@ -82,6 +83,7 @@ import com.a10miaomiao.bilimiao.comm.live.LiveAPI
 import com.a10miaomiao.bilimiao.comm.live.LiveLastRoomStore
 import com.a10miaomiao.bilimiao.comm.live.LivePageTrace
 import com.a10miaomiao.bilimiao.comm.live.LivePortraitStage
+import com.a10miaomiao.bilimiao.comm.live.LiveSpaceLauncher
 import com.a10miaomiao.bilimiao.comm.live.danmaku.ConnState
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuClient
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveMessage
@@ -273,8 +275,9 @@ import kotlin.math.roundToInt
  *    `MainActivity.basePlayerDelegate` 还原成 `private`。
  *    ★点它**必崩**（线上异常 `androidx.startup.StartupException: Binding AppCompatActivity must
  *    override an existing binding.` —— 浮层里 `subDI` 的 override 校验），删掉就是最划算的修法。
- *    ★`comm.live.LiveSpaceLauncher` 与它在 `ComposeFragment` 里的注册**故意留着**（无人调用的兜底，
- *    删它会牵动 compose 侧，风险更大）。
+ *    ★`comm.live.LiveSpaceLauncher` 与它在 `ComposeFragment` 里的注册**故意留着**（第五批时它是
+ *    无人调用的兜底，删它会牵动 compose 侧，风险更大；★第十五批第 5 条起它**重新有了调用端** ——
+ *    顶栏标题点击进主播空间，见 [openAnchorSpace]）。
  * 2. **删掉「听音频」功能**（按钮 / 状态 / 全部分支 / 音频舞台 / `LiveAudioService` / Manifest 条目）。
  * 3. **PiP 期间顶栏与底栏一律不可见**（用户："PIP 模式下，我想让它隐藏那个底部按钮，还有顶部的
  *    状态栏各种信息按钮"）：收口成一个门控 [controlsAllowed]（= 不在 PiP 且没有"即将进入 PiP"），
@@ -422,6 +425,44 @@ import kotlin.math.roundToInt
  *     `service/PlaybackService`（MediaSessionService），而它属于"点播那条链"，本批一个字节没动；
  *     直播这条路的后台形态默认由小窗承担（`live_pip_on_background` 默认开），
  *     所以只在"真 onStop（熄屏 / 关掉小窗设置后切走 / 小窗被收起）"时才需要它。
+ *
+ * ## 第十五批（本轮：用户 5 条实测反馈）
+ * 用户原话与逐条落点（每条在对应符号上都有完整 KDoc，这里只做地图）：
+ *
+ * 1. **状态栏"不跟随主题"**（"我切换安卓主题为白色，我再退出直播间，再进入直播间，这个时候状态栏
+ *    它就不跟随了。它被隐藏起来了……别把横屏的隐藏给搞掉就行了"）：
+ *    根因 = **图标明暗听主题的**（`res/values/themes.xml:19` 的 `android:windowLightStatusBar=true`，
+ *    `values-night` 那份是 false），而**底色是本页自己画的**（纯黑窗口底 + 黑蒙层顶栏/底栏）——
+ *    浅色主题下深色图标压在黑底上 = 用户看到的"被隐藏了"。
+ *    修法：[syncImmersivePolicy] 里**恒下发浅色图标**（`isAppearanceLightStatusBars/
+ *    …NavigationBars = false`，位置在幂等门**之前**，横竖屏都走这一句）；
+ *    `hide = isPageLandscape()` 的横屏隐藏逻辑与那两道幂等门**一个字没改**。
+ *    完整证据链（含"为什么退出重进才复现"= `configChanges` 含 `uiMode` 不重建页面）在那个函数的 KDoc 上。
+ * 2. **弹幕输入长度**（"明明说有限制字符，为什么不在输入的时候再限制……等我输完 100 多个字，
+ *    提示我发不了"）：上限本来就是同一个数（40），只是**只在发送时才校验**。
+ *    修法 = `LiveDanmakuClient.MAX_SEND_TEXT_LENGTH` 改成 public 的**唯一来源** +
+ *    [danmakuInput] 挂 `InputFilter.LengthFilter` —— 输入/粘贴时就打不进去；
+ *    不加字数计数器、不加额外 UI、hint 一个字没改。
+ * 3. **未开播倒计时**（"顶栏说叉叉秒后开播，为什么不是真正的倒计时？而是写一个文本上去"）：
+ *    [startOfflinePolling] 从"每轮写一句静态的 45s"改成**每秒刷一行文案、归零才真的问一次接口**
+ *    （45 × 1s = [OFFLINE_POLL_INTERVAL_MS]，接口频率与"单次尝试"语义不变）；
+ *    协程仍然只有 [pollJob] 那一个，开播 / 重取流 / 销毁各有取消点（见那个函数的 KDoc），
+ *    不新开 timer、不每秒写日志。
+ * 4. **横屏顶栏区误触手势**（"我想让它的那个区域，如果我从那里下滑的话，音量和亮度是不会触发的
+ *    ……不要把任何的那个高度顶到横屏状态下的画面"）：[startDragIfNeeded] 加一条**只在横屏**生效的
+ *    **起手**屏蔽（[landscapeGestureShieldBottomPx]：屏幕顶 → 顶栏底边；顶栏 `GONE` 也读得到它
+ *    最后一次布局的位置，几何拿不到时兜底"状态栏 insets + 顶栏内容高"，绝不算成 0）。
+ *    **只加判据、不改版式**：[applyVideoStageLayout] / [measurePortraitStage] 与横屏画面高度
+ *    一个字节没动，单击/双击语义也没动（那条 return false 与"横向滑动放行"走同一条路）。
+ * 5. **点标题进 UP 空间**（"既然返回后面是直播间的标题，那么我想在这个标题点击之后，是点击去 UP
+ *    的主页。……极简一点得了"）：[titleText] 加点击（触摸反馈走返回按钮同款 borderless ripple）→
+ *    [openAnchorSpace] → 复用现成的注册桥 [LiveSpaceLauncher]（uid 来自 [rememberAnchorUid]，
+ *    即 [resolveRoom] 降级链的 `uid`），跳成功后再走 [exitPage] 收摊。
+ *    标题里**不加** UP 名字、图标、按钮；uid 没拿到 / 桥没注册都只 toast 一句、留在直播间。
+ *    ★代价（那座桥的既定语义，**本批不重建浮层**）：跳转是把**主界面**的 NavHost 导航到用户空间，
+ *    所以从用户空间返回会落回直播 Tab 而不是原直播间 —— 第五批删掉的页内浮层
+ *    （`UserSpaceOverlayHost`）本来就是为了解决它；本批只把"点标题能进去"这条最小闭环接上
+ *    （用户要的就是"点击去 UP 的主页"），要不要恢复"返回还在直播间"另开一批再定。
  */
 class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
@@ -1077,6 +1118,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * · ★第八批（用户实测第 2 条）：它**不再常驻** —— 与那几颗按钮一起按 4 秒计时显隐
      *   （"为什么不和那几个按钮一起显示一两秒呢？为什么要一直站在那？"），
      *   见 [applyControlsVisibility] 的 `isDanmakuInputActive()` 档（正在输入时绝不收）。
+     * · ★第十五批第 2 条：挂 `InputFilter.LengthFilter(LiveDanmakuClient.MAX_SEND_TEXT_LENGTH)` ——
+     *   超长文本**输入时就打不进去**（接线与理由写在 [buildUi] 那一句旁边）。
      */
     private lateinit var danmakuInput: EditText
 
@@ -1230,6 +1273,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   （见 [renderRoomTitle]），那条路与"取流成功"是两条时间线。
      */
     private var titleRoomId: Long = 0L
+
+    /**
+     * 当前房间**主播的 uid**（0 = 还不知道）—— 顶栏标题点击进他的用户空间要用（[openAnchorSpace]）。
+     *
+     * ★来源只有一条：[resolveRoom] 那条降级链（`room_init` → `getH5InfoByRoom` → `get_info`）
+     *   返回的 `LiveRoomInitInfo.uid`（见 [rememberAnchorUid]）。**点击时现查是不行的**：
+     *   点击要立刻跳走（同步），不能再去等一次网络 —— 所以 uid 在进房解析时就记下来。
+     * ★初值 0 表示"没拿到"：那时点击只 toast 一句，绝不拿 0 去开空间（0 = 一个空白的用户空间）。
+     */
+    private var anchorUid: Long = 0L
 
     /**
      * 顶栏「在线人数」（`room/v1/Room/get_info` 的 `online` 字段；**null / 0 = 没拿到**）。
@@ -1473,6 +1526,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /** 导航栏内边距（px，`systemBars().bottom`）；底栏底部内边距取它与键盘高度的**较大值**，见 [refreshBottomBarInsets] */
     private var systemBarBottomInsetPx = 0
+
+    /**
+     * 状态栏内边距（px，`systemBars().top`）；唯一写点是 [topBar] 那只 insets 监听器。
+     *
+     * 唯一消费端是横屏"顶栏手势盾"的**兜底高度**（[landscapeGestureShieldBottomPx]：顶栏还没量出
+     * 几何时用它 + 顶栏内容高）。★用真实 insets 而不是 `getIdentifier("status_bar_height")`
+     * 那一套：insets 是这个**窗口**的真实值（横屏沉浸式下它就是 0，正是我们要的），
+     * 也不必为此再开一份取值工具（`StatusBarHelper.getStatusBarHeight()` 是 View 层的老路子）。
+     */
+    private var systemBarTopInsetPx = 0
 
     /**
      * 没有键盘时页面的高度（px，[rootLayout] 的实测高度）。
@@ -2549,6 +2612,21 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     /**
+     * 记下当前房间主播的 uid（顶栏标题点击进他的用户空间，见 [openAnchorSpace]）。
+     *
+     * 唯一来源是 [resolveRoom] 那条降级链的结果；两个调用点都是"房间信息刚回来"的地方
+     * （进房解析 [startResolveAndPlay] / 未开播轮询 [startOfflinePolling]）——
+     * 后者的意义是：进房那次解析被风控挡掉（`init == null`）时，轮询里成功的那一次也能把 uid 补上，
+     * 不至于"标题点一辈子没反应"。
+     *
+     * 只认 `> 0`：拿不到就保持 0（= 未知），**绝不用 0 去开一个空白用户空间**。
+     */
+    private fun rememberAnchorUid(init: LiveRoomInitInfo?) {
+        val uid = init?.uid ?: return
+        if (uid > 0L) anchorUid = uid
+    }
+
+    /**
      * 先 `room_init` 拿**真实房间号**：
      * - 播放接口和弹幕接口都要真实号（短号只对 room_init 有效）；
      * - 顺手拿到 `live_status`，没开播就**不要**白调一次 getRoomPlayInfo，直接转轮询。
@@ -2574,8 +2652,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 miaoLogger() error "[live] resolveRoom 失败（多为 room_init 风控 412），降级用 rawRoomId=$rawRoomId 继续取流"
             }
             // ★第五批：这里原来还有一句 `anchorUid = init.uid`（底栏「UP主」按钮要靠它进用户空间）。
-            //   按钮连同整条链路一起删了，`init.uid` 在本页**没有消费端**了，所以整句删掉。
-            //   `LiveRoomInitInfo.uid` 这个实体字段保留 —— 它属于共用的网络实体，不归本页管。
+            //   按钮连同整条链路一起删了，`init.uid` 在本页**没有消费端**，所以当时整句删掉。
+            //   ★第十五批：**消费端回来了** —— 顶栏标题点击 = 进主播用户空间（[openAnchorSpace]），
+            //   于是这里把它记下来。放在解析处而不是点击时现查：点击是同步的、不能等网络；
+            //   而这次解析本来就在进房时做（唯一一次必要请求之外零成本）。
+            rememberAnchorUid(init)
             val fallbackRoomId = rawRoomId.toLongOrNull()
             if (init == null && fallbackRoomId == null) {
                 showLoading(false)
@@ -2810,6 +2891,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 开播轮询：未开播/下播之后每 [OFFLINE_POLL_INTERVAL_MS] 查一次 `live_status`，
      * 一开播就用真实房间号重新起播。
      *
+     * ★第十五批第 3 条：状态行改成**每秒刷新的真倒计时**（"等待开播：37s 后自动检查…"），
+     *   归零才真的问一次接口 → 接口频率与"单次尝试"的语义**一个字节都没改**（见下面 while 里的账）。
+     *
      * ★★本轮（未开播与中途下播）它是**锁定之后唯一的自动恢复路径**：
      * ```
      * 进房发现没开播 / 中途下播 / 反复拿不到流
@@ -2829,9 +2913,31 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (pollJob?.isActive == true) return
         pollJob = lifecycleScope.launch {
             while (isActive) {
-                setStreamStatus("等待开播：${OFFLINE_POLL_INTERVAL_MS / 1000}s 后自动检查（开播即自动起播）")
-                delay(OFFLINE_POLL_INTERVAL_MS)
+                // ★第十五批第 3 条：**真倒计时**（原来每轮只写一句静态的"45s 后自动检查"，
+                //   用户："为什么不是真正的倒计时？而是写一个文本上去"）。
+                //   ① 每秒只改**一行文案**（[setStreamStatus] → [renderStatus] 是一次 setText，
+                //      不写任何日志、不碰接口）—— 不是每秒一次网络请求；
+                //   ② 45 次 × 1s = [OFFLINE_POLL_INTERVAL_MS]，所以**接口频率一个字节没变**
+                //      （仍是 45s 一次的单次尝试，风控口径不变）；
+                //   ③ 倒计时"归零"= 走到 1 之后再问一次接口，然后**回到 45 重新计时**（下一轮 for）。
+                //   ④ ★复核定稿：**倒计时只在前台写 UI**（`pageStarted`，与同类网络动作的门同源）——
+                //      退后台时不再每秒一次 setText；但**轮询本身照跑**（开播了必须能自动起播），
+                //      `delay` 与接口频率都不看这个门；回前台后 ≤1s 就写下一次，数字不会停在旧值上。
+                //   取消点天然齐全：这个协程就是 [pollJob] 自己 —— 主播开播那一支 `return@launch`
+                //   直接结束它、**PLAYING 那一支（画面回来了）也 cancel 它**、[retryPlayback] /
+                //   [onDestroy] 调 `pollJob?.cancel()` 取消它，页面一销毁 lifecycleScope 整体收摊；
+                //   `delay` 对取消是敏感点，不存在"留下一个每秒刷 UI 的野协程"，
+                //   也不会因为重复调用而叠加（上面那行 isActive 门）。
+                for (remain in OFFLINE_POLL_INTERVAL_MS / 1000 downTo 1L) {
+                    if (pageStarted) {
+                        setStreamStatus("等待开播：${remain}s 后自动检查（开播即自动起播）")
+                    }
+                    delay(1_000L)
+                }
                 val init = resolveRoom(rawRoomId) ?: continue
+                // 进房那次解析失败（风控 412 等）时，这一轮拿到的 uid 也要补上：顶栏标题点击
+                // 进主播空间要用它（见 [rememberAnchorUid]）。
+                rememberAnchorUid(init)
                 if (LiveStatus.isPlayable(init.live_status)) {
                     setStreamStatus("主播开播了，正在起播…")
                     // ★本轮：开播了 = "没在播"这条线结束（锁定解开、预算复位）。
@@ -3114,6 +3220,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                     //     （开播轮询把画面接上了，弹窗不该再挡着）。
                     hasPlayedThisRoom = true
                     offlineLatched = false
+                    // ★第十五批复核（必改 1）：**画面真的出来了 ⇒ "等开播"这条线结束，倒计时必须在这里收掉。**
+                    //   漏掉它的真路径（复核员实证）：中途下播 → 倒计时在跑 → 用户点底栏「画质」换线/换清晰度
+                    //   成功 → PLAYING 把状态行藏起来，**可下一秒倒计时又把"等待开播：44s 后自动检查"写回顶栏**
+                    //   并每秒刷新（旧写法 45s 才写一次，所以这个洞在改成每秒刷新之前几乎看不见），
+                    //   45s 后还会对正在播的流再 `delegate?.start(requestedQn)` 一次。
+                    //   取消是安全的：轮询**自己**发现开播那条路已经 `return@launch`（协程早就结束），
+                    //   这里收拾的是"轮询还活着、画面却已经回来"的那一种（换线/换清晰度/其它恢复路径）。
+                    pollJob?.cancel()
                     autoRetryBudgetExhausted = false
                     offlineDialogShown = false
                     autoRetryStamps.clear()
@@ -3863,6 +3977,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * toast 负责"立刻知道"，[danmakuInputError] 负责"边改文本边看得见"
      * （6 秒后自动收起，见 [showDanmakuInputError]）。**绝不**自己编"可能是未登录、被风控"这种猜的话；
      * 真拿不到原因（理论上不会）才退回"原因未知 + 弹幕连接状态"那句兜底。
+     * ★第十五批第 2 条起输入框已按同一上限过滤（`InputFilter.LengthFilter`），"弹幕最多 40 字"这句
+     *   只会在**绕过输入框**的调用方上出现；`LiveDanmakuClient` 里那道校验**保留**作为兜底。
      *
      * ★防连点是**两层**：这里的 [danmakuSending] 管界面（禁用输入框），
      *   `LiveDanmakuClient.sendDanmaku` 里那个 `AtomicBoolean` 管网络（第二次直接回
@@ -5081,6 +5197,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             ellipsize = TextUtils.TruncateAt.END
             setPadding(dpToPx(8), 0, dpToPx(8), 0)
             text = "直播间"
+            // ★第十五批第 5 条：**点标题 = 进这个房间主播的用户空间**（用户："既然返回后面是直播间的
+            //   标题，那么我想在这个标题点击之后，是点击去 UP 的主页……极简一点得了"）。
+            //   极简的三条落点：
+            //   · 标题本身**不加 UP 名字、不加图标、不加按钮**（用户明确要极简），只有"点这里能进去"；
+            //   · 触摸反馈复用返回按钮同款 borderless ripple（[selectableItemBackgroundBorderlessRes]），
+            //     不为它新画一份背景（它的底色仍是压在画面上的黑蒙层，一个字没动）；
+            //   · 跳转复用现成的注册桥 [LiveSpaceLauncher]（实现见 [openAnchorSpace]），
+            //     本页不新写 startActivity、不碰 compose 模块。
+            selectableItemBackgroundBorderlessRes().takeIf { it != 0 }
+                ?.let { setBackgroundResource(it) }
+            setOnClickListener { openAnchorSpace() }
         }
         statusText = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -5123,6 +5250,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // 沉浸式下状态栏是隐藏的；用户临时划出来时别让内容被状态栏压住
         ViewCompat.setOnApplyWindowInsetsListener(topBar) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            // ★第十五批：顺手记下状态栏内边距 —— 横屏"顶栏手势盾"的兜底高度要用它
+            //   （顶栏自己量出来之前，也只能靠它知道"状态栏那一段"有多高）。
+            systemBarTopInsetPx = bars.top
             view.setPadding(dpToPx(8), dpToPx(6) + bars.top, dpToPx(8), dpToPx(6))
             insets
         }
@@ -5211,6 +5341,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             maxLines = 1
             inputType = InputType.TYPE_CLASS_TEXT
             imeOptions = EditorInfo.IME_ACTION_SEND
+            // ★第十五批第 2 条：**输入时就拦住超长文本**（用户："明明说有限制字符，为什么不在输入的
+            //   时候再限制……等我输完 100 多个字，提示我发不了"）。用平台原生的长度过滤器，
+            //   超出上限的字符**根本打不进去**（粘贴同理，只留前 N 个），不新增字数计数器/额外 UI。
+            //   ★上限读 [LiveDanmakuClient.MAX_SEND_TEXT_LENGTH]（**唯一来源**，40）：
+            //     与真正发送时 `sanitizeSendText` 的判据同一个数，所以"能打进输入框" ⟺ "能发出去"，
+            //     不会再出现"打到 100 多字才被服务端/本地校验拒掉"。
+            //   ★它只过滤**输入**：`setText("")`（发送成功清空）与 `setText(...)`（将来若有回填）
+            //     仍照常工作（LengthFilter 对空串/短串一律放行）。
+            filters = arrayOf<InputFilter>(
+                InputFilter.LengthFilter(LiveDanmakuClient.MAX_SEND_TEXT_LENGTH),
+            )
             setPadding(dpToPx(12), dpToPx(9), dpToPx(12), dpToPx(9))
             background = GradientDrawable().apply {
                 cornerRadius = dpToPx(18).toFloat()
@@ -5981,7 +6122,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * | 所有线路均失败… / 线路反复失败… / 已固定线路 1… | delegate 的换线预算用尽与"固定第一条"策略 |
      * | 已暂停 | [delegateListener] 的 PAUSED（用户主动暂停，必须看得见） |
      * | 主播未开播（等待开播…）/ 主播已下播（等待重新开播…）/ 直播流反复中断，已停止自动重连（等待开播…） | delegate 的 OFFLINE（★本轮：`live_status` 不再是写给用户看的术语） |
-     * | 等待开播：45s 后自动检查（开播即自动起播） | 未开播/下播之后的轮询 [startOfflinePolling]（★本轮改的文案） |
+     * | 等待开播：Ns 后自动检查（开播即自动起播） | 未开播/下播之后的轮询 [startOfflinePolling]（★第十五批：`N` 是**每秒递减的真倒计时**，归零才问一次接口） |
      * | 播放失败：… / 房间号无法识别 | ERROR / 房间号解析失败 |
      * | 自动追流已暂停（5 分钟内已追 3 次） | [autoRetryLiveStream] 的预算用尽 |
      * | 弹幕 连接中 / 重连中 / 连接失败 / 未连接 | [danmakuStatusLabel]（★断开侧异常；已连接是正常态，不显示） |
@@ -6198,6 +6339,33 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   退出小窗时 [onPictureInPictureModeChanged]`(false)` 与尺寸监听都会再调一次，
      *   用**恢复后的真实尺寸**收敛（与 [syncPageLayoutToRealSize] 的 PiP 门控同一条理由）。
      *
+     * ## ★第十五批第 1 条：图标明暗也收口在这里，且**不受幂等门管**
+     * 本页系统栏图标的明暗**恒为"浅色图标"**（`isAppearanceLightStatusBars/…NavigationBars = false`）。
+     *
+     * ### 为什么原来会"看不见"（完整证据链）
+     * ```
+     * ① 主题属性决定了图标明暗（窗口创建时解析一次）：
+     *      res/values/themes.xml:19        android:windowLightStatusBar = true   ← 浅色主题（深色图标）
+     *      res/values-night/themes.xml:15  同一属性 = false                     ← 深色主题（白色图标）
+     * ② 同一个主题里 android:windowTranslucentStatus=true、android:statusBarColor=transparent，
+     *    所以"状态栏底下是什么颜色"**由本页自己画**：窗口底 = onCreate 的 ColorDrawable(Color.BLACK)，
+     *    顶栏底 = 黑蒙层 [scrimColor]，底栏底 = 黑蒙层 [scrimColor]；
+     * ③ ⇒ 两件事**错配**：底色恒黑（本页画），图标明暗却听主题的 —— 浅色主题下就是
+     *    "深色图标压在纯黑底上"，用户看到的就是"状态栏被隐藏了"（深色主题下白图标 → 正常）；
+     * ④ 为什么"退出直播间再进一次"才复现：本页 configChanges 里含 uiMode，主题切换**不重建本页**，
+     *    旧窗口不会重读①那条属性；而重进时窗口是**新**建的，会按当前主题重新解析，
+     *    于是把这个错配"当场兑现"。
+     * ```
+     * 修法就是把③里那条不该由主题说话的量**显式盖成恒定量**：本页黑底 → 恒用浅色图标，
+     * 与点播播放页同一句落点（`VideoPlayerActivity.kt:188-189`：`statusBarHelper.isLightStatusBar = false`
+     * / `isLightNavigationBar = false`，经 `StatusBarHelper.update()` 落到
+     * `controller.isAppearanceLightStatusBars`）。
+     *
+     * ### 为什么下发位置在**幂等门之前**
+     * 两道门管的是 `show/hide` 那次事务（"已经符合策略就别再下发"），而图标明暗是**恒定量**、
+     * 每次同步都要落一次 —— 门把它挡掉就等于把这条修法漏掉（门在稳态下几乎总是命中，
+     * 漏掉就是"改了但看不出效果"）。竖屏/横屏都走这一句：横屏临时划出系统栏时图标也必须是白的。
+     *
      * ## 调用点（任何一个"形态可能变了"的入口都要有它）
      * | 调用点 | 覆盖的形态变化 |
      * |---|---|
@@ -6230,13 +6398,22 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "landscape" to hide,
             "page" to (if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"),
         )
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        // ★第十五批第 1 条：**图标明暗在这一处恒为"浅色图标"（白）**，与 show/hide 无关，
+        //   所以它必须在幂等门**之前**下发 —— 门只挡 show/hide 那次事务，不能把这一条也挡掉
+        //   （为什么恒白：本页窗口背景恒为纯黑、顶栏底/底栏底都是黑蒙层，黑底只能用浅色图标；
+        //     与点播播放页 `statusBarHelper.isLightStatusBar = false` 同一句落点。
+        //     不写它就会被浅色主题的 `android:windowLightStatusBar=true` 带成深色图标 →
+        //     压在黑底上 = 用户看到的"状态栏被隐藏了"（错配：底色由本页画、明暗却听主题的），
+        //     完整证据链见本函数 KDoc）。
+        controller.isAppearanceLightStatusBars = false
+        controller.isAppearanceLightNavigationBars = false
         // 幂等门①+②：策略没变、且真实可见性已经符合策略 → 什么都不做（不闪、不产生多余事务）
         if (immersiveBarsHidden == hide && barsVisible == !hide) {
             // ★诊断日志（只读）
             LivePageTrace.note("immersive.skip", "reason" to "policyAndVisibilityMatch")
             return
         }
-        val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         if (hide) {
@@ -6472,8 +6649,52 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     /**
+     * ★第十五批第 5 条：顶栏标题点击 = 打开**当前房间主播的用户空间**
+     * （接线在 [buildUi] 的 [titleText] 那一段）。
+     *
+     * ## 跳转走的是现成的注册桥
+     * 用户空间是 compose 模块的 `UserSpacePage`（Compose 页面，只活在主界面的 NavHost 里），
+     * 而那份 `PageNavigation` 句柄**只活在 `ComposeFragment` 的根组合里**，app 侧拿不到
+     * （`grep -rn "pageNavigation" app/src` 的**代码**引用数为 0），所以全工程唯一的跨模块入口就是
+     * [LiveSpaceLauncher] —— 实现在 `ComposeFragment` 里注册（见那座桥的 KDoc）。
+     * 这里**不新写一套 startActivity**、也不开第二份跳转，只调用它。
+     * ★别再写"app 不能 import compose"（2026-09-28 复核反证）：`app/build.gradle.kts` 里就有
+     *   `implementation(project(":bilimiao-compose"))`，app 侧多处直接 import
+     *   `cn.a10miaomiao.bilimiao.compose.*`（`MainActivity` / `MainUi` / `PlayerController`）——
+     *   缺的是"导航句柄"，不是"依赖方向"。
+     *
+     * ## 为什么跳成功之后要走 [exitPage]（而不是只 finish）
+     * 那座桥的实现是"把**主界面**的 NavHost 导航到用户空间"，而本页正压在主界面之上：
+     * 不结束自己，用户看到的就是"点了标题什么都没发生"，退出去才发现主界面早换了页。
+     * ★用 [exitPage] 而不是裸 `finish()`：它是本页**用户主动离开直播间**的唯一出口，
+     *   除了 finish 还负责撤掉「回 App 仍停在直播间」的武装与记录（[LiveLastRoomStore]）——
+     *   漏了它，用户从 UP 空间退到桌面再回软件**会被自动拉回直播间**，那不是他点标题的意图。
+     *
+     * ## uid 没拿到 / 桥没注册时怎么处理
+     * 两条都只 toast 一句、**留在直播间**（绝不崩、绝不拿 0 去开空白空间、绝不发空 Intent）：
+     * · [anchorUid] = 0（进房解析被风控挡掉，且那之后也没补上）→ 提示稍后再试；
+     * · `LiveSpaceLauncher.open` 返回 false（主界面的 ComposeFragment 还没组合 / 导航抛异常，
+     *   见那座桥的 KDoc）→ 同样提示，用户再点一次即可。
+     */
+    private fun openAnchorSpace() {
+        val uid = anchorUid
+        // ★诊断日志（只读）：一次点击一条，不刷屏
+        LivePageTrace.note("title.click", "room" to rawRoomId, "uid" to uid)
+        if (uid <= 0L) {
+            toast("还没拿到主播信息，稍后再试")
+            return
+        }
+        if (!LiveSpaceLauncher.open(uid)) {
+            toast("打不开主播空间，稍后再试")
+            return
+        }
+        exitPage()
+    }
+
+    /**
      * 用户主动离开直播间（顶栏返回图标 / 系统返回键走到的那条路 —— 两条都经 [handleBack] 分级，
-     * 只有"竖屏下按返回"与"小窗里按返回"会走到这里）。
+     * 只有"竖屏下按返回"与"小窗里按返回"会走到这里；
+     * ★第十五批起**顶栏标题点击进 UP 空间**也走这里，见 [openAnchorSpace]）。
      *
      * ★必须显式解除「回 App 仍停在直播间」的武装（[ReturnToLiveGuard]）：
      *   用户是**主动收摊**，下次再进 App 不该被自动弹一个直播间出来 ——
@@ -7614,6 +7835,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ★本页**不做横向滑动 seek**：直播没有时间轴，"快进"没有意义（点播的横向手势对应的是 seek）。
      *   所以只有"竖直位移明显大于横向"时才进入手势，横向滑动直接放行给上层。
+     *
+     * ★第十五批第 4 条：**横屏时从"顶栏安全区"起手下滑不调亮度/音量**（用户点名的一条，
+     *   见 [landscapeGestureShieldBottomPx]）—— 那是"手势的起手判据"，不是把整块区域封死：
+     *   顶栏以下的画面照旧可滑，单击/双击语义一个字没变。
      */
     private inner class TapCatcher(context: Context) : View(context) {
 
@@ -7660,6 +7885,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * （同 `isLeftHalf` 旁边那套写法，只是那边每次 new 一个——它不在热路径上，没动它）。
          */
         private val videoStageLocation = IntArray(2)
+
+        /**
+         * 复用同一个两元数组装"横屏顶栏手势盾底边"用到的屏幕坐标（[landscapeGestureShieldBottomPx]）。
+         * ★与 [videoStageLocation] 分开两个字段而不是共用一个：两个判据在**同一次起手**里都会跑，
+         *   共用会让后跑的那个覆盖前者的结果 —— 那种 bug 只会在转屏后偶发，不值当。
+         */
+        private val shieldLocation = IntArray(2)
 
         private var dragMode = DRAG_NONE
         private var consumedByDrag = false
@@ -7738,6 +7970,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val dx = abs(event.rawX - downRawX)
             if (dy <= touchSlop || dy <= dx) return false
 
+            // ★第十五批第 4 条：**横屏时"从顶栏那一块起手"一律不进手势**（用户："我想让它的那个
+            //   区域，如果我从那里下滑的话，音量和亮度是不会触发的……"）。判据与高度见
+            //   [landscapeGestureShieldBottomPx]，形态口径与 [isPageLandscape] 同源（真实尺寸）。
+            //   ★这里**返回 false**（而不是把事件吃掉）：与下面"横向滑动 / 起手在画面外"两条路
+            //     完全一样 —— 事件照旧喂给 GestureDetector，单击显隐控制条、双击暂停的语义一个字
+            //     都不变；也**不给它发 CANCEL**（那是"手势已成立"才做的事）。
+            //   ★竖屏一个字节都不变：`isPageLandscape()` 为 false 时这一整条判据不执行。
+            if (isPageLandscape() && downRawY < landscapeGestureShieldBottomPx()) return false
+
             // ★★本轮（2026-09-26）：**起手点必须落在视频画面区域内**，才允许进入亮度/音量手势。
             //
             // 用户原话："我在竖屏的状态下拖动某一些区域，比如说**底栏的那个黑色块区域**，
@@ -7752,7 +7993,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //       ├─ 带子以下 → 弹幕列表（宿主注入的面板）→ 不在矩形内 → 不响应 ✓
             //       ├─ 列表以下 → 底栏（含输入条）        → 不在矩形内 → 不响应 ✓
             //       └─ 带子以内的黑边/留白                → 在矩形内   → 响应（观感仍是"视频区"）
-            // 横屏：带子关闭（`band = 0`）、容器铺满整页 ⇒ 矩形 ≈ 整屏 → **行为与改动前逐字一致** ✓
+            // 横屏：带子关闭（`band = 0`）、容器铺满整页 ⇒ 矩形 ≈ 整屏；
+            //       ★但屏幕最上面那条"顶栏安全区"已被 [landscapeGestureShieldBottomPx] 单独挡掉
+            //         （第十五批第 4 条），所以横屏实际可滑的是"顶栏以下"的画面 ✓
             // PiP：小窗里既没有手势层也没有这个交互，不受影响。
             // ```
             // ★位置放在 slop 判定**之后**、给 `GestureDetector` 发 CANCEL **之前**：
@@ -7776,6 +8019,50 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         }
 
         /**
+         * 横屏"顶栏手势盾"的**底边**（绝对屏幕 Y，与 `event.rawY` 同一套坐标）：起手点在这条线
+         * 之上（更靠屏幕顶）时**不进亮度/音量手势**。
+         *
+         * ## 为什么要有它（用户原话）
+         * 用户："我想让它的那个区域，如果我从那里下滑的话，音量和亮度是不会触发的……"
+         * 横屏画面是**全屏铺满**的（[applyVideoStageLayout] 里 `band = 0`），顶栏那一块也是画面，
+         * 于是从屏幕顶部（顶栏/状态栏那一条）往下滑同样满足"起手在画面内"，会误触左右半区的
+         * 亮度/音量。这里只挡**手势的起手区**，版式与画面高度一个字节都不动 ——
+         * 顶栏那一块仍然是画面的一部分（单击显隐控制条从那里也照旧能点）。
+         *
+         * ## 高度怎么算
+         * ```
+         * 顶栏量出了几何（height > 0）→ 顶栏自己的真实矩形：屏幕坐标 top + height
+         *    （横屏它贴在屏幕最顶；它的 padding 里已经含状态栏那一截 —— 见 buildUi 里那只 insets
+         *      监听，所以"状态栏临时被划出来"时这条线自己会跟着下移，不用另加）
+         * 顶栏还没量出几何（首帧 / 极端时序）→ 兜底：状态栏高度 + 顶栏内容高
+         *    （返回键点击区 [BACK_ICON_BOX_DP] + 上下内边距各 6dp = 那 12dp 的来历）
+         * ```
+         * ★顶栏被 `GONE` 时仍读得到它的位置：被 GONE 的 View 不会重新 layout，`top/bottom` 保留
+         *   **最后一次显示时的位置**（同一事实见 [videoBandTopPx]）—— 那正是"顶栏显示一两秒的
+         *   那块区域"，也正是用户要挡的地方；所以这条判据**不与顶栏显隐联动**。
+         * ★复核定稿的一句实话：刚转过屏、顶栏已经 `GONE` 的那一瞬，这个"最后一次位置"可能是
+         *   **竖屏那次**的（它的 padding 里含竖屏状态栏那一截）→ 盾底比横屏真实的 52dp 大出
+         *   那一截（常见 24~40dp）。★偏差方向**恒为偏大**（横屏里顶栏一旦再显示/重排就回到真值），
+         *   也就是"只会多挡顶栏下面一小条、绝不会漏挡" —— 所以不为此再读一次实时 insets，
+         *   那属于给一个"只会更保守"的边角加复杂度。
+         * ★兜底**绝不返回 0**：拿不到几何就整体失效，等于这个 bug 又回来了。
+         *   注意这与 [isInsideVideoStage] 的放行策略**刻意相反** —— 那边是"老行为宁可不改"，
+         *   这边是**新加的屏蔽**，失效就等于没修。
+         * ★每个手势只在起手时算一次（同 [isInsideVideoStage]），零分配。
+         */
+        private fun landscapeGestureShieldBottomPx(): Int {
+            if (::topBar.isInitialized) {
+                val h = topBar.height
+                if (h > 0) {
+                    topBar.getLocationOnScreen(shieldLocation)
+                    return shieldLocation[1] + h
+                }
+            }
+            // 兜底：状态栏那一段（insets 没来过就是 0，横屏沉浸式下本来就该是 0）+ 顶栏内容高
+            return systemBarTopInsetPx + dpToPx(BACK_ICON_BOX_DP + 12)
+        }
+
+        /**
          * 这个点（**绝对屏幕坐标**，与 `event.rawX/rawY` 同一套）落在视频画面矩形里吗？
          *
          * ## 矩形从哪来（"竖屏版式的唯一真相"）
@@ -7786,11 +8073,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          *          （那里面写的就是 `Rect(videoContainer.left, top, right, bottom)`），
          *          也就是弹幕列表要贴的那个"画面底边"的来源；这里直接读容器，不多一份镜像。
          * 横屏：videoContainer 铺满整页（`bandMaxHeightFraction = 0`）→ 矩形 = 整屏。
+         *       ★横屏的"屏幕最上面那条（顶栏安全区）"由 [landscapeGestureShieldBottomPx] 在**起手**
+         *         处另行挡掉（第十五批第 4 条），不在本判据里表达 —— 本判据只管"在不在画面里"。
          * ```
          * ★为什么不用 [videoView]（TextureView，真正的画面）：那是**letterbox 之后**的画面矩形，
          *   横屏宽银幕下左右两条黑边会被它排除掉 —— 那等于顺手改了横屏的手势范围（用户没要求，
          *   也不该在"修竖屏小瑕疵"里做）。用**视频带/容器**既覆盖竖屏的"播放区域"，
-         *   又天然保住横屏"整屏可滑"的既有手感。
+         *   又天然保住横屏"整屏可滑"的既有手感（★第十五批起横屏顶部那条顶栏区例外，见上）。
          * ★几何没就绪时**放行**（返回 true）：还没 `isInitialized` / 还没量出宽高（首帧、极端时序）时
          *   宁可保持改动前的老行为，也不能因为拿不到几何就让亮度/音量手势整体失灵。
          * ★只在**起手**时调用一次（每个手势一次坐标读，零分配之外的代价可忽略）。

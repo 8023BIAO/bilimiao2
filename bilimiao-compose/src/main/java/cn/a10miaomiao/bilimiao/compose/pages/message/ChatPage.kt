@@ -1,5 +1,10 @@
 package cn.a10miaomiao.bilimiao.compose.pages.message
 
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -46,16 +51,22 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
+import cn.a10miaomiao.bilimiao.compose.components.image.ImagesGrid
+import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
 import cn.a10miaomiao.bilimiao.compose.pages.community.components.EmojiGridBox
+import cn.a10miaomiao.bilimiao.compose.pages.community.components.ReplyImageHelper
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.MessageRefreshEvent
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.UserInfoCache
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.AccInfoData
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
+import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
+import com.a10miaomiao.bilimiao.comm.entity.comm.UploadBfsInfo
 import com.a10miaomiao.bilimiao.comm.entity.message.ChatMsgInfo
 import com.a10miaomiao.bilimiao.comm.entity.message.ChatMsgResponse
+import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
@@ -63,6 +74,7 @@ import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.store.MessageStore
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
@@ -73,11 +85,13 @@ import com.a10miaomiao.bilimiao.comm.toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -113,6 +127,33 @@ private fun debugJson(raw: String): String {
 }
 
 private val parseJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+/**
+ * 纯 WEB 形态的私信发送地址：**一个 APP 参数都不带**（appkey / mobi_app / statistics / access_key / sign）。
+ *
+ * 为什么图片消息不能走 `BiliApiService.biliVcApi(...)`：那个构造器内部是 `ApiHelper.createParams`，
+ * 会把上面整套 APP 参数注进 query（还会把 mobi_app 覆盖成 android_hd），`MiaoHttp` 也会因为
+ * `isWebApi=false` 再补 `app-key: android_hd` + `x-bili-mid` + `Authorization` 头。
+ * 本工程在"带图评论"上**真机踩过同一个坑**：走 APP 签名通道服务端直接回 `12088 不支持发送图片`，
+ * 同一张图纯 web（仅 Cookie + csrf）就成功 —— 见 CommentApi.addWithPictures 的 KDoc 与
+ * ReplyEditDialog.sendReply 里那句"带图评论必须走纯 WEB 通道"。
+ * 私信图片（msg_type=2）是同一类"带图写接口"，所以保守按纯 web 发；文字消息（msg_type=1）
+ * 那条链是现成可用的，继续走 biliVcApi，一个字不动。
+ *
+ * 注：这个 host 不在 [com.a10miaomiao.bilimiao.comm.utils.WbiSigner.autoScopeFor] 的直播白名单里，
+ * 所以两条链都不会被 WBI 签名（wts/w_rid）影响，差异只有"APP 参数 + APP 头"这一项。
+ */
+private const val IM_SEND_MSG_WEB_URL = "https://api.vc.bilibili.com/web_im/v1/web_im/send_msg"
+
+/**
+ * 没有 web 登录态时给用户看的话术。
+ * 要点：说清"缺什么"（SESSDATA / 网页登录态）+ "已经替你试过自动恢复" + "下一步怎么做"
+ * （内置网页登录页 H5LoginPage，改头像那条链用的也是同一句话术，见 ProfileAvatarUploader）。
+ */
+private const val MSG_NEED_WEB_LOGIN =
+    "发图需要网页登录态（SESSDATA），当前账号只有 APP 登录态；已尝试自动恢复仍未拿到，" +
+        "请用「网页登录」登录一次再发图。"
+
 data class ParsedMsg(val text: String, val toastText: String = "")
 
 private fun parseMsgText(raw: String): ParsedMsg {
@@ -144,6 +185,53 @@ private fun parseMsgText(raw: String): ParsedMsg {
     } catch (_: Exception) { ParsedMsg("[消息] " + raw.take(30)) }
 }
 
+/** 图片私信（msg_type=2）的 content 解析结果 */
+private data class ChatPicture(val url: String, val width: Int, val height: Int)
+
+/**
+ * 图片私信的 content 是 `{"url":"…","width":300,"height":300,"imageType":"jpeg","original":1,"size":54.1}`，
+ * 跟文字私信的 `{"content":"…"}` 不是一个结构。
+ *
+ * 宽高按 Double 解再取整：服务端/js 端发出来的可能是小数，用 Int 解会直接抛异常、
+ * 让整条消息退化成"[系统通知]"文字气泡。解析不出来就返回 null，让调用方走文字那条老路
+ * （**不猜**：宁可显示原文也不要显示一个错误的图片框）。
+ */
+private fun parsePicContent(msg: ChatMsgInfo): ChatPicture? {
+    // 2 = EN_MSG_TYPE_PIC（图片）、6 = EN_MSG_TYPE_CUSTOM_FACE（自定义表情，结构与图片相同）
+    if (msg.msg_type != 2 && msg.msg_type != 6) return null
+    return try {
+        @Serializable data class Pic(
+            val url: String = "",
+            val width: Double = 0.0,
+            val height: Double = 0.0,
+        )
+        val pic = parseJson.decodeFromString<Pic>(msg.content)
+        if (pic.url.isBlank()) null else ChatPicture(pic.url, pic.width.toInt(), pic.height.toInt())
+    } catch (_: Exception) { null }
+}
+
+/**
+ * 私信图片 → 全局图片预览组件（[ImagesGrid] / [PreviewImageModel]）要的模型。
+ *
+ * previewUrl **不加** `@宽w_高h` 缩略图后缀：私信图存在 message.biliimg.com，
+ * 评论图那套后缀（写在 i0.hdslb.com 上）在这个域上没验证过，给错后缀就是图片直接不显示；
+ * 而 [ImagesGrid] 内部本来就 `override(600)` 限制了解码尺寸，不加后缀也不会拖内存。
+ * 宽高缺失时按正方形兜底，避免除零、也避免 TransformItemView 拿到 0 尺寸。
+ */
+private fun ChatPicture.toPreviewModel(): PreviewImageModel {
+    val original = UrlUtil.autoHttps(url)
+    val w = if (width > 0) width else 600
+    return PreviewImageModel(
+        previewUrl = original,
+        originalUrl = original,
+        width = w.toFloat(),
+        height = (if (height > 0) height else w).toFloat(),
+    )
+}
+
+/** 图床上传结果：成功带 info，失败带给用户看的原因（口径对齐评论区 ReplyEditDialog.attemptUpload） */
+private data class ImageUploadResult(val info: UploadBfsInfo?, val error: String?)
+
 // ─── ViewModel ───────────────────────────────────────────────
 
 private class ChatViewModel(
@@ -156,6 +244,9 @@ private class ChatViewModel(
     private val messageStore: MessageStore by instance()
     val isRefreshing = mutableStateOf(false)
     val isSending = mutableStateOf(false)
+
+    /** 选完图正在压缩/上传（图片按钮转圈并拒绝重复点击） */
+    val isUploadingImage = mutableStateOf(false)
     val list = FlowPaginationInfo<ChatMsgInfo>()
     // 用 TextFieldValue 而不是 String：String 拿不到光标位置，插表情只能永远追加到末尾
     val inputText = mutableStateOf(TextFieldValue(""))
@@ -268,47 +359,237 @@ private class ChatViewModel(
     fun sendMsg() = viewModelScope.launch(Dispatchers.IO) {
         val text = inputText.value.text.trim()
         if (text.isEmpty()) return@launch
+        // 别手拼 JSON：多行文本（输入框允许换行）会拼出非法 JSON，服务端直接拒收
+        val contentJson = kotlinx.serialization.json.buildJsonObject {
+            put("content", kotlinx.serialization.json.JsonPrimitive(text))
+        }.toString()
+        sendMsgInternal(msgType = 1, contentJson = contentJson, clearText = true)
+    }
+
+    /**
+     * 私信发图（R11）：链路跟评论区发图是同一套，只有"业务标识"和"消息体"是私信自己的。
+     *   ① 选图：系统 Photo Picker（与评论区 ReplyEditDialog 同一个 contract，免存储权限）
+     *   ② [ReplyImageHelper.prepare]：复用评论区的压缩 / EXIF 摆正 / HEIC 转码 / 落盘
+     *   ③ [BiliApiService.commentApi.uploadImage]（biz = "im"）：复用评论区那个 multipart 上传，
+     *      它早就把 biz 参数化好了，就是为私信留的口子
+     *   ④ send_msg（msg_type = 2）+ 图床 JSON 消息体，交回 [sendMsgInternal] 走与文字私信完全相同的
+     *      乐观插入 / 回读 / 失败回滚 / 发完刷新列表那条路
+     * 图片消息体字段（url/width/height/imageType/original/size）以 B 站接口文档为准，缺 url 会被拒 21037。
+     */
+    fun sendImage(uri: Uri) {
+        // ★ 先在主线程把标志置起来、再起协程：光靠按钮 enabled 的禁用要等重组才生效，
+        //   连点两下会重复上传 + 重复发一条图（同一个 uri 发出去两张）
+        if (isUploadingImage.value) return
+        isUploadingImage.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            // 压缩落盘后的临时文件：单独留个引用给 finally 删（try 里的 val 出了块就看不见了）
+            var tempFile: File? = null
+            try {
+                // ★纯 WEB 发图前先体检 + 补救 web 登录态；补不回来就**一个请求都不发**
+                //   （注定 -101 的请求只会白费一次压缩+上传，还把失败原因说得含糊）
+                if (!ensureWebLogin()) {
+                    withContext(Dispatchers.Main) { toast(MSG_NEED_WEB_LOGIN) }
+                    return@launch
+                }
+                val file = ReplyImageHelper.prepare(BilimiaoCommApp.commApp.app, uri)
+                tempFile = file
+                val (info, error) = uploadImageForIm(file)
+                if (info == null) {
+                    launch(Dispatchers.Main) { toast("图片上传失败：${error ?: "未知原因"}") }
+                    return@launch
+                }
+                // ★尺寸宁可取本地真实像素也不许发 0：TV 扫码登录时上传先走 APP 通道，
+                //   那条通道可能只回 location/url（UploadBfsInfo 的兼容字段注释就是这么写的），
+                //   于是接口给的 width/height 是 0 —— 0 进消息体会让对方端按 h/w 算出 NaN/坏图。
+                //   文件是我们自己刚落盘的，只读个头（inJustDecodeBounds，不解码整图）就有尺寸。
+                val (localWidth, localHeight) = readLocalImageSize(file) ?: (0 to 0)
+                val width = info.width.takeIf { it > 0 } ?: localWidth
+                val height = info.height.takeIf { it > 0 } ?: localHeight
+                // size 单位千字节；服务端不回（<=0）就按本地文件长度换算 —— 估一个真值也比 0 强
+                val sizeKb = info.img_size.takeIf { it > 0 } ?: (file.length() / 1024.0)
+                val contentJson = kotlinx.serialization.json.buildJsonObject {
+                    put("url", kotlinx.serialization.json.JsonPrimitive(info.src))
+                    // 尺寸/大小在 B 站文档里都是"非必要"：实在拿不到就**整个字段不发**（缺字段服务端接受），
+                    // 绝不发 0 —— 发 0 恰恰是会让对面渲染坏的那种
+                    if (width > 0 && height > 0) {
+                        put("width", kotlinx.serialization.json.JsonPrimitive(width))
+                        put("height", kotlinx.serialization.json.JsonPrimitive(height))
+                    }
+                    put("imageType", kotlinx.serialization.json.JsonPrimitive(imageTypeName(file)))
+                    // 1 = 对方在 APP 里能看到"下载原图"按钮
+                    put("original", kotlinx.serialization.json.JsonPrimitive(1))
+                    if (sizeKb > 0) {
+                        put("size", kotlinx.serialization.json.JsonPrimitive(sizeKb))
+                    }
+                }.toString()
+                // 发图**不**清空输入框：用户可能一边打字一边插图，图发出去后那几个字还得留着
+                sendMsgInternal(msgType = 2, contentJson = contentJson, clearText = false)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                e.printStackTrace()
+                launch(Dispatchers.Main) { toast("图片发送失败：${e.message ?: "未知错误"}") }
+            } finally {
+                // 临时文件用完即删（评论区也是这个口径：不在缓存里留垃圾）
+                tempFile?.let { f -> runCatching { f.delete() } }
+                // ★UI 可见状态只在主线程改（工程约定：ReplyEditDialog.kt 的"所有 UI 可见状态只在主线程改"）
+                withContext(Dispatchers.Main) { isUploadingImage.value = false }
+            }
+        }
+    }
+
+    /**
+     * 发图前的"web 登录态体检 + 补救"。返回 true = 现在可以发纯 WEB 请求。
+     *
+     * 为什么必须有：图片消息走的是**纯 WEB** 表单（见 [IM_SEND_MSG_WEB_URL]），
+     * `isWebApi = true` 已经把 Authorization / access_key 那条路关掉了，唯一的凭据就是 Cookie 里的 SESSDATA。
+     * 而本 App 的登录可能走 TV 扫码：只有 access_token、CookieManager 里没有 SESSDATA，
+     * 这时候纯 WEB 请求**必然**回 -101 —— 与其发一个注定失败的请求，不如先补、补不上就直接告诉用户。
+     *
+     * 补救只做一件事：重放登录时服务端下发的 cookie_info（写法对齐 ProfileAvatarUploader.restoreWebCookies，
+     * 语义与冷启动 readAuthInfo → setCookie 完全一致，没有第二种凭据来源）。
+     * 注意 `CookieStore.importFromWebView() + syncToWebView()` 救不了登录态：它只回写
+     * buvid3 / buvid4 / b_nut / bili_ticket 这类**指纹** cookie，SESSDATA / bili_jct 是刻意不回写的。
+     *
+     * setCookie 的副作用只有一个：往 CookieManager 写 cookie + flush()，幂等；本来就登过网页版时
+     * 第一步探测就返回 true、连写都不会写 —— 对老用户零影响。
+     */
+    private fun ensureWebLogin(): Boolean {
+        if (hasWebLogin()) return true
+        runCatching {
+            BilimiaoCommApp.commApp.loginInfo?.cookie_info?.let {
+                BilimiaoCommApp.commApp.setCookie(it)
+            }
+        }
+        return hasWebLogin()
+    }
+
+    /** web 登录态判据：CookieManager 里有没有 SESSDATA（与 CommentApi.hasWebLoginCookie 同一判据） */
+    private fun hasWebLogin(): Boolean =
+        runCatching { MiaoHttp.sessDataToken() != null }.getOrDefault(false)
+
+    /**
+     * 只读文件头拿本地图片的真实像素尺寸（`inJustDecodeBounds` 不解码像素，开销就是读个头）。
+     *
+     * 存在的理由就是 [sendImage] 里那条：接口给的 width/height 可能是 0（APP 上传通道只回 location/url），
+     * 而这两个值要进消息体；用本地文件的尺寸兜底，比发 0 或者干脆不发都可靠。
+     * 解不出来返回 null（调用方按"没拿到"处理，不猜）。
+     */
+    private fun readLocalImageSize(file: File): Pair<Int, Int>? = runCatching {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        if (options.outWidth > 0 && options.outHeight > 0) {
+            options.outWidth to options.outHeight
+        } else {
+            null
+        }
+    }.getOrNull()
+
+    /**
+     * 上传到 B 站图床（BFS）。成功返回图床信息，失败返回给用户看的原因。
+     *
+     * 通道策略与评论区发图**完全一致**：`upload_bfs` 是 web 接口，有 web 登录态就先走 WEB 通道、
+     * 失败自动换 APP 通道兜底（保证"能发文字评论就一定能发图"）。
+     * web 登录态在上游 [ensureWebLogin] 里已经补救并确认过（没有就直接不发了），这里只按当前
+     * Cookie 决定先走哪条通道 —— 不再做"补 Cookie"的动作（那段 CookieStore 同步补不回凭据）。
+     */
+    private suspend fun uploadImageForIm(file: File): ImageUploadResult {
+        val hasWeb = hasWebLogin()
+        var lastError: String? = null
+        for (preferWeb in if (hasWeb) listOf(true, false) else listOf(false, true)) {
+            try {
+                val response = BiliApiService.commentApi
+                    .uploadImage(file = file, biz = "im", preferWeb = preferWeb)
+                    .awaitCall()
+                val parsed = MiaoJson.fromJson<ResponseData<UploadBfsInfo>>(
+                    response.body?.string().orEmpty()
+                )
+                val data = parsed.data
+                when {
+                    !parsed.isSuccess ->
+                        lastError = "code=${parsed.code} ${parsed.message}（HTTP ${response.code}）"
+                    data == null -> lastError = "服务端没返回图片信息（HTTP ${response.code}）"
+                    data.src.isBlank() -> lastError = "图片地址为空（HTTP ${response.code}）"
+                    else -> return ImageUploadResult(data, null)
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                lastError = "${e.javaClass.simpleName}: ${e.message ?: ""}".trim()
+            }
+        }
+        return ImageUploadResult(null, lastError)
+    }
+
+    /** 图片消息体里的 imageType 按 MIME 子类型写（文档示例是 jpeg），由落盘扩展名推出来 */
+    private fun imageTypeName(file: File): String = when (file.extension.lowercase()) {
+        "png" -> "png"
+        "gif" -> "gif"
+        "webp" -> "webp"
+        else -> "jpeg"
+    }
+
+    /**
+     * 乐观消息的插入 / 移除：一律切到主线程**同步**做，保证"先插后删"的顺序。
+     *
+     * 原来插入是 `launch(Dispatchers.Main) { … }` 异步派发、而失败回滚在 IO 线程直接改列表，
+     * 主线程一卡就会变成"删完才插"——那条假气泡的 msg_key 再也没人删，会永久留在会话里。
+     * 现在两边都走这里：调用点返回时改动已经落地，顺序不可能反。
+     */
+    private suspend fun applyLocalMsg(msgKey: Long, add: ChatMsgInfo? = null) =
+        withContext(Dispatchers.Main) {
+            val cur = list.data.value.toMutableList()
+            if (add != null) cur.add(add) else cur.removeAll { it.msg_key == msgKey }
+            list.data.value = cur
+        }
+
+    /**
+     * 发送私信的**唯一**实现：文字（msg_type=1）与图片（msg_type=2）共用。
+     * web 端 send_msg 只接受 msg_type 1 / 2 / 5，图片消息的 content 是图床 JSON（见 [sendImage]）。
+     *
+     * @param clearText 成功后是否清空输入框：文字消息清，图片消息不清
+     */
+    private suspend fun sendMsgInternal(msgType: Int, contentJson: String, clearText: Boolean) {
         // 提到 try 外：异常时也要能撤销这条本地乐观消息
         val fakeMsgKey = System.currentTimeMillis()
         try {
             isSending.value = true
-            // 别手拼 JSON：多行文本（输入框允许换行）会拼出非法 JSON，服务端直接拒收
-            val contentJson = kotlinx.serialization.json.buildJsonObject {
-                put("content", kotlinx.serialization.json.JsonPrimitive(text))
-            }.toString()
             val ts = System.currentTimeMillis() / 1000
             val csrf = BilimiaoCommApp.commApp.loginInfo?.cookie_info?.cookies
                 ?.find { it.name == "bili_jct" }?.value
             if (csrf == null) {
                 launch(Dispatchers.Main) { toast("未登录，无法发送") }
                 isSending.value = false
-                return@launch
+                return
             }
 
-            // 乐观更新：本地先塞一条消息
+            // 乐观更新：本地先塞一条消息（主线程同步插入，见 applyLocalMsg）
             val localMsg = ChatMsgInfo(
                 msg_key = fakeMsgKey,
-                msg_type = 1,
+                msg_type = msgType,
                 sender_uid = myUid,
                 content = contentJson,
                 timestamp = ts,
                 msg_seqno = 0,
             )
-            launch(Dispatchers.Main) {
-                val cur = list.data.value.toMutableList()
-                cur.add(localMsg)
-                list.data.value = cur
-            }
+            applyLocalMsg(fakeMsgKey, localMsg)
 
             // 发API
             val res = MiaoHttp.request {
-                url = BiliApiService.biliVcApi("web_im/v1/web_im/send_msg")
+                if (msgType == 2) {
+                    // ★图片消息走纯 WEB：只有端点 + 表单，不注入 appkey/sign（见 IM_SEND_MSG_WEB_URL 的注释），
+                    //   isWebApi = true 也正是 MiaoHttp 里跳过 app-key / x-bili-mid / Authorization 头的那一支
+                    //   （Cookie 不受影响：MiaoHttp 无论哪种模式都会带 CookieManager 里的登录态）
+                    isWebApi = true
+                    url = IM_SEND_MSG_WEB_URL
+                } else {
+                    // 文字消息：保持原有形态，一个字不动
+                    url = BiliApiService.biliVcApi("web_im/v1/web_im/send_msg")
+                }
                 method = MiaoHttp.POST
                 formBody = mapOf(
                     "msg[sender_uid]" to myUid.toString(),
                     "msg[receiver_id]" to talkerId.toString(),
                     "msg[receiver_type]" to "1",
-                    "msg[msg_type]" to "1",
+                    "msg[msg_type]" to msgType.toString(),
                     "msg[content]" to contentJson,
                     "msg[timestamp]" to ts.toString(),
                     "msg[dev_id]" to "bilimiao",
@@ -317,32 +598,36 @@ private class ChatViewModel(
                 )
             }.awaitCall().json<ResultInfo<Unit>>()
             if (res.isSuccess) {
-                inputText.value = TextFieldValue("")
+                if (clearText) inputText.value = TextFieldValue("")
                 showSendDialog.value = false
                 // 先从API刷新获取真实数据，再移除本地假消息（避免竞态窗口）
                 loadMsgsInternal()
-                val cur = list.data.value.toMutableList()
-                cur.removeAll { it.msg_key == fakeMsgKey }
-                list.data.value = cur
+                applyLocalMsg(fakeMsgKey)
                 launch(Dispatchers.Main) { toast("发送成功") }
                 // 通知私信列表刷新
                 MessageRefreshEvent.trigger()
             } else {
-                // 失败：移除本地假消息
-                launch(Dispatchers.Main) {
-                    val cur = list.data.value.toMutableList()
-                    cur.removeAll { it.msg_key == fakeMsgKey }
-                    list.data.value = cur
-                    toast(res.message.ifBlank { "发送失败" })
+                // 失败：先撤掉本地假消息（主线程同步），再提示原因
+                applyLocalMsg(fakeMsgKey)
+                // 图片这一支把服务端 code 也带上，真机可直接按码分流（-101 再补一句可操作的话术）；
+                // 文字链的文案与形态保持不变
+                val failText = if (msgType == 2) {
+                    val base = "发送失败（code=${res.code}）：${res.message.ifBlank { "未知原因" }}"
+                    if (res.code == -101) {
+                        "$base；网页登录态失效了，请用「网页登录」重新登录后再发图"
+                    } else {
+                        base
+                    }
+                } else {
+                    res.message.ifBlank { "发送失败" }
                 }
+                launch(Dispatchers.Main) { toast(failText) }
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
             // 异常时也要撤掉乐观更新的本地消息，否则它会永远留在列表里
-            val cur = list.data.value.toMutableList()
-            cur.removeAll { it.msg_key == fakeMsgKey }
-            list.data.value = cur
+            applyLocalMsg(fakeMsgKey)
             launch(Dispatchers.Main) { toast("发送失败: ${e.message}") }
         } finally {
             isSending.value = false
@@ -455,15 +740,10 @@ private fun ChatPageContent(
                 }
                 item { Spacer(Modifier.height(8.dp)) }
                 items(list, key = { it.msg_key }) { msg ->
-                    val parsed = remember(msg.msg_key) { parseMsgText(msg.content) }
-                    // 系统提示数组→Toast
-                    if (parsed.toastText.isNotBlank()) {
-                        LaunchedEffect(msg.msg_key) {
-                            toast(parsed.toastText)
-                        }
-                    }
-                    // 有文本内容才渲染气泡
-                    if (parsed.text.isNotBlank()) {
+                    // 图片消息（msg_type=2/6）先分流：它的 content 是图床 JSON，
+                    // 落到 parseMsgText 的兜底分支会显示成"[系统通知]"文字气泡
+                    val picture = remember(msg.msg_key) { parsePicContent(msg) }
+                    if (picture != null) {
                         ChatBubble(
                             msg = msg,
                             isMe = msg.sender_uid == viewModel.myUid,
@@ -472,8 +752,30 @@ private fun ChatPageContent(
                             talkerId = talkerId,
                             viewModel = viewModel,
                             timeText = viewModel.fmtTime(msg.timestamp),
-                            msgText = parsed.text,
+                            msgText = "",
+                            picture = picture,
                         )
+                    } else {
+                        val parsed = remember(msg.msg_key) { parseMsgText(msg.content) }
+                        // 系统提示数组→Toast
+                        if (parsed.toastText.isNotBlank()) {
+                            LaunchedEffect(msg.msg_key) {
+                                toast(parsed.toastText)
+                            }
+                        }
+                        // 有文本内容才渲染气泡
+                        if (parsed.text.isNotBlank()) {
+                            ChatBubble(
+                                msg = msg,
+                                isMe = msg.sender_uid == viewModel.myUid,
+                                myFace = viewModel.myFace,
+                                talkerFace = viewModel.talkerFace.value.ifBlank { initialFace },
+                                talkerId = talkerId,
+                                viewModel = viewModel,
+                                timeText = viewModel.fmtTime(msg.timestamp),
+                                msgText = parsed.text,
+                            )
+                        }
                     }
                 }
                 item { Spacer(Modifier.height(4.dp)) }
@@ -497,6 +799,13 @@ private fun ChatPageContent(
 @Composable
 private fun ChatSendPanel(vm: ChatViewModel) {
     val showEmoji = remember { mutableStateOf(false) }
+    // 系统相册选择器（Photo Picker）：API 30+ 免权限；30 以下自动回退到系统文件选择器。
+    // 与评论区发图用的是同一个 contract；私信选完直接上传+发送，不摆预览条（对齐 PiliPlus 的一步直发）
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) vm.sendImage(uri)
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // 内容区（输入框 + 表情）：吃「剩余高度」且可滚动。
@@ -569,10 +878,34 @@ private fun ChatSendPanel(vm: ChatViewModel) {
                            else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            // 发图片：图标/位置与评论区发图那颗按钮对齐（表情在左、图片其次）
+            IconButton(
+                onClick = {
+                    // 选图前先收起表情面板，避免两个面板叠在一起（评论区同一个约定）
+                    showEmoji.value = false
+                    imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                enabled = !vm.isUploadingImage.value && !vm.isSending.value,
+                modifier = Modifier.size(44.dp),
+            ) {
+                if (vm.isUploadingImage.value) {
+                    // 压缩 + 上传期间转圈：这里没有缩略图预览条，得让用户看到"在传"
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        Icons.Outlined.Image, "添加图片",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             Spacer(Modifier.weight(1f))
             FilledTonalButton(
                 onClick = { vm.sendMsg() },
-                enabled = vm.inputText.value.text.isNotBlank() && !vm.isSending.value,
+                // 上传图片期间也禁用：否则图片还在传、用户又把文字发出去了，两条发送请求并发
+                enabled = vm.inputText.value.text.isNotBlank() &&
+                        !vm.isSending.value && !vm.isUploadingImage.value,
                 shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -600,6 +933,7 @@ private fun ChatSendPanel(vm: ChatViewModel) {
 private fun ChatBubble(
     msg: ChatMsgInfo, isMe: Boolean, myFace: String, talkerFace: String,
     talkerId: Long, viewModel: ChatViewModel, timeText: String, msgText: String,
+    picture: ChatPicture? = null,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(
@@ -625,33 +959,42 @@ private fun ChatBubble(
                             else MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.widthIn(max = 280.dp),
                 ) {
-                    val parts = remember(msgText) { parseLinks(msgText) }
-                    SelectionContainer {
-                        Text(
-                            text = buildAnnotatedString {
-                                parts.forEach { (text, isLink) ->
-                                    if (isLink) {
-                                        // 之前只把链接染成链接样式，点了没反应；这里挂上真正的跳转
-                                        // （默认走 LocalUriHandler → 站内链接进原生页，站外进浏览器）
-                                        withLink(
-                                            LinkAnnotation.Url(
-                                                text,
-                                                TextLinkStyles(
-                                                    style = SpanStyle(
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        textDecoration = TextDecoration.Underline,
+                    if (picture != null) {
+                        // 图片气泡：复用评论区的 ImagesGrid（自带圆角、加载态、点击进全局图片预览），
+                        // 不给私信另写一套图片渲染。外层 Surface 已限宽 280dp，
+                        // 图片用 Fit 等比缩放，不会裁切（AGENTS 规则 5）。
+                        Box(modifier = Modifier.padding(4.dp)) {
+                            ImagesGrid(listOf(picture.toPreviewModel()))
+                        }
+                    } else {
+                        val parts = remember(msgText) { parseLinks(msgText) }
+                        SelectionContainer {
+                            Text(
+                                text = buildAnnotatedString {
+                                    parts.forEach { (text, isLink) ->
+                                        if (isLink) {
+                                            // 之前只把链接染成链接样式，点了没反应；这里挂上真正的跳转
+                                            // （默认走 LocalUriHandler → 站内链接进原生页，站外进浏览器）
+                                            withLink(
+                                                LinkAnnotation.Url(
+                                                    text,
+                                                    TextLinkStyles(
+                                                        style = SpanStyle(
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            textDecoration = TextDecoration.Underline,
+                                                        )
                                                     )
                                                 )
-                                            )
-                                        ) { append(text) }
-                                    } else append(text)
-                                }
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 22.sp),
-                            color = if (isMe) MaterialTheme.colorScheme.onPrimaryContainer
-                                    else MaterialTheme.colorScheme.onSurface,
-                        )
+                                            ) { append(text) }
+                                        } else append(text)
+                                    }
+                                },
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 22.sp),
+                                color = if (isMe) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(2.dp))

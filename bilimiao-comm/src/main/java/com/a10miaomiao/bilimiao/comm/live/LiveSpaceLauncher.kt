@@ -4,28 +4,36 @@ package com.a10miaomiao.bilimiao.comm.live
  * 「直播播放页 → 该 UP 的用户空间」的**注册桥**（comm 模块，唯一的跨模块落点）。
  *
  * ══════════════════════════════════════════════════════════════════════════
- * ## ★2026-09-26 定位变更：本桥现在是**兜底**，主路改成了"直播页内的浮层"
+ * ## ★定位沿革（2026-09-26 起，2026-09-28 复核修正）
  *
  * 用户报的 bug："在直播间点 UP主 进他主页没问题，但返回是直播界面的那个 Tab，不是他的直播间。"
  * 根因就在这条桥上：它的实现是"把**主界面**的 NavHost 导航到用户空间"，而主界面被直播页压着，
  * 要让它露出来就只能 `finish()` 掉直播页 —— 返回时直播页已经没了，自然只能回到直播 Tab。
  *
- * 现在的主路是 `com.a10miaomiao.bilimiao.compose.pages.user.UserSpaceOverlayHost`：
- * 用户空间作为**页内浮层**盖在直播页自己的视图树最上层，直播页不 finish、不 pause/stop，
- * 返回只是把浮层摘掉 —— 一次返回就回到**还在播**的直播间。
+ * 2026-09-26 那批的应对是新增页内浮层
+ * `com.a10miaomiao.bilimiao.compose.pages.user.UserSpaceOverlayHost`（用户空间盖在直播页自己的
+ * 视图树最上层，直播页不 finish，一次返回回到**还在播**的直播间），本桥降级为兜底。
  *
- * 本桥保留下来是因为它还有**兜底价值**：进程里拿不到可用的 `MainActivity`（没有它的 DI /
- * ComposeFragment，浮层开不起来）时，直播页会退回这条路（`LiveSpaceLauncher.open(mid)` + finish）。
- * 那条路的老代价（返回落到直播 Tab）在兜底场景下被接受 —— 它至少能把空间打开。
- * 所以：**注册点（`ComposeFragment`）与实现都不要删**。
+ * ★**该浮层文件已在后续批次（第五批）被整体删除** —— 所以现在本桥是**唯一**路径，
+ *   「直播页 → UP 空间」只有这一条：`open(mid)` 成功即由 compose 侧导航主界面 NavHost，
+ *   调用方随后 `finish()` 直播页。**代价照旧**：从 UP 空间返回落到直播 Tab，不是原直播间。
+ *   （要恢复"返回还在直播间"就得重建那份浮层，属 compose + DI 的较大改动；本轮评论区已记录。）
+ *
+ * 因此：**注册点（`ComposeFragment`）与实现都不要删** —— 删掉就没有任何进 UP 空间的路径了。
+ * 拿不到注册实现时 [open] 返回 false，调用方只 toast、不 finish、不乱跳（用户留在直播间）。
  *
  * ══════════════════════════════════════════════════════════════════════════
  * ## 为什么当初需要一座桥（而不是直播页直接跳）
  * 用户空间（`UserSpacePage`）是 **Compose 页面**，只活在 `bilimiao-compose` 的 NavHost 里，
  * 只能通过 `PageNavigation.navigate(...)` 打开；而调用方 `LivePlayerActivity` 在 **app** 模块。
- * 本工程的依赖方向是 `app → compose`、`compose → comm`，**app 反向 import compose 会成环编译不过**
- * （同一条约束在 `LiveBadgedAvatar` 里已经用"类名字符串 + 字面量 extra"绕过一次，
- * 但那条路只够传一个房间号，传不了"要打开哪个 Compose 页面"）。
+ * ★缺的不是"依赖方向"，是"**导航句柄**"（2026-09-28 复核修正，别把下面那条旧论据写回来）：
+ *   app 模块**本来就能** import compose —— `app/build.gradle.kts` 里
+ *   `implementation(project(":bilimiao-compose"))`，且 `MainActivity` / `MainUi` / `PlayerController`
+ *   等已在直接 import `cn.a10miaomiao.bilimiao.compose.*`；真正拿不到的是 `PageNavigation`
+ *   句柄本身（它只活在 `ComposeFragment` 的根组合里，`grep -rn "pageNavigation" app/src`
+ *   的**代码**引用数为 0）。
+ *   （`LiveBadgedAvatar` 那条"类名字符串 + 字面量 extra"的老路，也只够传一个房间号，
+ *    传不了"要打开哪个 Compose 页面"。）
  *
  * 所以这里采用**注册桥**：comm 模块只留一个函数类型的挂点（不放任何 Compose 依赖），
  * 由 compose 侧在 `ComposeFragment` 的根组合里注册一次真正的实现

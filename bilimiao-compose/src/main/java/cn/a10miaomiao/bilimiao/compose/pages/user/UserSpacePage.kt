@@ -195,6 +195,15 @@ private fun UserSpacePageDetailContent(
                                 title = "屏蔽该UP主"
                             }
                         }
+                        // R10：私信在别人的空间是低频操作，收进「更多」里，让顶栏那排按钮少一颗。
+                        // 只挪位置、不改行为：key/文案/图标与原来那颗按钮逐字一致，点击仍然走
+                        // UserSpaceViewModel.menuItemClick 的 MenuKeys.message 分支（PopupMenu 递归查 key）。
+                        // 图标名虽然不会被 PopupMenu 渲染（它只显示标题），仍原样保留 —— 这样"挪动"就是挪动。
+                        myItem {
+                            key = MenuKeys.message
+                            iconFileName = "ic_baseline_send_24"
+                            title = "私信"
+                        }
                     }
 //                    myItem {
 //                        key = 3
@@ -261,11 +270,6 @@ private fun UserSpacePageDetailContent(
                 action = MenuActions.search
             }
             if (!viewModel.isSelf) {
-                myItem {
-                    key = MenuKeys.message
-                    iconFileName = "ic_baseline_send_24"
-                    title = "私信"
-                }
                 myItem {
                     key = MenuKeys.follow
                     if (isFollow) {

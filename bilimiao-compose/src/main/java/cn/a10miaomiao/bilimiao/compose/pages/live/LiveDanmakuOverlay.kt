@@ -1354,7 +1354,9 @@ fun LiveDanmakuChatPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            // 停靠面板是"视频下方的一块区域"，不是浮在画面上的卡片 → 不做圆角，用整块底色
+            // 停靠面板是"视频下方的一块区域"，不是浮在画面上的卡片 → 不做圆角，用整块底色。
+            // ★底色 = **不透明纯黑**，与上方视频区/下方底栏同色、**不跟主题深浅**：
+            //   为什么、以及各文字色在这块底上的对比度核对，全写在 [CHAT_PANEL_BG] 的 KDoc 里。
             .background(CHAT_PANEL_BG)
             // ★吃掉落在面板上的**单击**：不然点一下面板的空白处会穿透到手势层，
             //   变成"显隐控制条"（列表常驻之后"点列表空白"是高频动作，一点就闪出控制条很烦）。
@@ -1633,8 +1635,57 @@ private const val CHAT_PENDING_MAX = 40
  */
 internal val CHAT_DOCKED_MIN_HEIGHT = 96.dp
 
-/** 面板底色：接近不透明（0xE6 ≈ 90%），保证小字在亮画面上也读得清 */
-private val CHAT_PANEL_BG = Color(0xE6101418)
+/**
+ * 面板底色：**不透明纯黑**（#000000），**与主题深浅无关**（浅色主题下也不变白）。
+ *
+ * 用户原话："竖屏的弹幕区域的背景色……要么也改成纯黑色？因为要长期去看这个弹幕，
+ *          我想让它合理护眼一点……直播间的两个区域，上下区域，在竖屏状态下，它也是纯黑色的"。
+ *
+ * 为什么**不跟主题**（不用 `surface` / `surfaceVariant`）：
+ * · 宿主现在把面板这棵 ComposeView 的主题**钉在深色档**
+ *   （`appColorScheme(themeState.copy(darkMode = 2), systemDark = true)`，理由见 Host 那段注释）——
+ *   **深色档下**取 `surface` 恰好也是纯黑，但那是 materialkolor `isAmoled = true` 的**条件**行为
+ *   （`(isAmoled && isDark) ? Black : …`，见 `BilimiaoTheme.kt:85` 与 `CustomThemeColorDialog.kt:140`）：
+ *   pin 一去掉、用户在浅色档，`surface` 就是近白 —— 整页（窗口底黑、顶栏/底栏黑蒙层）里唯一的亮板，
+ *   正是用户"要长期看、想护眼"的那一块。写死纯黑，是把"面板恒黑"从主题参数里解耦出来。
+ * · `surfaceVariant` 是 M3 深色色板里的中灰档（不是纯黑）—— 见下一条，深灰在这两块纯黑中间
+ *   是一条色带。
+ *
+ * 为什么是**纯黑**而不是 `#121212` 这类深灰：
+ * · 面板上下两块本来就是纯黑：窗口底色 `ColorDrawable(Color.BLACK)`（`LivePlayerActivity`）、
+ *   底栏 `scrimColor()` = 纯黑 150/255（浅色主题 120/255）。深灰贴在纯黑旁边**看得见一条色带**
+ *   （Material 暗色主题的 `#121212` + 高程提亮是给"整页没有纯黑"的通用场景用的，本页不适用）；
+ * · 竖屏 22:9 上视频是 16:9，画面下方本来就可能有一段黑边 —— 纯黑才接得住。
+ * · OLED 下纯黑像素熄灭是真的，**但别拿省电当理由**：实测"真黑 vs 深灰"的功耗差只有 ~0.3%
+ *   （引用 2）。这里选它的理由是"不刺眼 + 无缝"，不是省电。
+ *
+ * 对比度（只换底色、不动字色；逐个按 WCAG 公式实算）：
+ * · 用户名 = `MaterialTheme.colorScheme.primary` 是**唯一跟主题走**的一处，所以结论带前提：
+ *   **钉深色档时**（宿主 `copy(darkMode = 2)`，见 `LiveDanmakuOverlayHost`）primary 恒为亮色调
+ *   tone 80（L\*=80，与色相无关）→ 压纯黑 ≈12.3:1，≥ AA 的 4.5:1；
+ *   **不钉的话**（历史行为：用户把「主题设置 → 深浅色」设为"关闭" → 拿到浅色色板）是 tone 40 →
+ *   压纯黑只有 ≈3.25:1，低于 AA（改前压在合成色 #0E1216 上是 ≈2.9:1 —— 这条不是本次引入的）。
+ * · 其余三处**与主题档位无关**（正文值随发弹幕者选的色变，B 站默认白 ≈21:1）
+ *   —— 标题/提示是写死常量：[CHAT_TITLE_COLOR] 0xDCE3EA → ≈16.2:1、[CHAT_HINT_COLOR] 0x8A97A3 → ≈7.0:1；
+ *   改前分别 ≈14.5 / ≈6.3 / ≈18.8:1 —— 换纯黑之后**标题/提示只升不降**；正文按"同一个发弹幕者选的色"比较
+ *   也是只升不降（唯一例外是极深色弹幕，例如 `color=0x000000`：1.12 → 1.00:1，**改前改后都读不出来**，
+ *   非本次引入，本 App 发弹幕也不带颜色参数）。
+ * 两个半透明层跟着底色一起暗一点点（分隔线合成 0x2E3235 → 0x222222、按钮底 0x252D38 → 0x222A33），
+ * 仍是"看得见的一条细线 / 一枚浅色胶囊"，**这次不动它们**（非必要勿增实体）。
+ *
+ * 引用：1. WCAG 2.2 SC 1.4.3 Contrast (Minimum)：正文 ≥ 4.5:1、大字 ≥ 3:1
+ *          https://www.w3.org/TR/WCAG22/#contrast-minimum
+ *       2. OLED 上"真黑 vs 深灰"的功耗实测（差 ≈0.3%，可忽略）
+ *          https://www.androidauthority.com/true-black-dark-mode-1003537/
+ *
+ * ★不要改回 `MaterialTheme.colorScheme.*`；也别为它新开设置项。见 AGENTS.md §3.1
+ *   "不做运行时全局改主题色"：本页只在**单点**用中性黑（顶栏/底栏的 `scrimColor()` 同款做法）。
+ */
+// 豁免：AGENTS.md 规则 6 的那一档「叠在/紧邻画面、构成"视频页中性黑"的那一层」：面板**紧邻画面**
+//       （顶边 = 画面底边，矩形由宿主实测，见 LiveDanmakuOverlayHost.computeDockedRect），底色与顶栏/底栏的
+//       scrimColor() 蒙层**同源**（同一套"视频页保持中性黑"的约定，都是纯黑）；它故意不跟主题
+//       （理由见上面的 KDoc），所以没法用 MaterialTheme.colorScheme.* 表达。
+private val CHAT_PANEL_BG = Color(0xFF000000)
 
 /** 头部标题/按钮色 */
 private val CHAT_TITLE_COLOR = Color(0xFFDCE3EA)

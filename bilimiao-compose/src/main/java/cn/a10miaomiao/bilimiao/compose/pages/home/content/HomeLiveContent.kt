@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -1509,6 +1510,23 @@ private fun HomeLiveFollowBlock(
                     Spacer(modifier = Modifier.weight(1f))
                 }
             }
+            // ★区块与下面直播列表之间的分块线（用户原话："我想在他那里下面去加一个小的分块线，
+            //   可以复用普通视频的那个分块线。记得给他们两个添加距离哦，分块线的上下区域添加一点点距离"）。
+            //   复用 = **同一个组件、同一种写法**：androidx.compose.material3.HorizontalDivider ——
+            //   普通视频列表页页签下方那条线（RankPage / TimeRegionDetailPage / MyFollowPage 三处
+            //   都是 `HorizontalDivider(Modifier…fillMaxWidth())`）用的就是它；首页视频 Tab
+            //   （HomePopularContent、HomeTimeMachineContent）也 import 同一个类（那两处**当前没有调用点**，
+            //   是遗留 import）；全仓没有第二种分块线（规则 15：先 grep 再写，不新造）。
+            //   颜色/厚度都不传：默认即 outlineVariant + 1dp，正是规则 7 给"分割线"定的语义色。
+            //   上边距 8dp：区块内部既有的行距是 6dp（标题行→卡片行），规则 10 只允许 4/8/12/16，就近取 8；
+            //   下边距**不另加**：区块自己的 bottom 2dp + 列表卡片自己的 vertical 5dp = 7dp 本来就在，
+            //   再叠一层只会把线与下面的卡片拉得更远（非必要勿增实体）。
+            //   画在区块内部 = 天然"只在有内容时画"：整块没数据时本函数开头就 return 了，不会凭空多一条线。
+            HorizontalDivider(
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .fillMaxWidth(),
+            )
         }
     }
 }

@@ -956,17 +956,27 @@ class LiveDanmakuOverlayHost(
                 //     同一个函数、同一批键），原因见那个函数的 KDoc：本页是独立 Activity、没有 Store/DI；
                 //   · 只在组合第一帧读一次（`remember`）：面板里没有主题项，主题不会在它活着的时候变
                 //     （换主题要回设置页，再进直播间就是新的一份）。
-                // ★★`systemDark = true`（**刻意**不用 `isSystemInDarkTheme()`）：面板底色
-                //   **恒为深色**（`CHAT_PANEL_BG = 0xE6101418`，视频页的"蒙层保持中性黑"约定，
-                //   浅色主题下也是深色），所以这里要的是"为深底设计"的那一支色调 ——
-                //   深色色板里 `primary` 是亮色调（tone 80），压在近黑面板上对比度 ≈10:1；
-                //   而浅色色板的 `primary` 是给浅底用的暗色调（tone 40），压在近黑面板上只有 ≈3:1，
-                //   13sp 的小字会发闷读不清（本轮之前那个写死的 `0xFF8AB4F8` 亮蓝就是亮色调，
-                //   观感上也不该突然变暗）。**色相与彩度仍然完全来自用户主题色**，只是取了适配深底的明度。
-                //   ⇒ 想改成"严格跟随 App 深浅色"的话：把下面的 `systemDark = true` 换成
-                //     `isSystemInDarkTheme()` 即可（代价就是浅色主题下名字会偏暗）。
+                // ★★色板**钉在深色档**：`systemDark = true` 一个人钉不住 —— `appColorScheme` 的归一化是
+                //   `0 -> systemDark / 1 -> false / else -> true`（`BilimiaoTheme.kt:55-59`）。
+                //   用户把「主题设置 → 深浅色」设成"关闭"（darkMode = 1）时，上面那一票会被判成 false，
+                //   面板就拿到**浅色色板**：`primary` = tone 40（给浅底用的暗色调），压在恒为纯黑的面板
+                //   （`CHAT_PANEL_BG`）上只有 ≈3.25:1，低于 WCAG AA 的 4.5:1，13sp 的用户名发闷
+                //   （改前就是这个行为，按 WCAG 公式算下来 ≈2.9:1）。面板底色既然恒黑，色板就得跟底色走：
+                //   显式 `copy(darkMode = 2)` 走 `else -> true` 那一支，与 `systemDark` 无关地钉死深色。
+                //   · 为什么在这里 copy、而不是改 `appColorScheme`：那是**全 App 的公共取色入口**，
+                //     而"黑底面板"只有这一处 —— 只借它的 isDark 分支，不碰公共路径
+                //     （同款 copy 写法见 `AppStore.kt:130` 的 `theme?.copy(darkMode = mode)`）。
+                //   · 影响面：面板里吃 `colorScheme` 的**只有用户名一处**
+                //     （`LiveDanmakuOverlay.kt:1499` `val unameColor = MaterialTheme.colorScheme.primary`），
+                //     所以这次钉深色只动一个名字色，不牵连别的界面。
+                //   · 深色档下 `primary` 是亮色调（tone 80），压在纯黑面板上 ≈12.3:1；
+                //     **色相与彩度仍然完全来自用户主题色**，只是取了适配深底的明度。
+                //   ⇒ 想改成"严格跟随 App 深浅色"的话：把 `systemDark = true` 换成
+                //     `isSystemInDarkTheme()`，并去掉 `copy(darkMode = 2)`
+                //     （`systemDark` 是无默认值的必填参数，不能直接删掉），
+                //     代价就是浅色档下名字偏暗、对比度掉回 ≈3.25:1。
                 val themeState = remember { liveSheetThemeState(context) }
-                MaterialTheme(colorScheme = appColorScheme(themeState, systemDark = true)) {
+                MaterialTheme(colorScheme = appColorScheme(themeState.copy(darkMode = 2), systemDark = true)) {
                     // ★visible 用的是与 View 显隐**同一个信号**（listShown），不是裸的"竖屏"：
                     //   面板处于隐藏态时，这一份组合必须真的**不订阅** chat.lines
                     //   （只把 View 设成 GONE、组合还在跟着新弹幕重组，就不叫"不可见不干活"了）。

@@ -48,9 +48,11 @@ import kotlinx.serialization.Serializable
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import me.zhanghai.compose.preference.preference
 import me.zhanghai.compose.preference.preferenceCategory
+import me.zhanghai.compose.preference.sliderPreference
 import me.zhanghai.compose.preference.switchPreference
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
+import cn.a10miaomiao.bilimiao.compose.components.preference.sliderIntPreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
 import org.kodein.di.DI
 import org.kodein.di.DIAware
@@ -450,9 +452,9 @@ private fun SettingPageContent(
                     }
                 }
                 if (itemHits.isNotEmpty()) {
-                    // 开关 / 数值：能在搜索页直接改
+                    // 开关 / 拖动条 / 数值输入框：能在搜索页直接改，且用**原页面同款控件**
                     val editable = itemHits.filter { it.kind != SettingSearchItem.Kind.LINK }
-                    // LINK：滑条 / 下拉这类搜索页改不了的，只做"带路"，点开进对应设置页
+                    // LINK：下拉 / 多选这类搜索页改不了的，只做"带路"，点开进对应设置页
                     val linkOnly = itemHits.filter { it.kind == SettingSearchItem.Kind.LINK }
                     if (editable.isNotEmpty()) {
                         preferenceCategory(key = "search_items", title = { Text("设置项（可直接修改）") })
@@ -465,13 +467,49 @@ private fun SettingPageContent(
                                     // 不再只显示大类：告诉用户这条设置来自哪个设置页、哪个分组
                                     summary = { Text(item.searchSummaryText()) },
                                 )
-                                SettingSearchItem.Kind.INT -> textIntPreference(
+                                // 拖动条：原页面调 sliderIntPreference 的项，搜索页用**同一个 DSL** 渲染
+                                // （range / steps / 数值文案都由索引从原调用点原样带过来）。
+                                // 以前这类项被压成 INT 用输入框渲染 —— 用户反馈"拖动条搜出来变输入框"
+                                // （R9），就是这里。spec 判空只是防御索引/手改不一致，正常不会走到空。
+                                SettingSearchItem.Kind.SLIDER_INT -> {
+                                    val spec = item.slider
+                                    if (spec is SettingSearchItem.SliderSpec.IntSlider) {
+                                        sliderIntPreference(
+                                            key = item.prefKey,
+                                            defaultValue = item.default as Int,
+                                            title = { Text(item.title) },
+                                            summary = { Text(item.searchSummaryText()) },
+                                            valueRange = spec.range,
+                                            valueSteps = spec.steps,
+                                            valueText = spec.valueText,
+                                        )
+                                    }
+                                }
+                                // Float 拖动条：对应原页面的 sliderPreference（me.zhanghai.compose.preference）
+                                SettingSearchItem.Kind.SLIDER_FLOAT -> {
+                                    val spec = item.slider
+                                    if (spec is SettingSearchItem.SliderSpec.FloatSlider) {
+                                        sliderPreference(
+                                            key = item.prefKey,
+                                            defaultValue = item.default as Float,
+                                            title = { Text(item.title) },
+                                            summary = { Text(item.searchSummaryText()) },
+                                            valueRange = spec.range,
+                                            valueSteps = spec.steps,
+                                            valueText = spec.valueText,
+                                        )
+                                    }
+                                }
+                                // 数值输入框：原页面调 textIntPreference 的项保持原样（点开弹窗输入）
+                                SettingSearchItem.Kind.TEXT_INT -> textIntPreference(
                                     key = item.prefKey,
                                     defaultValue = item.default as Int,
                                     title = { Text(item.title) },
-                                    // 同上；INT 额外提示"点击输入数值"，和开关项区分开
+                                    // 同上；这一支额外提示"点击输入数值"，和开关/拖动条区分开
                                     summary = { Text(item.searchSummaryText()) },
-                                    label = "",
+                                    // 单位跟着原页面走：label 是**弹窗里输入框的字段名**
+                                    // （原页写 " sp"/" MB"/"秒"，丢了用户就看不到单位）
+                                    label = item.label,
                                 )
                                 // LINK 已被 editable 过滤掉；这一支只是让 when 对枚举保持穷尽
                                 SettingSearchItem.Kind.LINK -> Unit
@@ -569,10 +607,11 @@ private fun SettingSearchItem.searchLocationText(): String {
     }
 }
 
-/** 结果条目 summary：位置说明 + 数值项额外提示"点击输入数值"，和开关项区分开。 */
+/** 结果条目 summary：位置说明；只有"点开弹窗输入数值"的 [SettingSearchItem.Kind.TEXT_INT] 才追加操作提示。 */
 private fun SettingSearchItem.searchSummaryText(): String {
     val location = searchLocationText()
-    if (kind != SettingSearchItem.Kind.INT) return location
+    // 开关和拖动条都是就地直接操作，不需要提示 —— 多一句提示反而像另一种控件（用户 R9）
+    if (kind != SettingSearchItem.Kind.TEXT_INT) return location
     return if (location.isEmpty()) "点击输入数值" else "$location · 点击输入数值"
 }
 
