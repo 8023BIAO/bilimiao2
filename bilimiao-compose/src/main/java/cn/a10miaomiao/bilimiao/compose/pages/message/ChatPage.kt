@@ -50,6 +50,8 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
 import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoInputField
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSendButton
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.image.ImagesGrid
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
@@ -59,6 +61,8 @@ import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.MessageRefreshEvent
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.UserInfoCache
 import cn.a10miaomiao.bilimiao.compose.pages.message.content.AccInfoData
+import cn.a10miaomiao.bilimiao.compose.pages.message.content.mergeIntoUserInfoCache
+import cn.a10miaomiao.bilimiao.compose.pages.message.content.messageAvatarUrl
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
@@ -287,10 +291,18 @@ private class ChatViewModel(
                 if (res.isSuccess) {
                     val info = res.data
                     if (info != null) {
-                        talkerName.value = info.name
-                        talkerFace.value = info.face
-                        // 写入全局缓存
-                        UserInfoCache.put(uid, AccInfoData(mid = info.mid, name = info.name, face = info.face))
+                        // ★只覆盖非空值：acc/info 偶尔会回空 name/face，直接赋值会把列表刚传进来的
+                        //   好头像 / 好昵称**抹掉**（用户看到的"外面有头像、点进对话反而没有"就是这么来的）
+                        if (info.name.isNotBlank()) talkerName.value = info.name
+                        if (info.face.isNotBlank()) talkerFace.value = info.face
+                        // 写全局缓存：空值不覆盖已有值（会话列表直接读这个缓存，被写成空 face 就会退回占位图）
+                        val old = UserInfoCache.get(uid)
+                        mergeIntoUserInfoCache(uid, AccInfoData(mid = info.mid, name = info.name, face = info.face))
+                        // 拿到的是**新**头像：通知会话列表刷新一次，外面那块立刻跟着更新
+                        // （列表监听的就是这个 MessageRefreshEvent，见 PrivateMessageContent）
+                        if (info.face.isNotBlank() && old?.face != info.face) {
+                            MessageRefreshEvent.trigger()
+                        }
                     }
                 }
             } catch (_: Exception) {}
@@ -814,7 +826,9 @@ private fun ChatSendPanel(vm: ChatViewModel) {
         if (uri != null) vm.sendImage(uri)
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // ★左右各 16dp（AGENTS §2.10 的四档；与评论区那条输入条同档）：
+    //   原来这里没有左右内边距 → 输入框和发送按钮两边直接顶到屏幕（用户原话）。
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         // 内容区（输入框 + 表情）：吃「剩余高度」且可滚动。
         // 横屏可用高只有 ~360dp，原来"固定 260dp 表情格 + 无 weight 无滚动的根 Column"
         // 会把输入框 / 发送按钮挤出屏幕。weight(fill = false)：空间够时保持原来的紧凑高度
@@ -824,25 +838,14 @@ private fun ChatSendPanel(vm: ChatViewModel) {
                 .weight(1f, fill = false)
                 .verticalScroll(rememberScrollState()),
         ) {
-            OutlinedTextField(
+            // 统一输入框（描边/圆角/文字色走 MiaoInputBar 那套语义色；与评论区那个是**同一份实现**）
+            MiaoInputField(
                 value = vm.inputText.value,
                 onValueChange = { vm.inputText.value = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 80.dp, max = 160.dp),
-                placeholder = { Text("说点什么...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                shape = RoundedCornerShape(8.dp),
+                placeholder = "说点什么...",
+                minHeight = 80.dp,
+                maxHeight = 160.dp,
                 maxLines = 5,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                ),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 15.sp,
-                ),
             )
 
             Spacer(Modifier.height(8.dp))
@@ -908,27 +911,15 @@ private fun ChatSendPanel(vm: ChatViewModel) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            FilledTonalButton(
+            // 统一发送按钮：**不填充**（TextButton）+ 小飞机 + 文案「发送」（与评论区那颗是**同一份实现**）。
+            // 原来这里是 primaryContainer 的填充块：深色档 primaryContainer ≈ tone 30，与近黑 sheet 几乎同色，
+            // 加上"输入为空时是禁用态（onSurface 12%）"——用户原话"黑色主题下完全看不见"就是这么来的。
+            MiaoSendButton(
                 onClick = { vm.sendMsg() },
                 // 上传图片期间也禁用：否则图片还在传、用户又把文字发出去了，两条发送请求并发
-                enabled = vm.inputText.value.text.isNotBlank() &&
-                        !vm.isSending.value && !vm.isUploadingImage.value,
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
-            ) {
-                if (vm.isSending.value) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                } else {
-                    Text("发消息", fontSize = 14.sp)
-                }
-            }
+                enabled = vm.inputText.value.text.isNotBlank() && !vm.isUploadingImage.value,
+                loading = vm.isSending.value,
+            )
         }
     }
 }
@@ -1021,10 +1012,13 @@ private fun ChatBubble(
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun Avatar(url: String, onClick: (() -> Unit)? = null) {
-    // 🔧 使用默认占位图同时作为 loading 和 failure 状态，避免网络加载时显示空白
-    val place = cn.a10miaomiao.bilimiao.compose.R.drawable.bili_default_placeholder_img_tv
+    // 头像 URL 统一走 messageAvatarUrl（消息页唯一一份拼法，与私信列表共用）：
+    //   autoHttps 修 http:// 与协议相对地址；@200w_200h 走图床缩略图；空值给官方默认头像。
+    // 与列表拼出的是**同一个字符串** ⇒ 同一用户两处共用同一份 Glide 缓存（一处下过、另一处秒出）。
+    // 占位图也换成项目统一的头像占位（原来借的是视频封面那张 TV 图）
+    val place = cn.a10miaomiao.bilimiao.compose.R.drawable.bili_akari_img
     GlideImage(
-        model = url.ifEmpty { null },
+        model = messageAvatarUrl(url),
         contentDescription = null,
         modifier = Modifier.size(40.dp).clip(CircleShape).let {
             if (onClick != null) it.clickable(onClick = onClick) else it

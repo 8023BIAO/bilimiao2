@@ -8,10 +8,10 @@ object SettingConstants {
     const val HOME_ENTRY_VIEW_DYNAMIC = 3 // 动态
     const val HOME_ENTRY_VIEW_BANGUMI = 5 // 番剧
     const val HOME_ENTRY_VIEW_CINEMA = 6 // 影视
-    // 分区。为什么取 7 而不是 4：4 已经被"时光精选"占用了（见文件末尾那一段），
-    // 这里的值会原样落盘进 HomeEntryView，老数字的含义一个都不能动，新项只能往后取号。
-    const val HOME_ENTRY_VIEW_REGION = 7 // 分区
-    // 直播（第三阶段 A 路）。同理取 8：0~7 都已经被占用（4 = 时光精选，见文件末尾），
+    // ★7 已退役：原「分区」入口（首页「分区」Tab 连同它的设置项已整体删除，2026-09-28）。
+    //   数字**只增不复用** —— HomeEntryView 原样落盘，老用户存的就是 7；
+    //   把 7 分给新项会让他们的"首页入口"突然跳到另一个 Tab。
+    // 直播（第三阶段 A 路）。同理取 8：0~6 已被占用（4 = 时光精选，见文件末尾），7 已退役，
     // 这个值会原样落盘进 HomeEntryView，已经发出去的数字含义一个都不能动。
     const val HOME_ENTRY_VIEW_LIVE = 8 // 直播
 

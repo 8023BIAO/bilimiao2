@@ -61,11 +61,10 @@ private class HomeSettingPageViewModel(
 
     val entryViews = mapOf(
         SettingConstants.HOME_ENTRY_VIEW_DEFAULT to "默认",
-        // 顺序与首页 Tab 的排列一致（直播在最前，分区插在热门后、番剧前）
+        // 顺序与首页 Tab 的排列一致（直播在最前）
         SettingConstants.HOME_ENTRY_VIEW_LIVE to "直播",
         SettingConstants.HOME_ENTRY_VIEW_RECOMMEND to "推荐",
         SettingConstants.HOME_ENTRY_VIEW_POPULAR to "热门",
-        SettingConstants.HOME_ENTRY_VIEW_REGION to "分区",
         SettingConstants.HOME_ENTRY_VIEW_BANGUMI to "番剧",
         SettingConstants.HOME_ENTRY_VIEW_CINEMA to "影视",
         // SettingConstants.HOME_ENTRY_VIEW_TIME_SELECT to "时光精选",
@@ -145,7 +144,10 @@ private fun HomeSettingPageContent(
                     Text("首页入口")
                 },
                 summary = {
-                    Text(text = "当前: " + viewModel.entryViews[it])
+                    // ★`?: "未知"` 不能省：老用户把「首页入口」存成已退役的值（7 = 原「分区」）时，
+                    //   直接拼 null 会显示"当前: null"。显示"未知"与下拉里 valueToText 的兜底一致，
+                    //   实际行为 = 首页按"没有匹配的入口"落到第一个 Tab（不会崩）。
+                    Text(text = "当前: " + (viewModel.entryViews[it] ?: "未知"))
                 },
                 values = entryViewValues,
                 valueToText = {
@@ -160,7 +162,7 @@ private fun HomeSettingPageContent(
                 },
                 defaultValue = false,
             )
-            // 「直播」：和分区那个开关完全同一套（SettingPreferences 键 + AppStore 统一读取口），
+            // 「直播」：和上面几个开关完全同一套（SettingPreferences 键 + AppStore 统一读取口），
             // 默认 true = 老用户升级后首页第一个 Tab 直接就是直播，不想要的在这里关掉
             switchPreference(
                 key = SettingPreferences.HomeLiveShow.name,
@@ -187,15 +189,6 @@ private fun HomeSettingPageContent(
                 key = SettingPreferences.HomePopularShow.name,
                 title = {
                     Text("显示热门")
-                },
-                defaultValue = false,
-            )
-            // 「分区」：和上面几个开关走同一套键（SettingPreferences）+ 同一个 AppStore 读取口，
-            // 默认 true = 老用户升级后直接多出这个 Tab，不想要的在这里关掉
-            switchPreference(
-                key = SettingPreferences.HomeRegionShow.name,
-                title = {
-                    Text("显示分区")
                 },
                 defaultValue = false,
             )

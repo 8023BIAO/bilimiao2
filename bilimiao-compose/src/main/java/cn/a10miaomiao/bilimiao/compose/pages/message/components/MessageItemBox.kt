@@ -20,8 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import cn.a10miaomiao.bilimiao.compose.pages.message.content.messageAvatarUrl
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
-import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 
@@ -44,7 +44,10 @@ internal fun MessageItemBox(
             .padding(10.dp),
     ) {
         GlideImage(
-            model = UrlUtil.autoHttps(avatar) + "@200w_200h",
+            // 消息页三处头像（回复/@/赞 列表、私信会话列表、私信对话）统一走 messageAvatarUrl，
+            // 拼出同一个字符串 ⇒ 同一个用户共用同一份 Glide 缓存；空值也不会再拼出 "https:@200w_200h"
+            // 这种坏 URL（赞列表在 users 为空时就会传空，原来那颗头像是加载不出来的）
+            model = messageAvatarUrl(avatar),
             contentDescription = null,
             modifier = Modifier
                 .size(40.dp)

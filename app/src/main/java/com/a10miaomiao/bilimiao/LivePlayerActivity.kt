@@ -1986,7 +1986,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   且此刻进程里没有别的前台页面 → 记下这个直播间（onUserLeaveHint 通常已经记过一次，
         //   这里覆盖熄屏 / 来电 / 被别的 App 抢前台等**不走 hint** 的路径，幂等）。
         if (!isFinishing && !isChangingConfigurations) {
-            LiveLastRoomStore.onLivePageStopped(applicationContext, rawRoomId)
+            // ★task-47：多窗口（**非 PiP**）下把"别的页面还 resumed"那道门让开 ——
+            //   多窗口允许多个 Activity 同时 RESUMED，"直播间 stop 而主界面还亮着"不代表
+            //   用户在 App 内切页，而是"直播间这个窗口正在被收起/隐藏"。
+            //   见 [LiveLastRoomStore.onLivePageStopped] 的 `inMultiWindow` 参数说明。
+            //   PiP 传 false（它本来就不走 onStop），所以那条路行为不变。
+            LiveLastRoomStore.onLivePageStopped(
+                applicationContext,
+                rawRoomId,
+                inMultiWindow = isInMultiWindowMode && !isInPictureInPictureMode,
+            )
         }
         // ★必须在**动播放器之前**记下意图（第十二批起 onStop 不再是"无条件暂停"，见下）：
         //   这里记的是"退后台那一刻到底在不在播"——下面那条门控与 [onResume] 的恢复分支都读它，

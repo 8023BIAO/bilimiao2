@@ -11,6 +11,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import java.util.Collections
+import java.util.WeakHashMap
 
 /**
  * 「上次停在哪个直播间」的记录 + 「回 App 仍停在直播间」的**确定性**恢复（★2026-09-26 本轮）。
@@ -127,8 +129,28 @@ object LiveLastRoomStore {
      * 当前 resumed 的那个 Activity（**只在 resumed 期间持有**：onPause / onDestroy 立刻清）。
      * 恢复时要一个 Activity 来 `startActivity`（NEW_TASK 落进"刚刚回到前台的那个任务"），
      * 但绝不长期持有 —— 清得很干净，不给进程留泄漏。
+     *
+     * ★task-47：它现在表示"**最近一次 resume、且此刻仍在 resumed 的那个页面**"，取值由
+     *   [resumedSet] 兜底（多窗口下同时可能有多个页面 RESUMED，谁 pause 了都不能把别人一起忘掉）。
      */
     @Volatile private var resumedHost: Activity? = null
+
+    /**
+     * ★task-47：**当前仍处于 RESUMED 的全部页面**（弱引用，避免留 Activity）。
+     *
+     * 为什么需要它（用户实测 bug 的根因）：Android 10+ 的多窗口允许**多个 Activity 同时 RESUMED**
+     * （典型 = 系统小窗/分屏里"直播间"与"主界面"各占一个窗口）。原来的前台状态是**单槽**的
+     * （[resumedHost] / [resumedActivity]）：主界面先 resume（记成前台）→ 小窗里的直播间也 resume
+     * （覆盖成前台）→ **直播间被系统收掉时它自己的 onPause 把槽清空** ⇒ 紧接着 `onDestroy` 触发的
+     * [evaluateRestore] 看到"没有前台宿主"直接跳过，而主界面**本来就是 resumed、不会再来一次
+     * resume 回调** ⇒ 那个直播间再也回不来（"回桌面再回软件 → 只剩直播 Tab"）。
+     *
+     * 所以：集合只用于"谁 pause 之后，前台该落到谁身上"这一步（见 [onActivityPaused]）；
+     * 所有既有判据（[takePendingForRestore] 的四条、消费/清理规则）**一个字没改**。
+     * ★只在主线程读写（观察者回调 + `runOnUiThread` 的种子回调），与既有字段同一套约定。
+     */
+    private val resumedSet: MutableSet<Activity> =
+        Collections.newSetFromMap(WeakHashMap<Activity, Boolean>())
 
     /**
      * 落盘的**唯一消费者**（对象初始化时起一次，随进程存活）。
@@ -222,10 +244,18 @@ object LiveLastRoomStore {
      * ① `isFinishing` / `isChangingConfigurations` 由调用方在页面里判掉（正常退出、重建不算"离开"）；
      * ② 这里再判一次"进程里没有别的 resumed 页面" —— 直播间被**App 内**的另一个页面盖住时
      *    （例如从直播间开了点播播放页）也会走 onStop，但那种情况用户并没有离开 App，不该记。
+     *
+     * ★task-47：`inMultiWindow` 是给 ② 开的一道**例外**（调用方传
+     *   `isInMultiWindowMode && !isInPictureInPictureMode`，见 `LivePlayerActivity.onStop`）。
+     *   理由：多窗口下"别的页面还 RESUMED"**不等于**"用户在 App 内切页" —— Android 10+ 的多窗口
+     *   允许多个 Activity **同时 RESUMED**（主界面在另一个窗口里亮着，直播间这个窗口被隐藏/收起）。
+     *   这时这次 stop 同样是"用户离开直播间"，记录必须留下，否则系统把直播间窗口收掉之后
+     *   就无处可恢复（用户实测："系统小窗 → 回桌面 → 回软件，直播间消失、只剩直播 Tab"）。
+     *   ★PiP 不走这个例外（它有自己的记录点与判据），那条路行为一个字节不变。
      */
-    fun onLivePageStopped(context: Context, roomId: String) {
+    fun onLivePageStopped(context: Context, roomId: String, inMultiWindow: Boolean = false) {
         ensureAttached(context)
-        if (resumedActivity != null) {
+        if (!inMultiWindow && resumedActivity != null) {
             LivePageTrace.note(
                 "lastRoom.record.skip",
                 "reason" to "anotherPageResumed",
@@ -372,6 +402,8 @@ object LiveLastRoomStore {
      *
      * 四条一起看，缺一不可：
      * ① App 真的"回到软件"了（前台 = 主界面 [HOST_ACTIVITY]，不是"还在后台"也不是别的页面）；
+     *   ★task-47：多窗口下"前台"取自 [resumedSet]（同时可能有多个 RESUMED 的页面），
+     *   判据本身不变 —— 仍然要求"当下是主界面"。
      * ② 没有活着的直播间实例（典型 = 直播间还在 PiP 小窗里，那就等它被收掉再判）；
      * ③ "应当恢复"的记录还在；
      * ④ 取走即消费（一次性）。
@@ -520,8 +552,13 @@ object LiveLastRoomStore {
         override fun onActivityStarted(activity: Activity) = Unit
 
         override fun onActivityResumed(activity: Activity) {
+            resumedSet.add(activity)
             resumedHost = activity
             resumedActivity = activity.javaClass.name
+            // ★task-47：多窗口（**非 PiP**）判定 —— 见下面那段"为什么不消费记录"。
+            //   两个 API 都是 API 24（本工程 minSdk 24），无需版本判断。
+            val multiWindowNotPip =
+                activity.isInMultiWindowMode && !activity.isInPictureInPictureMode
             // ★诊断日志（只读）："有 Activity resume" 是恢复判定的两个触发点之一
             LivePageTrace.note(
                 "lastRoom.resumed",
@@ -529,21 +566,46 @@ object LiveLastRoomStore {
                 "pendingRoom" to (pending.roomId ?: "-"),
                 "restore" to pending.restore,
                 "livePageCount" to livePageCount,
+                "multiWindowNotPip" to multiWindowNotPip,
             )
             if (resumedActivity == LIVE_PLAYER_ACTIVITY) {
-                // ★人已经在直播间里了（用户自己点开 PiP 小窗放大 / 从直播 Tab 点进来 / 恢复成功）
-                //   → "应当恢复"作废：这就是"不能因为直播间自己 resume 又触发一次恢复"那条防循环。
-                if (pending.restore) consume()
+                if (multiWindowNotPip) {
+                    // ★★task-47（**用户实测根因**）：多窗口里**不**把"直播间 resume"当成
+                    //   "人已经在直播间里了"，因此**不消费**记录。
+                    //   为什么：Android 10+ 的多窗口允许多个 Activity 同时 RESUMED，而"用户点桌面图标
+                    //   回 App"带回来的是**主界面**；小窗里的直播间可能恰好也处于 RESUMED（甚至只是
+                    //   瞬时 resume），紧接着就被系统收掉（finish）。原来那一句"直播间 resume → 作废
+                    //   记录"会在这一刻把记录先消费掉 ⇒ 小窗被收掉后 `evaluateRestore` 无记录可恢复
+                    //   ⇒ 用户落在直播 Tab、直播间"消失"（普通视频没有这套账本，所以它不受影响）。
+                    //   ★"取走即消费/防循环"的语义没变，只是给多窗口加了这条例外；PiP 不在其列
+                    //   （PiP 的 `isInPictureInPictureMode` 为 true）→ PiP 那条路逐字不变。
+                    LivePageTrace.note(
+                        "lastRoom.consume.skip",
+                        "reason" to "multiWindowNotPip",
+                        "room" to (pending.roomId ?: "-"),
+                    )
+                } else if (pending.restore) {
+                    // ★人已经在直播间里了（单窗口下这是可靠信号）→ "应当恢复"作废：这就是
+                    //   "不能因为直播间自己 resume 又触发一次恢复"那条防循环。
+                    consume()
+                }
             }
             evaluateRestore()
         }
 
         override fun onActivityPaused(activity: Activity) {
+            resumedSet.remove(activity)
             if (resumedHost === activity) {
                 // ★诊断日志（只读）：前台页面离开（resumedActivity 清空）
                 LivePageTrace.note("lastRoom.paused", "activity" to activity.javaClass.name)
-                resumedHost = null
-                resumedActivity = null
+                // ★★task-47：**不能在 pause 时无条件把前台清成 null** —— 多窗口下这里刚 pause 的
+                //   可能只是"小窗里那个直播间"，而主界面**仍然 resumed 着**（它不会再来一次 resume
+                //   回调）。前台落到集合里还剩下的那个页面上，"小窗被系统收掉"那一刻
+                //   [evaluateRestore] 才拿得到宿主（否则直接以 "no host" 跳过 = 用户实测的 bug）。
+                //   单窗口下集合此时为空 ⇒ 行为与改动前逐字一致（前台清空）。
+                val next = resumedSet.firstOrNull()
+                resumedHost = next
+                resumedActivity = next?.javaClass?.name
             }
         }
 
@@ -570,12 +632,17 @@ object LiveLastRoomStore {
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
 
         override fun onActivityDestroyed(activity: Activity) {
+            // ★task-47：任何页面销毁都从"仍 RESUMED 集合"里摘准（弱引用只是兜底）——
+            //   否则一个已销毁的宿主可能被 [onActivityPaused] 的兜底选中；
+            //   即便选中了，[evaluateRestore] 的 `isDestroyed` 那道门也不会拿它去 startActivity。
+            resumedSet.remove(activity)
             if (activity.javaClass.name != LIVE_PLAYER_ACTIVITY) return
-            // 只负责"别把一个已经销毁的 Activity 当成前台宿主"；直播间实例计数的加减
-            // 在页面钩子里（onLivePageCreated / onLivePageDestroyed），那里还要顺带再判一次恢复。
+            // 直播间：前台若正是它，落到"此刻还 RESUMED 的另一个页面"（多窗口：小窗被系统收掉时
+            // 主界面通常还在前台，[evaluateRestore] 需要它当宿主）。
             if (resumedHost === activity) {
-                resumedHost = null
-                resumedActivity = null
+                val next = resumedSet.firstOrNull()
+                resumedHost = next
+                resumedActivity = next?.javaClass?.name
             }
         }
     }

@@ -51,9 +51,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeBangumiContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeLiveContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomePopularContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeRecommendContent
-import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeRegionContent
 import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeTimeMachineContent
-import cn.a10miaomiao.bilimiao.compose.pages.home.content.HomeTimeSelectContent
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
 import com.a10miaomiao.bilimiao.comm.mypage.MenuActions
@@ -127,16 +125,11 @@ private sealed class HomePageTab(
         }
     }
 
-    /**
-     * 分区：左侧一条竖排分区条 + 右侧该分区的视频卡片（内容在 HomeRegionContent.kt）。
-     * 位置按用户要求插在「热门」之后、「番剧」之前。
-     */
-    data object Region : HomePageTab(id = PageTabIds.HomeRegion, name = "分区") {
-        @Composable
-        override fun PageContent(pageState: HomePageState) {
-            HomeRegionContent()
-        }
-    }
+    // ★「分区」Tab 已整体删除（2026-09-28）：它与「时光姬」功能重复，且多数分区接口拉不到内容。
+    //   内容页 HomeRegionContent.kt 与 tab 常量 PageTabIds.HomeRegion 一并删除，不要再加回来
+    //   （要分区内容就用「时光姬」）。
+    //   ⚠ 遗留（在本轮写作用域之外，未动）：首页设置里「显示分区」开关与「首页入口 → 分区」选项还在
+    //   （pages/setting/HomeSettingPage.kt），现在选了不会有任何效果 —— 待单独一轮清理。
 
     data object Bangumi : HomePageTab(id = PageTabIds.HomeBangumi, name = "番剧") {
         @Composable
@@ -185,10 +178,10 @@ private class HomePageViewModel(
     private var lastBackPressedTime = 0L
 
     /**
-     * 「分区」Tab 显不显示，和热门/番剧/影视一样由 AppStore.HomeSettingState 统一管：
-     * 设置页写 datastore → AppStore 的 collector 推新 state → 这里重建 Tab 列表。
-     * 早先这里自己又 collect 了一份分区自己的 datastore，等于同一件事两条数据流，
-     * 还漏掉了下面 HOME_ENTRY_VIEW_REGION 那个"首页入口"选项，现在并回一条。
+     * Tab 列表由首页设置（`AppStore.HomeSettingState`，键在 `SettingPreferences` 里）统一决定：
+     * 设置页写 datastore → AppStore 的 collector 推新 state → 这里重建整个 Tab 列表。
+     * ★单一数据流：早先「分区」Tab 自己也 collect 了一份 datastore，等于同一件事两条流、还漏了
+     *   "首页入口"那个选项；那个 Tab 已删，这个教训保留在这里 —— 新 Tab 一律走 `setting` 这一个来源。
      */
     private val _tabs = mutableStateOf(getTabs(appStore.state.home))
     val tabs
@@ -244,14 +237,6 @@ private class HomePageViewModel(
         if (setting.showPopular) {
             tabs.add(HomePageTab.Popular)
             if (entryView == SettingConstants.HOME_ENTRY_VIEW_POPULAR) {
-                initialPage = tabs.size - 1
-            }
-        }
-        // 分区：用户要求插在「热门」之后、「番剧」之前。
-        // 和上面几个 Tab 一样，既能被显示开关藏掉，也能当「首页入口」的默认落点
-        if (setting.showRegion) {
-            tabs.add(HomePageTab.Region)
-            if (entryView == SettingConstants.HOME_ENTRY_VIEW_REGION) {
                 initialPage = tabs.size - 1
             }
         }

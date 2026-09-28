@@ -7,8 +7,6 @@ object PageTabIds {
     const val HomeLive = "home.live"
     const val HomeRecommend = "home.recommend"
     const val HomePopular = "home.popular"
-    /** 分区（左侧分区条 + 右侧视频卡片） */
-    const val HomeRegion = "home.region"
     const val HomeTimeSelect = "home.time-select"
     const val HomeBangumi = "home.bangumi"
     const val HomeCinema = "home.cinema"

@@ -53,6 +53,7 @@ import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
@@ -76,6 +77,35 @@ import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
 import java.text.SimpleDateFormat
 import java.util.*
+
+// ════════════════════════════════════════════════════════════
+// 头像 URL：会话列表与私信对话**共用这一份**（别再各写一份）
+// ════════════════════════════════════════════════════════════
+
+/** B 站官方默认头像（用户没设过头像时接口自己也会返回这张） */
+internal const val DEFAULT_FACE_URL = "https://i0.hdslb.com/bfs/face/member/noface.jpg"
+
+/**
+ * 消息页统一的头像 URL 拼法：`autoHttps(face) + "@200w_200h"`，空值走官方默认头像。
+ *
+ * 为什么必须只有一份：Glide 的缓存键就是"URL 字符串（+请求尺寸）"。会话列表和私信对话原来
+ * 都直接用接口给的**裸 URL**，看着一样，但只要两处拼法/取值不同，缓存就永远不共用 ——
+ * 这正是用户问的"难道它们不是共用一个吗"以及"一处出来了、另一处出不来"的机制。
+ *
+ * 为什么必须 autoHttps：B 站头像字段有三种形态 —— `https://…`（正常）、`http://…`（明文）、
+ * `//i0.hdslb.com/…`（协议相对）。本 App targetSdk=36 且没开 usesCleartextTraffic：明文 http 会被
+ * 系统直接拦掉，协议相对地址会被 Glide 当成相对路径 —— 两种都是"永远加载不出来"，
+ * 表现就是用户说的"挂几个小时还是占位图"。autoHttps 把这两种都补成 https。
+ *
+ * 为什么加 `@200w_200h`：项目里所有头像都这么写（DynamicModuleAuthorBox / MyFollowerPage /
+ * ReplyItemBox…）。头像原图动辄上百 KB，走 B 站图片 CDN 的 200×200 缩略图只有几 KB ——
+ * 这是"头像加载过慢"的那一半原因。
+ *
+ * 空值不许交给 Glide（`model = null` 会永远停在占位图，用户分不清"没头像"还是"加载失败"），
+ * 统一兜底成 [DEFAULT_FACE_URL]：它也是 B 站图床上的真实图片，会进同一份缓存，秒出。
+ */
+internal fun messageAvatarUrl(face: String?): String =
+    UrlUtil.autoHttps(face?.takeIf { it.isNotBlank() } ?: DEFAULT_FACE_URL) + "@200w_200h"
 
 // ════════════════════════════════════════════════════════════
 // 全局用户信息缓存（进程级，ChatPage 复用；LRU 淘汰）
@@ -133,15 +163,34 @@ internal object UserInfoCache {
     @Synchronized fun putAll(map: Map<Long, AccInfoData>) { cache.putAll(map); scheduleSave() }
 }
 
+/**
+ * 把一次用户信息查询的结果并进全局缓存：**空值不覆盖已有值**（会话列表/私信对话共用这一份）。
+ *
+ * 为什么不能直接 `put`：`x/space/acc/info` 偶尔会回空的 name/face，直接写进缓存会把
+ * 列表已经拿到的好头像抹成空 —— 用户看到的就是"刚才还有头像，一会儿又变占位图"。
+ */
+internal fun mergeIntoUserInfoCache(uid: Long, info: AccInfoData) {
+    val old = UserInfoCache.get(uid)
+    UserInfoCache.put(
+        uid,
+        AccInfoData(
+            mid = if (info.mid > 0L) info.mid else uid,
+            name = info.name.ifBlank { old?.name ?: "" },
+            face = info.face.ifBlank { old?.face ?: "" },
+        )
+    )
+}
+
 // 全局刷新事件（ChatPage发消息后触发，PrivateMessageContent监听）
 // 🔧 使用递增计数器替代时间戳，避免系统时间回拨导致相同值不触发刷新
 internal object MessageRefreshEvent {
     private val _needRefresh = MutableStateFlow(0L)
     val needRefresh: StateFlow<Long> = _needRefresh
-    private var counter = 0L
+    // 触发点可能来自 IO 线程（发消息成功后、私信对话补到新头像后），普通 var 自增会丢更新
+    // → 用 Atomic 保证每次 trigger 都换一个新值，列表那边的 LaunchedEffect(key) 一定被唤醒
+    private val counter = java.util.concurrent.atomic.AtomicLong(0)
     fun trigger() {
-        counter++
-        _needRefresh.value = counter
+        _needRefresh.value = counter.incrementAndGet()
     }
 }
 
@@ -296,7 +345,7 @@ private class PrivateMessageViewModel(
                                         .awaitCall()
                                         .json<ResultInfo<AccInfoData>>()
                                     if (res.isSuccess && res.data != null) {
-                                        UserInfoCache.put(uid, res.data!!)
+                                        mergeIntoUserInfoCache(uid, res.data!!)
                                         hasNew = true
                                     }
                                 } catch (_: Exception) {}
@@ -377,7 +426,7 @@ private class PrivateMessageViewModel(
                                             .awaitCall()
                                             .json<ResultInfo<AccInfoData>>()
                                         if (res.isSuccess && res.data != null) {
-                                            UserInfoCache.put(uid, res.data!!)
+                                            mergeIntoUserInfoCache(uid, res.data!!)
                                             hasNew = true
                                         }
                                     } catch (_: Exception) {}
@@ -519,16 +568,21 @@ internal fun PrivateMessageContent() {
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // 🔧 加 loading 占位图，避免网络加载时显示空白
+                    // 头像：URL 拼法走全消息页唯一那份 messageAvatarUrl（与私信对话同一个字符串 ⇒ 共用 Glide 缓存）
+                    // face 为空时先翻一次 UserInfoCache —— 对方在私信对话里刚补全的头像，这里不用等下次整页刷新就能显示
                     GlideImage(
-                        model = chat.userFace.ifEmpty { null },
+                        model = messageAvatarUrl(
+                            chat.userFace.takeIf { it.isNotBlank() } ?: UserInfoCache.get(chat.talkerId)?.face
+                        ),
                         contentDescription = null,
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape),
                         contentScale = ContentScale.Crop,
-                        loading = placeholder(cn.a10miaomiao.bilimiao.compose.R.drawable.bili_default_placeholder_img_tv),
-                        failure = placeholder(cn.a10miaomiao.bilimiao.compose.R.drawable.bili_default_placeholder_img_tv),
+                        // 头像占位用项目里统一的头像图（评论区/动态/搜索头像都是它）；
+                        // 原来借的是视频封面那张 TV 占位图，跟头像不是一套
+                        loading = placeholder(cn.a10miaomiao.bilimiao.compose.R.drawable.bili_akari_img),
+                        failure = placeholder(cn.a10miaomiao.bilimiao.compose.R.drawable.bili_akari_img),
                         requestBuilderTransform = { it.apply(RequestOptions.diskCacheStrategyOf(DiskCacheStrategy.ALL)) },
                     )
                     Spacer(modifier = Modifier.width(12.dp))

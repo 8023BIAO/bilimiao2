@@ -112,10 +112,9 @@ object SettingPreferences {
     val HomeBangumiShow = booleanPreferencesKey("home_bangumi_show")
     // 显示影视
     val HomeCinemaShow = booleanPreferencesKey("home_cinema_show")
-    // 显示分区
-    // 键名沿用上面这一组的命名（HomeXxxShow / home_xxx_show）；字符串保持不变，
-    // 是因为分区功能最早就是往这个键写的，已经点过开关的用户升级后设置不会丢。
-    val HomeRegionShow = booleanPreferencesKey("home_region_show")
+    // 【已删除】HomeRegionShow（"home_region_show"）—— 首页「分区」Tab 已整体删除（2026-09-28）。
+    //   只删了代码里的键常量：**DataStore 里老用户已经落盘的值保留不动**（删键没有收益，
+    //   孤儿值也不会被读到）；将来若真要复用这个字符串，语义已经变了，别直接拿来用。
     // 显示直播（第三阶段 A 路：首页第一个 Tab）。键名沿用这一组的命名习惯，
     // 新键 = 新字符串，所以默认值 true 能直接对"老用户升级后第一次读"生效。
     val HomeLiveShow = booleanPreferencesKey("home_live_show")

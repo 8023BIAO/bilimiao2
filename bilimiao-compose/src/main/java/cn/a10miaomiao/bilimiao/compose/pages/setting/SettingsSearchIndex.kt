@@ -12,8 +12,8 @@ import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
  * 数据源：各设置页里真实存在的 switchPreference / sliderIntPreference / sliderPreference /
  * textIntPreference 调用点（`components/preference/` 下的 DSL 定义本身不算），外加 listPreference /
  * multiSelectIntPreference / listStylePreference / customSetsPreference 这类**搜索页改不了、
- * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 96 个调用点，
- * 收录 137 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
+ * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 95 个调用点，
+ * 收录 136 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
  * （注释掉的调用、`key = item.prefKey` 这类动态渲染、`preference(...)+onClick` 动作项等）。
  *
  * ★搜索结果必须用**与原设置页同款控件**：Kind 与控件一一对应 —— [SettingSearchItem.Kind.SWITCH]
@@ -125,7 +125,7 @@ data class SettingSearchItem(
 
 object SettingsSearchIndex {
 
-    /** 137 条；由 gen_settings_index.py 生成（覆盖 96 个调用点） */
+    /** 136 条；由 gen_settings_index.py 生成（覆盖 95 个调用点） */
     val items: List<SettingSearchItem> = listOf(
         SettingSearchItem(prefName = "PlayerBackground", prefKey = "player_background", title = "后台播放", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "后台播放 ① 播放 播放器设置 PlayerBackground player_background"),
@@ -411,8 +411,6 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "显示推荐 ② 界面 首页设置 首页顶部设置 HomeRecommendShow home_recommend_show recommend"),
         SettingSearchItem(prefName = "HomePopularShow", prefKey = "home_popular_show", title = "显示热门", category = "② 界面", page = "首页设置", section = "首页顶部设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "显示热门 ② 界面 首页设置 首页顶部设置 HomePopularShow home_popular_show"),
-        SettingSearchItem(prefName = "HomeRegionShow", prefKey = "home_region_show", title = "显示分区", category = "② 界面", page = "首页设置", section = "首页顶部设置",
-            kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "显示分区 ② 界面 首页设置 首页顶部设置 HomeRegionShow home_region_show region 区域"),
         SettingSearchItem(prefName = "HomeBangumiShow", prefKey = "home_bangumi_show", title = "显示番剧", category = "② 界面", page = "首页设置", section = "首页顶部设置",
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "显示番剧 ② 界面 首页设置 首页顶部设置 HomeBangumiShow home_bangumi_show"),
         SettingSearchItem(prefName = "HomeCinemaShow", prefKey = "home_cinema_show", title = "显示影视", category = "② 界面", page = "首页设置", section = "首页顶部设置",

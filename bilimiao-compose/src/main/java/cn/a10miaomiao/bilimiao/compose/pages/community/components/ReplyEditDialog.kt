@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -28,11 +27,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
@@ -48,20 +45,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,7 +62,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -78,7 +70,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -92,6 +83,8 @@ import cn.a10miaomiao.bilimiao.compose.components.dialogs.AnyPopDialog
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AnyPopDialogProperties
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.AutoSheetDialog
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.DirectionState
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoInputField
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSendButton
 import cn.a10miaomiao.bilimiao.compose.pages.community.ReplyEditParams
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
@@ -141,9 +134,9 @@ class ReplyEditDialogState(
     var _input = mutableStateOf(TextFieldValue(""))
     val input: TextFieldValue get() = _input.value
 
-    val textEmpty: Boolean by derivedStateOf {
-        input.text.isEmpty()
-    }
+    // ★删除（task-46）：`textEmpty` 原来只服务"空内容时画占位符"那一段 decorationBox；
+    //   现在占位符交给统一输入框 `MiaoInputField`（OutlinedTextField 的 placeholder 自己判空），
+    //   留着它就是只写不读的死属性。
 
     val snackbar = SnackbarHostState()
 
@@ -507,9 +500,9 @@ fun ReplyEditDialog(
     }
     if (state.visible) {
         AutoSheetDialog(
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(10.dp),
+            // 规则 4：外壳已经刷过 surface，这里不要再叠一层背景；modifier 只承载 padding。
+            // 10dp → 16dp（规则 10 的四档）：与私信那条输入条的左右内边距**同档**（用户要求两边对齐）。
+            modifier = Modifier.padding(16.dp),
             content = {
                 Column(
                     modifier = Modifier
@@ -595,38 +588,25 @@ private fun ReplyTextField(
             state.requestFocus()
         }
     }
-    Surface(
+    // ★统一输入框（`MiaoInputBar.kt`，与私信那条是**同一份实现**）：
+    //   原来这里是 `Surface(Transparent) + BasicTextField` —— **没有描边**，所以"看不出哪里能打字"；
+    //   用户点名要私信那条"点缀主题色描边"，这里就用同一套（未聚焦 `outline` / 聚焦 `primary`）。
+    //   高度/占位符/键盘动作/自动聚焦都沿用原来的语义（90~180dp、"请发表你的评论"、Done 收键盘）。
+    MiaoInputField(
+        value = state.input,
+        onValueChange = state::inputChange,
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent,
-    ) {
-        BasicTextField(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = minInputHeight, max = 180.dp)
-                .padding(8.dp)
-                .focusRequester(state.focusRequester),
-            textStyle = TextStyle(
-                fontSize = 18.sp,
-                color = MaterialTheme.colorScheme.onSurface
-            ),
-            value = state.input,
-            onValueChange = state::inputChange,
-            // 光标颜色跟随主题（原来写死一个青色，换主题色/深色模式都不搭）
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            decorationBox = { innerTextField ->
-                if (state.textEmpty) {
-                    Text("请发表你的评论", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                innerTextField()
-            },
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    state.freeFocus()
-                }
-            ),
-        )
-    }
+        placeholder = "请发表你的评论",
+        focusRequester = state.focusRequester,
+        minHeight = minInputHeight,
+        maxHeight = 180.dp,
+        maxLines = Int.MAX_VALUE,
+        keyboardActions = KeyboardActions(
+            onDone = {
+                state.freeFocus()
+            }
+        ),
+    )
 }
 
 
@@ -655,7 +635,8 @@ private fun ReplyTextToolbar(
                 tint = if (visibleEmoji) {
                     MaterialTheme.colorScheme.primary
                 } else {
-                    MaterialTheme.colorScheme.onBackground
+                    // 规则 7：次要文字/图标走 onSurfaceVariant（原来用 onBackground，与私信那条不一致）
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
         }
@@ -668,7 +649,7 @@ private fun ReplyTextToolbar(
                 Icon(
                     imageVector = Icons.Default.Image,
                     contentDescription = "添加图片",
-                    tint = MaterialTheme.colorScheme.onBackground
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -687,31 +668,12 @@ private fun ReplyTextToolbar(
             }
         }
         Spacer(Modifier.weight(1f))
-        TextButton(
-            onClick = onSendClick
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (loading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text(
-                        "发布",
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = null
-                    )
-                }
-            }
-        }
+        // ★统一发送按钮（`MiaoInputBar.kt`，与私信那颗是**同一份实现**）：
+        //   文案「发布」→「发送」（用户点名）、小飞机图标（原来就有，保留）、**不填充**（原来也是 TextButton）。
+        MiaoSendButton(
+            onClick = onSendClick,
+            loading = loading,
+        )
     }
 }
 

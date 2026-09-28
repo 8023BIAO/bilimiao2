@@ -46,9 +46,6 @@ class AppStore(override val di: DI) :
         val showTimeSelect: Boolean = false,
         val showBangumi: Boolean = true,
         val showCinema: Boolean = false,
-        // 分区。默认**显示**：这个 Tab 是用户主动要的，默认藏起来等于没做；
-        // 不想要的在 设置→首页设置 里关掉即可（与 推荐/番剧 默认开是同一个取舍）。
-        val showRegion: Boolean = false,
         // 直播。默认**显示**（用户主动要的入口，默认藏起来等于没做）；
         // 位置是首页第一个 Tab，不想要的在 设置→首页设置 里关掉。
         val showLive: Boolean = true,
@@ -94,7 +91,6 @@ class AppStore(override val di: DI) :
                         showTimeSelect = it[TimeSelectShow] ?: false,
                         showBangumi = it[HomeBangumiShow] ?: true,
                         showCinema = it[HomeCinemaShow] ?: false,
-                        showRegion = it[HomeRegionShow] ?: false,
                         showLive = it[HomeLiveShow] ?: true,
                         entryView = it[HomeEntryView] ?: SettingConstants.HOME_ENTRY_VIEW_RECOMMEND
                     )
