@@ -395,7 +395,12 @@ private class ChatViewModel(
                 tempFile = file
                 val (info, error) = uploadImageForIm(file)
                 if (info == null) {
-                    launch(Dispatchers.Main) { toast("图片上传失败：${error ?: "未知原因"}") }
+                    // 提示统一走 withContext（不再用裸 launch）：task-14 把发送逻辑抽成 suspend 函数后，
+                    // sendMsgInternal 里的裸 launch 失去了 CoroutineScope 接收者 → 落到 kotlinx 已废弃的
+                    // **顶层** launch，真编译直接 DEPRECATION_ERROR（vc186 拦下的就是这条）。
+                    // 这一处虽然还在 viewModelScope.launch 的协程体里（接收者还在），也一并统一，
+                    // 免得以后挪动代码再踩同一个坑。语义 = 等这句 toast 落地再往下走，顺序只会更严格。
+                    withContext(Dispatchers.Main) { toast("图片上传失败：${error ?: "未知原因"}") }
                     return@launch
                 }
                 // ★尺寸宁可取本地真实像素也不许发 0：TV 扫码登录时上传先走 APP 通道，
@@ -427,7 +432,7 @@ private class ChatViewModel(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
-                launch(Dispatchers.Main) { toast("图片发送失败：${e.message ?: "未知错误"}") }
+                withContext(Dispatchers.Main) { toast("图片发送失败：${e.message ?: "未知错误"}") }
             } finally {
                 // 临时文件用完即删（评论区也是这个口径：不在缓存里留垃圾）
                 tempFile?.let { f -> runCatching { f.delete() } }
@@ -556,7 +561,9 @@ private class ChatViewModel(
             val csrf = BilimiaoCommApp.commApp.loginInfo?.cookie_info?.cookies
                 ?.find { it.name == "bili_jct" }?.value
             if (csrf == null) {
-                launch(Dispatchers.Main) { toast("未登录，无法发送") }
+                // 本函数是 suspend 且**没有** CoroutineScope 接收者：裸 launch 会落到废弃的顶层 launch（编译报错），
+                // 必须用 withContext。语义不变（提示完再 return）。
+                withContext(Dispatchers.Main) { toast("未登录，无法发送") }
                 isSending.value = false
                 return
             }
@@ -603,7 +610,7 @@ private class ChatViewModel(
                 // 先从API刷新获取真实数据，再移除本地假消息（避免竞态窗口）
                 loadMsgsInternal()
                 applyLocalMsg(fakeMsgKey)
-                launch(Dispatchers.Main) { toast("发送成功") }
+                withContext(Dispatchers.Main) { toast("发送成功") }
                 // 通知私信列表刷新
                 MessageRefreshEvent.trigger()
             } else {
@@ -621,14 +628,14 @@ private class ChatViewModel(
                 } else {
                     res.message.ifBlank { "发送失败" }
                 }
-                launch(Dispatchers.Main) { toast(failText) }
+                withContext(Dispatchers.Main) { toast(failText) }
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
             // 异常时也要撤掉乐观更新的本地消息，否则它会永远留在列表里
             applyLocalMsg(fakeMsgKey)
-            launch(Dispatchers.Main) { toast("发送失败: ${e.message}") }
+            withContext(Dispatchers.Main) { toast("发送失败: ${e.message}") }
         } finally {
             isSending.value = false
         }
