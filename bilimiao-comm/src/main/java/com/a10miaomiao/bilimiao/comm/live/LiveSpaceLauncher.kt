@@ -1,8 +1,5 @@
 package com.a10miaomiao.bilimiao.comm.live
 
-import android.app.Activity
-import android.view.View
-
 /**
  * 「直播播放页 → 该 UP 的用户空间」的**注册桥**（comm 模块，唯一的跨模块落点）。
  *
@@ -20,17 +17,13 @@ import android.view.View
  * ★**该浮层文件已在后续批次（第五批）被整体删除** —— 所以现在本桥是**唯一**路径，
  *   「直播页 → UP 空间」只有这一条：`open(mid)` 成功即由 compose 侧导航主界面 NavHost，
  *   调用方随后 `finish()` 直播页。**代价照旧**：从 UP 空间返回落到直播 Tab，不是原直播间。
- *   （要恢复"返回还在直播间"就得重建那份浮层，属 compose + DI 的较大改动；本轮评论区已记录。）
  *
- * ★**2026-09-28（task-26/27）浮层以"工厂"形式复活**（用户："返回为什么是回到直播 TAB，
- *   不是直播间？路线还是要理成一条线的"）：页内浮层重新实现（compose 侧 `UserSpaceOverlayHost`），
- *   但这次**不再让任何人反向依赖** —— 浮层把自己的构造注册成本文件下面的 [SpaceOverlayFactory]，
- *   直播页拿到的是本模块的 [SpaceOverlayHandle]。于是本桥同时承载两条路：
- *   · **主路** = [createOverlay]：直播页把浮层铺在自己页面最上层，**不 finish、不 pause/stop**，
- *     一次返回回到**还在播**的直播间（上面那条代价就此消失）；
- *   · **兜底** = [open]：浮层建不出来（注册缺席 / 构造抛异常）时照旧"导航主界面 + finish 直播页"，
- *     宁可返回栈不完美，也不让"点标题没反应"。
- *   两条路的取舍与顺序写在 `LivePlayerActivity.openAnchorSpace()` 的 KDoc 上。
+ * ★**2026-09-28 二次修订（用户："删除回退……做减法"）**：直播页那条调用端（"点标题进 UP 空间"）
+ *   与后来为修它返回栈而复刻的**页内浮层**（`UserSpaceOverlayHost` + 本桥上一版的浮层工厂 API
+ *   `SpaceOverlayHandle` / `SpaceOverlayFactory` / `registerOverlay` / `createOverlay`）已**整体删除** ——
+ *   所以现在本桥**没有任何调用方**（`grep -rn "LiveSpaceLauncher" app/src` 只剩注释）。
+ *   下面这套 `open(mid)` 的语义与实现**保持原样**：本桥与 `ComposeFragment` 里的注册继续留着
+ *   （删它会牵动 compose 侧，风险更大），将来真的需要"从直播页进空间"时仍然从 [open] 进来。
  *
  * 因此：**注册点（`ComposeFragment`）与实现都不要删** —— 删掉就没有任何进 UP 空间的路径了。
  * 拿不到注册实现时 [open] 返回 false，调用方只 toast、不 finish、不乱跳（用户留在直播间）。
@@ -48,16 +41,14 @@ import android.view.View
  *   （`LiveBadgedAvatar` 那条"类名字符串 + 字面量 extra"的老路，也只够传一个房间号，
  *    传不了"要打开哪个 Compose 页面"。）
  *
- * 所以这里采用**注册桥**：comm 模块只留**函数类型的挂点**（不放任何 Compose 依赖 ——
- * [overlayFactory] 交出来的是 Android `View`，[opener] 交出来的是一次导航回调），
- * 由 compose 侧在 `ComposeFragment` 的根组合里注册真正的实现。
+ * 所以这里采用**注册桥**：comm 模块只留一个函数类型的挂点（不放任何 Compose 依赖），
+ * 由 compose 侧在 `ComposeFragment` 的根组合里注册一次真正的实现
+ * （`pageNavigation.navigate(UserSpacePage(id = mid.toString()))`）。
  *
  * ```
- * app 侧：LivePlayerActivity.openAnchorSpace()
- *            ├─ LiveSpaceLauncher.createOverlay(this, uid) { … }  ← 主路：要一个浮层句柄（不认 compose）
- *            └─ LiveSpaceLauncher.open(mid)                       ← 兜底：只要一次导航（不认 compose）
+ * app 侧：LivePlayerActivity（★当前**没有调用端** —— "点标题进 UP 空间"已按用户要求整体回退）
+ *            └─ LiveSpaceLauncher.open(mid)   ← 只认这个函数，不认 compose
  * compose 侧：ComposeFragment 根组合
- *            ├─ LiveSpaceLauncher.registerOverlay { … }           ← 浮层工厂（task-26 实现）
  *            └─ LiveSpaceLauncher.register { mid -> pageNavigation.navigate(UserSpacePage(...)) }
  * ```
  *
@@ -67,11 +58,10 @@ import android.view.View
  * 这里仍用 `@Volatile` 护一下可见性，代价是一个字段，收益是"万一将来有人在别的线程调"也不会读到脏引用。
  *
  * ## 生命周期
- * `ComposeFragment` 用 `DisposableEffect` 注册 + `onDispose` 注销，两套挂点同生共死，所以：
- * · 页面在 → [open] 返回 true（跳转成功）、[createOverlay] 返回句柄（浮层建得起来）；
- * · 页面没了（ComposeFragment 已销毁 / 进程刚起还没组合）→ [open] 返回 **false**、
- *   [createOverlay] 返回 **null**，调用方 toast 兜底 / 自动走兜底老路，**不 finish、不乱跳**
- *   （用户留在直播间，再点一次就好）。
+ * `ComposeFragment` 用 `DisposableEffect` 注册 + `onDispose` 注销，所以：
+ * · 页面在 → [open] 返回 true（跳转成功）；
+ * · 页面没了（ComposeFragment 已销毁 / 进程刚起还没组合）→ [open] 返回 **false**，
+ *   调用方 toast 兜底，**不 finish、不乱跳**（用户留在直播间，再点一次就好）。
  */
 object LiveSpaceLauncher {
 
@@ -112,92 +102,4 @@ object LiveSpaceLauncher {
         val impl = opener ?: return false
         return runCatching { impl(mid) }.isSuccess
     }
-
-    // ── 页内浮层（2026-09-28 task-26/27；与上面的 [opener] 互不影响、各自独立注册）──────────
-
-    /**
-     * 浮层的工厂实现，由 `ComposeFragment` 注册（与 [register] 同一个注册点、同一条 `DisposableEffect`）。
-     * ★与 [opener] 一样：**重复注册 = 覆盖**（重建时旧实现已失效），注销走 [unregisterOverlay]。
-     */
-    @Volatile
-    private var overlayFactory: SpaceOverlayFactory? = null
-
-    /** 注册浮层工厂（**唯一注册点**：`ComposeFragment`）。 */
-    fun registerOverlay(factory: SpaceOverlayFactory) {
-        overlayFactory = factory
-    }
-
-    /** 注销浮层工厂（`ComposeFragment.onDispose`）。注销后 [createOverlay] 一律返回 null。 */
-    fun unregisterOverlay() {
-        overlayFactory = null
-    }
-
-    /**
-     * 尝试建一个"页内 UP 空间浮层"。
-     *
-     * @param mid UP 的 uid（必须 > 0；0 会打开一个空白的用户空间，与 [open] 同一条门）
-     * @return 句柄；**没注册 / 构造抛异常 / 返回 null 一律给调用方 null**（调用方据此走 [open] 兜底）
-     *
-     * ★★**"绝不抛"是本轮的安全底线**：compose 侧那套浮层要自己拼 `subDI`（历史上正是它抛过
-     *   `StartupException: Binding AppCompatActivity must override an existing binding.` 把用户崩过），
-     *   所以这里把整个构造过程 `runCatching` 掉 —— DI 出问题、窗口拿不到、注册表缺 destination……
-     *   任何异常都只退化成"今天的行为"（[open] + finish），**绝不让"点一下标题"变成闪退**。
-     */
-    fun createOverlay(
-        activity: Activity,
-        mid: Long,
-        onExitToMainHost: () -> Unit,
-    ): SpaceOverlayHandle? {
-        if (mid <= 0L) return null
-        val impl = overlayFactory ?: return null
-        return runCatching { impl.create(activity, mid, onExitToMainHost) }.getOrNull()
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// 页内浮层的两个类型（2026-09-28 task-26/27 **冻结**的接口：名字与签名不许改）
-//
-// ★为什么两个类型放在文件末尾而不是对象前面：对象那段 KDoc 必须**紧贴** `object`，
-//   中间插两个声明会把它变成悬空注释（谁也没被它注释到）—— 文档结构也是代码结构的一部分。
-// ══════════════════════════════════════════════════════════════════════════
-
-/**
- * **页内 UP 空间浮层**的句柄（直播页拿到的就是这个接口）。
- *
- * 为什么要有它（而不是让直播页直接持有 compose 那个 `UserSpaceOverlayHost`）：
- * 直播页在 **app** 模块、浮层实现在 **compose** 模块，而 app 侧**拿不到 compose 的
- * `PageNavigation` 句柄**（它只活在 `ComposeFragment` 的根组合里）—— 注册桥（本文件）
- * 因此仍是唯一的跨模块落点，只是这次交换的是"一个浮层句柄"而不是"一次导航"。
- *
- * 三个成员都是**实现方（compose 侧）**的责任，直播页只调：
- * · [view]：浮层的根 View，由直播页 `addView` 到自己的页面最上层（铺满 + 高 elevation）；
- * · [onBack]：把一次系统返回**交给浮层自己**处理（它内部可能还能退一层 / 关掉自己的弹窗）。
- *   返回 `true` = 这次返回已被浮层消费掉；`false` = 浮层已经退到底、该关了（**由直播页关**，
- *   直播页只关浮层、**绝不退出直播间** —— 那正是本方案要根治的 bug）。
- * · [dispose]：关浮层时由直播页调用（先摘 view 再 dispose）。**实现方必须保证可重复调用不炸**
- *   （直播页在 onStop / onDestroy / 进 PiP 等多条路径上都会尝试关它）。
- */
-interface SpaceOverlayHandle {
-    /** 浮层根 View（**未挂载**的新 View；直播页负责 addView / removeView）。 */
-    val view: View
-
-    /** @return true = 这次返回已在浮层内消费；false = 浮层该关了（直播页只关它，不退出直播间） */
-    fun onBack(): Boolean
-
-    /** 关浮层（摘 view 之后调用）；**可重复调用不炸**。 */
-    fun dispose()
-}
-
-/**
- * 浮层工厂：由 compose 侧（`ComposeFragment`）实现并注册（见 [LiveSpaceLauncher.registerOverlay]）。
- *
- * @param activity 宿主 Activity（= 直播页；浮层要拿它当自己那套 Compose 的宿主）
- * @param mid UP 的 uid（> 0）
- * @param onExitToMainHost 浮层里点到"不属于 UP 空间流程"的目的地（典型 = 打开点播播放器）时回调：
- *   直播页收到后**关浮层 + 退出直播间**，把界面让给主界面自己那条导航
- *   （为什么不用再调 [LiveSpaceLauncher.open]，见 `LivePlayerActivity.handOffToMainHost()`）。
- * @return 句柄；**构造失败就返回 null**（调用方自动退回旧路，绝不让"点标题"变成闪退）
- */
-fun interface SpaceOverlayFactory {
-    fun create(activity: Activity, mid: Long, onExitToMainHost: () -> Unit): SpaceOverlayHandle?
 }

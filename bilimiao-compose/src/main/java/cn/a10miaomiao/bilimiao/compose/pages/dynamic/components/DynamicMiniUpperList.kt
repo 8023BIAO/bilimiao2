@@ -24,15 +24,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import bilibili.app.dynamic.v2.UpListItem
 import cn.a10miaomiao.bilimiao.compose.common.localPageNavigation
-import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import cn.a10miaomiao.bilimiao.compose.pages.mine.MyFollowPage
 import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
+import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 
@@ -128,9 +129,8 @@ fun DynamicMiniUpperList(
                     Box(
                         modifier = Modifier
                             .size(56.dp)
-                            // ★故意不用 .clip(CircleShape)：它会把 LiveBadgedAvatar 的涟漪裁掉
-                            //   （涟漪画在头像之外，见那边的 KDoc）。选中底色改用
-                            //   background(color, shape = CircleShape)，圆还是一样大，但不裁子节点。
+                            // 圆底用 background(color, shape = CircleShape) 画（不引入 clip）：
+                            // 圆还是一样大，而且这一层本来就只画一个圆底。
                             .background(
                                 color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
                                 else Color.Transparent,
@@ -138,20 +138,22 @@ fun DynamicMiniUpperList(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        LiveBadgedAvatar(
-                            face = item.face,
-                            size = 48.dp,
-                            // uid 有效才查在播状态（脏数据 uid<=0 传 null = 不请求、不挂标记）
-                            mid = item.uid.takeIf { it > 0 }?.toString(),
-                            // 与宽栏一致：点哪都算整行点击（筛选 / 已选中再点进空间，见 DynamicPage）
-                            liveClickOnAvatar = false,
-                            onClick = null,
-                            // 选中描边从 GlideImage 挪到本组件外层：只 border、不 clip（clip 会裁涟漪）
-                            modifier = Modifier.border(
-                                width = if (isSelected) 3.dp else 0.dp,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                shape = CircleShape,
-                            ),
+                        // 裸头像：头像上的「直播中」药丸 + 涟漪已整体删除（用户 2026-09-28，
+                        // 只保留直播页「我的关注·正在直播」区块卡片上那颗角标）。
+                        // 点整行 = 筛选 / 已选中再点进他的空间，仍由上面 Column 的 clickable 负责。
+                        GlideImage(
+                            model = UrlUtil.autoHttps(item.face) + "@200w_200h",
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                // 选中描边（选中态、不是直播标记）
+                                .border(
+                                    width = if (isSelected) 3.dp else 0.dp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = CircleShape,
+                                ),
                         )
                     }
                     Spacer(modifier = Modifier.size(4.dp))

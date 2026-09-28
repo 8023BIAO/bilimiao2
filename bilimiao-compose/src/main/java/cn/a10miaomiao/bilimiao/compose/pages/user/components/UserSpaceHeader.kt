@@ -31,7 +31,6 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,7 +48,6 @@ import cn.a10miaomiao.bilimiao.compose.components.image.previewer.ImagePreviewer
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.PreviewImageModel
 import cn.a10miaomiao.bilimiao.compose.components.image.provider.localImagePreviewerController
 import cn.a10miaomiao.bilimiao.compose.components.image.viewer.ModelProcessor
-import cn.a10miaomiao.bilimiao.compose.components.user.LiveBadgedAvatar
 import cn.a10miaomiao.bilimiao.compose.components.user.UserLevelIcon
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.TransformItemView
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.VerticalDragType
@@ -57,7 +55,6 @@ import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberPre
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.previewer.rememberTransformItemState
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserArchiveViewModel
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpaceViewModel
-import com.a10miaomiao.bilimiao.comm.live.entity.LiveUserStatus
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
@@ -69,26 +66,21 @@ import kotlinx.coroutines.launch
 /**
  * 用户空间顶部的大头像。
  *
- * ★为什么改成走 [LiveBadgedAvatar]（而不是原来的裸 GlideImage）：
- *   用户在播时要在这张脸上挂「直播中」+ 涟漪，点头像直接进直播间。
- *   头像本体（带图片预览器缩放层的那一坨）通过 `avatarContent` 槽位原样传进去，
- *   所以**图片预览器的行为一点没变**，只是外面多了一层"在播装饰 + 点击路由"。
+ * ★这里现在是**裸头像**：头像上的「直播中」药丸 + 涟漪已整体删除（用户 2026-09-28：
+ *   "直播中还有哪一些页面有这些涟漪，还有它那个三个字的样式，全部给它删除了，
+ *   仅保留那个直播页面的我的关注在直播那个"）。
+ *   原来那层 `LiveBadgedAvatar` 只是"在播装饰 + 点击路由"，删掉后点击语义回到
+ *   **点头像 = 看大图**（[previewerController.enterTransform]，本来就写在 onClick 里）。
  *
- * ★为什么 [rippleActive] 要由外面传进来：
- *   这个头像是跟着 `ChainScrollableLayout` 一起上滑淡出的（UserSpacePage 里算的 alpha），
- *   滚上去之后虽然还在组合树里，但已经看不见了 —— 这时必须把涟漪停掉，
- *   否则就是白白烧电。传 false 时 LiveBadgedAvatar 内部**整个动画节点都不进组合树**。
- *
- * ★为什么 [liveStatus] 是"外面塞进来"而不是自己去查：
- *   这个页面的首屏接口 `x/v2/space` 本来就返回了 `live.liveStatus` / `live.roomid`
- *   （见 SpaceInfo.LiveInfo 的注释），一份数据两用，**一次额外请求都不用发**。
+ * ★图片预览器的缩放层一点没变：它仍在 [TransformItemView] 里（`itemState` +
+ *   `previewerState`），80dp 的尺寸改由 [TransformItemView] 自己的 `modifier` 承担
+ *   （它的实现是 `modifier…fillMaxSize()`，所以**必须**由外面给死尺寸 —— 直接裸放
+ *   会被 `fillMaxSize` 撑满整行）。
  */
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun UserFaceImage(
     face: String,
-    liveStatus: LiveUserStatus?,
-    rippleActive: Boolean,
 ) {
     val previewerController = localImagePreviewerController()
     val previewerState = rememberPreviewerState(
@@ -99,41 +91,34 @@ private fun UserFaceImage(
     val itemState = rememberTransformItemState(
         intrinsicSize = Size(200f, 200f),
     )
-    LiveBadgedAvatar(
-        face = face,
-        size = 80.dp,
-        liveStatus = liveStatus,
-        animateRipple = rippleActive,
-        // 没在播时点头像 = 原来的"看大图"；在播时被"进直播间"顶掉（用户要的就是这个）
-        onClick = {
-            previewerController.enterTransform(
-                previewerState,
-                listOf(
-                    PreviewImageModel(
-                        originalUrl = UrlUtil.autoHttps(face),
-                        previewUrl = UrlUtil.autoHttps(face) + "@200w_200h",
-                        height = 200f,
-                        width = 200f
+    TransformItemView(
+        modifier = Modifier.size(80.dp),
+        key = face,
+        itemState = itemState,
+        transformState = previewerState,
+    ) {
+        GlideImage(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .clickable {
+                    previewerController.enterTransform(
+                        previewerState,
+                        listOf(
+                            PreviewImageModel(
+                                originalUrl = UrlUtil.autoHttps(face),
+                                previewUrl = UrlUtil.autoHttps(face) + "@200w_200h",
+                                height = 200f,
+                                width = 200f
+                            )
+                        ),
                     )
-                ),
-            )
-        },
-        avatarContent = {
-            TransformItemView(
-                key = face,
-                itemState = itemState,
-                transformState = previewerState,
-            ) {
-                GlideImage(
-                    modifier = Modifier.fillMaxSize()
-                        .clip(CircleShape),
-                    model = UrlUtil.autoHttps(face) + "@200w_200h",
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                )
-            }
-        },
-    )
+                },
+            model = UrlUtil.autoHttps(face) + "@200w_200h",
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+        )
+    }
 }
 
 @OptIn(ExperimentalGlideComposeApi::class)
@@ -216,33 +201,27 @@ private fun NumBox(
     }
 }
 
+/**
+ * 用户空间头部（头像 + 昵称 + 数据）。
+ *
+ * @param rippleActive ★**本参数目前没有消费方**：它原本只喂给头像的涟漪
+ *   （`LiveBadgedAvatar(animateRipple = …)`），而涟漪已随「直播中」标记整体删除
+ *   （用户 2026-09-28，只保留直播页「我的关注·正在直播」区块的卡片角标）。
+ *   按本轮任务要求（"rippleActive 先不要动"）保留形参不删 —— 它的调用方
+ *   `UserSpacePage.kt` 本次不在写作用域内，删形参会连带改那个文件（`rippleActive = alpha > 0.02f`
+ *   那一处，见 UserSpacePage 的注释）。**下次动到那里时应把形参和实参一起删掉。**
+ */
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun UserSpaceHeader(
     modifier: Modifier = Modifier,
     isLargeScreen: Boolean = false,
-    /**
-     * 头像上的涟漪要不要动。
-     *
-     * ★为什么由外面算：头部是跟着 `ChainScrollableLayout` 上滑淡出的
-     *   （UserSpacePage 里那个 `alpha`），滚出视野后它**仍在组合树里**，
-     *   LazyColumn 那种"回收即停"的省电机制在这里不生效 ——
-     *   所以把"可见性"从调用方显式传进来，看不见就别烧电。
-     */
     rippleActive: Boolean = true,
     viewModel: UserSpaceViewModel,
     archiveViewModel: UserArchiveViewModel,
 ) {
     val detailData = viewModel.detailData.collectAsStateWithLifecycle().value ?: return Box {}
     val cardData = detailData.card
-    // 在播状态直接来自本页首屏接口的 `live` 对象（一次额外请求都不用发，见 SpaceInfo.LiveInfo）
-    val liveStatus = remember(cardData.mid, detailData.live) {
-        LiveUserStatus.of(
-            uid = cardData.mid,
-            liveStatus = detailData.live.liveStatus,
-            roomId = detailData.live.roomid,
-        )
-    }
     val location = cardData.space_tag?.firstOrNull {
         it.type == "location"
     }?.title ?: ""
@@ -275,8 +254,6 @@ fun UserSpaceHeader(
             ) {
                 UserFaceImage(
                     face = cardData.face,
-                    liveStatus = liveStatus,
-                    rippleActive = rippleActive,
                 )
                 if (isLargeScreen) {
                     Box(
