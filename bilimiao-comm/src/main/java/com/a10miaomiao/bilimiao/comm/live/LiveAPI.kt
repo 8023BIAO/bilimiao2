@@ -327,46 +327,6 @@ class LiveAPI {
     )
 
     /**
-     * **按 uid 批量**查"这些 UP 谁在直播、房间号是多少"。
-     *
-     * 这是给"头像上挂『直播中』标记"用的**唯一数据源**（关注列表 / 动态卡片那种
-     * 手上只有一堆 uid、没有房间号的场景）。
-     *
-     * ★实测（2026-09，容器内 curl，无 Cookie / 无 WBI / 只带 UA + live Referer）：
-     *   - `code=0`，返回体是 `data: { "<uid>": {...} }` 的 **Map**，key 是字符串 uid；
-     *   - **一次 30 个 uid 全部返回**（实测 30/30）；60 个也能回但会缺；
-     *   - **不签名也能过**，与 [danmuInfo] 那个"必签"的接口不是一回事。
-     *
-     * ★为什么参数键写字面量 `uids%5B%5D` 而不是 `uids[]`：
-     *   B 站这个接口只认**重复键** `uids[]=1&uids[]=2` 的形式，
-     *   逗号拼接（`uids=1,2`）实测直接 `code=1` 报错。
-     *   而 [ApiHelper.urlencode] 只对 **value** 做 URL 编码、**不碰 key**，
-     *   所以 key 里的方括号要自己先编码好 —— 写成 `uids[]` 服务端实测也收，
-     *   但那要靠"OkHttp 不会重编码方括号"这个隐含前提，显式编码更稳。
-     *
-     * ★为什么这条**不能**复用 [liveUrl] 的 vararg 那条路：
-     *   `liveUrl` 内部是 `mapOf(*pairs)` —— Map 会把**同名 key 去重**，
-     *   30 个 uid 传进去只剩最后一个，等于只查了一个人。所以这里手拼 query，
-     *   只借用 `liveUrl(path)` 拼出来的裸 base（那部分仍是同一个域名常量）。
-     *
-     * 返回壳：`ResultInfo<Map<String, com.a10miaomiao.bilimiao.comm.live.entity.LiveUserStatusInfo>>`。
-     */
-    fun liveStatusByUids(uids: List<String>) = MiaoHttp.request {
-        isWebApi = true
-        // 沿用 danmuInfo 的写法带上 live 自己的 Referer/Origin。
-        // ★实测这个接口对 Referer **不敏感**：只带 MiaoHttp 默认的 www Referer、
-        //   两个 Referer 叠加、甚至完全不带头，三种都回 code=0 ——
-        //   所以这里是"保持一致"而不是"必须"。留着的原因是万一哪天 B 站收紧同源校验，
-        //   我们这边不用再改一遍。
-        headers["Referer"] = "https://live.bilibili.com/"
-        headers["Origin"] = "https://live.bilibili.com"
-        val query = uids
-            .filter { it.isNotBlank() }
-            .joinToString("&") { "uids%5B%5D=$it" }
-        url = liveUrl("room/v1/Room/get_status_info_by_uids") + "?" + query
-    }
-
-    /**
      * [roomInit] 的**带降级**版本：解析房间号（短号 → 真实号）+ 开播状态 + 主播 uid。
      *
      * ★为什么必须有这个降级（2026-09-26「所有直播间都提示获取直播信息失败」的根因，别删）：

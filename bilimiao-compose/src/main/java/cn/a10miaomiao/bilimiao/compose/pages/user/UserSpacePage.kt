@@ -351,9 +351,6 @@ private fun UserSpacePageDetailContent(
                         }
                     },
                 isLargeScreen = isLargeScreen,
-                // 头部淡出（alpha→0）之后就把头像的涟漪停掉：这里还在组合树里，
-                // 不像 LazyColumn 那样会被回收，只能靠这个开关显式省电
-                rippleActive = alpha > 0.02f,
                 viewModel = viewModel,
                 archiveViewModel = archiveViewModel,
             )

@@ -203,20 +203,12 @@ private fun NumBox(
 
 /**
  * 用户空间头部（头像 + 昵称 + 数据）。
- *
- * @param rippleActive ★**本参数目前没有消费方**：它原本只喂给头像的涟漪
- *   （`LiveBadgedAvatar(animateRipple = …)`），而涟漪已随「直播中」标记整体删除
- *   （用户 2026-09-28，只保留直播页「我的关注·正在直播」区块的卡片角标）。
- *   按本轮任务要求（"rippleActive 先不要动"）保留形参不删 —— 它的调用方
- *   `UserSpacePage.kt` 本次不在写作用域内，删形参会连带改那个文件（`rippleActive = alpha > 0.02f`
- *   那一处，见 UserSpacePage 的注释）。**下次动到那里时应把形参和实参一起删掉。**
  */
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun UserSpaceHeader(
     modifier: Modifier = Modifier,
     isLargeScreen: Boolean = false,
-    rippleActive: Boolean = true,
     viewModel: UserSpaceViewModel,
     archiveViewModel: UserArchiveViewModel,
 ) {
