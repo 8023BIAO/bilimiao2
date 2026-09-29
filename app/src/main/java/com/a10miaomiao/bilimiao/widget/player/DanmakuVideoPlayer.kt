@@ -1726,10 +1726,17 @@ initDanmakuTouchListener()
             if (mGestureDownVolume < 0) {
                 mGestureDownVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             }
-            val deltaV = (max * deltaYNeg * 2 / curHeight).toInt()
+            // ★★2026-09-29 用户实测拍板：**音量滑动的灵敏度降到 ÷3**（整屏 = 1/3 量程，3 屏走完）。
+            //   原值 `×2`（半屏走完整条行程）是上游导入 GSY 时带的系数，用户实测两次反馈"太灵敏"
+            //   （"一滑就归零/拉满"、"比我普通视频的音量调节差很多"）；直播间那侧同一时刻
+            //   也按同一系数对齐 ⇒ **四个滑动（点播/直播 × 音量/亮度）统一为 ÷3**。
+            //   点播的亮度本来就是 `-deltaY / (curHeight * 3f)`（见下面 mBrightness 分支），
+            //   所以这一改是"音量向亮度看齐"，不是新拍一个手感。
+            //   ★要回退：把两处 `/ (curHeight * 3)` 换回 `* 2 / curHeight`（音量与气泡必须一起改）。
+            val deltaV = (max * deltaYNeg / (curHeight * 3)).toInt()
             am.setStreamVolume(AudioManager.STREAM_MUSIC, mGestureDownVolume + deltaV, 0)
             val volumePercent =
-                (mGestureDownVolume * 100 / max + deltaYNeg * 2 * 100 / curHeight).toInt()
+                (mGestureDownVolume * 100 / max + deltaYNeg * 100 / (curHeight * 3)).toInt()
             showVolumeDialog(-deltaY, volumePercent)
         } else if (mBrightness) {
             if (Math.abs(deltaY) > mThreshold) {

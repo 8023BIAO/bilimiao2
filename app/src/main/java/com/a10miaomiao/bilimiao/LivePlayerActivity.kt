@@ -2186,22 +2186,61 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // 所以这里**补记一次**：紧接着的 [LiveLastRoomStore.onLivePageDestroyed] 会 `evaluateRestore()`，
         // 那一刻主界面已在前台、`livePageCount` 刚归零，四判据齐 ⇒ 直播间被自动开回来。
         //
-        // ★五条反向保护（逐条对应到下面的条件，一条都不许松）：
+        // ★六条反向保护（逐条对应到下面的条件，一条都不许松）：
         //   ① 用户按返回 / 顶栏返回主动退出 → [userExitedPage]（[exitPage] 里置位）⇒ 不补记；
         //   ② 整个任务被划掉 → 账由 `PlaybackService.onTaskRemoved` 清掉，且 store 侧
         //      `taskRemovedSuppressRecord` 会挡住这一瞬的补记 ⇒ 不复活；
         //   ③ PiP 叉掉小窗（含"手动点底栏画中画再叉掉"）→ [pipEnteredThisSession] ⇒ 不补记，
         //      那条路的既有语义（"手动进 PiP 不记账"、"带着直播间离开 App 才记账"）一字不变；
         //   ④ 配置变更重建 → [isChangingConfigurations] ⇒ 不补记；
-        //   ⑤ `NEW_TASK` 拉起逻辑在 `LiveLastRoomStore.evaluateRestore` 里，一字未动。
+        //   ⑤ `NEW_TASK` 拉起逻辑在 `LiveLastRoomStore.evaluateRestore` 里，一字未动；
+        //   ⑥ ★2026-09-29 本轮：**在系统小窗 / PiP 里被点「X」关掉** → [closedInWindow] ⇒
+        //      不补记 **且** 先把账清掉（[LiveLastRoomStore.onLivePageExited]）——
+        //      用户意图是"关掉这个直播间"，不是"带着它离开 App"（详见上面那段注释）。
         // ★"账本为空"这一条（[LiveLastRoomStore.hasPendingRestore]）是给 PiP/按 Home 那条路让路的：
         //   那种情况**本来就记过账**，补记只会在同一刻覆盖它 —— 保持"同一时刻只有一条账"。
         // ══════════════════════════════════════════════════════════════════
+        // ★★2026-09-29（用户实测报的回归）：**系统小窗被点「X」关掉 ≠ 系统清栈**
+        //
+        // 用户原话："我把直播间的界面放到系统小窗那里去，然后我点叉，我再进入软件，怎么又回到
+        // 那个直播间的界面了？……这个没修好。" + "安卓小窗系统点叉，它没有给我们任何的返回值吗？
+        // 没有回调什么的？"
+        //
+        // 回调是有的：点「X」时系统会**销毁这个窗口里的 Activity** ⇒ 走到的就是本函数
+        // （`isFinishing == true`，且 `isInMultiWindowMode == true`）—— 与"系统清栈"在页面侧
+        // **唯一可区分**的判据就是"它当时是不是在系统小窗/PiP 里"：
+        //   · 系统清栈（点桌面图标回 App / 系统回收）→ 页面**不在**小窗里；
+        //   · 用户点 X 关窗 → 页面**就在**小窗里（`isInMultiWindowMode || isInPictureInPictureMode`）。
+        //
+        // 认错的代价正是用户看到的那一幕：点 X 之后紧接着的补记账（下面那个 if）会写下
+        // `[LiveLastRoomStore.onLivePageLeavingApp]`，而 `[onLivePageDestroyed] → evaluateRestore()`
+        // 下一秒就把"该恢复"当成真的 ⇒ **下次进 App 自动把直播间开回来**。
+        // 按用户意图定：**把 X 关窗当作"用户主动退出直播间"** ⇒ 走 [onLivePageExited] 那条清账路
+        // （与返回键退出同一个语义、同一个 API），并跳过下面的补记账。
+        //
+        // ★为什么不会误伤"系统清栈仍要恢复"那条：那种情况页面不在小窗里 ⇒ 进不了本分支；
+        //   整任务被划掉那条另有保护（`PlaybackService.onTaskRemoved` → store 的
+        //   `taskRemovedSuppressRecord` + `clear()`，本分支不参与）。
+        // ══════════════════════════════════════════════════════════════════
+        val closedInWindow = runCatching {
+            isInMultiWindowMode || isInPictureInPictureMode
+        }.getOrDefault(false)
+        if (isFinishing && !userExitedPage && !isChangingConfigurations && closedInWindow) {
+            LivePageTrace.note(
+                "onDestroy.userClosedWindow",
+                "room" to rawRoomId,
+                "multiWindow" to runCatching { isInMultiWindowMode }.getOrDefault(false),
+                "pip" to runCatching { isInPictureInPictureMode }.getOrDefault(false),
+            )
+            // 用户主动关掉小窗 = 用户主动退出直播间：记录作废，下次进 App **不该**被开回直播间
+            LiveLastRoomStore.onLivePageExited(applicationContext)
+        }
         if (isFinishing &&
             !userExitedPage &&                                  // ①
             !isChangingConfigurations &&                        // ④
             rawRoomId.isNotBlank() &&
             !pipEnteredThisSession &&                           // ③
+            !closedInWindow &&                                  // ⑥ 本轮：点 X 关窗不算"系统清栈"
             !LiveLastRoomStore.hasPendingRestore()              // 已有账不覆盖（PiP / 按 Home 那条路）
         ) {
             LivePageTrace.note(
@@ -8344,48 +8383,35 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 dragStartWriteMs = writer.writeTotalMs
             }
             val deltaY = downRawY - event.rawY // 向上滑 = 变大
-            // ★★本轮（2026-09-29）用户拍板：**直播间音量一律照点播那套来**。
-            //   原文："直接给我用点播那套，我给我装上，我试试看，怎么个事啊？"
+            // ★★2026-09-29（用户真机实测后拍板，**本行第二次定稿**）：音量与亮度统一为
+            //   **÷(屏高 × 3)** —— 整屏滑动 ≈ 改变 1/3 量程（3 屏走完整条行程）。
             //
-            // 点播的音量系数（`widget/player/DanmakuVideoPlayer.kt:1718-1733` —— 那是 **App 自己
-            // override** 的 `touchSurfaceMove`；GSY 库里的原版不是这个数，见下）：
-            // ```
-            // deltaV = max * deltaYNeg * 2 / curHeight
-            // volumePercent = mGestureDownVolume*100/max + deltaYNeg*2*100/curHeight
-            // ```
-            // ★别照 GSY 反编译结果"纠错"：v13.2.1 的 `GSYVideoControlView.touchSurfaceMove`
-            //   `mChangeVolume` 分支是 `×3.0f`（javap：`ldc_w float 3.0f` 两处 → `f2i` →
-            //   `setStreamVolume(3, mGestureDownVolume + deltaV, 0)`），它的亮度是 `-deltaY / curHeight`；
-            //   是**本 App 的 override** 把音量改成 ×2、把亮度改成 `/(curHeight × 3f)` ——
-            //   所以"点播那套"要抄的是 override 之后的 ×2，不是 GSY 原版。
-            // 两边的**结构也相同**（不存在"增量 vs 累计"这一层差别）：点播音量分支里 `mDownY`
-            //   **不推进**（GSY 字节码里 `putfield mDownY` 只有"按下"与"亮度分支"两处），所以
-            //   `deltaYNeg = mDownY − event.getY()` 本身就是**按下点起的累计位移**；而
-            //   `mGestureDownVolume` 只在"进入音量模式"那一帧读一次（`mChangeVolume` 一旦为真，
-            //   `onTouch` 就不再调 `touchSurfaceMoveFullLogic`），此后每帧写的都是**绝对档位**
-            //   `mGestureDownVolume + (int)(…)` ⇒ `(int)` 截断**不跨帧累积**。
-            //   本页 `deltaY = downRawY − event.rawY` 同样是累计位移、同样是"基准档位 + 截断后的
-            //   增量"，逐帧提交绝对档位（[StreamVolumeWriter] 最后一档必胜）⇒ 同一次位移同一个档位。
-            //   （反证：若真按"逐帧增量 + 每帧 toInt"算，max=15 / 屏高 2400 时，每帧 8px 的增量
-            //     都是 15×8×2/2400 = 0.1 → 截断成 0，整条手势一档都不动 —— 点播显然不是这样。）
-            // 之前 6 倍偏差的来历就是把本页音量写成了**亮度**的 `/(屏高 × 3)`（1 屏 = 1/3 量程），
-            // 而点播音量是 `×2 / 屏高`（1 屏 = 2 倍量程，**半屏走完整条行程**）。
-            // 历史提醒：这一行曾按"灵敏度"反馈被来回改过两次（÷3 ⇄ ×2）—— 本轮判据不是手感猜测，
-            // 而是"与点播源码同一个系数"；此后只按真机手感再调节一次，别再凭推理来回翻。
+            // 用户原话（装 vc197 = ×2 那版之后）："现在的音量怎么那么灵敏呢？……两个都是非常灵敏，
+            // 两个是完全一模一样的灵敏了。我要求回到上一个点播的那样，那个我都习惯了。"
+            // ⇒ 结论：**点播的 `×2` 也偏灵敏**（那是上游导入 GSY 时带的系数），
+            //   所以这一版把**点播与直播的音量一起改成 ÷3**，与两边**亮度**的既有系数完全一致：
+            //   ```
+            //   点播亮度：-deltaY / (curHeight * 3f)          （既有，未动）
+            //   直播亮度：ΔY / (pageHeight * 3)               （既有，未动）
+            //   点播音量：原 max*deltaYNeg*2/curHeight → max*deltaYNeg/(curHeight*3)
+            //   直播音量：原 max*deltaY*2/pageHeight   → max*deltaY/(pageHeight*3)
+            //   ```
+            //   即**四个滑动（点播/直播 × 音量/亮度）现在同一条手感**，且都落在用户习惯的那档。
             //
-            // 其它干扰项本轮一并排查完毕（结论：都不会改变灵敏度）
-            //   · 死区：点播 `mThreshold = 80px` 才开始调（GSY 字节码里 `bipush 80`）；本页
-            //     `touchSlop`（约 8~24px）就进手势 ⇒ 本页**更早**响应，不是更迟钝；
-            //   · 除数：点播 `curHeight = 横屏 ? mScreenWidth : mScreenHeight`（GSY 的横竖屏交换写法；
-            //     两个页面都声明了 `configChanges=orientation|screenSize`、转屏不重建 Activity，所以
-            //     竖屏 = 屏幕高、横屏 = 建视图那一刻的屏宽 ≈ 当前屏高）；本页 [pageHeightPx] = 播放页
-            //     高度 ≈ 整屏 ⇒ 同一量级；
-            //   · 亮度：点播是**增量累加**（`mDownY` 每帧推进），本页是累计位移 ⇒ 等价；两边系数
-            //     都是 `/(屏高 × 3)`（★这个 ×3 同样是 App override 加的，GSY 原版亮度只有 `÷屏高`），
-            //     **本来就一致**（本轮不动它）。
-            val deltaV = (max * deltaY * 2 / pageHeight).toInt()
+            // ★别再"照 GSY 反编译结果纠错"：v13.2.1 的 `GSYVideoControlView.touchSurfaceMove`
+            //   `mChangeVolume` 分支是 `×3.0f`（javap：`ldc_w float 3.0f` → `f2i`）、亮度是
+            //   `-deltaY / curHeight`；App 侧 `DanmakuVideoPlayer.touchSurfaceMove`（override）
+            //   才是真正生效的那份。两边音量现在都是"基准档位 + 按下点起的累计位移 / (屏高×3)"，
+            //   结构相同（`mDownY` 在音量分支不推进 —— GSY 字节码实证）⇒ 同一位移同一档位。
+            // ★历史：这一行被"灵敏度"来回改过三次（÷3 → ×2 → ÷3）。**要再动它之前，先看这条注释**
+            //   与用户原话：他不接受"半屏走完"（×2），也不接受"比点亮更迟钝"。改就四个一起改。
+            //
+            // 其它已排查、不改变灵敏度的项：死区（点播 `mThreshold=80px` 才开始调；本页 `touchSlop`
+            // 约 8~24px 就进手势 ⇒ 本页更早响应）；除数（点播 `curHeight = 横屏 ? mScreenWidth :
+            // mScreenHeight`，本页 [pageHeightPx] = 播放页高度 ≈ 整屏，同一量级）。
+            val deltaV = (max * deltaY / (pageHeight * 3)).toInt()
             val volumePercent =
-                (downVolume * 100 / max + deltaY * 2 * 100 / pageHeight).toInt()
+                (downVolume * 100 / max + deltaY * 100 / (pageHeight * 3)).toInt()
             val target = (downVolume + deltaV).coerceIn(0, max)
             // ① 气泡**先**刷（★第十三批的顺序）：用户看到的即时反馈优先 ——
             //    这条路上一个跨进程调用都没有，所以"每个 MOVE 都跟手"由它保证。
