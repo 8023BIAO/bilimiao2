@@ -334,7 +334,7 @@ object PublicDownloadStore {
      * 删掉一个相对目录及它**下面所有子目录**里的全部文件；返回删掉的条目数。
      *
      * ★ 必须递归：一集的媒体文件在下级目录里（`<剧集目录>/<清晰度 tag>/video.m4s`），
-     *   只删"直接放在剧集目录里的文件"会把整集视频留在公共目录里（用户实测："删不干净"）。
+     *   只删"直接放在剧集目录里的文件"会把整集视频留在公共目录里（实测：删不干净）。
      */
     fun deleteDir(context: Context, relativeDir: String): Int {
         val clean = relativeDir.replace('\\', '/').trim('/')

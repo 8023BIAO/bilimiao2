@@ -63,7 +63,7 @@ class BilimiaoCommApp(
 
         // 未登录（游客模式）：每天补一套**匿名**设备指纹。
         // 否则一个 buvid3 都没有 → B站 Web 接口全返回 -352 → 游客模式什么都刷不出来；
-        // 而用登录时期留下的指纹又会跟账号关联（用户要求"游客就该什么都不带"）。
+        // 而用登录时期留下的指纹又会跟账号关联（游客态就应当什么都不带）。
         runCatching {
             CoroutineScope(Dispatchers.IO).launch {
                 com.a10miaomiao.bilimiao.comm.network.GuestFingerprint.ensureAnonymousOncePerDay()

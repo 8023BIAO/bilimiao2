@@ -102,7 +102,7 @@ data class SettingSearchItem(
      * 为什么 [valueText] 存的是 lambda 而不是"格式化字符串"：各设置页的数值文案
      * （"24行" / "1.0倍" / 0 档显示"无限制" / 直播速度的 "1.5x"）都是各页自己写的
      * Composable lambda，索引里存二手描述既会漏也会漂；原样拷贝才能保证搜索页
-     * 显示的数值文案与原页面逐字一致 —— 用户要的就是"原来是什么，现在就是什么"。
+     * 显示的数值文案与原页面逐字一致 —— 原来是什么，搜索页就显示什么。
      */
     sealed interface SliderSpec {
         /** `sliderIntPreference`：整数拖动条 */

@@ -73,7 +73,7 @@ class StatusBarHelper(
             activity.window.decorView
         )
         controller.isAppearanceLightStatusBars = isLightStatusBar && !isNightMode
-        // 原来**完全没设**导航栏明暗 → 浅色主题下白图标压在浅色底栏上 = 看不见（用户反馈的"没适配"）
+        // 原来**完全没设**导航栏明暗 → 浅色主题下白图标压在浅色底栏上 = 看不见（浅色主题下这点没适配）
         controller.isAppearanceLightNavigationBars = isLightNavigationBar && !isNightMode
     }
 

@@ -283,7 +283,7 @@ class LivePlayerDelegate(
         // 点播（GSY）起播时无条件 `requestAudioFocus(STREAM_MUSIC, AUDIOFOCUS_GAIN_TRANSIENT)`，
         // 直播随即收到 `AUDIOFOCUS_LOSS_TRANSIENT` → media3 的 AudioFocusManager 自动
         // `playWhenReady = false`（暂停）；而 GSY 暂停时**不归还**焦点 → 直播就一直停着。
-        // 用户看到的就是"播了个普通视频，把我的直播 PIP 暂停了，而且点继续播放恢复的是点播"。
+        // 表现为：点播视频一起播，直播小窗就被暂停，而点「继续播放」恢复的却是点播。
         //
         // 退出焦点管理之后：直播不再进焦点栈，点播那句 GAIN_TRANSIENT 顶不动它；
         // 直播也不再去顶别人 —— 两路各播各的（"多开互不干扰"）。
@@ -894,7 +894,7 @@ class LivePlayerDelegate(
     /**
      * 清晰度菜单数据：**只列服务端本次下发的档位**（`accept_qn`），描述取自 `g_qn_desc`，按 qn 从高到低。
      *
-     * ★用户拍板的口径："它给我们什么，就去选择什么……它都没给我们，我们还去显示？"
+     * ★既定口径：服务端给什么就选什么；它没给的一律不显示。
      *   所以候选集就是服务端明确接受的那一份（`accept_qn`）；服务端没给的档位**不列**。
      * · `g_qn_desc`（房间能力全表）只用来取**中文描述**，以及 `accept_qn` 为空时的**兜底**
      *   （那种情况下列全表总比列空菜单强 —— 这是本函数一直以来的兜底，不是"多列档位"）。
@@ -1063,7 +1063,7 @@ class LivePlayerDelegate(
             "line=${lineIndex + 1}/${candidates.size} autoReconnect=$autoReconnect autoLineSwitch=$autoLineSwitch"
         // ★「设置 → 直播设置 → 自动重连」关掉（`live_auto_reconnect=false`）：
         //   任何失败都**只提示、不自动恢复** —— 换线路、重取流、回 live edge 三条路一起停，
-        //   否则用户会觉得"我明明关了它还在偷偷重连"。恢复入口只剩底栏「重试」。
+        //   否则会让人觉得关掉之后它仍在偷偷重连。恢复入口只剩底栏「重试」。
         // ★本轮的"下播判定"也**必须**排在这一句之后：锁定会连带起 45s"等待开播"轮询，
         //   那同样是一种自动恢复 —— 用户关掉自动重连时，行为要与改动前**逐字一致**（只提示）。
         if (!autoReconnect) {

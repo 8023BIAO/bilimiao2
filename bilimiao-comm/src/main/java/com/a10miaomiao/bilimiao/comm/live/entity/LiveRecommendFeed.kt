@@ -8,8 +8,8 @@ import kotlinx.serialization.Serializable
  * ## 这个接口是什么、为什么用它做「推荐」
  * 它就是**B 站直播首页那条个性化推荐流**（不是"按分区/按人气排"的人工榜单）：
  * 服务端按账号画像 + 实时热度分流下发，客户端**不需要、也无法**自己定义"推荐哪些分区"。
- * 这正是用户要的："这个推荐应该是我们定义不了哪些分区……系统的 API 分流推荐给我们，
- * 我们用它的就行"。
+ * 推荐哪些分区完全由系统 API 分流决定（客户端不需要、也无法自己定义），
+ * 用它的结果即可。
  *
  * 端到端出处（照 PiliPlus 抄，行号已核对）：
  *  - URL 常量：PiliPlus `lib/http/api.dart:781-782`
@@ -157,10 +157,10 @@ data class LiveRecommendRoom(
  * ★为什么要有这一层映射（而不是让 UI 同时认两种实体）：
  *   首页网格、屏蔽规则、点卡片进播放页、点 UP 名进空间这一整套全是按 [LiveRoomItem] 写的；
  *   在这里把 `id → roomid`、`parent_area_id → parent_id` 对齐掉，**UI 一行都不用为推荐流特判**，
- *   卡片也就不用复制第二份（用户明确要求："别再复制第四份"）。
+ *   卡片也就不用复制第二份（不再复制第四份）。
  *
  * ★数值字段一律 `?: 0`、字符串 `?: ""`：与 [LiveRoomItem] 的默认值语义一致，
- *   界面侧"拿不到就不显示"的判断（如 `online > 0`、`area_name.isNotBlank()`）照常成立。
+ *   界面侧"拿不到就不显示"的判断（如 `area_name.isNotBlank()`）照常成立。
  */
 fun LiveRecommendRoom.toRoomItem(): LiveRoomItem = LiveRoomItem(
     roomid = id ?: 0,

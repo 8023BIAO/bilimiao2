@@ -828,7 +828,7 @@ private fun ChatSendPanel(vm: ChatViewModel) {
     }
 
     // ★左右各 16dp（AGENTS §2.10 的四档；与评论区那条输入条同档）：
-    //   原来这里没有左右内边距 → 输入框和发送按钮两边直接顶到屏幕（用户原话）。
+    //   原来这里没有左右内边距 → 输入框和发送按钮两边直接顶到屏幕。
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         // 内容区（输入框 + 表情）：吃「剩余高度」且可滚动。
         // 横屏可用高只有 ~360dp，原来"固定 260dp 表情格 + 无 weight 无滚动的根 Column"
@@ -904,7 +904,7 @@ private fun ChatSendPanel(vm: ChatViewModel) {
             Spacer(Modifier.weight(1f))
             // 统一发送按钮：**不填充**（TextButton）+ 小飞机 + 文案「发送」（与评论区那颗是**同一份实现**）。
             // 原来这里是 primaryContainer 的填充块：深色档 primaryContainer ≈ tone 30，与近黑 sheet 几乎同色，
-            // 加上"输入为空时是禁用态（onSurface 12%）"——用户原话"黑色主题下完全看不见"就是这么来的。
+            // 加上"输入为空时是禁用态（onSurface 12%）"——这颗按钮在深色主题下几乎看不出来。
             MiaoSendButton(
                 onClick = { vm.sendMsg() },
                 // 上传图片期间也禁用：否则图片还在传、用户又把文字发出去了，两条发送请求并发

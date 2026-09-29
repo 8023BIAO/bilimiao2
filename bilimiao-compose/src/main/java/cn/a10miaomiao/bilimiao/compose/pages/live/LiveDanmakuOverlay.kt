@@ -90,7 +90,7 @@ import kotlin.math.roundToInt
  * - 空闲（没有待入场、屏上也没有弹幕）时帧循环**挂起等信号**，不白占 Choreographer。
  *
  * ### 出问题时的可观测性（第三阶段修复的重点）
- * 用户实测"看不见弹幕"时，release 包的日志是**空实现**
+ * release 包里遇到"看不见弹幕"时，日志是**空实现**
  * （`MiaoLogger.println`：`if (!BuildConfig.DEBUG && level != Log.ERROR) return`），
  * 于是"到底没收到 / 收到了没画出来"完全无从判断。这里给两条肉眼可见的通道：
  * - [debugCounters]=true（默认取 [LiveDanmakuTrace.overlayCounters]）→ 左上角常显一行计数：
@@ -146,8 +146,8 @@ import kotlin.math.roundToInt
  *   为什么不"两套一起显示"：用户的心智是"滚动弹幕 ↔ 弹幕列表"二选一（横屏仍是滚动弹幕），
  *   叠着显示等于同一条消息在一屏上出现两遍，而且列表模式下没人看滚动层，白烧一个 60fps 帧循环。
  * @param chat 竖屏弹幕列表的数据缓冲。★本轮起**恒为同一份**（横屏 / PiP / 听音频期间也继续往里存，
- *   只是不显示列表）—— 用户实测："我在横屏的状态下，那些用户发弹幕，他不会记录在我的竖屏那里区域显示。
- *   我返回竖屏，我发现一条都没有。" 传 null 只剩"弹幕整体关着 / 页面不在"这种情况：
+ *   只是不显示列表）—— 此前只按竖屏形态存，横屏收到的弹幕转回竖屏后一条都没有。
+ *   传 null 只剩"弹幕整体关着 / 页面不在"这种情况：
  *   浮层那时压根不组合，连 collect 都不跑（**面板不可见时不订阅 `lines`，也不额外开销**这一点没变）。
  *   只读复用 `LiveDanmakuClient.messages`（同一个 collect，不开第二条连接、不加第二个订阅者）。
  *   进房那批"最近历史弹幕"不走这条流，由宿主用 [LiveDanmakuChatLog.addHistory] 直接铺底（见该方法）。
@@ -181,9 +181,9 @@ fun LiveDanmakuOverlay(
      *   （`DanmakuDisplaySettingContent.kt:121` 的 `defaultValue = 0`）—— 于是**绝大多数用户**
      *   拿到的是那个兜底 8。8 条车道 × 22dp ≈ 176dp：在 1080×2400 的竖屏上只占 19%，
      *   在横屏 2400×1080 上占 43%，**显示区域选"全屏"也不会多出一条车道** ——
-     *   这正是用户报的"我选全屏，进去热门直播间却还不是全屏"。
-     * - vc168 把兜底 8 删了、并让"全屏"无视点播行数；本轮（用户要求"直播弹幕所有参数只来自
-     *   `live_danmaku_*`"）连那条点播行数上限本身也不再读 —— `maxLanes` 字段已从
+     *   结果就是：即便把显示区域选成"全屏"，热门直播间的车道数也不会变多。
+     * - vc168 把兜底 8 删了、并让"全屏"无视点播行数；本轮**直播弹幕的参数只来自
+     *   `live_danmaku_*`**，连那条点播行数上限本身也不再读 —— `maxLanes` 字段已从
      *   `LiveDanmakuSettings` 整个删除。
      *
      * 现在的语义**只有一句**：车道数 = 显示区域高度 ÷ 车道高（见下面 [laneCount]）。
@@ -266,7 +266,7 @@ fun LiveDanmakuOverlay(
             if (msg !is LiveMessage.Danmaku) return@collect
             // ★列表缓冲走**同一个 collect**：SharedFlow 虽然支持多订阅者，但同一批数据没必要起第二个协程。
             //   ★本轮改动：横屏 / PiP 期间**也照样存**（宿主现在恒传同一份 chat）——
-            //   用户实测"横屏收到的弹幕转回竖屏一条都没有"，根因就是这里以前按形态把 chat 传成 null。
+            //   横屏收到的弹幕转回竖屏一条都没有，根因就是这里以前按形态把 chat 传成 null。
             //   存一条的代价 = 往**待提交缓冲**里 append + （缓冲满 40 条时）一次提交（见 LiveDanmakuChatLog）；
             //   面板不在屏上时没有任何组合在订阅它，所以"不可见不干活"仍然成立（只是"存"这件事继续做）。
             chatState.value?.add(msg)
@@ -297,7 +297,7 @@ fun LiveDanmakuOverlay(
     //    因为"一条弹幕都没有"正是帧循环挂起的场景，靠帧循环刷新就永远看不到状态了
     var statusText by remember { mutableStateOf("") }
     // ★key 带 laneCount / areaFrac / rollingVisible：这三项是"显示区域到底生效没有"的直接答案
-    //   （用户报的"选了全屏还不是全屏"），改了就该立刻反映到状态条上，而不是靠肉眼猜。
+    //   （"选了全屏到底生效没有"的直接答案），改了就该立刻反映到状态条上，而不是靠肉眼猜。
     //   （本轮之前 key 里还有一个"屏蔽词过滤器"：直播不做过滤之后它没了。）
     LaunchedEffect(debugCounters, statusHint, laneCount, areaFrac, rollingVisible) {
         if (!debugCounters && !statusHint) {
@@ -464,7 +464,7 @@ private class DanmakuStage(
         active.isNotEmpty() || pending.isNotEmpty() || fixedTop.isNotEmpty() || fixedBottom.isNotEmpty()
 
     fun enqueue(msg: LiveMessage.Danmaku) {
-        // ★本轮起**没有任何关键词过滤**（用户："直播弹幕去掉屏蔽词"）：原来这里会拿点播那份词表
+        // ★本轮起**没有任何关键词过滤**：原来这里会拿点播那份词表
         //   （`danmaku_filter_enabled` / `danmaku_filter_keywords`）在入队前把命中的弹幕丢掉，
         //   现在整条链路已删 —— 收到的每一条 `DANMU_MSG` 都会照常排队上屏。
         //   LiveMessage.Danmaku.color 是 0xRRGGBB，这里补上 alpha，并**当场乘上不透明度**：
@@ -640,7 +640,7 @@ private class PendingDanmaku(
  * ★本轮删掉了第四块"屏蔽词过滤=N"：直播不再做关键词过滤，这条统计恒为 0，留着只会误导。
  *
  * @param layoutHint 显示区域 / 车道数 / 是否列表模式（vc168 新增）。
- *   为什么值得单独占一行：用户报的"我选了全屏，它还是不是全屏"**无法从现有计数条判断** ——
+ *   为什么值得单独占一行："显示区域到底生效没有"**无法从现有计数条判断** ——
  *   `收=30 上屏=20 在屏=20` 在"只有 8 条车道"和"铺满 39 条车道"两种情况下长得一模一样。
  *   把"区域=%/车道=N/上限=显示区域"打出来，这条链路是否生效当场可验（不用连 adb、不用问用户）。
  */
@@ -702,7 +702,7 @@ private const val LANE_LINE_HEIGHT_FACTOR = 1.4f
 //   而点播「滚动弹幕最大行数」的默认值就是 **0（无限制）**（DanmakuDisplaySettingContent.kt:121）
 //   —— 于是"显示区域=全屏"时可用高度是整屏，真正能用的却只有 8 条车道：
 //   8 × 22dp ≈ 176dp，在 1080×2400 竖屏上只占 **19%**，横屏 2400×1080 上占 **43%**，
-//   下面那块永远是空的。这正是用户报的"我选全屏，进去热门直播间却还不是全屏"。
+//   下面那块永远是空的 —— 选了全屏也补不上这块空白。
 //   现在车道数 = 显示区域高度 ÷ 车道高（见 `LiveDanmakuOverlay` 里 laneCount 的推导），
 //   全屏就是整屏、1/4 屏就是 1/4 屏，所见即所得。
 //   ★本轮又往前一步：连那条"点播滚动弹幕最大行数"的上限也不再读（`maxLanes` 字段已从
@@ -760,13 +760,10 @@ private val STATUS_COLOR = Color(0xFFFFE082)
 // ═══════════════════════════════════════════════════════════════════════════
 // 竖屏「弹幕列表」（vc168 任务 2 → 改成**常驻停靠** → 本轮修**转屏恢复与贴边**）
 //
-// 用户原话（第一次）："我们在竖屏的情况下，弹幕是否可以做成……一个冒号，他说的什么。
-//           这个区域可以上下滑动偷看，就是最新的弹幕在最底下，旧的在上面，可以往上滑动看。"
-// 用户原话（停靠那一轮，5 张截图为证）："还有弹幕列表把那个按钮给挡住了……要么就是**固定在那个视频下面**，
-//           直接不要有一个说什么按钮才能让它显示去……就把那个列表**一直显示在它的下面**，
-//           如果说它是竖屏的情况下。还有那个弹幕列表，就**一直显示到底部**就行了。"
-// 用户原话（本轮）："怎么我旋转全屏，再转回竖屏，我竖屏状态下专属的弹幕（用户名+内容那种列表）怎么不见了？"
-//           "中间有一大块黑屏空呢……竖屏的情况下把它给占满？"
+// 需求（第一次）：竖屏下做成"用户名 + 冒号 + 内容"的列表，可上下滑动回看，
+//           最新在最底下、旧的在上面。
+// 需求（停靠那一轮）：列表不能被浮动按钮挡住，要么固定在视频下方、要么一直显示到底部。
+// 需求（本轮）：全屏转回竖屏后列表要能回来；视频与列表之间不留黑屏空当，竖屏下占满。
 //
 // 形态变化三条：
 // 1. **常驻**：右下角那个「弹幕列表」胶囊删掉了（`ensureListChip` 整段没了），竖屏进来就是列表；
@@ -812,7 +809,7 @@ class LiveDanmakuChatLine(
      * 昵称；解析不到时是 "观众"（[LiveDanmakuChatLog.add] 兜底）。
      * ★自己发的那条也走同一个字段：本轮起取真实昵称（`LiveSelfNickname`，服务端回声 /
      * 历史弹幕 / 本机 `user.data` / `nav` 四条来源），**只有全拿不到时才退回"我"** ——
-     * 用户明确要求"跟列表里其它条目一样显示昵称全名，不是 uid"。
+     * 自己发的那条要与列表里其它条目同格式：显示昵称全名，不是 uid。
      */
     val uname: String,
     val text: String,
@@ -825,7 +822,7 @@ class LiveDanmakuChatLine(
  *
  * 设计取舍（都是"为什么"）：
  * 1. **新的放 index 0**：面板用 `LazyColumn(reverseLayout = true)` 画，
- *    index 0 天然贴在**屏幕最底**、index 往上都是旧弹幕 —— 用户要的"最新在最底下"不用额外布局代码。
+ *    index 0 天然贴在**屏幕最底**、index 往上都是旧弹幕 —— 最新一条落在最底下，不需要额外布局代码。
  * 2. **上限 [capacity] = 200 条的硬上限**：热门房每秒几十条，无上限就是内存 + 重组双双失控。
  *    ★为什么不像竞品那样"攒 50 条再裁一次"（PiliPlus `controller.dart:52-53` 的 500/550）：
  *    这里是**硬上限**，好处是"列表到底占多少内存"是一句能验证的话（永远 ≤200 行）。
@@ -1065,7 +1062,7 @@ class LiveDanmakuChatLog(private val capacity: Int = CHAT_MAX_LINES) {
  *
  * 三件事分别对应一条要求，缺一条都会出问题：
  * 1. **平滑**：用 [LazyListState.animateScrollToItem]（LazyList 自带的平滑滚动）替掉原来的
- *    `scrollToItem(0)` 瞬时跳 —— 用户要的"过渡感"主要就是这一下：整列**滑**上去一格，
+ *    `scrollToItem(0)` 瞬时跳 —— 这里的"过渡感"主要就来自这一下：整列**滑**上去一格，
  *    而不是"啪"地换一屏。时长/曲线由 LazyList 按距离自己定（它不暴露 spec）。
  *    ★本轮补充（"这一档到底是什么"）：Compose 1.12.1 的 `animateScrollToItem` 不是
  *      "固定时长的 tween"，而是 `LazyLayoutScrollScopeKt` 里**默认 spring
@@ -1150,8 +1147,8 @@ private class LiveChatBottomScroller(private val listState: LazyListState) {
  * 本文件只负责"长什么样、怎么滚"，**不关心它被挂在哪、占多大** ——
  * 矩形（视频画面底边 → 底栏顶边）由宿主按实测几何算好写进 layoutParams。
  *
- * ★vc168"常驻停靠"之后的面板**没有标题栏、没有「收起」按钮**（用户原话："直接不要有一个说什么
- *   按钮才能让它显示去"）：它常驻在视频下方，顶多留一条 1dp 分隔线。上一版那行
+ * ★vc168"常驻停靠"之后的面板**没有标题栏、没有「收起」按钮**（列表常驻，不需要开关入口）：
+ *   它常驻在视频下方，顶多留一条 1dp 分隔线。上一版那行
  *   「弹幕列表　最新在下 · 上滑看历史　　收起」占的是用户最想看的"最新那几条"的位置，
  *   而"最新在下/上滑看历史"这两条信息在列表本身的行为里已经自解释。
  *
@@ -1372,7 +1369,7 @@ fun LiveDanmakuChatPanel(
             ),
     ) {
         // ── 唯一的"头部"：一条 1dp 分隔线 ──
-        // 不做标题栏：列表是**常驻**的（用户："直接不要有一个说什么按钮才能让它显示去"），
+        // 不做标题栏：列表是**常驻**的，
         // 标题/收起按钮占的正是"最新那几条"的位置；但画面与列表是两块不同材质，
         // 边界还是要一条线说清楚。
         Box(
@@ -1473,10 +1470,10 @@ fun LiveDanmakuChatPanel(
 }
 
 /**
- * 列表里的一行："用户名："（**主题色**）+ 内容（弹幕自己的颜色，已补 alpha）。
+ * 列表里的一行：**用户名 + 冒号**（**主题色**）+ 内容（弹幕自己的颜色，已补 alpha）。
  *
- * ★本轮（2026-09-26）修的就是用户报的那条 ——"直播间评论区，在竖屏的状态下，名字的高亮
- *   没有跟随我们主题颜色"：用户名以前是一个**写死的淡蓝**（`Color(0xFF8AB4F8)`，
+ * ★本轮（2026-09-26）修的就是"竖屏列表里用户名高亮没跟主题色"这一条：
+ *   用户名以前是一个**写死的淡蓝**（`Color(0xFF8AB4F8)`，
  *   与主题毫无关系），现在改成 `MaterialTheme.colorScheme.primary`。
  *
  * 为什么是 `MaterialTheme.colorScheme.primary`（而不是别的取法）：
@@ -1507,7 +1504,7 @@ private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine, modifier: Modifier = M
         buildAnnotatedString {
             withStyle(SpanStyle(color = unameColor)) {
                 append(line.uname)
-                append("：") // 用户原话里的那个冒号（半角冒号在中文里太挤，用全角）
+                append("：") // 全角冒号（半角冒号在中文里太挤）
             }
             withStyle(SpanStyle(color = line.color)) {
                 append(line.text)
@@ -1600,7 +1597,7 @@ private const val CHAT_ITEM_PLACEMENT_MS = 160
  *   高速房间里两轮动画就会自然首尾相接 —— 这是必须的：内容每秒长高 λ×23dp，
  *   视口的**平均**速度必须与之一致，硬塞静止段只会把同样的位移挤成更陡的爆发。
  * - 间隔只要**大于**"低速房间一轮动画的实际可见时长"（几十毫秒），
- *   低速时就会呈现"滑一下、停一下"的完整动作（用户要的"过渡感"）。
+ *   低速时就会呈现"滑一下、停一下"的完整动作（也就是这里要的"过渡感"）。
  *   120ms 正好落在两者之间：竞品是 500ms（`EasyThrottle.throttle('liveDm', 500ms)`，
  *   `controller.dart:381-385`），我们取它的一半不到 —— 更跟手，但保持了同一套"节流"语义。
  * - 低于 100ms 就没有意义：同拍多条消息本来就会被 [LiveDanmakuChatLog.wakeUp] 合并。
@@ -1638,8 +1635,8 @@ internal val CHAT_DOCKED_MIN_HEIGHT = 96.dp
 /**
  * 面板底色：**不透明纯黑**（#000000），**与主题深浅无关**（浅色主题下也不变白）。
  *
- * 用户原话："竖屏的弹幕区域的背景色……要么也改成纯黑色？因为要长期去看这个弹幕，
- *          我想让它合理护眼一点……直播间的两个区域，上下区域，在竖屏状态下，它也是纯黑色的"。
+ * 理由：竖屏下要长时间看这块弹幕，纯黑比跟随主题更护眼；
+ *       直播间的上下两块区域在竖屏下本来也是纯黑的。
  *
  * 为什么**不跟主题**（不用 `surface` / `surfaceVariant`）：
  * · 宿主现在把面板这棵 ComposeView 的主题**钉在深色档**
@@ -1700,7 +1697,7 @@ private val CHAT_JUMP_BG = Color(0xCC2B3440)
 private val CHAT_DIVIDER = Color(0x22FFFFFF)
 
 // ★本轮（2026-09-26）删掉了 `CHAT_NAME_COLOR = Color(0xFF8AB4F8)`（原来在这里）。
-//   它就是用户报的"名字的高亮没有跟随我们主题颜色"的**根因**：用户名是写死的淡蓝，
+//   它就是"名字高亮不跟主题色"的**根因**：用户名是写死的淡蓝，
 //   换任何主题都不会变。现在用户名取 `MaterialTheme.colorScheme.primary`
 //   （= 用户自定义主题色经 `appColorScheme()` 推出的主色），见 [LiveDanmakuChatRow]。
 //   ★内容色（`line.color`）**不跟主题**：那是弹幕自己带的色（B 站的彩名/彩色弹幕），

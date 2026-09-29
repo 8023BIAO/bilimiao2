@@ -56,7 +56,7 @@ object WbiSigner {
      *   评论、分区榜、番剧点评、播放进度上报……全靠这条基线跑着。
      *   修好签名的那一刻，MiaoHttp 里那条按 `"api.bilibili.com" in url` 判定的自动签名
      *   会**同时**给上面所有区域加上 `wts` + `w_rid`，等于一个"修复"顺手改掉了全 App 的请求形态。
-     *   用户明确反对这种影响面（原话：**"要不然他又破坏我软件里面的其他区域"**、"这个 WBI 我真的被坑了不知道多少次了"）。
+     *   这种影响面必须避免：一个"修复"不该顺手破坏 App 的其他区域。
      *
      * 所以现在的规则是：
      *   - [LIVE]：直播链路（进房拿弹幕 token / 发弹幕）**缺签名直接 -352**，必须签，且不受用户开关影响；
@@ -123,8 +123,8 @@ object WbiSigner {
      *   而不是靠改全局判据（那是上次踩坑的方式）。
      */
     fun shouldSign(rawUrl: String, scope: WbiScope? = null): Boolean = when (scope) {
-        // 直播：必须签。刻意**不看** [MiaoHttp.isWbiEnabled] —— 用户要求"不需要用户说开不开，
-        // 直播直接需要的就给他"，所以直播链路的可用性不能被一个设置项卡住。
+        // 直播：必须签。刻意**不看** [MiaoHttp.isWbiEnabled] —— 直播直接需要的就给它、
+        // 不需要额外开关放行，所以直播链路的可用性不能被一个设置项卡住。
         WbiScope.LIVE -> true
         // 非直播：只有调用点显式写死 + 老总开关开着才签
         WbiScope.NON_LIVE -> MiaoHttp.isWbiEnabled

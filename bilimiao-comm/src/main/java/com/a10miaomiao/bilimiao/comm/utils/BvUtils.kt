@@ -27,7 +27,7 @@ object BvUtils {
      *   「继续播放」卡片（`StartViewContent.kt:312`）、历史/收藏/稍后再看卡片
      *   （`StartLibraryCard.kt:211`）、点赞消息、动态里的 UGC 合集等入口传进来的都是 **av 号**。
      *   如果直接把它当 bvid 用，就会去查 `videoID=98935548` → 服务端返回空数组 →
-     *   **片头片尾等片段全部消失**（用户报的"怎么又不见了"就是这么来的）。
+     *   **片头片尾等片段全部消失**（"怎么又不见了"就是这么来的）。
      */
     fun isValidBvid(s: String?): Boolean {
         val v = s?.trim().orEmpty()

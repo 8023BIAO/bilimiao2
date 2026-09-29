@@ -216,7 +216,7 @@ data class LiveFollowRoom(
     val live_status: Int = 0,
     /** 房间封面（实测这一条接口的封面上这个 key） */
     val room_cover: String = "",
-    /** 观看人数文案（如 "19"）—— 卡片右下角那块"人看过"用它兜底 */
+    /** 观看人数文案（如 "19"）—— 卡片上的人气角标已删，这里只用于反解 `online` */
     val text_small: String = "",
     /** 子分区名（实测为空串，真正有值的是 [area_name_v2]） */
     val area_name: String = "",
@@ -229,7 +229,7 @@ data class LiveFollowRoom(
  * [LiveFollowRoom] → 首页直播卡片统一吃的 [LiveRoomItem]。
  *
  * ★`online` 用 [LiveFollowRoom.text_small] 反解：这个接口不给人气数字，只给"19"这样的成品文案；
- *   卡片那边 `online > 0` 才显示"人看过"，反解成功就有、失败（空串/非数字）就自然不显示 ——
+ *   `online` 仍由它反解（成功就有值、失败就为 0）；卡片上的人气角标已整体删除，
  *   既不硬编 0、也不为它多打一次接口。
  */
 fun LiveFollowRoom.toRoomItem(): LiveRoomItem = LiveRoomItem(

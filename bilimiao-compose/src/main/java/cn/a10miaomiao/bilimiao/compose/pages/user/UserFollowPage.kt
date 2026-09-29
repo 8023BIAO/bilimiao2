@@ -285,7 +285,7 @@ private fun UserFollowPageContent(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // ★裸头像（不再挂「直播中」+ 涟漪）：用户 2026-09-28 拍板"直播标记只留两处"
+                    // ★裸头像（不再挂「直播中」+ 涟漪）：直播标记只留两处
                     //   —— 用户空间顶部大头像 + 动态页 UP 栏头像。关注列表一屏十几个头像，
                     //   全都在扩散涟漪太吵；uid 不再传，标记与在播查询一起消失（连带的"一屏一条请求"也没了）。
                     //   点头像仍进他的空间 —— 整个 Row 已经挂着 clickable，行为不变。

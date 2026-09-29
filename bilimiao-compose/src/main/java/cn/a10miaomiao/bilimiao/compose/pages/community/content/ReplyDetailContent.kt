@@ -578,9 +578,9 @@ fun ReplyDetailContent(
                         }.fillMaxWidth(),
                         item = reply,
                         isUpper = replyMid == upMid,
-                        // ★ 2026-09-26（用户要求）：主评论也要能删。这一行以前被注释掉，
+                        // ★ 2026-09-26：主评论也要能删。这一行以前被注释掉，
                         //   从消息（收到的赞 / 回复我的）点进详情时正文只有这一条评论，
-                        //   垃圾桶得退回视频评论列表才看得到（用户："我大海捞针了"）。
+                        //   垃圾桶得退回视频评论列表才看得到。
                         //   现在直接挂在这条评论的操作行里（点赞/回复后面），别人的评论不显示。
                         showDelete = userState.isSelf(replyMid),
                         onAvatarClick = {

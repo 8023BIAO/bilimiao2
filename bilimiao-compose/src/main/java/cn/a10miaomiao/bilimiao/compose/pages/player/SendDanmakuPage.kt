@@ -270,8 +270,7 @@ internal fun SendDanmakuPageContent(
                     modifier = Modifier.padding(end = 5.dp)
                 ) {
                     // 统一发送按钮（`components/input/MiaoInputBar.kt`，与私信/评论区**同一份实现**）：
-                    // **不填充**（TextButton）+ 小飞机 + 文案「发送」。用户原话："评论区的发送按钮、
-                    // 准备发送弹幕的那个……不应该填充"。
+                    // **不填充**（TextButton）+ 小飞机 + 文案「发送」。
                     // · 宽度用 `widthIn(min = 80.dp)` 而不是 `width(80.dp)`：trailingIcon 槽位原来就是
                     //   80dp，这里保持同样的占位，同时大字体下允许它自己长宽（不会把"发送"截掉）。
                     // · loading 时按钮内部自己画 16dp 转圈（原来那颗是 30dp 的，形态随统一实现）。

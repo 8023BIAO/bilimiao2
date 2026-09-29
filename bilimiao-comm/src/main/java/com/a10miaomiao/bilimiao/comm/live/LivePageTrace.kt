@@ -58,8 +58,8 @@ object LivePageTrace {
     /**
      * ★**总开关**：`false` = logcat 与文件**都不写**（一个布尔全局关掉）。
      *
-     * ★2026-09-29 task-53 曾临时置 `true` 取证（用户："系统小窗里的直播间会被杀掉……你可以加个 log
-     *   调查"），**task-57 收尾已改回 `false`**：故障已定位并修好（`LivePlayerActivity.onDestroy`
+     * ★2026-09-29 task-53 曾临时置 `true` 取证（为排查"系统小窗里的直播间会被杀掉"），
+     *   **task-57 收尾已改回 `false`**：故障已定位并修好（`LivePlayerActivity.onDestroy`
      *   的"系统清栈补记账"那条）。诊断设施本身全部保留 —— 关掉开关后每次调用只读一个布尔就返回，
      *   零运行时成本；下次再查这类问题把这一行改回 `true` 即可。
      */

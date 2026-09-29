@@ -89,7 +89,7 @@ sealed interface LivePlayability {
 
     /**
      * **不是"未开播"的失败**：接口报错 / 服务端没下发流 / stream 里一条可用线路都没有。
-     * ★这一类最容易被旧代码写成"未开播"，也是本次用户反馈（"明明在播却显示未开播"）的正主。
+     * ★这一类最容易被旧代码写成"未开播"，也是"明明在播却显示未开播"这种反馈的正主。
      */
     class NoStream(val detail: String) : LivePlayability {
         override val hasStream: Boolean get() = false

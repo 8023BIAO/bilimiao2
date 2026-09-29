@@ -36,7 +36,7 @@ data class LivePlayUrlInfo(
      * ★2026-09-26 新增（纯加法）：这两个字段一直躺在响应里，只是旧实体没声明、
      *   被 `ignoreUnknownKeys` 丢掉了。判"为什么拿不到流"时必须能区分
      *   "没开播"与"这是密码/付费房" —— 后者官方页面能看、第三方拿不到流，
-     *   笼统报"未开播"正是用户在反馈里追问的"是权限不足吗"。
+     *   笼统报"未开播"会让人误以为是权限不足。
      *   （`room_init` 的实体 [LiveRoomInitInfo] 里本来就有同名的这两个字段，语义一致。）
      */
     val encrypted: Boolean = false,

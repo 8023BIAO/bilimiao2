@@ -35,7 +35,7 @@ class PicInPicHelper(
          * ★为什么必须有实例盐：PendingIntent 的身份 =（创建包名, requestCode, `Intent.filterEquals`），
          *   而 `filterEquals` **不比较 extras** —— 同一个 action + 写死的 requestCode 会让同 App 内
          *   所有 PiP 实例拿到**同一个** PendingIntent（token 被系统合并，extras 谁最后建谁覆盖）。
-         *   于是两个播放器同时在小窗时，点一次两个接收器都会响应（用户说的"抢接口"），
+         *   于是两个播放器同时在小窗时，点一次两个接收器都会响应（两个接收器抢同一个接口），
          *   而且完全无法分辨点的是哪个小窗。
          */
         val ACTION_MEDIA_CONTROL = "media_control"

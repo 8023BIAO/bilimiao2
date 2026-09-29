@@ -6,7 +6,7 @@ package com.a10miaomiao.bilimiao.comm.live
  * ══════════════════════════════════════════════════════════════════════════
  * ## ★定位沿革（2026-09-26 起，2026-09-28 复核修正）
  *
- * 用户报的 bug："在直播间点 UP主 进他主页没问题，但返回是直播界面的那个 Tab，不是他的直播间。"
+ * 现象：在直播间点 UP主 能进他主页，但返回时落到直播列表 Tab，而不是原来的直播间。
  * 根因就在这条桥上：它的实现是"把**主界面**的 NavHost 导航到用户空间"，而主界面被直播页压着，
  * 要让它露出来就只能 `finish()` 掉直播页 —— 返回时直播页已经没了，自然只能回到直播 Tab。
  *
@@ -18,7 +18,7 @@ package com.a10miaomiao.bilimiao.comm.live
  *   「直播页 → UP 空间」只有这一条：`open(mid)` 成功即由 compose 侧导航主界面 NavHost，
  *   调用方随后 `finish()` 直播页。**代价照旧**：从 UP 空间返回落到直播 Tab，不是原直播间。
  *
- * ★**2026-09-28 二次修订（用户："删除回退……做减法"）**：直播页那条调用端（"点标题进 UP 空间"）
+ * ★**2026-09-28 二次修订（删除与回退、做减法）**：直播页那条调用端（"点标题进 UP 空间"）
  *   与后来为修它返回栈而复刻的**页内浮层**（`UserSpaceOverlayHost` + 本桥上一版的浮层工厂 API
  *   `SpaceOverlayHandle` / `SpaceOverlayFactory` / `registerOverlay` / `createOverlay`）已**整体删除** ——
  *   所以现在本桥**没有任何调用方**（`grep -rn "LiveSpaceLauncher" app/src` 只剩注释）。

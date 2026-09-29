@@ -156,7 +156,7 @@ class VideoDetailViewModel(
      *   （`StartLibraryCard.kt:211` 传的是 `it.aid.toString()`）、点赞消息、动态里的
      *   UGC 合集等入口传进来的**都是 av 号**。把 av 号当 bvid 用 →
      *   查询变成 `videoID=98935548`（av 号）→ 服务端返回 `[]` → **片头片尾等片段全部消失**
-     *   （用户实测报的"刚才好了怎么又不见了"）。
+     *   （表现就是"刚才好了怎么又不见了"）。
      *
      * 取值优先级：
      * ① 视频详情接口返回的 bvid（最可靠，av 入口也能拿到真 BV 号）；

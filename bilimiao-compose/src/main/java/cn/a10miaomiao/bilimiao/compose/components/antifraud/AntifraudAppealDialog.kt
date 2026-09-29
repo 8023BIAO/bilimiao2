@@ -58,11 +58,11 @@ data class AntifraudAppealRequest(
  * 申诉弹窗的全局状态 —— 挂在 ComposeFragment 根部渲染（见 [AntifraudAppealDialogHost]）。
  *
  * 为什么不继续用 DialogX（2026-09-27 用户实测后的结论）：
- *   ① DialogX 自己的 MaterialYou 调色板跟本 App 的主题色/点缀色对不上（用户："没有使用我这个软件主题的搭配色"）；
+ *   ① DialogX 自己的 MaterialYou 调色板跟本 App 的主题色/点缀色对不上；
  *   ② 它那个 CustomDialog 容器是 wrap_content + centerInParent，横屏/大字体时底部按钮会被裁。
  * 现在改用 App 自己的 [AutoSheetDialog] —— 就是直播页、番剧首页那个"底栏筛选弹窗"同一套：
  * 主题色走 MaterialTheme（含用户自定义主题色/materialKolor），
- * 竖屏贴底、横屏居中、安全区与旋转由 AnyPopDialog 统一处理（用户原话："它不管你软件怎么旋转屏幕…都会居中"）。
+ * 竖屏贴底、横屏居中、安全区与旋转由 AnyPopDialog 统一处理。
  */
 object AntifraudAppealDialogState {
 
@@ -127,7 +127,7 @@ private fun AppealFormSheet(request: AntifraudAppealRequest) {
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            // 文案里**不再重复额度**（用户实测："要不然底部都有一个重复提示了"）——
+            // 文案里**不再重复额度**（否则底部会连着出现两条同样的提示）——
             // 额度只在下面那一行 `quotaText` 里说一次。
             text = if (dynamic) {
                 "动态被限流/隐藏时用：uid + 动态链接；提交后结果发到「消息 → 系统通知」"

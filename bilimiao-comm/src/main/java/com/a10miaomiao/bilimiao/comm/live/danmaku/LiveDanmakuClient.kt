@@ -317,8 +317,8 @@ class LiveDanmakuClient(private val roomId: Long) {
     }
 
     /**
-     * ★**进房先拉一批"最近的弹幕"**（第四个需求，用户原话："点进去发现有最近的弹幕或者评论……
-     * 我进去一脸懵，人家最近在讨论什么我都不知道"）。
+     * ★**进房先拉一批"最近的弹幕"**（第四个需求：进去就能看到别人最近在聊什么，
+     * 而不是一片空白）。
      *
      * ## 接口与出处（照竞品 PiliPlus 抄，行号见 [LiveDanmakuHistoryAPI] 的类注释）
      * `GET https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid=&room_type=0`
@@ -332,7 +332,7 @@ class LiveDanmakuClient(private val roomId: Long) {
      * 去重、发送没有一行因为历史弹幕而改变。
      *
      * ## 为什么不直接 `_messages.tryEmit(...)` 塞进实时流
-     * 1. **滚动弹幕层会把这些旧弹幕当新弹幕飞一遍** —— 用户要的是"铺进竖屏列表"，
+     * 1. **滚动弹幕层会把这些旧弹幕当新弹幕飞一遍** —— 这批历史弹幕应当**铺进竖屏列表**，
      *    不是"一进房先刷一屏几分钟前的旧弹幕"；
      * 2. `_messages` 是 `replay = 0` 的 `SharedFlow`：浮层还没订阅时发出去的消息会**静默丢失**，
      *    而"拉历史"恰好就发生在进房那一瞬（正是这个空档）。
@@ -798,7 +798,7 @@ class LiveDanmakuClient(private val roomId: Long) {
      *
      * ★语义变化（第三阶段修复）：`Failed` 从"永久放弃"变成"**60s 后才自己再试一次**"。
      *   对外仍然先给出 `Failed`（A 路要提示用户、要给手动重试入口都还能用），
-     *   但不再需要"UI 必须配合"才可能恢复 —— 这正是用户实测"永远不会自己好"的根因。
+     *   但不再需要"UI 必须配合"才可能恢复 —— 这正是过去"永远不会自己好"的根因。
      */
     private fun failPermanently(reason: String) {
         log("判为不可自动恢复：$reason → 停止自动重连（60s 后自愈重试）")
@@ -1388,7 +1388,7 @@ class LiveDanmakuClient(private val roomId: Long) {
             // ★昵称（第四个需求）：优先用**已经知道的自己昵称** —— 来源是"服务端把某条我发的弹幕
             //   推回来时的真实昵称" / 历史弹幕里我自己那条 / 本机 user.data / nav，
             //   统一由 LiveSelfNickname 管（见该类注释）。真的一个都拿不到才退回"我"。
-            //   ★绝不显示 uid：用户明确要求"跟别人一样的昵称全名"。
+            //   ★绝不显示 uid：要与别人一样显示昵称全名。
             uname = LiveSelfNickname.current() ?: FALLBACK_SELF_UNAME,
             color = DEFAULT_COLOR,
             timeMs = System.currentTimeMillis(),
@@ -1485,7 +1485,7 @@ class LiveDanmakuClient(private val roomId: Long) {
          * `Failed`（不可自动恢复）之后的自愈间隔。
          *
          * ★为什么不干脆"永远不重试"：宿主不会替我们重连（见 [reviveJob]），
-         *   用户实测就是"一条弹幕都没有，而且永远不会自己好"。
+         *   不重试的后果就是：一条弹幕都没有，而且永远不会自己好。
          *   60s 是"能自愈"与"别把风控惹毛"之间的折中（`getDanmuInfo` 是敏感接口，
          *   方案 §6.1 建议这类轮询不要密于 30~60s）。
          */

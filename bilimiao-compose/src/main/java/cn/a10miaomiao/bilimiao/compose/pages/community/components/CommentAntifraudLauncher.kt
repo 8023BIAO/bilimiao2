@@ -52,9 +52,9 @@ object CommentAntifraudLauncher {
      * 打开官方申诉页 —— 兜底路径。
      *
      * 现在的主路径是原生提交（见 [submitAppeal]）；只有拿不到 `bili_jct`（网页登录态）时
-     * 才把用户送到官方页面。这里换过两轮，结论留着免得再折腾（用户 2026-09-25 拍板："你还是跳外部吧"）：
+     * 才把用户送到官方页面。这里换过两轮，结论留着免得再折腾 —— 兜底路径**直接跳外部浏览器**：
      *   · 内置 WebView：得替 B站 页面适配主题 —— 注入官方深色令牌 `bili_dark` 之后，
-     *     表单变成"白底白字"（用户原话："黑色主题看不见"），提交还因为填错字段报"请求错误"；
+     *     表单变成"白底白字"，提交还因为填错字段报"请求错误"；
      *   · 顺带的"把评论ID/位置复制到剪贴板让用户粘"也一起去掉了：用户粘进了"BV号"那一格，直接提交失败。
      */
     private fun openAppealPage() {
@@ -481,7 +481,7 @@ object CommentAntifraudLauncher {
             .setMessage(body)
         if (isBad) {
             dialog.setOtherButton("关闭") { _, _ -> false }
-            // 用户 2026-09-26："底部还是有一个自动申诉的按钮" —— 名字就叫「自动申诉」，
+            // 底栏那个按钮的名字就叫「自动申诉」，
             // 点开是官方同款的两个输入（链接 + 理由），提交走原生接口。
             dialog.setCancelButton("自动申诉") { _, _ ->
                 showAppealDialog(

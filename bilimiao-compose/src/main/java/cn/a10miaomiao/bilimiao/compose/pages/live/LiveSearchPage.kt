@@ -83,7 +83,6 @@ import com.a10miaomiao.bilimiao.comm.live.entity.LiveSearchRoomItem
 import com.a10miaomiao.bilimiao.comm.mypage.SearchConfigInfo
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
-import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
@@ -131,7 +130,7 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ## 搜索历史：和全站搜索**分开存**（第四阶段改动）
  * 本页历史落在自己的库/表 `LiveSearchHistory_db` / `LiveSearchHistory`（[LiveSearchHistoryDB]），
- * 不再往全站搜索的 `PreventKeyWord_db2` 里写 —— 用户要求"两者不联动、各自独立"。
+ * 不再往全站搜索的 `PreventKeyWord_db2` 里写 —— 两边不联动、各自独立。
  * 输入框里点一下就走**直播搜索**接口（`search_live`），底栏那个搜索入口走的是全站搜索，互不影响。
  *
  * ## ★类名与构造签名是**约定锁死**的
@@ -653,7 +652,7 @@ private fun LiveSearchPageContent(viewModel: LiveSearchPageViewModel) {
 /**
  * 顶部搜索条。
  * 造型照 `components/start/SearchInputInline.kt` 的 SearchTextField（圆角、无下划线、
- * 尾部清空按钮），多了右边一个明确的「搜索」按钮 —— 用户说的"回车/点搜索"两条路都要有。
+ * 尾部清空按钮），多了右边一个明确的「搜索」按钮 —— 回车与点按钮两条路都要有。
  */
 @Composable
 private fun LiveSearchInputBar(
@@ -799,12 +798,12 @@ private fun LiveSearchHistoryPanel(
  * │ 标题（最多两行） │
  * └───────────────┘
  * ```
- * ★2026-09-29：封面左上角那颗「直播中」角标已删除（用户："还有这个直播中，我建议也全删了吧"）——
+ * ★2026-09-29：封面左上角那颗「直播中」角标已删除 ——
  *   这一屏搜出来的**条条都是直播**，角标不携带信息，还挡住封面左上角；现在与 PiliPlus 的信息层次一致。
  * 人气文案直接用接口给的 `watched_show.text_large`（"15.5万人气"/"9.9万人看过"）——
  * 它是服务端算好的，用 `online` 自己拼会在"人看过"的房间里显示错含义（实测两种都有）。
  *
- * ★人气为什么叠在封面右下角（用户实测反馈"人气的位置跟着主播名走"的修复点）：
+ * ★人气为什么叠在封面右下角（人气的位置会跟着主播名移动，这是修复点）：
  *   原来人气是底部渐变条 Row 的第三个孩子（名字 / Spacer / 人气）：Row 测量时带 weight 的
  *   两个孩子各拿"剩余空间的一半"，名字那块 `fill = false` 只占自己文字那么宽，省下的空间
  *   **不会**补给兄弟 —— 于是人气的横坐标 = 名字宽度 + 半行，名字越长越往右，还留一段死白在右边。
@@ -860,7 +859,7 @@ private fun LiveRoomCard(
                 loading = placeholder(R.drawable.bili_default_placeholder_img_tv),
                 failure = placeholder(R.drawable.bili_fail_placeholder_img_tv),
             )
-            // ★2026-09-29：封面左上角的「直播中」角标已删除（用户："还有这个直播中，我建议也全删了吧"）
+            // ★2026-09-29：封面左上角的「直播中」角标已删除
             //   —— 搜索结果的条条都是直播，角标不携带信息、还挡封面左上角。
             Row(
                 modifier = Modifier
@@ -906,10 +905,10 @@ private fun LiveRoomCard(
             }
             // 人气：**叠在封面右下角**（同首页直播 Tab 的 LiveRoomCard，HomeLiveContent.kt:1088-1107）。
             // ★修复点：人气原本是上面那个渐变条 Row 的第三个孩子，横坐标 = 名字宽度 + 半行，
-            //   用户实测"名字一长，人气就跟着往右跑"。改成封面 Box 的独立角标后，
+            //   名字一长，人气就跟着往右跑。改成封面 Box 的独立角标后，
             //   锚点只剩"封面右下角 + 6dp"，与主播名一个字都不相干。
-            //   文案仍旧走 [hotText]（优先服务端的 watched_show.text_large），只改位置、不改文案来源。
-            // 空文案（既没有 text_large、online 也是 0）不画这颗胶囊：半透明底的空壳比什么都不画更像 bug。
+            //   文案仍旧走 [hotText]（只取服务端的 watched_show.text_large），只改位置、不改文案来源。
+            // 没有服务端文案就不画这颗胶囊：半透明底的空壳比什么都不画更像 bug。
             val hotText = item.hotText()
             if (hotText.isNotBlank()) {
                 Row(
@@ -985,12 +984,11 @@ private fun LiveSearchEmptyHint(keyword: String) {
 }
 
 /**
- * 卡片右下角的文案：优先用接口给的人气文案，没有再按 `online` 自己拼。
- * （`online` 也存在，但实测有的房间 `online` 是"当前人气"、有的房间 `text_large` 才是
- *   正确说法（"N人看过"），只有 `text_large` 是服务端按 `watched_show.switch` 选好的。）
+ * 卡片右下角的人气文案：**只**用接口给的 `watched_show.text_large`，取不到就不显示。
+ * （实测有的房间 `online` 是"当前人气"、有的房间才是"累计看过"，口径并不统一；
+ *   只有 `text_large` 是服务端按 `watched_show.switch` 选好的成品文案。）
  */
 private fun LiveSearchRoomItem.hotText(): String {
     val text = watched_show?.text_large.orEmpty()
-    if (text.isNotBlank()) return text
-    return if (online > 0) "${NumberUtil.converString(online)}人看过" else ""
+    return if (text.isNotBlank()) text else ""
 }

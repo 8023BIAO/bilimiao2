@@ -263,7 +263,7 @@ fun VideoDetailContent(
                         tags.forEach { tag ->
                             // 标签样式对齐**官方国际版**（用户给的截图量的）：
                             //   无边框、底色只比背景亮一点点、文字用灰色而不是纯白 ——
-                            //   原来是"1.14dp 描边 + 纯白字 + 31dp 高"，一排框框太抢眼（用户说"突出、沉重"）。
+                            //   原来是"1.14dp 描边 + 纯白字 + 31dp 高"，一排框框太抢眼、显得突出又沉重。
                             // 这里不用 AssistChip：当前 Material3 的 chip 去掉了 contentPadding 参数、
                             // 内边距固定 16dp 改不动，所以用 Surface 自己搭，尺寸完全可控（涟漪照旧有）。
                             Surface(

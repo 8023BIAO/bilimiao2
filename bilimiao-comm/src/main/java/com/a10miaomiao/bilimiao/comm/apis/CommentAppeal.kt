@@ -26,12 +26,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
  *    { uid: 当前用户 mid, link: 动态id或链接, reason, csrf }
  * ```
  *
- * H5 原话：「注：24小时内仅可提交3条申诉」——所以额度见 [DAILY_LIMIT]，
+ * H5 页面写明：「注：24小时内仅可提交3条申诉」——所以额度见 [DAILY_LIMIT]，
  * 本地还有 [com.a10miaomiao.bilimiao.comm.antifraud.AntifraudAppealQuota] 兜底记账。
  *
  * 为什么不是 WebView：
  *   ① H5 页面深色适配后表单白底白字（之前踩过）；
- *   ② 用户要"弹窗里一键提交"，页面上再点三次反而烦；
+ *   ② 弹窗里一键提交比在页面上再点三次顺手；
  *   ③ 接口参数已经抓清楚，原生提交可控、可给明确失败提示。
  *
  * 注意：服务端只接受"确实处于可申诉状态"的内容；正常评论会回
@@ -239,7 +239,7 @@ object CommentAppeal {
     /**
      * 申诉理由 = 用户理由（默认 [DEFAULT_REASON]）+ 评论原文 + 相关位置。
      *
-     * **文字评论和图文评论都认**（用户要求"要识别文字和图文"）：纯图没有正文时写明
+     * **文字评论和图文评论都认**：纯图没有正文时写明
      * "图片评论 N 张，无文字正文"；有正文时在正文后标图片数 —— 审核端拿到的是"文字 + 图文"两样信息。
      */
     fun composeReason(

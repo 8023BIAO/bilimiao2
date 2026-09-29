@@ -225,7 +225,7 @@ private fun MyFollowerContent(viewModel: MyFollowerViewModel) {
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // ★裸头像（不再挂「直播中」+ 涟漪）：用户 2026-09-28 拍板"直播标记只留两处"
+                // ★裸头像（不再挂「直播中」+ 涟漪）：直播标记只留两处
                 //   —— 用户空间顶部大头像 + 动态页 UP 栏头像。粉丝列表整屏都是头像，
                 //   一起扩散涟漪的观感是"满屏都在动"；这里连 uid 都不再传，标记与在播查询一起消失。
                 //   点头像仍进他的空间（右边那块文字区是同一个动作，与改动前一致，两处都留着）。

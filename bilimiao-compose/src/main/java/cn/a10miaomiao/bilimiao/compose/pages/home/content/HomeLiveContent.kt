@@ -50,7 +50,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,7 +86,6 @@ import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.AppStore
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
-import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.store.WindowStore
@@ -148,15 +146,15 @@ internal const val LIVE_RECOMMEND_LABEL = "推荐"
  * PiliPlus 把直播浏览拆成了两层：
  *   - `lib/pages/live_area/view.dart`：**全部标签**页 —— 顶级分区 TabBar + 每个顶级分区下的子分区网格；
  *   - `lib/pages/live_area_detail/child/view.dart`：**子分区详情** —— 子分区横向标签条 + 直播房间卡片网格。
- * 这里**照它的信息层次抄成一层**（用户要的是"首页一个 Tab 里就能浏览直播"，不是再点进去两层）：
+ * 这里**照它的信息层次抄成一层**（要的是在首页一个 Tab 里就能浏览直播，不是再点进去两层）：
  *
  * ```
  * ┌ 搜索直播间（点击 → LiveSearchPage，B 路的搜索页）+ 右侧「分类」筛选按钮
  * └ 直播房间卡片网格（按设置的列数 / 分页 / 下拉刷新 / 失败重试 / 空态）
  * ```
  *
- * ## 分类为什么从"顶部两条标签"改成"筛选弹窗"（第四阶段改动，用户要求）
- * 原先顶级 12 个 + 子分区最多 195 个全铺在搜索框下面，用户原话是"好长的条啊，不好看也不好找"。
+ * ## 分类为什么从"顶部两条标签"改成"筛选弹窗"（第四阶段改动）
+ * 原先顶级 12 个 + 子分区最多 195 个全铺在搜索框下面，条太长、既不好看也不好找。
  * 现在照**影视/番剧**首页那一套（`HomeBangumiFilterSheet.kt`：底部弹窗 + FilterChip + 重置/确定，
  * 选中后回父级刷新列表，见 HomeBangumiContent.kt:411-419）：分类收进 [HomeLiveFilterSheet]，
  * 弹窗内两级联动（先选顶级分区，再选子分区），点「确定」→ 关弹窗 + 刷新卡片。
@@ -169,10 +167,9 @@ internal const val LIVE_RECOMMEND_LABEL = "推荐"
  * `live_grid_span`（每行卡片数）与 `live_sort_type`（默认排序）从 AppStore 的 `state.live` 读，
  * 设置里一改、回到首页 Tab 立刻生效（不需要重进页面）。
  *
- * ## 排序入口搬到筛选弹窗（第五阶段，用户要求）
- * 用户原话："我想在直播的 Tab 首页底栏筛选的那个，在最上面，就是在全部分类的上面，按排序说
- * 排序是热度排序或者是最新排序。这样我们就不用去到设置里面了。设置里面的热度排序选项给它不显示了，
- * 给它删除代码，就移动到首页的底栏筛选那里去。"
+ * ## 排序入口搬到筛选弹窗（第五阶段）
+ * 排序放在这一屏**最上面**、在全部类别之上，可选热度排序 / 最新排序；这样不必再进设置页。
+ * 设置里原来那一项也不再显示、代码一并删除，排序只留首页底栏筛选这一处入口。
  * 所以排序现在**在 [HomeLiveFilterSheet] 里选**（设置页那一项由另一路删除），本文件的职责是：
  *   ① 把当前排序交给弹窗显示（[HomeLiveContent] 里的 `sortType`）；
  *   ② 弹窗点「确定」后，**把新排序写回同一个键** `live_sort_type`（老用户的值和默认值都不变）；
@@ -199,10 +196,9 @@ internal const val LIVE_RECOMMEND_LABEL = "推荐"
  * 本页是**挂在首页 Tab 里的普通 Composable**（`HomePageTab.Live`），不是独立路由，
  * 所以不需要（也**不允许**）在 `BilimiaoPageRoute.kt` 注册 —— 代码检查规则 C 针对的是 ComposePage 子类。
  *
- * ## 第六阶段：分类里多了一个「推荐」（用户要求，排在「全部」**之前**）
- * 用户原话："皮皮 Plus 它直播有一个推荐的 Tab……我想添加在那个全部 tag 那上面，前面就它前面
- * 写一个推荐，然后去推荐之后这些都是应该有系统的 API 分流推荐给我们，我们用它的就行。
- * 然后如果用户想自定义化它会去选择其他的分类什么的。"
+ * ## 第六阶段：分类里多了一个「推荐」（排在「全部」**之前**）
+ * 做法参照竞品 PiliPlus 的直播页：分类那一排的**最前面**多一项「推荐」，
+ * 内容由 B 站推荐接口下发，想自己挑类别时再选下面的分区。
  *
  * 落的三个点，一个不多一个不少：
  *   ① [HomeLiveFilterSheet] 的「顶级分区」那一排，第一个 chip 是**推荐**、第二个才是全部
@@ -212,7 +208,7 @@ internal const val LIVE_RECOMMEND_LABEL = "推荐"
  *   ③ 想自己挑分区/排序的用户，照旧在同一个弹窗里选（行为一个字都没改，仍走 `areaRoomList`）。
  *
  * ★**默认值保持原样**：`selectedParentId` 的初始值仍然是 [LiveAPI.AREA_ALL]（全部），
- *   「推荐」只多一个选项、不改任何既有默认（用户要求"别改用户既有观感"）。
+ *   「推荐」只多一个选项、不改任何既有默认与观感。
  *   谁想用推荐，自己去点一下，点完 `rememberSaveable` 会记住（切 Tab/转屏不丢）。
  *
  * ★顶部那个筛选按钮的文案也跟着走：选「推荐」时按钮上写"推荐"（见 [HomeLiveContent] 的 filterLabel），
@@ -514,7 +510,7 @@ private class LiveRoomListViewModel(
      * 点击区域的划分见 [LiveRoomCard]）。
      *
      * ★uid 从哪来（**实测，不是猜的**）：`room/v1/Area/getRoomList` 的响应里就带 `uid`，
-     *   `LiveRoomItem.uid` 早就建模了它（实体注释原话："主播 uid（= LivePlayerActivity 里 mid 的来源）"）。
+     *   `LiveRoomItem.uid` 早就建模了它（该实体字段的注释写的就是"主播 uid（= LivePlayerActivity 里 mid 的来源）"）。
      *   所以进用户空间**不需要多发一次请求**，卡片上这一次点击直接用列表里已有的 mid。
      *   （★这也是本页能做、而两个「直播搜索」页做不了的原因：`search_live` 实测**不返回 uid**，
      *     详见本次交付报告；那边保持现状，没有硬编任何 id。）
@@ -565,11 +561,11 @@ internal fun HomeLiveContent() {
     // 出现"点的是手游，接口一回来高亮和内容跳到网游"）。0 = 全部。
     // ★第六阶段：-1 = 推荐（[LIVE_PARENT_RECOMMEND]，UI 侧哨兵，不是分区）。
     //   **默认值一个字没改**：老用户点进这个 Tab 看到的还是「全部」的榜单，
-    //   推荐只多一个可选项（用户要求"别改既有观感"）。
+    //   推荐只多一个可选项、不改变既有观感。
     var selectedParentId by rememberSaveable { mutableStateOf(LiveAPI.AREA_ALL) }
     var selectedAreaId by rememberSaveable { mutableStateOf(0) }
 
-    // ★筛选记忆（用户 2026-09-26："首页直播 Tab 的底栏筛选没有持久化记忆，番剧/影视就有"）：
+    // ★筛选记忆（首页直播 Tab 的底栏筛选原先没有持久化，番剧/影视那两处有）：
     //   上面两个 `rememberSaveable` 只活到进程被杀；这里照番剧那套再落一份盘（一个字符串键 `parent:area`），
     //   进页面时异步读回一次。排序有自己的键（live_sort_type），不在这里。
     //   只读一次（`LaunchedEffect(Unit)`），失败就保持默认「全部」——不影响任何现有行为。
@@ -591,7 +587,7 @@ internal fun HomeLiveContent() {
     }
 
     // 筛选弹窗（第四阶段做分类、第五阶段加排序）：显隐 + "点了几次确定"。
-    // ★为什么要有 tick：同一分区再点一次「确定」也要把列表刷一遍（用户："选完关闭弹窗并刷新卡片"），
+    // ★为什么要有 tick：同一分区再点一次「确定」也要把列表刷一遍（确定后关弹窗、随即刷新卡片），
     //   而选中项没变时列表组件不会重建，只能靠这个计数让里面主动 refresh（见 LiveRoomList 的参数）。
     var showFilter by rememberSaveable { mutableStateOf(false) }
     var filterApplyTick by rememberSaveable { mutableStateOf(0) }
@@ -763,9 +759,9 @@ internal fun HomeLiveContent() {
 /**
  * 顶部一行：搜索入口 + 分类筛选入口。
  *
- * 用户原话是"什么界面啊、搜索啊、什么分类啊，给它全抄了"，而搜索页本身由 **B 路**实现
+ * 界面、搜索、分类这几样都照搬 PiliPlus，而搜索页本身由 **B 路**实现
  * （`cn.a10miaomiao.bilimiao.compose.pages.live.LiveSearchPage(keyword)`，路由注册也在 B 路），
- * 这里只放入口：一个**看得见的搜索框**（不是一个 24dp 的小图标 —— 用户抱怨的就是"找不到入口"），
+ * 这里只放入口：一个**看得见的搜索框**（不是一个 24dp 的小图标 —— 入口小到找不到），
  * 点一下带着空关键字进搜索页，由搜索页自己去输入。
  *
  * ★为什么不做成可输入的输入框：在 Tab 里输入要么把键盘顶在首页上、要么输入到一半切 Tab 丢字，
@@ -968,7 +964,7 @@ private fun LiveRoomList(
                 // 双击底部「直播」：在顶部就刷新，不在顶部先回到顶部（和首页其它 Tab 一致）。
                 // 这里只刷房间列表 —— 分类树拉不到时本组件压根不会被组合（父级走的是另一个分支），
                 // 所以不存在"顺手重试分类树"这种需求，多刷一次反而白拉十几 KB。
-                // ★关注区块跟着一起刷（用户要的是"我刚关注的人开播了，双击/下拉就能看到"）：
+                // ★关注区块跟着一起刷（刚关注的人开播了，双击/下拉就应该能看到）：
                 //   它是另一条独立请求，不刷它就会出现"列表是最新的、上面的关注还是十分钟前的"。
                 if (listState.firstVisibleItemIndex == 0) {
                     viewModel.refresh()
@@ -1052,28 +1048,28 @@ private fun LiveRoomList(
  * 为什么不能复用点播的 `VideoItemBox`：
  *   1. 它是**横排**卡片（左边 140x85 封面 + 右边文字），封面比例写死 140:85；直播卡片是
  *      PiliPlus/斗鱼/虎牙那种**竖排**卡片：封面在上（16:9）、标题和 UP 主在下；
- *   2. 它封面右下角放的是"视频时长"，直播没有时长、要放的是**实时人气**。
+ *   2. 它封面右下角放的是"视频时长"，直播没有这个字段，那一格现在也不放任何角标。
  *   硬套只会把它改成"既能点播又能直播"的四不像，所以另写一个，和它的取舍是"宁可多一个卡片，
  *   不要把点播卡片的语义搅浑"。
  *
- * 卡片信息层次（照 PiliPlus 的 `LiveCardVApp`）：封面 16:9 / 右下人气 / 标题 1 行 / 分区名 + UP 名 1 行。
+ * 卡片信息层次（照 PiliPlus 的 `LiveCardVApp`）：封面 16:9 / 标题 1 行 / 分区名 + UP 名 1 行。
  *
  * ★2026-09-29：封面左上角那颗「直播中 / 轮播 / 未开播」角标（`LiveStatusBadge`）**整体删除** ——
- *   用户原话："还有这个直播中，我建议也全删了吧"（理由：这些列表条条都是直播，角标不携带信息、
- *   还挡住封面左上角）。代价：推荐流里"轮播/未开播"不再有文字区分（首页列表本身只列在播房间，
- *   这个区分本来也只有推荐流偶尔用得上），用户明确接受。
+ *   理由：这一屏清一色是直播房，角标多不出来任何信息，却会遮住封面。
+ *   代价：推荐流里"轮播/未开播"不再有文字区分（首页列表本身只列在播房间，
+ *   这个区分本来也只有推荐流偶尔用得上），这一点是明确接受的。
  *
  * ★第六阶段：这张卡片现在被**本页的两条数据源共用**（「全部/分区」的 `getRoomList` 与新增的
  *   「推荐」流），首页里**只此一份**直播卡片 —— 推荐流那边靠实体映射
  *   （`LiveRecommendFeed.toRoomItem()`）把字段对齐成 [LiveRoomItem]，而不是在这里再复制一张
- *   "推荐专用卡片"（用户明确要求"别再复制第四份"）。改样式只需要改这一个函数。
+ *   "推荐专用卡片"（不再复制第四份）。改样式只需要改这一个函数。
  *   （两个直播搜索页各自有一份 private 的 `LiveRoomCard` 副本，那是它们的历史选择，不在本次范围。）
  *
- * ## 两个点击区（第四阶段补：用户问"点圈起来的 UP 名能不能进他的空间"）
+ * ## 两个点击区（第四阶段补：点圈起来的 UP 名也要能进他的空间）
  * ```
  * ┌───────────────────────┐
  * │                （封面）│  ┐
- * │                1.2万人气│  ├─ 点这里 → 进直播间（onClick）
+ * │                        │  ├─ 点这里 → 进直播间（onClick）
  * ├───────────────────────┤  ┘
  * │ 标题一行               │  ┘
  * │ 英雄联盟  Ⓤ 桂圆味蘑菇  │  ← 只有「Ⓤ 名字」这一块 → 进用户空间（onClickUpper）
@@ -1100,7 +1096,7 @@ internal fun LiveRoomCard(
     val context = LocalContext.current
     // 跟随全局「不显示封面」开关（设置→内容与评论），和 VideoItemBox/MiniVideoItemBox 保持一套行为：
     // 用户开了省流，直播这边还在哗哗下封面图，属于"设置时灵时不灵"。
-    // 注意藏掉封面**不影响**人气的显示 —— 卡片仍然能看出"多少人看"。
+    // 注意藏掉封面只影响封面图本身，卡片其余部分（标题/UP 主/分区）照常显示。
     val dataStore = remember { SettingPreferences.run { context.dataStore } }
     val hideCover by remember {
         dataStore.data.map { it[SettingPreferences.VideoHideCover] ?: false }
@@ -1131,28 +1127,10 @@ internal fun LiveRoomCard(
                     failure = placeholder(R.drawable.bili_fail_placeholder_img_tv),
                 )
             }
-            // ★封面左上角的「直播中」角标已删除（2026-09-29，用户："这些列表条条都是直播，
-            //   角标不携带信息、还挡住封面左上角"）—— 见 LiveRoomCard 的 KDoc 与下方墓碑注释。
-            // 右下角：实时人气（没拿到就不显示这一块，不要显示"0人气"——那是在撒谎）
-            if (item.online > 0) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f),
-                            shape = RoundedCornerShape(4.dp),
-                        )
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "${NumberUtil.converString(item.online)}人看过",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
+            // ★封面上的两个叠加角标都已删除（2026-09-29，做减法；别再加回来）：
+            //   ① 左上角「直播中」—— 列表内全部都是直播，该角标不携带信息且会遮挡封面；
+            //   ② 右下角「N人看过」—— `online` 在部分房间是"当前人气"、部分房间才是"累计看过"，
+            //      硬拼成"人看过"属于口径错误（依据：`LiveSearchInfo.kt:84`、`LivePlayerActivity.kt:6378`）。
         }
         Text(
             text = item.title,
@@ -1231,9 +1209,9 @@ private const val COVER_SIZE_SUFFIX = "@672w_378h_1c_"
 // ══════════════════════════════════════════════════════════════════════════
 // 顶部「我的关注 · 正在直播」区块（第七阶段，2026-09-26）
 //
-// 用户原话："我也想抄他这个，在我的那个搜索下面或者上面，添加我已关注的、是否已开播，
-// 开播就在这里显示。然后如果这个列表前面几个自动适配的满了的话，抄他的「查看更多」。
-// 看他怎么写，我们怎么写，直接抄。……我关注的人到底在哪？大海里面找，要么搜，真的有点麻烦。"
+// 需求：在搜索框的上/下方加一条"我已关注的、正在开播"的区块，开播就在这里显示；
+// 这一行按宽度自动适配，装不下时照抄 PiliPlus 的「查看更多」——写法与它保持一致。
+// （原来的痛点是：关注的人在哪儿要找半天，翻列表或者搜都很麻烦。）
 //
 // 抄的是 PiliPlus 首页「直播」Tab 顶部那一条：
 //   标题行「我的关注  N人正在直播            查看更多 ›」 + 一行主播卡片
@@ -1242,8 +1220,8 @@ private const val COVER_SIZE_SUFFIX = "@672w_378h_1c_"
 //   「查看更多 ›」→ 完整列表页（同文件 :297 `Get.to(const LiveFollowPage())`）。
 //
 // ★与 PiliPlus 唯一**故意不同**的一处：它 `totalCount == 0` 时**仍然画标题行**
-//   （`_buildFollowList` 里标题是无条件渲染的）。用户明确要求"不要显示空标题"，
-//   所以本区块的判据是"有在播的人 且 总数 > 0"，否则整块不渲染（见 HomeLiveFollowBlock）。
+//   （`_buildFollowList` 里标题是无条件渲染的）。这里**不显示空标题**，
+//   所以判据是"有在播的人 且 总数 > 0"，否则整块不渲染（见 HomeLiveFollowBlock）。
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -1301,7 +1279,7 @@ private class HomeLiveFollowViewModel(
         }
     }
 
-    /** 下拉刷新 / 双击 Tab 都走这里（用户验收："下拉刷新能刷出新的开播"） */
+    /** 下拉刷新 / 双击 Tab 都走这里（下拉刷新要能刷出新的开播） */
     fun refresh() = load()
 
     private fun load() {
@@ -1384,8 +1362,8 @@ private fun HomeLiveFollowBlock(
         val shown = items.take(columns)
 
         // ★「查看更多 ›」= "这一行装不下"时的出口，判据是**服务端说的人数**而不是我们拿到了几个：
-        //   刚好放满（2 个在播、一行 2 个）或放不满（1 个在播）→ 不显示（用户原话：
-        //   "前面几个自动适配的满了的话……就用「查看更多」"）。
+        //   刚好放满（2 个在播、一行 2 个）或放不满（1 个在播）→ 不显示
+        //   （这一行自动适配排满、装不下时，才用「查看更多」这个出口）。
         //   PiliPlus 同源判据：`itemCount: totalCount > listLength ? listLength + 1 : listLength`
         //   （lib/pages/live/view.dart:322-326，总数比列表长才多插一个"更多"箭头）。
         val hasMore = total > shown.size
@@ -1448,8 +1426,8 @@ private fun HomeLiveFollowBlock(
                     LiveRoomCard(
                         item = item,
                         modifier = Modifier.weight(1f),
-                        // ★点卡片 → **直接进他的直播间**（用户点名要的："我关注的 UP 主直播那里，
-                        //   点进头像应该是直接进入他的直播间了吧？"）。
+                        // ★点卡片 → **直接进他的直播间**（关注区块里点卡片/头像就应当直接进直播间，
+                        //   而不是先进个人空间）。
                         //   走 components/user/LiveBadgedAvatar.kt 里那个公开的 enterLiveRoom：
                         //   它进的是同一个原生播放页（LivePlayerActivity），
                         //   不在这里再抄第三份 setClassName 的 Intent。
@@ -1469,8 +1447,8 @@ private fun HomeLiveFollowBlock(
                     Spacer(modifier = Modifier.weight(1f))
                 }
             }
-            // ★区块与下面直播列表之间的分块线（用户原话："我想在他那里下面去加一个小的分块线，
-            //   可以复用普通视频的那个分块线。记得给他们两个添加距离哦，分块线的上下区域添加一点点距离"）。
+            // ★区块与下面直播列表之间的分块线（要在区块下方加一条小的分块线，
+            //   复用普通视频那个分块线，并且分块线上下各留一点距离）。
             //   复用 = **同一个组件、同一种写法**：androidx.compose.material3.HorizontalDivider ——
             //   普通视频列表页页签下方那条线（RankPage / TimeRegionDetailPage / MyFollowPage 三处
             //   都是 `HorizontalDivider(Modifier…fillMaxWidth())`）用的就是它；首页视频 Tab
@@ -1500,7 +1478,7 @@ private const val HOME_LIVE_FOLLOW_ITEM_KEY = "home-live-follow-block"
  * 区块里一张卡片的**目标最小宽度**。
  *
  * ★为什么不直接跟主网格一样用 300dp：主网格一列就占满手机屏宽（自适应时手机就是 1 列），
- *   而这一块要的是"一屏能扫到几个正在直播的关注"（用户原话"前面几个自动适配的"）。
+ *   而这一块要的是"前面的卡片自动适配、一屏能扫到几个正在直播的关注"。
  *   150dp 在 360~430dp 的手机上正好落 **2 列 × 1 行 = 2 个**，
  *   平板/横屏自动变 3~4 个（上限见 [FOLLOW_MAX_COLUMNS]）。
  */

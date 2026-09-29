@@ -555,7 +555,7 @@ private fun ReplyTextField(
     }
     // ★统一输入框（`MiaoInputBar.kt`，与私信那条是**同一份实现**）：
     //   原来这里是 `Surface(Transparent) + BasicTextField` —— **没有描边**，所以"看不出哪里能打字"；
-    //   用户点名要私信那条"点缀主题色描边"，这里就用同一套（未聚焦 `outline` / 聚焦 `primary`）。
+    //   与私信那条"点缀主题色描边"用同一套（未聚焦 `outline` / 聚焦 `primary`）。
     //   高度/占位符/键盘动作/自动聚焦都沿用原来的语义（90~180dp、"请发表你的评论"、Done 收键盘）。
     MiaoInputField(
         value = state.input,
@@ -591,7 +591,6 @@ private fun ReplyTextToolbar(
         verticalAlignment = Alignment.Bottom
     ) {
         // 表情 / 图片两颗工具按钮：与私信**同一份实现**（`MiaoInputToolButton`，**线框**图标 + 44dp + 同 tint）
-        // 用户原话："图标的表情和图片为什么不一样？我想用那个私信界面的那两个"——这里就是那一套。
         MiaoInputToolButton(
             icon = Icons.Outlined.EmojiEmotions,
             contentDescription = "emoji表情",
@@ -622,7 +621,7 @@ private fun ReplyTextToolbar(
         }
         Spacer(Modifier.weight(1f))
         // ★统一发送按钮（`MiaoInputBar.kt`，与私信那颗是**同一份实现**，只是文案不同）：
-        //   · 评论区 = **「发布」**（用户 2026-09-29 要求改回来："要发布的文字那里改成「发布」，不是「发送」"）；
+        //   · 评论区 = **「发布」**（2026-09-29 改回来：发布场景用「发布」而不是「发送」）；
         //   · 私信 = 「发送」（`MiaoSendButton` 的默认文案，见 ChatPage）。
         //   不填充、小飞机图标两处一致。
         MiaoSendButton(

@@ -62,7 +62,6 @@ import com.a10miaomiao.bilimiao.comm.mypage.SearchConfigInfo
 import com.a10miaomiao.bilimiao.comm.mypage.myMenu
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
-import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
@@ -540,9 +539,9 @@ internal fun SearchLiveContent(
  *
  * 为什么复制而不是共用：那个文件属于另一路交付物，里面的 `LiveRoomCard`/`hotText()` 都是 private ——
  * 要么改它，要么复制一份（本次选择）。
- * ★两份刻意保持一字不差，包括"人气叠在封面右下角"这一处修复：`LiveSearchPage.kt` 里那份
- *   **同步改了同一个位置**（用户说的"在直播页搜索"走的正是那个路由 —— 首页直播 Tab 的搜索框
- *   `HomeLiveContent.kt` 的 LiveSearchEntry → `LiveSearchPage`）。只改一份 = 漏一半。
+ * ★两份刻意保持一字不差，包括"人气叠在封面右下角"与"`hotText()` 只取服务端文案"这两处修复：
+ *   `LiveSearchPage.kt` 里那份**同步改了同一个位置**（"在直播页搜索"走的正是那个路由 —— 首页直播 Tab
+ *   的搜索框 `HomeLiveContent.kt` 的 LiveSearchEntry → `LiveSearchPage`）。只改一份 = 漏一半。
  *   将来若要统一，应抽成公共组件（已写进交付报告的风险项）。
  *
  * 信息层次（用户点名要的四样：封面 / 标题 / UP / 人气）：
@@ -554,7 +553,7 @@ internal fun SearchLiveContent(
  * │ 标题（最多两行） │
  * └───────────────┘
  * ```
- * ★2026-09-29：封面左上角那颗「直播中」角标已删除（用户："还有这个直播中，我建议也全删了吧"）——
+ * ★2026-09-29：封面左上角那颗「直播中」角标已删除 ——
  *   这一屏搜出来的条条都是直播，角标不携带信息、还挡住封面左上角。`LiveSearchPage.kt` 那份
  *   同款角标**同批删掉**（两份卡片一直是"同步改"的约定，见上）。
  *
@@ -659,11 +658,11 @@ private fun LiveRoomCard(
                 Spacer(modifier = Modifier.weight(1f))
             }
             // 人气：**叠在封面右下角**（同首页直播 Tab 的 LiveRoomCard，HomeLiveContent.kt:1088-1107）。
-            // ★为什么从"行内贴右"改成"叠封面右下角"：用户要的是"像直播 Tab 那样固定住"，
+            // ★为什么从"行内贴右"改成"叠封面右下角"：人气要像直播 Tab 那样固定住，
             //   而直播 Tab 的人气就在封面右下角（半透明胶囊）。锚点从"名字行的行尾"换成"封面右下角"后，
             //   人气的位置只由卡片宽度决定，跟主播名一个字都不相干。
-            //   文案仍旧走 [hotText]（优先服务端的 watched_show.text_large），只改位置、不改文案来源。
-            // 空文案（既没有 text_large、online 也是 0）不画这颗胶囊：半透明底的空壳比什么都不画更像 bug。
+            //   文案仍旧走 [hotText]（只取服务端的 watched_show.text_large），只改位置、不改文案来源。
+            // 没有服务端文案就不画这颗胶囊：半透明底的空壳比什么都不画更像 bug。
             val hotText = item.hotText()
             if (hotText.isNotBlank()) {
                 Row(
@@ -699,14 +698,13 @@ private fun LiveRoomCard(
 }
 
 /**
- * 卡片右下角的人气文案：优先用接口给的 `watched_show.text_large`，没有再按 `online` 自己拼。
- * （实测有的房间 `online` 是"当前人气"、有的房间 `text_large` 才是正确说法"9.9万人看过"，
+ * 卡片右下角的人气文案：**只**用接口给的 `watched_show.text_large`，取不到就不显示。
+ * （实测有的房间 `online` 是"当前人气"、有的房间才是"累计看过"，口径并不统一；
  *   只有 `text_large` 是服务端按 `watched_show.switch` 选好的成品文案。）
  */
 private fun LiveSearchRoomItem.hotText(): String {
     val text = watched_show?.text_large.orEmpty()
-    if (text.isNotBlank()) return text
-    return if (online > 0) "${NumberUtil.converString(online)}人看过" else ""
+    return if (text.isNotBlank()) text else ""
 }
 
 /** 搜到 0 条时的提示：比"空空如也"多告诉用户两件事 —— 搜的是什么词、下一步能干什么 */

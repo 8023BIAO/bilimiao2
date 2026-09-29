@@ -26,7 +26,7 @@ import com.a10miaomiao.bilimiao.comm.toast
 /**
  * 应用内 DPI / 字体缩放弹窗。
  *
- * 从 FlagsSettingPage 里抽出来做成公共组件：用户反馈"设置 → 界面 → 显示与字号 → 再点一下"
+ * 从 FlagsSettingPage 里抽出来做成公共组件：原先要走"设置 → 界面 → 显示与字号 → 再点一下"
  * 要三步才出弹窗，现在设置首页那一级直接调它（一步到位）。
  * 值存在 DefaultSharedPreferences 的 app_dpi / app_font_scale，改完用 recreate() 生效。
  */

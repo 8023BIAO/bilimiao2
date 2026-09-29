@@ -19,7 +19,7 @@ import android.net.Uri
  * 用户空间顶部大头像）都改回了裸头像。
  * ★2026-09-29 状态（本轮更正）：当时写的"「直播中」只剩关注区块那一处角标"**也已不成立** ——
  *   那颗角标（`HomeLiveContent.kt` 的 `LiveStatusBadge`，以及直播搜索 / 全站搜索直播 Tab 的同款）
- *   同一批被用户点名删掉了（原话："还有这个直播中，我建议也全删了吧"）。
+ *   同一批一起删掉了。
  *   ⇒ **全工程现在没有任何「直播中」药丸/角标**，本文件是"进直播间"的唯一入口 [enterLiveRoom]。
  *   详情与删除记录见 `HomeLiveContent.kt` 里 `LiveRoomCard` 的 KDoc。
  *

@@ -1121,7 +1121,7 @@ private fun BangumiDetailPageContent(
                                 }
                                 // ★ vc108：一级 ↔ 二级评论之间补上**过渡动画**（和普通视频、专栏、动态评论区一致）。
                                 //   以前这里是 `Box { if (currentReply != null) 二级 else 一级 }` —— **硬切**，
-                                //   没有任何过渡效果，用户反馈"二级评论点进去再退回来，看得眼睛痛"。
+                                //   没有任何过渡效果，二级评论点进去再退回来很晃眼。
                                 //   换成 DataDrivenNavigator（内部就是 SharedTransitionLayout + AnimatedContent），
                                 //   顺带把评论头像的 sharedElement 共享元素动画也带上（ReplyItemBox 拿到 scope 时会用）。
                                 DataDrivenNavigator(

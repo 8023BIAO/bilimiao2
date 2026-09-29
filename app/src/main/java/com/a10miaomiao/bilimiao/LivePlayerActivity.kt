@@ -92,8 +92,8 @@ import com.a10miaomiao.bilimiao.comm.live.entity.LiveStatus
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
-// ★本轮：顶栏「在线人数」的数字文案复用首页直播卡片**同一个**格式化函数
-//   （`HomeLiveContent.kt` 的 `"${NumberUtil.converString(item.online)}人气"`），
+// ★数字文案统一走 `NumberUtil.converString`（社区、视频卡片等多处共用同一份实现；
+//   //   本页顶栏「在线人数」已于 2026-09-26 撤掉，首页直播卡片的数字角标也已于 2026-09-29 删除）。
 //   所以"1.2万"这个口径全 App 只有一份实现。
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
@@ -137,19 +137,19 @@ import kotlin.math.roundToInt
  * │        ★状态文字**只在异常/过渡时显示**（正常播放时 `GONE`，顶栏只剩返回 + 标题）——
  * │          见 [renderStatus]；在线人数跟着房间号写在同一个括号里，见 [renderRoomTitle]。
  * ├─ 底栏（bottomBar）：**输入条 + 五颗按钮（同一行）**（弹幕 / 画质 / **设置** / 画中画 / 旋转）
- * │        ★第八批：竖屏与横屏**同一套一行版式**（用户："把它和那个几个按钮放一起"）；
+ * │        ★第八批：竖屏与横屏**同一套一行版式**（需求：把控件与相邻按钮并排）；
  * │          输入条**与五颗按钮同一套显隐**（点画面唤出、[CONTROLS_AUTO_HIDE_MS] 后一起消失，
  * │          用 INVISIBLE 保住占位；"正在输入"不收、PiP 里 GONE —— 见 [applyControlsVisibility]）。
  * │          「刷新 / 发弹幕」两颗按钮已删：「刷新」改自动（[autoRetryLiveStream]）+ 弹窗里的
  * │          「重新取流」，「发弹幕」变成输入条本身（"画中画"曾搬到顶栏，用户改主意后又回了底栏）。
  * │        （按钮是纯文字按钮，**不横滑**；五颗**等宽**、同一档字号 —— [applyBottomBarTextSizes]）
- * │        ★第十四批：「设置」回来了（用户点名"画质的后面、PIP 的中间"；第二批删过它，
+ * │        ★第十四批：「设置」回来了（位置在画质与画中画之间；第二批删过它，
  * │          这次弹的是与「首页直播 Tab 底栏筛选」同一套外壳的 Compose 弹窗，见 [settingButton]）。
- * │        ★第四批：**「暂停/播放」与它占的那一格已删**（用户："我需要腾空间"），
+ * │        ★第四批：**「暂停/播放」与它占的那一格已删**（为底栏腾空间），
  * │          暂停入口见下面第四条；「重试」改名「刷新」（功能一行未改）——
  * │          ★第七批起「刷新」这颗按钮本身也没了，改成自动追流，见下面第七批。
  * │        ★第五批：**「听音频」与「UP主」两颗按钮连同它们背后的功能一起删掉**
- * │          （用户："多一事不如少一事"）—— 见下面第五批那一段。
+ * │          —— 见下面第五批那一段。
  * └─ ProgressBar                               缓冲指示
  * ```
  * ★竖屏下"弹幕列表"这块面板**不在这棵树里**：它由弹幕宿主注入到 activity 内容视图的最上层
@@ -192,7 +192,7 @@ import kotlin.math.roundToInt
  *    `TOP|START + 整页宽` 定位，右侧贴边的亮度气泡正好落在窗口右边缘上，窗口一旦越过屏幕
  *    右边缘就被裁掉）。★这一版**仍然是悬浮窗**，竖屏下又暴露了同一类坐标系问题的另一半，
  *    第三批把它整体搬进页面（见下），这里保留记录以便回溯"为什么是三步走到今天"；
- * 2. **删掉底栏「设置」按钮与它弹的直播设置弹窗**（用户："用户想设置自己退出来再去设置"）：
+ * 2. **删掉底栏「设置」按钮与它弹的直播设置弹窗**：
  *    设置项一个没少，只是入口收敛到「设置 → 直播设置」页（原来的 `showLiveSettingsDialog` 已删）；
  * 3. **PiP 播放/暂停按钮点不动**：根因是动作 Intent 用了 `setClass()`（显式组件）而接收器
  *    是**动态注册**的 —— 详见 [buildPipActions] 的证据链；
@@ -233,7 +233,7 @@ import kotlin.math.roundToInt
  *    **不挡底栏**（矩形底边 = 底栏顶边 + 宿主再夹一道）、**不要切换按钮**（宿主侧已无胶囊）。
  *
  * ## 第四批（用户实测反馈驱动 —— 底栏字号 / 听音频居中 / 竖屏抬头 / 另外四条）
- * 1. **PiP 回来底栏字号变小**（用户："我 PIP 返回软件它就变小了，其他字体好像是正常的"）
+ * 1. **PiP 回来底栏字号变小**（从 PiP 返回后仅底栏字号缩水，其他字体不变）
  *    → 当时定位到的根因是**底栏分行与版式按 `Configuration.orientation` 推导**：进 PiP 时系统会带着
  *    "小窗尺寸"的配置回调一次 [onConfigurationChanged]，而 16:9 小窗在竖屏手机上的方向就是
  *    LANDSCAPE → 底栏被按**横屏规则**重排成"一行 10 颗"，每格宽度只剩竖屏的一半，
@@ -244,30 +244,30 @@ import kotlin.math.roundToInt
  *    `LiveDanmakuOverlayHost` 的 `portrait = h > w` 对齐），并且**尺寸一变就重排**
  *    （[installPageLayoutWatchers] → [syncPageLayoutToRealSize]），字号因此只由"格子宽度"决定，
  *    与首次进入逐像素一致。完整证据链与 AOSP 依据见报告《直播优化-播放页第三批-说明.md》§1。
- *    ★★**用户复测仍然"变小了"** —— 真正的病根在**平台 autosize**（见下面第五批第 3 条），
+ *    ★★**复测仍然偏小** —— 真正的病根在**平台 autosize**（见下面第五批第 3 条），
  *    这一批的"字号归一 + 交给 autosize"其实从来没生效过（③ 是空的）。
- * 2. **听音频舞台整体垂直居中**（用户："往居中一点，不然它全部顶上去了"）：
+ * 2. **听音频舞台整体垂直居中**（原来整体顶在上方）：
  *    ★该舞台与整个听音频模式已在第五批删除，这里只留记录。
- * 3. **竖屏视频带下移到「状态栏 + 顶栏」之下**（用户："太顶了……应该放在那个顶栏和状态栏下面"）：
+ * 3. **竖屏视频带下移到「状态栏 + 顶栏」之下**（原来贴得太靠上）：
  *    顶边 = [videoBandTopPx]（顶栏底边，顶栏那份 insets 里已经含状态栏内边距）；
  *    同时**底边永远等于列表槽 [danmakuListSlot] 的顶边**（[measurePortraitStage] 的
  *    `listTop = videoContainer.bottom` + [installPageLayoutWatchers] 里那两只监听器），
  *    中间不留黑缝。底栏是浮层、4 秒自动隐藏，但**视频始终在它下面**（用顶栏最后一次布局的位置，
  *    与底栏"隐藏后位置不变"是同一套依据）。
- * 4. **底栏删掉「暂停/播放」那一颗**（用户："第一个暂停和播放那个按钮给取消掉吧，我需要腾空间"）：
+ * 4. **底栏删掉「暂停/播放」那一颗**（为底栏腾空间）：
  *    暂停/播放入口一个没少 —— ① **双击画面**（[TapCatcher]，受「设置 → 直播设置 → 双击暂停」
  *    `live_double_tap_pause` 管、默认开）；② PiP 小窗上的动作按钮（[buildPipActions]）。
  *    唯一要留意的边界写在报告"未做/风险"里（用户把「双击暂停」关掉时，画面模式就只剩 PiP 这一条路）。
- * 5. **发弹幕成功即关输入弹窗**（用户："发送完成应该把那个提示框给马上隐藏了"）：
+ * 5. **发弹幕成功即关输入弹窗**：
  *    当时那个发弹幕弹窗的 `submit()` 里成功分支补一次 `dismiss()`；失败仍然留着让用户改文本重发。
  *    ★第七批：那个弹窗已整块删除（改成常驻输入条），这一条只作为历史记录保留。
- * 6. **清晰度/线路弹窗里的文字居中**（用户："里面的文字没有居中，它靠边上去了"）：
+ * 6. **清晰度/线路弹窗里的文字居中**（原来行文字未居中、贴着弹窗边缘）：
  *    [LiveListDialog.show] 的行文案与副标题改成居中（弹窗标题仍是常规 `MaterialAlertDialog` 观感）。
- * 7. **底栏「重试」→ 第一个按钮「刷新」**（用户："放到第一个按钮去……是否可以叫符合名字一点的刷新？
- *    它的功能不要乱改"）：[orderedBottomButtons] 把它排到最前，文案改「刷新」，
+ * 7. **底栏「重试」→ 第一个按钮「刷新」**（位置排到最前，文案改得更贴切，
+ *    功能一行不改）：[orderedBottomButtons] 把它排到最前，文案改「刷新」，
  *    实现仍然是 [retryPlayback]（重新取流/追到最新直播进度，一行未改）。
  *
- * ## 第五批（本轮，用户明确要求"做减法"）
+ * ## 第五批（本轮，做减法）
  * 1. **删掉底栏「UP主」按钮与它带来的整条链路**：按钮、`openUpSpace` / `navigateToUpSpace` /
  *    `openSpaceOverlay` / `closeSpaceOverlay` / `resolveAnchorUid`、`MainActivityRef`、
  *    `UpSpace` 那几个字段与常量、`cn…compose.pages.user.UserSpaceOverlayHost`（文件已删）；
@@ -278,13 +278,13 @@ import kotlin.math.roundToInt
  *    删它会牵动 compose 侧，风险更大）。★第十五批第 5 条那条调用端（点标题进 UP 空间）已按用户
  *    要求**整体回退**（"删除回退……做减法"），所以这里又回到"留着但不调"的状态。
  * 2. **删掉「听音频」功能**（按钮 / 状态 / 全部分支 / 音频舞台 / `LiveAudioService` / Manifest 条目）。
- * 3. **PiP 期间顶栏与底栏一律不可见**（用户："PIP 模式下，我想让它隐藏那个底部按钮，还有顶部的
- *    状态栏各种信息按钮"）：收口成一个门控 [controlsAllowed]（= 不在 PiP 且没有"即将进入 PiP"），
+ * 3. **PiP 期间顶栏与底栏一律不可见**（两栏在小窗里会遮住大部分画面）：
+ *    收口成一个门控 [controlsAllowed]（= 不在 PiP 且没有"即将进入 PiP"），
  *    并在**进小窗的第一步**（[enterPipMode] / [onUserLeaveHint]）就把控制条收掉、撤掉自动隐藏计时，
  *    这样进小窗那 1~2 秒也不会闪出来；退出小窗再恢复（[onPictureInPictureModeChanged]）。
  *    ★病根是 [onConfigurationChanged] 里的 `showControlsTemporarily()`：进小窗时系统会派发
  *    一次小窗尺寸的配置变更，它把关掉的控制条又打开了（同时也让按钮按小窗宽度被测量/缩字）。
- * 4. **底栏字号改成确定性写法**（用户："返回直播间的话，它那些按钮的字体又变小了"）：
+ * 4. **底栏字号改成确定性写法**（回到直播间后底栏字号会再次缩水）：
  *    不再用平台 `autosize`，改成**固定档位 [BOTTOM_BUTTON_TEXT_SP_STEPS]（14/13/11/9sp）+
  *    按真实格宽选一档**，并且**底栏每次布局都按它自己的真实宽度重算一遍**
  *    （[applyBottomBarTextSizes]，挂在 [bottomBar] 的布局监听上）——
@@ -292,27 +292,26 @@ import kotlin.math.roundToInt
  *    完整根因（AOSP 源码级）见报告《直播优化-删UP主与听音频-说明.md》§4。
  *
  * ## 第六批（本轮，两处交互调整）
- * 1. **返回键分级**（用户："直播间全屏的时候，我按一下返回，应该是退出全屏的状态，返回到竖屏。
- *    如果是竖屏的状态返回的，应该是退出直播间。"）：系统返回键与顶栏返回图标**共用** [handleBack] ——
+ * 1. **返回键分级**（按一次返回：全屏 → 退出全屏回竖屏；竖屏 → 退出直播间）：
+ *    系统返回键与顶栏返回图标**共用** [handleBack] ——
  *    横屏（= 全屏）→ [exitFullscreenToPortrait]（切回竖屏、**留在直播间**）；竖屏 → [exitPage]。
  *    ★与「自动旋转」不打架的关键：切竖屏时同时置 [orientationPinnedByUser]（会话级），
  *    否则 [applyAutoRotatePolicy] 会在紧接着的 [onConfigurationChanged] 里把方向断言回
  *    `FULL_SENSOR` → 手机还横着 → 立刻又被转回横屏。设置键 `live_auto_rotate` 一个字节都不写。
  *    ★★本轮修正（用户实测报的 bug）：**自动旋转=开时这个钉住是"一次性"的** ——
  *    设备下一次真的被转动就交还给自动旋转（见 [pinOrientationByUser] / [releaseOneShotOrientationHold]），
- *    否则"点一次旋转 / 按一次返回"就等于把自动旋转永久关掉了（用户原话："点旋转按钮之后，你旋转
- *    方向它是不跟随的，除非你手动按那个旋转按钮才能切换方向"）。自动旋转=关时才是永久钉住。
- * 2. **顶栏返回只留图标**（用户："去掉那个顶栏的返回，只保留一个图标，就是复用我们视频播放器的
- *    那个返回图标，也就是我们其他页底栏的那个返回图标。"）：原来的「← 返回」文字按钮
+ *    否则"点一次旋转 / 按一次返回"就等于把自动旋转永久关掉了（此后方向只能靠手动按「旋转」按钮切换）。
+ *    自动旋转=关时才是永久钉住。
+ * 2. **顶栏返回只留图标**（复用点播播放器与其他页底栏那颗返回图标）：
+ *    原来的「← 返回」文字按钮
  *    （`actionButton` + 主题色药丸底）换成 24dp 的
  *    `R.drawable.ic_arrow_back_white_24dp` —— 点播播放器全屏那颗返回用的就是它
  *    （`widget/player/DanmakuVideoPlayer.kt:1094`），与「其他页」AppBar 的 `ic_back_24dp`
  *    是同一条 Material arrow_back 路径（[buildUi] 顶栏那一段有完整的选型理由）。
  *
  * ## 第七批（本轮，用户拍板的"底栏重构"）
- * 用户原话与逐条落点：
- * 1. **发弹幕 = 常驻输入条**（"发弹幕变常驻输入条……记得用安卓的 API 把它那个改成发送，
- *    我们就省了一个发送的按钮了，也省出那个弹窗按钮"）：
+ * 逐条落点：
+ * 1. **发弹幕 = 常驻输入条**（软键盘回车键改走「发送」，据此去掉发送按钮与弹窗按钮）：
  *    底栏最上面一条 [danmakuInput]（hint「发个弹幕…」），`imeOptions = IME_ACTION_SEND` ——
  *    软键盘回车键就是「发送」，**没有弹窗、没有发送按钮**；发送中禁用 + 转圈
  *    （[danmakuSendProgress]），成功清空输入并收起键盘，失败**保留文本**并把
@@ -333,7 +332,7 @@ import kotlin.math.roundToInt
  *    内容高度仍按 [dialogContentMaxHeightPx] 的 **62% 真机屏幕**封顶并可滚，**没有「取消」按钮**。
  * 5. **「画中画」挪到顶栏**（★已回退，且死代码已删）：第七批曾把画中画做成**顶栏图标**
  *    （与顶栏返回同一套风格：白色 24dp 图标、[BACK_ICON_BOX_DP]dp 点击区、borderless ripple）。
- *    用户随后改主意 ——"为什么要把画中画移到顶栏去？简直就是没有必要" —— 画中画**留在底栏**
+ *    随后又改回底栏 —— 画中画**留在底栏**
  *    （[orderedBottomButtons] / [pipButton]）。那颗**从未挂载**的顶栏图标（字段、创建代码、
  *    被注释掉的 `topBar.addView`、主题刷新那一行）已作为死代码**整体删除**：
  *    顶栏现在只有 **返回 + 标题 + 状态文字**（状态文字仅异常时显示，见 [renderStatus]）。
@@ -383,8 +382,8 @@ import kotlin.math.roundToInt
  * 弹幕列表区跟着缩短：底栏顶边上移 → [installPageLayoutWatchers] 里那只底栏监听器立刻重跑
  * [measurePortraitStage]，列表槽与宿主面板一起让位。
  *
- * ## 第九批（用户实测三条："横屏开着键盘转回竖屏"这条路上的键盘/转屏组合）
- * 用户原话与现象（三张真机截图逐像素核过，证据见交付报告）：
+ * ## 第九批（用户实测三条，都出在横屏开键盘后转回竖屏这条路上）
+ * 现象（三张真机截图逐像素核过，证据见交付报告）：
  * 1. **转回竖屏后弹幕区一大块黑色空白** —— 面板的矩形**冻在键盘动画的中间态**上（底边停在半空，
  *    转屏、收键盘都不再跟着走）；
  * 2. **键盘上方有半透明残影** —— 面板底边停在**键盘抬起之前**的底栏位置（更靠下），
@@ -404,7 +403,6 @@ import kotlin.math.roundToInt
  *   （宿主新入口 `notifyPortraitListGeometryChanged`，同步、不依赖重组时机）。
  *
  * ## 第十二批（本轮：退后台"只出声、不解码视频"，全自动、无按钮）
- * 用户原话（语音）："我说的后台音频继续播放，可以看一下我的其他的普通视频，听音频的。"
  * 落成一句话：**照点播那条已有的"只听声音"形态，把直播页的退后台行为补上"只出声"这一档**。
  *
  *  1. **门控 = 已有设置键 `live_background_play`**（「后台继续直播」，**默认关**）：
@@ -426,10 +424,9 @@ import kotlin.math.roundToInt
  *     所以只在"真 onStop（熄屏 / 关掉小窗设置后切走 / 小窗被收起）"时才需要它。
  *
  * ## 第十五批（用户 5 条实测反馈，★第 5 条已按用户要求整体回退）
- * 用户原话与逐条落点（每条在对应符号上都有完整 KDoc，这里只做地图）：
+ * 逐条落点（每条在对应符号上都有完整 KDoc，这里只做地图）：
  *
- * 1. **状态栏"不跟随主题"**（"我切换安卓主题为白色，我再退出直播间，再进入直播间，这个时候状态栏
- *    它就不跟随了。它被隐藏起来了……别把横屏的隐藏给搞掉就行了"）：
+ * 1. **状态栏"不跟随主题"**（切到白色主题、退出再进直播间后，状态栏被隐藏了；横屏的隐藏保持不变）：
  *    根因 = **图标明暗听主题的**（`res/values/themes.xml:19` 的 `android:windowLightStatusBar=true`，
  *    `values-night` 那份是 false），而**底色是本页自己画的**（纯黑窗口底 + 黑蒙层顶栏/底栏）——
  *    浅色主题下深色图标压在黑底上 = 用户看到的"被隐藏了"。
@@ -453,8 +450,7 @@ import kotlin.math.roundToInt
  *    最后一次布局的位置，几何拿不到时兜底"状态栏 insets + 顶栏内容高"，绝不算成 0）。
  *    **只加判据、不改版式**：[applyVideoStageLayout] / [measurePortraitStage] 与横屏画面高度
  *    一个字节没动，单击/双击语义也没动（那条 return false 与"横向滑动放行"走同一条路）。
- * 5. ~~**点标题进 UP 空间**~~ —— ★**已按用户要求整体回退**（用户实测后原话："我的那个直播间点击那个
- *    房间号，就顶栏，它跳转到 up 主页那个。哎，删除回退，妈的 bug 太多了，做减法。"）：
+ * 5. ~~**点标题进 UP 空间**~~ —— ★**已整体回退**（bug 较多，按做减法撤销）：
  *    这一条、以及后来为修它的返回栈而复刻的**页内浮层**（`attachSpaceOverlay` / `closeSpaceOverlay` /
  *    `handOffToMainHost` / `spaceOverlayBack` / 返回键分层）连同 comm 桥上的浮层 API
  *    （`SpaceOverlayHandle` / `SpaceOverlayFactory` / `registerOverlay` / `createOverlay`）
@@ -489,7 +485,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * ★为什么不复用点播的 `media_control`（诊断报告 §0「附带隐患」+ §5 第 2 条）：
          *   ① 那个 action 是**隐式广播**且 PendingIntent 身份只认（包名, requestCode, filterEquals）
          *      —— 不比 extras，于是全 App 所有 PiP 实例共享同一批 PI token，
-         *      两个播放器同时在小窗里时**一次点击会同时操作两个**（用户原话"它和我的普通视频在抢那个接口"）；
+         *      两个播放器同时在小窗里时**一次点击会同时操作两个**（两个播放器在抢同一个接口）；
          *   ② 任何 App 都能发那个 action（`RECEIVER_EXPORTED`）。
          *   所以直播用**自己的 action + 自带包名的定向 Intent + 自留的 requestCode**，
          *   与点播的动作通道彻底分开：谁的小窗被点，就只有谁的播放器动。
@@ -538,7 +534,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         /**
          * 手势气泡贴边时**额外**留的边距（dp）。★取 0 是有意的：
          * GSY 那两份布局自带留白（音量胶囊在 90dp 盒子里居中 ≈ 25dp 起；亮度图标 `marginEnd=15dp`），
-         * 而那正是用户认可的横屏观感（"距离左边一点距离，右边也是距离一点距离"）。
+         * 而那正是横屏下要的观感（左右各留一点距离）。
          * 再加一层边距会让横屏跟着变 —— 本轮要求"横屏不许回归"，所以统一 0：
          * 横竖屏用的是同一行代码、同一个值，横屏与已验证的那版逐像素一致。
          */
@@ -569,7 +565,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * "分行"这件事不再存在：**竖屏与横屏是同一套一行版式**（★第八批统一，见 [rebuildBottomBar]），
          * 所以那个常量连同 [rebuildBottomBar] 里的 `chunked(perRow)` 一起删了。
          * [BOTTOM_ROW_EQUAL_CELL_MIN_COUNT] 保留：它仍是"一行里按钮多了要不要均分"的规则，
-         * 而现在 5 颗**恒走"等宽格"那一支**（用户第 3 条："同高、同宽（等分）、同内边距"；
+         * 而现在 5 颗**恒走"等宽格"那一支**（第八批第 3 条：同高、同宽、等分、同内边距；
          * ★第十四批加第 5 颗「设置」之后这个数更大，规则照样恒成立）。
          */
 
@@ -602,7 +598,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         /**
          * ★第八批：底栏里**输入框的保底宽度**（dp）—— "输入框不被压成一条缝"的硬门限。
          *
-         * 输入条与底栏那几颗按钮现在**同一行**（用户："把它和那个几个按钮放一起"；
+         * 输入条与底栏那几颗按钮现在**同一行**（需求：把输入条与相邻按钮并排；
          * ★第十四批起是 5 颗：弹幕 / 画质 / 设置 / 画中画 / 旋转），
          * 而按钮的格宽由 [applyBottomBarTextSizes] 按"最宽的那条文案"算出来 ——
          * 算之前先把这 [DANMAKU_INPUT_MIN_WIDTH_DP]dp 从整行里**扣掉**：
@@ -771,7 +767,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         /**
          * 亮度手势灵敏度：**与点播（GSY）完全一致 —— 划满 3 个屏高走完整条行程**。
          *
-         * ★2026-09-26 用户实测"手势太灵敏，想下滑看状态栏，一滑就全黑"。
+         * ★2026-09-26 实测：下滑看状态栏时会误触亮度手势，一滑即全黑。
          *   病根：这里的系数原来是 `0.9`，即"一屏就滑掉 110% 行程"；而点播是
          *   `增量 / (屏高 × 3)` 累加 ⇒ 3 屏才走完全程。绝对位移与增量写法是线性等价的，
          *   **差的就是这个系数**（1/0.9 ≈ 1.11 屏 vs 3 屏，灵敏度差约 3.3 倍）。
@@ -1085,7 +1081,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * bottomBar(VERTICAL) = [ row(HORIZONTAL: danmakuInputRow(weight=1) + bottomButtons), danmakuInputError ]
      *                          ↑ 输入框吃剩下的宽度                   ↑ 5 颗等宽格
      * ```
-     * ★竖屏与横屏**同一套版式**（★第八批：用户要"输入框和那几个按钮放一起"，见 [rebuildBottomBar]）。
+     * ★竖屏与横屏**同一套版式**（★第八批：输入框与那几颗按钮并排一行，见 [rebuildBottomBar]）。
      * ★它自己**不 GONE**：显隐全落在孩子身上（输入条与五颗按钮都走 `INVISIBLE`）——
      *   于是隐藏时底栏高度不变、底栏顶边不变，弹幕列表区的底边也就不会跟着跳。
      * ★它的**顶边**就是竖屏弹幕列表区的底边（[measurePortraitStage]），
@@ -1104,8 +1100,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private lateinit var danmakuInputRow: LinearLayout
 
     /**
-     * **弹幕输入框**（★第七批的核心，用户："发弹幕变常驻输入条……把它那个改成发送，
-     * 我们就省了一个发送的按钮了，也省出那个弹窗按钮，很烦，感觉又多走一步"）。
+     * **弹幕输入框**（★第七批的核心：弹幕改为常驻输入条，回车键即「发送」，
+     * 因此不再需要发送按钮与弹窗按钮）。
      *
      * · hint = 「发个弹幕…」，`imeOptions = IME_ACTION_SEND` → 软键盘的回车键就是**发送**，
      *   不需要发送按钮、也不弹任何窗口（[submitDanmakuInput]）；
@@ -1126,8 +1122,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 输入条下方的失败提示行（`GONE` 常态）。
      *
-     * 为什么不只 toast（用户："失败**保留文本**并把 `LiveDanmakuClient.lastSendError`（服务端原文）
-     * 显示出来（toast 或输入条下方的提示）"）：toast 两秒就没了，而"为什么被拒"
+     * 为什么不只 toast（失败时不丢文本：把 `LiveDanmakuClient.lastSendError`（服务端原文）
+     * 同时给到 toast 与输入条下方的提示）：toast 两秒就没了，而"为什么被拒"
      * （敏感词 / 频率限制 / 未登录 / 长度超限）恰恰要边改文本边看，所以两条路一起给：
      * toast 负责"立刻知道"，这一行负责"看得见地留着"。见 [showDanmakuInputError] 的 6 秒自动收起。
      */
@@ -1139,9 +1135,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★为什么按钮要独立成一层：显隐时只换**这一层**的 `visibility`（`VISIBLE` ↔ `INVISIBLE`），
      *   而用 `INVISIBLE`（不是 `GONE`）是为了**保住占位** ——
      *   底栏高度不变 → 底栏顶边不变 → 弹幕列表区不随控制条显隐跳来跳去
-     *   （这正是"上下留白是用户有意留给控制栏的，不要优化掉"那条要求的落点）。
+     *   （这正是那条要求的落点：控制条上下留白是刻意留的，不要优化掉）。
      * ★第八批：它的**宽度**由 [applyBottomBarTextSizes] 按"等宽格 × 颗数"写成固定值
-     *   （里面每颗都是 `weight = 1` 的等分格）—— 用户第 3 条要的"同高、同宽（等分）"就落在这里。
+     *   （里面每颗都是 `weight = 1` 的等分格）—— 第八批第 3 条要求的同高、同宽（等分）就落在这里。
      *   ★第十四批加第 5 颗（[settingButton]）时**这一行代码没动**：颗数是从
      *     [orderedBottomButtons] 数出来的，宽度与字号自动按 5 格重算。
      */
@@ -1157,7 +1153,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   5 个字的文案会把整行字号从 14sp 拖到 9sp（[applyBottomBarTextSizes] 按"最宽的文案"统一挑档）。
      *   当前画质/线路**一个信息都没少**：点开这颗按钮，「清晰度」段与「线路」段的副标题就是
      *   「当前：原画（qn 10000）」「当前：线路 1/2」（[showStreamDialog]），当前档还带打勾。
-     *   ★本轮更正一句旧注释：它**不再**在顶栏状态行里出现（用户拍板"当前画质/线路从状态行去掉"，
+     *   ★本轮更正一句旧注释：它**不再**在顶栏状态行里出现（当前画质/线路不再写进状态行，
      *     见 [renderStatus] 的判定清单）—— 顶栏现在只在异常/过渡时显示状态文字。
      *   想改回"带当前值"：把这里与 [delegateListener] 里那处换成 `"画质·$desc"` 即可（一行）。
      */
@@ -1176,14 +1172,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private lateinit var settingButton: TextView
 
-    /** 底栏「旋转」（用户点名要留在底栏："那个旋转一定要放到底栏来啊，它是经常用到的"） */
+    /** 底栏「旋转」（常用按钮，固定留在底栏） */
     private lateinit var rotateButton: TextView
 
     // ★第七批删掉的字段（连同它们的按钮一起）：
     //   · `lineButton`   —— 线路并进「画质·线路」弹窗的第二段（[showStreamDialog]）；
     //   · `sendDanmakuButton` —— 被常驻输入条 [danmakuInput] 取代；
     //   · `retryButton`  —— 「刷新」改自动（[autoRetryLiveStream]），手动入口在弹窗里；
-    //   · `pipButton`    —— ★2026-09-26 又搬回底栏了（用户："没必要移到顶栏"）；顶栏那颗图标（`pipIconButton`）已整体删除（见 [buildUi] 顶栏那一段）。
+    //   · `pipButton`    —— ★2026-09-26 又搬回底栏了；顶栏那颗图标（`pipIconButton`）已整体删除（见 [buildUi] 顶栏那一段）。
 
     // ── 播放 / 弹幕 ─────────────────────────────────────────────────────────
     private var delegate: LivePlayerDelegate? = null
@@ -1192,9 +1188,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * ★第十四批：底栏「设置」按钮弹出的**直播设置弹窗**的宿主（compose 模块的 View 桥）。
      *
-     * 用户原话："我们在直播间底栏，画质的后面、PIP 的中间添加一个按钮，就是设置。就是会弹出直播间的
-     * 设置选项、设置页。**记得用我的那个自定义的全屏弹窗**，不管你怎么转屏，它都会自己适配。
-     * 就是我的那个底栏筛选的那个弹窗。"
+     * 底栏「设置」的位置与弹窗形态：放在画质与画中画之间，弹出直播间的设置选项/设置页，
+     * 复用自定义全屏弹窗（即首页底栏筛选那套外壳），转屏会自己适配。
      *
      * · 弹窗本体（外壳 `AutoSheetDialog` + 设置项）在 `LiveSettingSheet.kt`；本页只负责
      *   "什么时候弹/收"（[showLiveSettingSheet] / [dismissLiveSettingSheet]），
@@ -1220,8 +1215,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     //   清晰度 + 线路 = **同一个** [LiveListDialog]（内部是 MaterialAlertDialog +
     //   TabLayout 两段 + 定高可滚列表，见 [showStreamDialog]）。
     //   ★第七批：**发弹幕的弹窗已整块删除** —— 它被常驻输入条 [danmakuInput] 取代
-    //     （用户："省出那个弹窗按钮"），所以这里只剩一个弹窗字段。
-    //   ★底栏「设置」与它弹的直播设置弹窗**已删**（用户："用户想设置自己退出来再去设置"）——
+    //     （省掉那个弹窗按钮），所以这里只剩一个弹窗字段。
+    //   ★底栏「设置」与它弹的直播设置弹窗**已删**（底栏不再放设置入口）——
     //     那些设置一个没少，入口只剩「设置 → 直播设置」页（Compose 的 `LiveSettingPage`）。
     private var streamDialog: LiveListDialog? = null
 
@@ -1312,9 +1307,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private var danmakuEnabled = true
 
     /**
-     * **该直播间是不是"关闭了弹幕/评论"的房间**（★本轮新增。用户原话："某一些直播间，它是关闭了
-     * 评论的那个选项。如果能获取到它关闭评论 API 的话，那么这个时候就不应该去显示那个发送弹幕的
-     * 输入框，还有那个弹幕区域了。还有弹幕的那个，不管横屏竖屏，应该给它关了。"）。
+     * **该直播间是不是"关闭了弹幕/评论"的房间**（★本轮新增：能拿到"关闭评论"的判据时，
+     * 就不显示发送弹幕的输入框与弹幕区域；弹幕本身不管横屏竖屏都关掉）。
      *
      * ```
      * true  → 输入条不再能输入/发送（原位只留一行很轻的提示）、竖屏弹幕列表不显示、滚动弹幕不渲染
@@ -1361,7 +1355,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * "主播已下播 / 未开播"这个弹窗**本次进房是否已经弹过**。
      *
-     * ★用户明确要求"不要自动循环弹窗"：一次下播事件只弹一次；真的重新开播（`PLAYING`）之后
+     * ★一次下播事件只弹一次（不自动循环弹窗）；真的重新开播（`PLAYING`）之后
      *   才重新允许下一次（那时是**新的一次**下播，再弹一次才是对的）。
      */
     private var offlineDialogShown = false
@@ -1372,8 +1366,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * **本次进房有没有真的播出过画面**（`PLAYING`）—— 只用来决定文案说"未开播"还是"已下播"。
      *
-     * ★为什么用"出过画面"而不是列表里那个 `live_status`：列表可能是旧的（用户实测："我之前的列表
-     *   还是'他开播'的状态，我进去其实他没开播"），而这个标记是**本页亲眼看到的**事实。
+     * ★为什么用"出过画面"而不是列表里那个 `live_status`：列表可能是旧的（实测：列表状态可能已经过期，
+     *   进去其实没开播），而这个标记是**本页亲眼看到的**事实。
      */
     private var hasPlayedThisRoom = false
 
@@ -1430,7 +1424,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   [TapCatcher.onSingleTapConfirmed] 的单击显隐判据）；
      *   "回到全屏该恢复成什么样"才是它唯一该被读的地方（[onResume] / [onStop] 的恢复分支）。
      * ★第七批起它不管输入条（那时输入条常驻）；★第八批起**又管了** —— 输入条与按钮同一套显隐
-     *   （用户："为什么不和那几个按钮一起显示一两秒呢？"），只有"正在输入"与 PiP 两档例外，
+     *   （与那几颗按钮同一套显隐：显示一两秒后一起收起），只有"正在输入"与 PiP 两档例外，
      *   见 [applyControlsVisibility]。
      */
     private var controlsVisible = true
@@ -1661,7 +1655,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★旧行为（本轮修掉的 bug）：不管设置是开是关都**永久**置位，而且**全文件没有任何地方清除**
      *   （置位只有 [toggleOrientation] 与 [exitFullscreenToPortrait] 两处）——于是自动旋转=开时
      *   点一次「旋转」，[applyAutoRotatePolicy] 就在**每一次**转屏回调里提前 return，
-     *   方向只剩「旋转」按钮能改（用户原话："除非你手动按那个旋转按钮才能切换方向"）。
+     *   方向只剩「旋转」按钮能改（不手动按它就切不了方向）。
      */
     private var orientationPinnedByUser = false
 
@@ -1788,7 +1782,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 「已经在看同一个房间 → 不再新开」：命中时把**已有实例**拉回前台，自己立刻退出。
      *
-     * ## 为什么需要它（用户点名的"防堆栈/防死循环"第 2 条）
+     * ## 为什么需要它（"防堆栈/防死循环"第 2 条）
      * 「直播 → 空间 → 点直播中头像 → 回到原直播间」这条路上，最后一个动作又是
      * `startActivity(LivePlayerActivity)`。如果每次都新建实例，就要重复"重取流 + 黑屏 1~2 秒"，
      * 而且中间会短暂存在两个 ExoPlayer（双声/抢解码器）。上游的 `currentInstance` 兜底
@@ -1941,14 +1935,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (wasPipEntryPending) applyControlsVisibility(controlsVisible)
         if (wasPipEntryPending && !controlsVisible) showControlsTemporarily()
         returnToLiveGuard.disarm()
-        // ★第七批：**回到前台 = 自动追一次最新流**（用户："回到前台（onResume）……自动重新取流追到最新"）。
+        // ★第七批：**回到前台 = 自动追一次最新流**（回到前台时自动再取一次流、追到最新进度）。
         //   判据是 [onStop] 留下的那个标记，而不是"onResume 被调用了" —— 后者在**进页面第一帧**也会来，
         //   那时 delegate 还没建出来/第一路取流正在飞，再追一次纯属重复请求。
         //   真的退过后台（onStop → onResume）才算"回到前台"，见 [autoRetryLiveStream] 的防抖与预算。
         // ★第十二批（后台只出声）：**先把画面接回来**。
         //   这一路后台期间流一秒都没断（只关了视频轨），所以这里只做一件事：re-enable 视频轨
         //   —— Surface 从头到尾没摘过，画面自己就回来了，**一个网络请求都不发**
-        //   （用户要求："回前台不许重新取流，除非看门狗判定卡死"）。
+        //   （回前台不重新取流；只有看门狗判定卡死才追）。
         //   ★唯一例外：后台期间**真的断了**（playerError / 不在 READY|BUFFERING）——那就把
         //   [resumePlayIntent] 留给下面那条"回到前台按需追到最新"，恢复能力与改动前逐字一致，
         //   不会因为"关了视频轨"把一条已经断掉的流永远留在错误态里。
@@ -1999,7 +1993,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 //   走 `autoRetryLiveStream`（自带防抖 20s + 5 分钟最多 3 次 + 尊重"自动重连"设置），
                 //   它内部就是 `retryPlayback()`（清限流预算 + 重新取流 + 起播）→ 天然追到最新。
                 //   · 原本在播 → 追流并继续播（可能有一瞬间加载，这是直播的正常代价）；
-                //   · 原本暂停 → 上面这个分支不进，**保持暂停**，一个请求都不发（用户要的"暂停就是暂停"）。
+                //   · 原本暂停 → 上面这个分支不进，**保持暂停**，一个请求都不发。
                 autoRetryLiveStream("回到前台：按需追到最新")
             }
             // else：保持暂停，什么都不做（`resumePlayIntent` 本来就是 false）
@@ -2009,7 +2003,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * "离开 App 之前用户的播放意图"（2026-09-26 用户定的规则）。
      *
-     * 用户原话："用户退出之前什么意图，就是继续什么意图。"
+     * 规则：**离开前是什么意图，回来就保持什么意图**。
      *   · 退桌面时**在播** → 回前台**继续播**；
      *   · 退桌面时**暂停** → 回前台**还是暂停**（要用户自己点播放）；
      *   · 而且**不许重新取流**（所以 [onResume] 里原来那句"回到前台自动追流"被撤掉了；
@@ -2041,7 +2035,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   本身就是"用户还带着这个直播间"的信号 —— 而且这条路**必须**记：
             //   · 系统小窗被**最小化**时，页面可能**只是被藏起来、并不销毁**（`onDestroy` 不来），
             //     那样"窗口里被销毁"那条补记根本不会执行 ⇒ 回 App 时账本空 ⇒ 用户看到"啥都没了"
-            //     （他实测："我回到软件是啥都没了"）。
+            //     （实测：回到软件后什么都没了）。
             //   · 这条**同样**受 task-removed 抑制（[LiveLastRoomStore.onLivePageWindowMinimized]
             //     内部走同一个 `record`），所以"划掉最近任务不复活"不会被带坏。
             val windowed = runCatching {
@@ -2215,9 +2209,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ══════════════════════════════════════════════════════════════════
         // ★★2026-09-29（用户实测报的回归）：**系统小窗被点「X」关掉 ≠ 系统清栈**
         //
-        // 用户原话："我把直播间的界面放到系统小窗那里去，然后我点叉，我再进入软件，怎么又回到
-        // 那个直播间的界面了？……这个没修好。" + "安卓小窗系统点叉，它没有给我们任何的返回值吗？
-        // 没有回调什么的？"
+        // 现象：直播间放进系统小窗后点「X」，再进软件又回到了那个直播间（当时未修好）；
+        // 另外的疑问：安卓小窗点「X」有没有返回值/回调。
         //
         // 回调是有的：点「X」时系统会**销毁这个窗口里的 Activity** ⇒ 走到的就是本函数
         // （`isFinishing == true`，且 `isInMultiWindowMode == true`）—— 与"系统清栈"在页面侧
@@ -2396,7 +2389,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //     不该记、也不该在回来时被恢复打扰。
         LiveLastRoomStore.onLivePageLeavingApp(applicationContext, rawRoomId)
         // ★「设置 → 直播设置 → 退后台自动进小窗」（`live_pip_on_background`，默认开）：
-        //   关掉它的用户明确表示"切走就别再挂个小窗"，此时连 31 以下的兜底分支也不走。
+        //   关掉它的用户明确表示不希望再有悬浮小窗，此时连 31 以下的兜底分支也不走。
         if (!pipOnBackgroundEnabled()) return
         // 用户按 Home/切走且正在播：自动进画中画（直播最自然的后台形态）
         //
@@ -2420,7 +2413,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   不能只"重新求值一次可见性" —— 那一版传的是 `controlsVisible`，而
             //   [applyControlsVisibility] 里 `visible == true` 那一支**优先于** PiP 档
             //   （见 `topBar` / `bottomBar` 的 when），于是离开前控制条正好亮着时，顶栏底栏会
-            //   **原样亮到窗口缩完**（用户抱怨的"最前面那一两秒"）。
+            //   **原样亮到窗口缩完**（最前面那一两秒）。
             //   [hideControlsForPip] 与 [enterPipMode] 同款：撤掉自动隐藏计时 + 立刻置为不可见，
             //   幂等、无副作用；★且它**不改"用户意图"**（见那个函数的 KDoc）—— 所以"没进成小窗"
             //   时（[onStop] / [onResume] 清标记后）回到前台仍是**进去之前那个样子**，
@@ -2458,15 +2451,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // ★task-53 取证：PiP 与"系统小窗（多窗口）"是两回事，两个标志位一起记才分得清
             "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
         )
-        // PiP 窗口里没有点按钮的空间：**顶栏与底栏一起收起来**（用户："PIP 模式下，我想让它隐藏那个
-        // 底部按钮，还有顶部的状态栏各种信息按钮，因为它会挡住 PIP 的大部分视觉"）。
+        // PiP 窗口里没有点按钮的空间：**顶栏与底栏一起收起来**（两栏在小窗里会遮住大部分画面）。
         if (isInPictureInPictureMode) {
             pipEntryPending = true
             // ★task-55 保护③：本会话进过 PiP —— [onDestroy] 的补记要绕过这条路（理由见字段 KDoc）
             pipEnteredThisSession = true
             // PiP 里误触手势会同时改系统音量和画面亮度，很难发现，直接收起手势层
             gestureHud.hide()
-            // ★第十四批：**进小窗必须把直播设置弹窗收掉** —— 用户明确要求"PiP 里不弹"。
+            // ★第十四批：**进小窗必须把直播设置弹窗收掉** —— 小窗里不弹。
             //   主路径（点底栏「画中画」/ 退后台自动进）走 [enterPipMode] → [dismissDialogs]（已含它），
             //   但系统也可能**不经那条路**直接把本页缩成小窗（ROM/系统手势），所以这里再兜一次。
             //   幂等（[LiveSettingSheetHost.dismiss] 里有判断），没开着时零开销。
@@ -2524,7 +2516,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             runAfterPageLayout {
                 syncPageLayoutToRealSize(force = true)
                 measurePortraitStage()
-                // ★★第十一批第 1 条：**退出小窗必须重排沉浸式**（用户："我在 PIP 进入软件，它也是隐藏的"）。
+                // ★★第十一批第 1 条：**退出小窗必须重排沉浸式**（退出小窗后沉浸式必须重排，否则状态栏仍是隐藏态）。
                 //   必须放在 [runAfterPageLayout] 里、和版式同一帧：这一行的本意就是"窗口已经恢复了"，
                 //   此刻 [isPageLandscape] 读到的才是**恢复后的真实尺寸**；直接写在外层会在
                 //   "窗口还停在小窗尺寸（16:9 = 横屏）"的那一瞬间判错方向、又压一次 hide。
@@ -2537,7 +2529,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //
             // ★★第十批（本轮修复 ③）：**退出小窗不再无条件重取流**，改成"交给看门狗判健康"。
             //
-            // ## 旧写法错在哪（这一处正是"为什么点播没这些屁事"的答案之一）
+            // ## 旧写法错在哪（这一处正是点播没这类问题的原因之一）
             // 旧代码在这里无条件 `autoRetryLiveStream("退出小窗回到全屏")` ⇒ `delegate.retry()`
             // ⇒ **重新取流 + 换 MediaSource + prepare**，而这三件事正好落在"点放大"的展开过渡里：
             // · 点播那条稳的链路在退出小窗时**一个网络请求、一次换源都没有**
@@ -2548,7 +2540,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   ⇒ 用户看到的正是"有时没事、有时黑屏播放不了"；
             // · 它还和"小窗展开"的过渡动画抢窗口几何（见 [updatePipParams] 里"过渡期间不下发"）。
             //
-            // ## 现在怎么做（用户"从 PiP 回全屏追到最新"这条要求一条没少）
+            // ## 现在怎么做（从 PiP 回全屏追到最新这条要求一条没少）
             // 退出小窗只做两件事：① 记下"刚出小窗"的时刻（[pipExitedAtMs]，让 PiP 参数下发避开
             // 过渡动画）；② 清掉看门狗的采样起点，把"要不要追"交给 [checkLiveHealthOnce] ——
             // 它 5s 一次巡检，三条判据（连续缓冲 8s / 落后 15s / **10s 没有新视频帧**）任意一条成立
@@ -2576,8 +2568,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 系统返回键与顶栏返回图标**共用**的一套分级语义。
      *
-     * 用户原话："直播间全屏的时候，我按一下返回，应该是退出全屏的状态，返回到竖屏。
-     * 如果是竖屏的状态返回的，应该是退出直播间。" 落成三行：
+     * 返回键分级：按一次返回 —— 全屏时退出全屏回竖屏，竖屏时退出直播间。落成三行：
      * ```
      * 画中画（小窗）→ 退出直播间（[exitPage]）
      * 横屏（= 全屏）→ 退出全屏：切回竖屏，**留在直播间**（[exitFullscreenToPortrait]）
@@ -2937,8 +2928,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     /**
-     * 判定"**这个直播间关没关弹幕**"（用户原话："某一些直播间，它是关闭了评论的那个选项……
-     * 这个时候就不应该去显示那个发送弹幕的输入框，还有那个弹幕区域了"）。
+     * 判定"**这个直播间关没关弹幕**"（关了的房间不显示发送弹幕的输入框与弹幕区域）。
      *
      * ## 时机与代价
      * 只在 [setupPlayerAndDanmaku] 里调一次（**每个房间一次**，换房 `recreate()` 后自然再判一次），
@@ -3076,7 +3066,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /** `room_init`：★实测免登录、免 UA、免 Referer，裸请求即 code=0（方案 §2.1） */
     private suspend fun resolveRoom(id: String): LiveRoomInitInfo? = withContext(Dispatchers.IO) {
-        // ★改用**多级降级**解析（2026-09-26 用户实测"所有直播间都提示获取直播信息失败"）：
+        // ★改用**多级降级**解析（2026-09-26 实测：所有直播间都误报获取直播信息失败）：
         //   `room/v1/Room/room_init` 被 B 站整端点风控封禁（HTTP 412 `request was banned`，
         //   容器内 87 次实测 97.7% 被封），而 getH5InfoByRoom / get_info / getRoomPlayInfo 全部 200。
         //   降级链能同时拿回 live_status（未开播判定与 30s 轮询靠它）与 uid（第五批之前「UP主」按钮靠它），
@@ -3111,8 +3101,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (pollJob?.isActive == true) return
         pollJob = lifecycleScope.launch {
             while (isActive) {
-                // ★第十五批第 3 条：**真倒计时**（原来每轮只写一句静态的"45s 后自动检查"，
-                //   用户："为什么不是真正的倒计时？而是写一个文本上去"）。
+                // ★第十五批第 3 条：**真倒计时**（原来每轮只写一句静态的"45s 后自动检查"，并不逐秒递减）。
                 //   ① 每秒只改**一行文案**（[setStreamStatus] → [renderStatus] 是一次 setText，
                 //      不写任何日志、不碰接口）—— 不是每秒一次网络请求；
                 //   ② 45 次 × 1s = [OFFLINE_POLL_INTERVAL_MS]，所以**接口频率一个字节没变**
@@ -3173,7 +3162,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     /**
-     * ★本轮新增：**"主播已下播 / 未开播"的一次性提示**（用户原话："这个我想整个弹窗说他没开播"）。
+     * ★本轮新增：**"主播已下播 / 未开播"的一次性提示**（用弹窗说明主播没开播）。
      *
      * ## 为什么这么克制（三件事刻意不做）
      * | 不做 | 为什么 |
@@ -3184,7 +3173,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ## 弹窗里的两句话
      * - 标题：**"主播已下播"**（本次进房真的播出过画面 —— [hasPlayedThisRoom]）/ **"主播未开播"**（一次都没播起来）；
-     *   ★判据是本页**亲眼看到的画面**，不是列表里那个可能过期的 `live_status`（用户实测："列表还是'他开播'，进去其实没开播"）。
+     *   ★判据是本页**亲眼看到的画面**，不是列表里那个可能过期的 `live_status`（实测：列表状态可能还停在"他开播"，进去其实没开播）。
      * - 正文：一句"已经在等待开播，开播后会自动起播" —— 让用户知道**现在什么都不用做**，
      *   也在暗示"不会一直换流了"（这正是本轮修的东西）。
      *
@@ -3292,7 +3281,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 弹幕连接状态 → 顶栏短标签，**只回"异常/过渡"那几档**；正常态回 null（不占位置）。
      *
-     * ★本轮（用户："顶栏正常的时候没有状态文字……'弹幕 已连接'也算正常态，隐藏"）：
+     * ★本轮（正常态一律不占状态行：'弹幕 已连接'也归入需要隐藏的正常态）：
      * | 状态 | 回什么 | 为什么 |
      * |---|---|---|
      * | [ConnState.Connecting] | 「弹幕 连接中」 | 过渡态（刚进房/刚重连，用户能看到它在动） |
@@ -3358,15 +3347,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   见 [renderRoomTitle]）。在线人数每 45s 回来一次时会再调一次同一个函数。
             titleRoomId = info.roomId
             renderRoomTitle()
-            // ★★本轮（用户拍板的"减法"）：这里原来还有一句
+            // ★★本轮（做减法）：这里原来还有一句
             //   `setStreamStatus("画质 ${info.actualQnDesc}$requestedHint ｜ 线路 …")` —— **整句删除**。
-            //   用户原话："当前画质/线路也在状态行里显示 ✗ —— 那部分去掉（画质弹窗内已有'当前：xxx'）"。
+            //   判据：状态行不再承担画质/线路信息（弹窗副标题里已经有'当前：xxx'）。
             //   当前档位信息一个都没少：底栏「画质」那颗按钮点开的弹窗里，清晰度段与线路段的副标题
             //   就是「当前：原画（qn 10000）」「当前：线路 1/2」（[showStreamDialog]）。
             //   ★随之删掉的还有只为这句话服务的 `requestedHint`（"（请求 xxx）"那个后缀）——
             //     它的另一半信息仍在：未登录被静默降级时下面那句 toast 会如实告知。
             // ★★第八批（用户实测第 3 条）：底栏那颗按钮的文案从「画质·原画」**缩短成「画质」**，
-            //   所以这里**不再**把当前值写进按钮 —— 用户原话给了两条路（"要么给足宽度、要么缩短为「画质」"），
+            //   所以这里**不再**把当前值写进按钮 —— 只有两条路（要么把宽度给够、要么把文案缩短为「画质」），
             //   而这一行现在要和输入框 + 另外三颗按钮挤在同一行：5 个字会把整行字号从 14sp 拖到 9sp
             //   （[applyBottomBarTextSizes] 按"一行里最宽的文案"统一挑一档）。
             //   ★想改回"带当前值"：把本行换成 `qualityButton.text = "画质·${info.actualQnDesc}"` 即可
@@ -3542,10 +3531,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 「重新取流」= 原来的底栏第一颗「刷新」（第四批之前叫「重试」）—— **功能一行未改**。
      *
-     * 用户原话（第四批）："把底栏的那个重试放到第一个按钮去。这个重试按钮是否可以叫符合名字一点的刷新？
-     * ……它的功能不要乱改，它这个功能是对的。"
-     * 用户原话（★第七批）："「刷新」改成自动……**保留手动入口**：放进「画质·线路」弹窗里一个
-     * 「重新取流」小按钮（不占底栏）……行为与现在的手动「刷新」**完全一致**。"
+     * 第四批：底栏第一颗改为「重试」并改名为更贴切的「刷新」，功能一行未改、功能本身是对的。
+     * ★第七批：改成自动追流的同时**保留手动入口**：「画质·线路」弹窗里多一个
+     * 「重新取流」小按钮（不占底栏），行为与原来的手动「刷新」**逐字一致**。
      *
      * 落到的就是本函数（`delegate.retry()`）：**清空限流预算 + 立即重新取流/追到最新直播进度**，
      * 播放器不重建、底栏其它按钮与弹幕开关的状态都不动（见 `LivePlayerDelegate.retry()`）。
@@ -3634,7 +3622,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     /**
-     * ★本轮：顶栏「在线人数」的刷新（用户要求"搭在已有的轮询上、30~60 秒刷一次"）。
+     * ★本轮：顶栏「在线人数」的刷新（复用已有的轮询，30~60 秒刷一次）。
      *
      * ## 数据来源：`room/v1/Room/get_info` 的 `online`
      * 走的是 [LiveAPI.roomInfo]（**本页早就在用的同一条接口**：`resolveRoom` 的降级链第 ③ 层
@@ -3655,7 +3643,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ```
      * 时间戳在**发出前**就写（乐观），所以一次超时不会让下一次巡检再叠一发。
      *
-     * ## 拿不到怎么办（用户要求："拿不到人数时不显示括号，不要显示 0 / --"）
+     * ## 拿不到怎么办（拿不到人数就整条不显示，不要退化成 0 或 --）
      * 失败 / `online <= 0` → **什么都不改**：上一次的值留着（数字不会跳成 0），
      * 首次就没拿到则一直不带括号（[renderRoomTitle] 里那个 `> 0` 判断）。
      */
@@ -3825,7 +3813,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ```
      * ⓪ 已经锁定"没在播"（[offlineLatched]）            → 不做（★本轮新增：这就是"下播之后别再换流"）
      * ① 页面没在前台 / 在小窗 / 正在进小窗        → 不做
-     * ② 「自动重连」关掉（live_auto_reconnect=false）→ 不做（那是用户"我要完全手动"的明确表态，
+     * ② 「自动重连」关掉（live_auto_reconnect=false）→ 不做（那等于明确要求完全手动，
      *                                              手动入口 = 弹窗里的「重新取流」）
      * ③ 距离上一次自动追流 < AUTO_RETRY_MIN_INTERVAL_MS → 不做（合并同一秒里的多个触发源）
      * ④ 这一份预算已经用尽（[autoRetryBudgetExhausted]）→ 不做，并**只提醒一次**
@@ -3835,7 +3823,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★④⑤ 是"止损阀"，而且**不再随滑窗回满**（★本轮改的就是这一点）：真遇到一条持续坏的流，
      *   看门狗会每 [LIVE_WATCHDOG_INTERVAL_MS] 就再想追一次，没有它就会变成"每 20 秒打一次接口"
      *   的死循环；而**只有滑动窗口**的旧写法会"窗口一过额度自动恢复"，也就是**永远**在追 ——
-     *   这正是用户实测的"一直在换流换流"。现在一份预算用到底，只有两条路能重新给预算：
+     *   这正是实测到的反复换流问题。现在一份预算用到底，只有两条路能重新给预算：
      *   真的恢复播放（`PLAYING`）或用户手动「画质·线路 → 重新取流」。
      */
     private fun autoRetryLiveStream(reason: String) {
@@ -3923,7 +3911,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         miaoLogger() info "[live] 自动追流：$reason"
         // 状态文案交给 delegate（retry() → load() 会报"正在重新获取直播流…"），这里不抢着写
         // ★`fromAuto = true`：自动这一路**不解开**"没在播"的锁定、也不重新给 Activity 侧的预算 ——
-        //   那是"用户明确要我再来一次"（手动「重新取流」）才该做的事；自动这一路只负责把画面追回来。
+        //   那是**手动「重新取流」**才该做的事；自动这一路只负责把画面追回来。
         retryPlayback(fromAuto = true)
     }
 
@@ -4025,8 +4013,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 「画质 · 线路」弹窗 —— 底栏那一颗 [qualityButton] 的唯一去向（★第七批合并）。
      *
-     * 用户原话："「画质」和「线路」合并成一颗（两者本来就是'选用哪条流'）：一个按钮
-     * （文案如「画质·原画」）→ 打开一个弹窗，里面两段/两个 Tab：清晰度 + 线路。"
+     * 底栏把「画质」与「线路」并成一颗（本质上都是'选用哪条流'）：一个按钮
+     * （文案如「画质·原画」）打开一个弹窗，弹窗内分两段/两个 Tab —— 清晰度与线路。
      *
      * ## 一个弹窗、两段（[LiveListDialog] 的 `segments`）
      * | 段 | 标题 | 内容 | 点一条做什么 |
@@ -4042,12 +4030,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ## 两个"不占底栏"的入口都在这里
      * · **「重新取流」**（中性按钮）—— ★第七批「刷新」改自动之后留下的**手动兜底**
-     *   （用户："保留手动入口：放进「画质·线路」弹窗里一个「重新取流」小按钮（不占底栏）"）。
+     *   （手动入口不丢：「画质·线路」弹窗里保留一个「重新取流」小按钮，不占底栏）。
      *   行为与以前那颗「刷新」按钮**逐字一致**：[retryPlayback] → `delegate.retry()`
      *   （清限流预算 + 重新取流追到最新），点完关弹窗，让用户直接看顶栏状态。
      * · 清晰度/线路本来的两级入口也都在这里 —— 底栏因此不再需要「更多」按钮。
      *
-     * ## 几何（用户点名"别改回去"的那条）
+     * ## 几何（不要再改回去的那条）
      * 内容区高度仍由 [dialogContentMaxHeightPx] 按**真机屏幕的 62%** 封顶并可滚；
      * 本弹窗比原来多了一条 Tab 栏，所以列表的上限再扣掉 [DIALOG_TAB_STRIP_DP]
      * （不扣的话"Tab + 列表 + 标题 + 按钮"会比 62% 高一截，正是"按钮被顶出屏幕"的病根）。
@@ -4190,8 +4178,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 输入条那条**发送**路径（★第七批：发弹幕弹窗整块删除后，这里是唯一的发送实现）。
      *
      * 触发点只有一个：[danmakuInput] 的 `IME_ACTION_SEND`（软键盘的回车键 = 发送，接线在 [buildUi]）。
-     * 用户原话："记得用安卓的 API 把它那个改成发送，我们就省了一个发送的按钮了，
-     * 也省出那个弹窗按钮，很烦，感觉又多走一步，很麻烦。"
+     * 软键盘回车键直接走「发送」：发送按钮与弹窗按钮都可以去掉，操作也少一步。
      *
      * ## 四条约定（与删掉的那个弹窗逐条对齐，行为一个不少）
      * | 阶段 | 行为 |
@@ -4216,8 +4203,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private fun submitDanmakuInput() {
         if (isFinishing || isDestroyed) return
-        // ★该直播间关闭了弹幕 → **不再尝试发送**（用户要求："这个时候就不应该去显示那个发送弹幕的
-        //   输入框"）。这是第二道门：第一道是 [applyDanmakuInputClosedUi] 把输入框置成不可用
+        // ★该直播间关闭了弹幕 → **不再尝试发送**（关闭了就不该再给出发送弹幕的入口）。
+        //   这是第二道门：第一道是 [applyDanmakuInputClosedUi] 把输入框置成不可用
         //   （IME 的回车动作根本不会触发）；但"正在发送的途中房间判定回来了"这种时序也要挡住。
         if (roomDanmakuClosed) return
         val text = danmakuInput.text?.toString()?.trim().orEmpty()
@@ -4241,7 +4228,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             danmakuSending = false
             setDanmakuInputSending(false)
             if (ok) {
-                // 成功：清空 + 收键盘（用户："成功清空输入并收起键盘"）
+                // 成功：清空 + 收键盘
                 danmakuInput.setText("")
                 dismissDanmakuInput()
                 toast("弹幕已发送")
@@ -4328,10 +4315,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   所以现在只剩这一条调用链，语义更干净：**本页开关就是本页开关**。）
      *
      * ★[A2-fix 2026-09-26] 开关状态现在会**持久化到直播自己的键** `live_danmaku_enable`：
-     *   用户实测"直播间把弹幕关掉，退出重进又自己开"不能接受；不再另加设置入口（做减法），
+     *   实测：弹幕关掉后退出重进又被自动打开，这种情况不能接受；不再另加设置入口（做减法），
      *   底栏这颗按钮本身就是入口。
      *
-     * ★★**绝不回写点播弹幕设置**（用户明确要求："直播里关弹幕不许写 `default_danmaku_show`"）★★
+     * ★★**绝不回写点播弹幕设置**（只写直播自己的键，不动点播的键）★★
      *   · 直播弹幕的可见性只认直播自己的 `live_danmaku_enable`（见 `LiveDanmakuSettings.from()`）；
      *   · 往点播的 `default_danmaku_show` 写一次 false，用户点播那边的弹幕会**跟着消失** ——
      *     那是"我只是在直播里关一下弹幕，结果点播也坏了"的经典事故，所以这里始终只写 live_ 键。
@@ -4377,7 +4364,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         danmakuButton.alpha = if (danmakuEnabled) 1f else 0.45f
         danmakuButton.text = when {
             !danmakuEnabled -> "弹幕"
-            // ★第八批（用户实测第 3 条"文字不换行不省略"）：连接判死时的文案从「弹幕重连」
+            // ★第八批（第 3 条：文字不换行、不省略）：连接判死时的文案从「弹幕重连」
             //   缩成「重连」—— 4 个字会把**整行**字号拖低一档（[applyBottomBarTextSizes] 按最宽文案挑档），
             //   而 2 个字与其它三颗（画质 / 画中画 / 旋转）同量级，整行永远停在最大档。
             //   语义不变：这颗按钮此时点一下就是 [restartDanmaku]（见 [toggleDanmaku]）。
@@ -4395,10 +4382,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // 历史（免得后人以为功能丢过）：这里原来有一个 `showLiveSettingsDialog()` —— 底栏「设置」弹的、
     // 用**原生控件拼的**"直播设置"弹窗（默认画质 / 默认线路策略 / 退后台自动进小窗 / 后台继续直播 /
     // 自动重连 / 双击暂停 / 显示弹幕 共 7 项 + 两个二级选择列表）。第二批被用户要求删掉
-    // （"把播放底栏区域的设置按钮给去掉吧……用户想设置自己退出来再去设置"），
+    // （播放底栏不再放设置按钮，设置入口统一收进设置页），
     // 按钮 + 弹窗 + 两个二级列表 + 三个写入小工具一起删，入口只剩「设置 → 直播设置」页。
     //
-    // 用户现在又点名要它（原话见 [settingButton] 的 KDoc），而且**指定了弹窗长什么样**：
+    // 第十四批又把它加回来（形态见 [settingButton] 的 KDoc），而且**弹窗形态有明确要求**：
     // "记得用我的那个自定义的全屏弹窗，不管你怎么转屏，它都会自己适配。就是我的那个底栏筛选的那个弹窗。"
     // 于是：
     // · 外壳 = `AutoSheetDialog`（与首页直播 Tab 的「筛选」弹窗 `HomeLiveFilterSheet` **同一套**，
@@ -4501,8 +4488,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 底栏「旋转」：手动把方向切到当前方向的另一侧（竖↔横）。
      *
-     * ★★本轮重定语义（用户实测："你点旋转按钮之后，你旋转方向它是不跟随的，除非你手动按那个旋转
-     *   按钮才能切换方向。这个我觉得和那个设置页开启自动旋转冲突"）——**按设置分两档**：
+     * ★★本轮重定语义（实测：按过「旋转」之后方向不再跟随，必须手动再按才能切换；
+     *   这与设置页的自动旋转相冲突）——**按设置分两档**：
      *
      * | 「自动旋转」 | 点这一下之后 | 手机再转 | 依据 |
      * |---|---|---|---|
@@ -4534,8 +4521,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "page" to (if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"),
         )
         showControlsTemporarily()
-        // ★第十一批第 1 条：**底部「旋转」按钮也要重排沉浸式**（用户点名："我点击旋转按钮，
-        //   再旋转再旋转，你没有更新，它还是隐藏了"）。这里先同步一次（用户在横屏点了旋转、
+        // ★第十一批第 1 条：**底部「旋转」按钮也要重排沉浸式**（实测：反复点旋转时状态栏仍是隐藏的）。
+        //   这里先同步一次（用户在横屏点了旋转、
         //   窗口方向如果已经翻过来就当场生效）；真正可靠的收敛点仍是转屏之后**尺寸落定**那一次
         //   —— [installPageLayoutWatchers] 的尺寸监听会再调一次，两处都幂等。
         syncImmersivePolicy()
@@ -4544,8 +4531,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 「设置 → 直播设置 → 自动旋转」（`live_auto_rotate`，默认**开**）的**消费端**。
      *
-     * 用户原话："我想在直播设置里面添加一个开关，就是屏幕方向转动自动旋转，竖屏它就竖屏，
-     * 横屏它就是全屏。" 落成两行：
+     * 直播设置里新增一个「自动旋转」开关：竖着拿就是竖屏、横过来就是全屏。落成两行：
      * | 设置值 | requestedOrientation | 效果 |
      * |---|---|---|
      * | 开（默认） | [ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR] | 跟随重力感应：竖着拿=竖屏、横过来=横屏（本页恒为沉浸式全屏，所以横屏即全屏看） |
@@ -4557,8 +4543,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   老用户升级后不会遇到"转屏没反应"。
      * ★为什么关掉时锁的是"进入时的方向"而不是 `UNSPECIFIED`：`UNSPECIFIED` 只是"我不表态"，
      *   系统照样会把 Activity 跟着重力转 —— 那就等于开关没生效。要"锁"就必须给出一个明确值。
-     *   （设置页 KDoc 里写的 `UNSPECIFIED` 是"不跟随"的**意图**写法，这里按用户原话
-     *   "关=锁定进入时的方向"落成明确值，行为更贴合。）
+     *   （设置页 KDoc 里写的 `UNSPECIFIED` 是"不跟随"的**意图**写法；本页把"关"落成显式值 ——
+     *   锁定进入房间那一刻的方向，行为更贴合。）
      * ★读取口：`SettingPreferences.liveSettings().autoRotate`（主线程 O(1) 内存快照，
      *   键 `live_auto_rotate` 由设置页那边登记，见 `SettingPreferences.LiveAutoRotate`）。
      *   设置页改完要**重进直播间**才生效 —— 与本页其它设置项（默认画质等）保持一致，
@@ -4591,7 +4577,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ```
         // :341-342  fun updatePlayerMode(...)  { if (player?.isPicInPicMode == true) return ... }
         // :347-348  fun onHostSizeChanged(...) { if (player?.isPicInPicMode == true) return ... }
-        //           KDoc 原话："画中画：窗口方向 ≠ 设备方向，别按它推导"
+        //           KDoc 里写明："画中画：窗口方向 ≠ 设备方向，别按它推导"
         // ```
         // 本页下面那句 `resources.configuration.orientation` 读的正是**窗口**方向，而进/出小窗都会走
         // [onConfigurationChanged]（进小窗时窗口先缩成小窗尺寸 → 配置回调 → PiP 回调）：16:9 房间在
@@ -4722,7 +4708,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 武装释放哨兵（幂等）：把基线重置成"还没读到"，并在需要时注册加速度计。
      *
      * ★注册失败（没有加速度计 / 被系统挡住）时**绝不**留一个永远解不开的钉住 ——
-     *   当场把方向交还给自动旋转：宁可退回"跟随"，也不要退回用户投诉的那个"永久锁死"。
+     *   当场把方向交还给自动旋转：宁可退回"跟随"，也不要退回"永久锁死"那个老问题。
      */
     private fun armDeviceOrientationSentinel() {
         orientationSentinelBaseline = null
@@ -4827,8 +4813,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ★★第五批第 3 条：**进小窗的动作一开始就把控制条收掉**（顶栏 + 底栏），
      *   而不是等 `onPictureInPictureModeChanged(true)` —— 那个回调要等窗口缩完才来，
-     *   中间那 1~2 秒里控制条会挡在小窗画面上（用户原话："它虽然只有一两秒的显示时间，
-     *   但是它会挡住"）。同时置 [pipEntryPending]，把这段过渡期关进 [controlsAllowed] 的门里，
+     *   中间那 1~2 秒里控制条会挡在小窗画面上（显示时间虽短，但这段过渡期确实会遮挡）。
+     *   同时置 [pipEntryPending]，把这段过渡期关进 [controlsAllowed] 的门里，
      *   免得 [onConfigurationChanged] 的 `showControlsTemporarily()` 又把它打开。
      *
      * ★失败（系统拒掉 / 26 以下）时把标记清掉，否则控制条会一直被门控压着不显示。
@@ -4884,20 +4870,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * setAspectRatio      ← 画面自己的宽高比（[pipAspectRatio] = 解码尺寸，与 videoContainer 同源）
      *                       点播：`playerSourceInfo.width/height`（接口元数据，也是"画面尺寸"）
      *                       ⇒ 两边都**没有"竖屏走一条、横屏走一条"的分支**：竖屏视频 → Rational(w,h) < 1
-     *                         → 系统给竖屏小窗；横屏视频 → > 1 → 横屏小窗（用户说的"竖屏走竖屏、
-     *                         横屏走横屏"就是这个比例的直接结果，不是某个方向开关）
+     *                         → 系统给竖屏小窗；横屏视频 → > 1 → 横屏小窗（竖屏视频走竖屏小窗、
+     *                         横屏视频走横屏小窗就是这个比例的直接结果，不是某个方向开关）
      * setActions          ← 直播：播放/暂停 1 颗；点播：后退/播放暂停/前进 3 颗（直播无时间轴，见 [buildPipActions]）
      * setSeamlessResize   ← ★★第十批更正（**上一轮这张表在这一行是错的**，它写的是"两边都在 S+ 置 true"）：
-     *                       点播**在用的**那条链路（`PicInPicHelper.buildParams()`，也是用户说"一直很稳"
+     *                       点播**在用的**那条链路（`PicInPicHelper.buildParams()`，也是实测一直很稳
      *                       的那条）已经把 `setSeamlessResizeEnabled` **注释掉了**
-     *                       —— `PicInPicHelper.kt:190-197`，2026-09-26 用户实测回退，原话级理由：
+     *                       —— `PicInPicHelper.kt:190-197`，2026-09-26 实测回退，理由：
      *                       "无缝尺寸过渡…点播页在'小窗 → 桌面 → 回 App'这条路上要经历一次全屏回填，
      *                       用户实测**卡在过渡中间**（半屏旧界面半屏新界面 + 全 App 黑屏乱掉）"。
      *                       ⇒ 本页原来那一行 `setSeamlessResizeEnabled(true)` 现在是**全工程唯一**
      *                       还开着无缝缩放的地方，本轮按同一条结论停用（见 [buildPipParams]）。
      *                       注：`VideoPlayerActivity`（独立点播页）也还留着它，
      *                       但那个页面被 `VideoPlayerLauncher.USE_STANDALONE_ACTIVITY = false`
-     *                       停用了（用户："不要碰我以前已经做好的点播播放"），所以不在对比范围。
+     *                       停用了（那条点播链路不碰），所以不在对比范围。
      * setAutoEnterEnabled ← 直播 S+ 置（受"退后台自动进小窗"开关 + [hasVideoPicture] 门控，见下）；
      *                       点播的 `VideoPlayerActivity.buildPipParams(autoEnter=true)` 同样置
      * setSourceRectHint   ← ★第九批对齐：26+ **一律**带（原来只在 31+ 带，见下面那段说明）
@@ -4934,15 +4920,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //
             // ★★第九批（**与点播对齐**）：再与上"**画面就绪**"（[hasVideoPicture]）。
             //   点播进小窗有两个前置：`PlayerController.enterPip()` 的 `delegate.isOpened()`
-            //   （`comm/delegate/player/PlayerController.kt:825-828`，KDoc 原话：**"播放器没开着就别进：
+            //   （`comm/delegate/player/PlayerController.kt:825-828`，KDoc 里写明：**"播放器没开着就别进：
             //   没有内容的 PiP 窗口是纯黑一块，用户会以为播放器坏了"**）+ 比例来自**起播时就已到手**的
             //   接口元数据（`playerSourceInfo.width/height`，`PlayerDelegate2.kt:1145` 取流成功即写）。
             //   直播没有尺寸元数据（`LiveRoomInitInfo`/`LiveStreamInfo` 里没有 width/height），
             //   比例只能等**首帧解码**的 `onVideoSizeChanged`（`:1895-1898`）——在那之前
             //   [pipAspectRatio] 只能给 16:9 兜底，而 [buildUi]（`:3314`）与 [setupPlayerAndDanmaku]
             //   （`:1739`）**在起播之前就把 `autoEnterEnabled=true` 连同这个 16:9 注册给了系统**。
-            //   于是"开了竖屏直播间、画面还没出来就划走"会按 16:9 弹出小窗 —— 用户原话
-            //   **"竖屏它走的是横屏"** 唯一还能成立的代码路径就是这一条（比例已知时
+            //   于是"开了竖屏直播间、画面还没出来就划走"会按 16:9 弹出小窗 —— "竖屏走成横屏"
+            //   唯一还能成立的代码路径就是这一条（比例已知时
             //   [pipAspectRatio] 给的就是画面自己的比例，见那份 KDoc）。
             //   ⇒ 尺寸未知时**不让系统自动进**：宁可这次不弹小窗（回到 App 还有 [autoRetryLiveStream]），
             //     也不弹一个"比例是假的"的黑小窗。尺寸一到 [onVideoSizeChanged] 会立刻重下发本参数
@@ -4952,7 +4938,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // ★★第十批（本轮修复 ②）：**不启用无缝缩放**（`setSeamlessResizeEnabled`）。
             //
             // 它是"点小窗放大 → 回到直播间有时黑屏、播放不了"的头号嫌疑，三条证据：
-            // ① 点播**在用的**那条链路（`PicInPicHelper`，用户原话"其他视频 PIP 小窗它就没那么多屁事"）
+            // ① 点播**在用的**那条链路（`PicInPicHelper`，其他视频的 PIP 小窗没有这类问题）
             //    已经在 2026-09-26 把它注释掉了，理由是同场景下的同一种故障：
             //    "小窗 → 桌面 → 回 App"→"用户实测**卡在过渡中间**（半屏旧界面半屏新界面 + 全 App
             //    黑屏乱掉）"（`comm/delegate/helper/PicInPicHelper.kt:190-197`，原文可查）。
@@ -4977,7 +4963,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★坐标系口径：`getGlobalVisibleRect` 给的是**屏幕坐标**，与 `setSourceRectHint` 要求的完全一致。
      * ★★第八批为什么要把它抽出来单独一份：PiP 的源矩形 = "**画面**在哪"，
      *   而画面矩形会随版式/方向/键盘 insets/底栏几何变化 —— 必须能在几何变化后**重新算一次并重下发**
-     *   （用户实测第 4 条："pip 怎么又是那种不完全显示占满的呢"）。指纹与下发共用这一个函数，
+     *   （实测第 4 条：小窗里画面不是完全铺满）。指纹与下发共用这一个函数，
      *   两边永远不会读到不同的值。
      */
     private fun pipSourceRectHint(): Rect? {
@@ -5138,7 +5124,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★★第十批（本轮修复 ④）：把"退出小窗后 [PIP_EXIT_SETTLE_MS] 之内的 PiP 参数下发"
      * **推迟到过渡动画结束之后**，而不是插在动画中间。
      *
-     * ## 为什么（用户："点小窗放大 → 回直播间有时黑屏、播放不了"）
+     * ## 为什么（小窗放大回直播间时偶发黑屏、无法播放）
      * `setPictureInPictureParams` 不是"改个内存变量"：它是一次跨进程调用，SystemUI / WMShell
      * 收到后会**按当前 PiP 状态重算小窗几何与窗口容器**。而"点放大"正在做小窗→全屏的窗口过渡，
      * 此时再让系统重算小窗几何，就等于在动画中途改它正在动画的那个东西 —— 表现可以是从
@@ -5176,8 +5162,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * ★★第八批（用户实测第 4 条）：**几何一变就重新下发 PiP 参数**，不要只在进小窗时算一次。
      *
-     * ## 为什么必须有它（用户原话："为什么我 pip 怎么又是那种不完全显示占满 pip 的呢？
-     * 刚才不是修好了，现在怎么又回来了？"）
+     * ## 为什么必须有它（"PiP 里画面不完全铺满"的问题修好后又复现）
      * PiP 参数里有两样东西是**几何的函数**：
      * ```
      * setAspectRatio     ← 视频解码尺寸（换清晰度 / 换线路 / 换直播间）
@@ -5309,7 +5294,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   TextureView 就是把画面当**普通 View** 画进窗口缓冲 → "视频 → 弹幕 → 手势 → 控制条"
         //   的叠放顺序**由 View 树本身保证**，不依赖任何窗口合成语义。
         //   旁证：本工程其它视频渲染全都是 TextureView —— 点播是 GSY 的 GSYVideoType.TEXTURE
-        //   （widget/player/DanmakuVideoPlayer.kt:657 原话"我们是 TextureView 渲染"），
+        //   （widget/player/DanmakuVideoPlayer.kt:657 写明"我们是 TextureView 渲染"），
         //   点播弹幕是 master.flame.danmaku.ui.widget.DanmakuView（也是 TextureView 实现）；
         //   直播页原先那处 SurfaceView 是**全工程唯一一处**，也正好是唯一"叠上去的 View 看不见"的地方。
         //   代价：TextureView 多一次 GPU 拷贝、不支持 DRM/HDR（直播 FLV/HLS 两者都没有）。
@@ -5393,8 +5378,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             setBackgroundColor(scrimColor())
             setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6))
         }
-        // ★返回按钮本轮改成**只有图标**（用户："去掉那个顶栏的返回，只保留一个图标，就是复用我们视频
-        //   播放器的那个返回图标，也就是我们其他页底栏的那个返回图标。"）：
+        // ★返回按钮本轮改成**只有图标**（复用点播播放器与其他页底栏那颗返回图标）：
         //   · 图标 = `R.drawable.ic_arrow_back_white_24dp` —— 点播播放器**全屏时**那颗返回用的就是它
         //     （`widget/player/DanmakuVideoPlayer.kt:1094` 的 `mBackButton.setImageResource(...)`；
         //     布局里 `@id/back` 的默认图是 `ic_close_white_24dp`，进 FULL 模式才换成这一支）；
@@ -5481,10 +5465,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
         // ⑤ 底栏 = **输入条 + 五颗按钮（同一行）**（★第七批重构 + ★第八批统一版式 + ★第十四批第 5 颗）
         //
-        // 用户原话："发弹幕变常驻输入条……记得用安卓的 API 把它那个改成发送，我们就省了一个发送的按钮了，
-        // 也省出那个弹窗按钮"；"那个旋转一定要放到底栏来啊，它是经常用到的"；
-        // "「画质」和「线路」合并成一颗"；"不要「更多」按钮"；
-        // ★第十四批："我们在直播间底栏，画质的后面、PIP 的中间添加一个按钮，就是设置。"
+        // 底栏约定：弹幕改为常驻输入条，回车键即「发送」，据此去掉发送按钮与弹窗按钮；
+        // 「旋转」常驻底栏（使用频率高）；「画质」与「线路」并成一颗；不设「更多」按钮；
+        // ★第十四批：在画质与画中画之间加一颗「设置」。
         // ★第八批（用户实测第 1/3 条）：**竖屏也做成一行** ——
         //   "还有那个输入框，你干嘛要单独一行呢？把它和那个几个按钮放一起呢？"
         //   "那几颗按钮奇奇怪怪"（大小不一、间距怪异）。所以竖屏与横屏现在是**同一套**：
@@ -5499,7 +5482,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   （"为什么不和那几个按钮一起显示一两秒呢？为什么要一直站在那？"），只有 PiP 里 `GONE`。
         //   隐藏用 `INVISIBLE`（与按钮同款）：保住占位 → 底栏高度不变 → 弹幕列表区不跳。
         // ★5 颗按钮是浮层动作：4 秒后 `INVISIBLE`（不是 `GONE`）—— 同上，都是为了"底栏顶边不变"。
-        // ★按钮文案一律**尽量短**（用户："按钮文字尽量短"）：5 颗同一行 + 还要给输入框留位，
+        // ★按钮文案一律**尽量短**：5 颗同一行 + 还要给输入框留位，
         //   长文案只会把整行字号拖小（[applyBottomBarTextSizes] 按"最宽的文案"统一挑档）。
         //   ★第十四批那颗「设置」是 2 个字，**没有改变整行字号档位**（最宽的仍是 3 字的
         //     「弹幕开」/「画中画」；真正的变量是"颗数 4 → 5"，账见 [DANMAKU_INPUT_MIN_WIDTH_DP]）。
@@ -5512,9 +5495,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   底栏当时 4 颗（★第十四批起 5 颗），竖屏/横屏都放得下，不需要搬到顶栏去。
         // 2 字：保住 14sp（见 updateDanmakuButton 的说明）
         pipButton = actionButton("小窗").apply { setOnClickListener { enterPipMode() } }
-        // ★★第十四批：底栏「设置」**回来了**（用户："我们在直播间底栏，画质的后面、PIP 的中间添加一个
-        //   按钮，就是设置。就是会弹出直播间的设置选项、设置页。**记得用我的那个自定义的全屏弹窗**，
-        //   不管你怎么转屏，它都会自己适配。就是我的那个底栏筛选的那个弹窗。"）。
+        // ★★第十四批：底栏「设置」**回来了**（位置在画质与画中画之间，弹出直播间的设置选项/设置页；
+        //   复用自定义全屏弹窗，即首页底栏筛选那套外壳，转屏会自己适配）。
         //   · 位置：`orderedBottomButtons()` 里排在 [qualityButton] 与 [pipButton] **中间**；
         //   · 文案「设置」两个字 —— 与其它四颗同量级，不会把整行字号多拖低一档
         //     （[applyBottomBarTextSizes] 按"一行里最宽的文案"统一挑档，最宽的仍是 3 字的
@@ -5530,7 +5512,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // 不重建按钮本身）——这样字号档位（记在 `View.tag` 上）与背景不会被反复刷。
         // ★第八批：每颗都是 `width = 0 + weight = 1` 的**等分格** —— 容器宽度由
         //   [applyBottomBarTextSizes] 按"最宽的那条文案 × 颗数"写成固定值，于是 5 颗**同宽**
-        //   （用户第 3 条："同高、同宽（等分）、同内边距"）；字号也是**一行共用一档**（同高）。
+        //   （第八批第 3 条：同高、同宽、等分、同内边距）；字号也是**一行共用一档**（同高）。
         //   左右外边距 [BOTTOM_BUTTON_MARGIN_DP] 留在每一颗自己身上，几种宽度算法共用同一份账。
         //   ★第十四批加了第 5 颗，**排版代码一个字节都没改**：颗数进 [applyBottomBarTextSizes] 的
         //     预算公式（`/ count`）与 `weight=1` 的等分，这里只多了一行创建。
@@ -5547,10 +5529,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             bottomButtons.addView(button, lp)
         }
 
-        // ⑤′ 弹幕输入条（用户："发个弹幕…"）+ 发送中的转圈 + 失败提示行
+        // ⑤′ 弹幕输入条（hint「发个弹幕…」）+ 发送中的转圈 + 失败提示行
         //
         // ★`imeOptions = IME_ACTION_SEND`：软键盘回车键 = 「发送」→ [submitDanmakuInput]，
-        //   所以既没有发送按钮、也没有弹窗（用户："我们就省了一个发送的按钮了，也省出那个弹窗按钮"）。
+        //   所以既没有发送按钮、也没有弹窗。
         // ★`inputType = TYPE_CLASS_TEXT`（**不带** MULTI_LINE）+ `maxLines = 1`：这是"回车键变成
         //   动作键而不是换行"的标准组合；`maxLines` 同时防住"输入框被撑成三行把底栏顶高"。
         // ★焦点变化：拿到焦点就 `holdControls()`（正在打字时控制条不许自动隐藏），
@@ -5563,8 +5545,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             maxLines = 1
             inputType = InputType.TYPE_CLASS_TEXT
             imeOptions = EditorInfo.IME_ACTION_SEND
-            // ★第十五批第 2 条：**输入时就拦住超长文本**（用户："明明说有限制字符，为什么不在输入的
-            //   时候再限制……等我输完 100 多个字，提示我发不了"）。用平台原生的长度过滤器，
+            // ★第十五批第 2 条：**输入时就拦住超长文本**（原来只在发送时才校验，输完 100 多字才被拒）。
+            //   用平台原生的长度过滤器，
             //   超出上限的字符**根本打不进去**（粘贴同理，只留前 N 个），不新增字数计数器/额外 UI。
             //   ★上限读 [LiveDanmakuClient.MAX_SEND_TEXT_LENGTH]（**唯一来源**，40）：
             //     与真正发送时 `sanitizeSendText` 的判据同一个数，所以"能打进输入框" ⟺ "能发出去"，
@@ -5725,7 +5707,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ① `Configuration.orientation` 是**窗口**方向，不是设备方向（PiP 小窗、分屏、自由窗口都会不一致，
      *    项目里点播早就写了这条：`PlayerController.updatePlayerMode()` 的"画中画：窗口方向 ≠ 设备方向"）；
      * ② 回调可能**根本不来**（退出 PiP、某些 ROM 的自动进入、窗口被系统改尺寸）。
-     * 这两个坑合起来就是用户报的"PIP 返回后底栏文字变小"：底栏被小窗方向的配置重排成横屏那一套，
+     * 这两个坑合起来就是实测到的 PiP 返回后底栏文字变小：底栏被小窗方向的配置重排成横屏那一套，
      * 回到全屏却没人再排一次。**真实布局尺寸**是唯一同时躲开这两个坑的信号（点播的
      * `onHostSizeChanged` / "尺寸是方向的最终真源"、宿主的 `portrait = h > w` 都是同一条结论）。
      *
@@ -5842,15 +5824,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * · **「画质」**：原来的「画质」+「线路」两颗合并（两者本来就是"选用哪条流"），
      *   点开是同一个弹窗的两段（[showStreamDialog]）。★第八批文案从「画质·原画」缩短成「画质」
      *   （理由见 [qualityButton] 的 KDoc）；
-     * · **「设置」**（★第十四批，本颗）：用户点名"画质的后面、PIP 的中间"，弹直播设置弹窗
+     * · **「设置」**（★第十四批，本颗）：位置在画质与画中画之间，弹直播设置弹窗
      *   （[showLiveSettingSheet] → compose 模块的 `LiveSettingSheetHost`）；
      * · **「画中画」**：点一下进小窗（[enterPipMode]）；
-     * · **「旋转」**：用户点名"那个旋转一定要放到底栏来啊，它是经常用到的"。
+     * · **「旋转」**：常用按钮，固定留在底栏。
      *
      * ★第七批从这里**删掉**的按钮（连同它们的字段）：`retryButton`「刷新」（改自动追流，
      *   手动入口在「画质·线路」弹窗里）、`sendDanmakuButton`「发弹幕」（变成输入条本身）。
      *   「画中画」第七批曾搬到顶栏（那颗图标已作为死代码删除），用户随后改主意，**又回到了底栏**（本清单里那颗）。
-     * ★「设置」自己也有过一轮反复：第二批从底栏**删掉**（用户当时："用户想设置自己退出来再去设置"），
+     * ★「设置」自己也有过一轮反复：第二批从底栏**删掉**（设置入口当时收敛到设置页），
      *   ★第十四批用户明确要求**加回来**（文案与位置都点名了）—— 键与设置项一直没有变过，
      *   变的只是入口；现在两个入口（本页弹窗 + 「设置 → 直播设置」页）共用同一份项
      *   （`liveSettingPreferenceItems`），不再有"两套 UI 各写各的"那种漂移。
@@ -5882,7 +5864,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * · 那一行里的按钮原先各按 `WRAP_CONTENT` 排，文案长短不同 → 宽窄不一、看着"奇奇怪怪"；
      *   现在一律 `weight=1` 等分 [bottomButtons]（容器宽度由 [applyBottomBarTextSizes] 定死），
      *   字号也统一成一档 —— **同高、同宽、同内边距**。
-     * · 用户还明确不要横滑（"别横滑"）：所以一行的宽度账全部在 [applyBottomBarTextSizes] 里算完，
+     * · 一行不允许横滑：所以一行的宽度账全部在 [applyBottomBarTextSizes] 里算完，
      *   窄屏是**缩字号**（[BOTTOM_BUTTON_TEXT_SP_STEPS]），不给任何滚动容器。
      * ★**只搬运容器，不重建按钮**：五颗按钮在 [buildUi] 里 addView 进 [bottomButtons] 一次，
      *   这里只把 [bottomButtons] 换父容器。好处是按钮的 `tag`（字号档位记录）与背景不会被反复刷掉。
@@ -6048,11 +6030,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   这就是"按钮态跟随主题"的落点；
      * · 文字白色：按钮压在**视频**上，白字对画面/主题底都有足够对比（和点播控制条一致）；
      * · 左右内边距压到 [BOTTOM_BUTTON_PADDING_H_DP]dp：均分格子里文案再长也不换行、不溢出
-     *   （换行会把底栏撑成三行，那正是用户抱怨的"按钮过多"）；
+     *   （换行会把底栏撑成三行，那正是要避免的"按钮过多"）；
      * · 字号 = [applyBottomBarTextSizes] 按"**一行里最宽的文案** + 等宽格预算"统一挑一档，
      *   再由 [applyDeterministicTextSize] 写到每一颗上（★第八批：同一档 → 同高）。
      *
-     * ## ★★为什么把 autosize 换掉（第五批第 4 条，用户："返回直播间的话，它那些按钮的字体又变小了"）
+     * ## ★★为什么把 autosize 换掉（第五批第 4 条：回到直播间后底栏字号会再次缩水）
      * 第四批写的"先把字号归一到 14sp 再交给 autosize"这套保护**从来没生效过**，两条 AOSP 源码级事实：
      * 1. `TextView.setTextSize(int unit, float size)`（AOSP 13 `TextView.java:4485`）的整个函数体是
      *    `if (!isAutoSizeEnabled()) { setTextSizeInternal(...) }` —— autosize 一旦打开，
@@ -6213,11 +6195,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     /**
-     * 一行里**最宽的那条按钮文案**在给定字号档位下有多宽（px）—— 用户第 3 条"同字号"的判据。
+     * 一行里**最宽的那条按钮文案**在给定字号档位下有多宽（px）—— 第八批第 3 条"同字号"的判据。
      *
      * ★为什么取"最宽"而不是"每颗各量各的"：按钮在同一行且共用一档字号，只要最宽的那条放得下，
      *   其余的一定放得下；反过来若按每颗自己量，就会出现"这颗 14sp、那颗 11sp"——
-     *   字号不一 → 高度不一 → 正是用户说的"奇奇怪怪"。
+     *   字号不一 → 高度不一 → 正是要避免的"奇奇怪怪"。
      * ★用**按钮自己的 Paint** 量文字（`button.paint`）：它带着这个按钮真实的字体/字距/缩放，
      *   量出来的宽度就是"按这个字号画出来有多宽"，和平台 autosize 的判据同源（都是"文字宽 ≤ 可用宽"），
      *   只是输入宽度从"上一次测量的结果"换成了"当前真实的格宽"。
@@ -6246,7 +6228,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 算出来，见 [widestBottomButtonLabelPx]）。
      *
      * ★为什么不再"每颗按自己的格宽各挑一档"（第五批的写法）：它们现在与输入框同一行、
-     *   共用同一份宽度预算，各挑各的必然出现"字号不一、大小奇怪"（用户第 3 条原话）；
+     *   共用同一份宽度预算，各挑各的必然出现"字号不一、大小奇怪"（第八批第 3 条）；
      *   同一行里**同字号 → 同高、同宽**才是这一条要求的落点。
      * ★`View.tag` 在这里只是"当前生效档位"的记录（全工程这些按钮没有别的 tag 用途）；
      *   档位没变就一个字节都不写（幂等，见 [applyBottomBarTextSizes] 的"不自激"那一段）。
@@ -6264,10 +6246,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 通用纯文字按钮（**底栏每一颗**都用它建）。
      *
-     * ★顶栏那颗「← 返回」本轮已经**不用它**了：用户要"只有图标、复用点播播放器的返回图标"，
+     * ★顶栏那颗「← 返回」本轮已经**不用它**了：只保留图标、复用点播播放器的返回图标，
      *   现在是 [backButton]（[ImageView] + `ic_arrow_back_white_24dp`，见 [buildUi] 顶栏那一段）。
      *
-     * ★底色 = 主题强调色 30% 透明（用户要"按钮态跟随主题"）。原来是写死的
+     * ★底色 = 主题强调色 30% 透明（按钮态跟随主题）。原来是写死的
      *   `argb(90,255,255,255)`（白 35%），换成主题色之后，"点缀色"这件事才真的跟着主题走；
      *   底栏那些按钮会再由 [applyBottomButtonStyle] 统一刷一遍（单行/内边距/固定档位字号），
      *   这里给的是"独立使用它"时的默认样子。
@@ -6304,7 +6286,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 播放侧状态文案 = **异常/过渡**（★本轮：正常态不再往状态行写东西）。
      *
-     * 用户原话（本轮）："正常播放的时候，这个状态就不要显示了……顶栏就只剩返回和房间号。"
+     * 本轮：正常播放时状态行留空，顶栏只保留返回与房间号。
      * 所以本函数**只**用于"此刻值得用户看一眼"的那几档（缓冲中 / 正在追流 / 已暂停 /
      * 弹幕断开 / 未开播 / 播放失败 …），全量清单见 [renderStatus] 的 KDoc。
      *
@@ -6351,7 +6333,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * | **隐藏（正常）** | 出处 |
      * |---|---|
      * | 直播中 | PLAYING → [setStreamStatusNormal] |
-     * | 画质 … ｜ 线路 … | ★**本轮整条删除**（用户："那部分去掉，画质弹窗里已经有'当前：xxx'"）—— 现在 [onStreamReady] 一个字都不写状态行，当前画质/线路只在「画质 · 线路」弹窗的副标题里 |
+     * | 画质 … ｜ 线路 … | ★**本轮整条删除**（当前档位在画质弹窗的副标题里）—— 现在 [onStreamReady] 一个字都不写状态行，当前画质/线路只在「画质 · 线路」弹窗的副标题里 |
      * | 弹幕 已连接 | [danmakuStatusLabel] 返回 null（正常态不占位置） |
      *
      * ## 为什么用 `GONE` 而不是"写空串"
@@ -6371,7 +6353,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 顶栏标题 = `直播间 房间号（x.x万人在线）`（★本轮：在线人数就写在房间号后面的括号里）。
      *
-     * ## 三档（用户要求："拿不到人数时**不显示括号**，不要显示 0 / --"）
+     * ## 三档（拿不到人数就整条不显示，不要退化成 0 或 --）
      * ```
      * 还没拿到房间号（titleRoomId == 0）→ 保持初值「直播间」
      * roomOnline == null 或 <= 0        → 「直播间 8178490」（不带括号）
@@ -6379,8 +6361,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ```
      *
      * ## 数字口径与首页直播卡片**完全一致**
-     * `NumberUtil.converString(online)` —— 与首页直播卡片人气文案同一句
-     * （`HomeLiveContent.kt`：`"${NumberUtil.converString(item.online)}人气"`）：
+     * `NumberUtil.converString(online)` —— 与社区/视频卡片共用同一个格式化函数
+     * （`HomeLiveContent.kt` 直播卡片原先也用它；该角标已于 2026-09-29 删除）：
      * ≥1 万显示 `x.x万`（保留 1 位小数）、≥1 亿显示 `x.x亿`、不足 1 万就是原数字。
      * 本页**不自己写格式化**，也不在文案里加"人气/看过"这类另一种口径的说法。
      *
@@ -6451,8 +6433,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * | 控件 | 显隐规则 | 为什么 |
      * |---|---|---|
      * | [topBar] | 跟着 `visible`（`GONE`） | 与改动前一致：4 秒自动隐藏、单击唤出 |
-     * | [bottomButtons]（那一行按钮，★第十四批起 5 颗） | 跟着 `visible`，但用 **`INVISIBLE`** 而不是 `GONE` | **保住占位**：底栏高度不变 → 底栏顶边不变 → 弹幕列表区不随控制条显隐跳动（"上下留白是用户有意留给控制栏的"）；同时 `INVISIBLE` 的子 View 不参与触摸派发，按钮不会"看不见却点得到" |
-     * | [danmakuInputRow]（输入条） | **跟着 `visible`** 一起显隐（`INVISIBLE`，与按钮同款）；**正在输入时一定不收**；**PiP / 即将进 PiP 时 `GONE`** | ★第八批（用户："为什么不和那几个按钮一起显示一两秒呢？为什么要一直站在那？"）：输入条不再是"常驻"，点画面唤出、4 秒后与按钮**一起消失**；正在打字（[isDanmakuInputActive]）时收起会把光标/键盘留着却把条藏了，那是纯粹的添乱，所以那一档强制可见；PiP 小窗里多一条挡画面、也弹不出输入法，所以整条 `GONE`（连占位都不要） |
+     * | [bottomButtons]（那一行按钮，★第十四批起 5 颗） | 跟着 `visible`，但用 **`INVISIBLE`** 而不是 `GONE` | **保住占位**：底栏高度不变 → 底栏顶边不变 → 弹幕列表区不随控制条显隐跳动（控制条上下留白是刻意留的）；同时 `INVISIBLE` 的子 View 不参与触摸派发，按钮不会"看不见却点得到" |
+     * | [danmakuInputRow]（输入条） | **跟着 `visible`** 一起显隐（`INVISIBLE`，与按钮同款）；**正在输入时一定不收**；**PiP / 即将进 PiP 时 `GONE`** | ★第八批：输入条不再是"常驻"，点画面唤出、4 秒后与按钮**一起消失**；正在打字（[isDanmakuInputActive]）时收起会把光标/键盘留着却把条藏了，那是纯粹的添乱，所以那一档强制可见；PiP 小窗里多一条挡画面、也弹不出输入法，所以整条 `GONE`（连占位都不要） |
      * ★`bottomBar` 自己**不整体 GONE**：它是"输入条 + 按钮"的容器，两种显隐都只落在孩子身上 ——
      *   于是隐藏时底栏高度**一点不变**，弹幕列表区的底边也就不会跟着跳。
      */
@@ -6463,7 +6445,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (::bottomButtons.isInitialized) {
             bottomButtons.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         }
-        // ★2026-09-26 用户实测"屏幕上下一直有一条半透明黑条挡着画面"（横屏底部/竖屏/PiP 里都有）：
+        // ★2026-09-26 实测：屏幕上下始终有一条半透明黑条遮挡画面（横屏底部/竖屏/PiP 里都有）：
         //   根因是**只藏了按钮和输入条，没藏装它们的那层容器** —— 而 `bottomBar` 自己带
         //   `setBackgroundColor(scrimColor())`（见 applyThemeColors），容器还在画，黑条就永远在。
         //   现在：容器跟着一起藏；`INVISIBLE`（不是 GONE）**保住占位**，所以用户有意留的上下留白不变，
@@ -6501,7 +6483,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 进小窗的"第一步"就该调它：**撤掉自动隐藏计时 + 立刻收起顶栏/底栏按钮/输入条**（★第五批第 3 条）。
      *
      * 为什么不能只依赖 `onPictureInPictureModeChanged(true)`：那个回调要等窗口**缩完**才来，
-     * 中间那 1~2 秒里控制条还挂在屏幕上（用户原话："它虽然只有一两秒的显示时间，但是它会挡住"）。
+     * 中间那 1~2 秒里控制条还挂在屏幕上（显示时间虽短，但这段过渡期确实会遮挡）。
      * 所以 [enterPipMode]（手动）与 [onUserLeaveHint]（31+ 系统自动进入）都在**最早的那一刻**调它。
      * 撤计时是必须的：`hideControlsRunnable` 到点后会再调一次 [setControlsVisible]，
      * 虽然那时门控也会把它压成不可见，但留着一条待执行的 Runnable 没有意义。
@@ -6548,13 +6530,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 沉浸式：**只有横屏（全屏）才隐藏系统栏**（竖屏一律把状态栏显出来）。
      *
-     * ★2026-09-26 用户要求："竖屏的情况下可以不要隐藏状态栏吗？……我老是想下滑去看时间，
-     *   还有手机电量什么的。竖屏其实可以不用去隐藏的。" —— 竖屏时系统状态栏本来就该在，
+     * ★2026-09-26 定稿：竖屏下不隐藏系统状态栏（要能随时看到时间和电量），
+     *   横屏照旧隐藏 —— 竖屏时系统状态栏本来就该在，
      *   顶栏（返回/房间号/状态）排在它**下面**即可（顶栏的顶边本来就是按状态栏内边距算的，
      *   见 [videoBandTopPx] 用的是 `topBar.bottom`，所以这里只要别把它藏掉）。
      *   横屏仍是全屏沉浸（隐藏系统栏 + 允许滑动临时唤出）。
      *
-     * ## ★★第十一批第 1 条：只"更新进入那一刻"是不够的（用户复测原话）
+     * ## ★★第十一批第 1 条：只"更新进入那一刻"是不够的（复测结论）
      * > "你说竖屏状态下那个状态栏不丢失，你只更新了进入的那一刻，我点击旋转按钮，再旋转再旋转，
      * >  你没有更新，它还是隐藏了。然后我在 PIP 进入软件，它也是隐藏的。**你没有做好各种逻辑门**。"
      *
@@ -6934,7 +6916,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 弹窗内容区的**高度上限**（px）：正常弹窗不许顶出屏幕。
      *
-     * 为什么要有这个数（用户实测："它弹窗超出了我的屏幕，我点不了"）：
+     * 为什么要有这个数（实测：弹窗会超出屏幕，按钮点不到）：
      * 一个 wrap_content 的弹窗，内容（长列表 / 长文本）比屏幕还高时，
      * 系统的做法是把窗口裁到屏幕大小 —— **底部的按钮就被裁到屏幕外了**，怎么点都点不到。
      * 所以这里把"内容区"的高度封顶，弹窗总高 = 标题 + 内容 + 按钮栏 ≤ 可用高度，
@@ -6959,7 +6941,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private fun dialogContentMaxHeightPx(leaveRoomForIme: Boolean = false): Int {
         val ime = if (leaveRoomForIme) imeInsetPx else 0
-        // ★2026-09-26 用户反馈"线路弹窗的取消按钮怎么都被挡住"——根因就在这里：
+        // ★2026-09-26 实测反馈：线路弹窗的取消按钮会被挡住 —— 根因就在这里：
         //   原来按 **pageHeightPx()（播放页高度≈整屏）** 减一点算上限，于是"内容 + 标题 + 按钮栏"
         //   必然超过屏幕，按钮栏被挤到屏幕外（不是按钮没放对位置）。
         //   现在按**真实屏幕高度**取一个保守百分比（62%），再加上对话框自身的 chrome 预留，
@@ -7006,7 +6988,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 为什么统一走 [MaterialAlertDialogBuilder]：
      * · 它就是**全 App 的弹窗观感**（`MainActivity.showNotificationPermissionTips()` 用的也是它，
      *   主题 `Theme.Bilimiao` 继承 `Theme.Material3.DayNight.NoActionBar`）——
-     *   用户要的"MD 三 E / 系统自带那种弹窗"；
+     *   要的是系统自带那类 Material 弹窗；
      * · 窗口几何由主题 + 系统算（居中、左右留白、最大宽度），**不再由我们按像素钉死**，
      *   于是竖屏/横屏/小屏/分屏都不会越界，也不需要转屏后重算（本轮删掉的那段全屏几何代码）；
      * · 长内容靠我们自己的 [MaxHeightScrollView] 封顶滚动，按钮在弹窗外面的按钮栏里，永远点得到。
@@ -7020,7 +7002,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     //   底栏「弹幕」那个按钮是会话级临时开关，同样一行都不写 —— 写入点已经不在这条路上。
 
     /**
-     * 气泡贴在**哪一侧**（用户规则："各自贴不挡手的那一侧"）。
+     * 气泡贴在**哪一侧**（各自贴不挡手的那一侧）。
      *
      * · 调音量（右半区按下）→ 气泡在**左**（[START]，手指在右边不挡）
      * · 调亮度（左半区按下）→ 气泡在**右**（[END]，手指在左边不挡）
@@ -7039,7 +7021,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ```
      * 尺寸只有 90~100dp，父容器又是播放页自己 → **物理上不可能跑出屏幕**。
      *
-     * ## ★竖屏根因（用户实测："亮度超出我的屏幕外、音量没有靠边"，横屏却是对的）
+     * ## ★竖屏根因（实测：亮度跑到屏幕外、音量不靠边，横屏却是对的）
      *
      * ### 上一版是怎么写的（错在哪：两套坐标系混用）
      * 气泡住在**独立的 Dialog 悬浮窗**里，位置这样算：
@@ -7207,7 +7189,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 主题配色（用户反馈："直播区域的所有东西，点缀色、主题色、副色什么的，没有跟随我们的那些主题"）
+    // 主题配色（实测反馈：直播区域的点缀色、主题色、副色没有跟随主题设置）
     //
     // ★病根：原来页面里几乎所有颜色都是**写死**的两类 ——
     //   · 中性色：底栏/顶栏黑色蒙层 `argb(140,0,0,0)`、按钮 `argb(90,255,255,255)`、白字；
@@ -7327,7 +7309,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 把主题色刷到**已经建好的控件**上（转屏/深浅色切换后重算一次就够了，不重建页面）。
      *
-     * 覆盖范围 = 用户点名的几处："弹窗强调色、按钮态、状态条、图标"：
+     * 覆盖范围 = 几个指定位置（弹窗强调色、按钮态、状态条、图标）：
      * · 按钮态 → 底栏每一颗按钮的底色（[applyBottomButtonStyle]）；
      * · 状态条 → 顶栏那行状态文字（副色）+ 缓冲圈（主色）；
      * · 弹窗强调色 → [LiveListDialog] 每次 show 时现取 [accentColor]，
@@ -7428,7 +7410,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *    与正文里的行一样**手动接点击**（`setNeutralButton(label, null)` + `setOnShowListener` 里
      *    覆盖），因为默认的按钮回调点完会**无条件关弹窗**，而我们要自己决定关不关
      *    （这里选择：关掉 —— 用户点它就是想"重来一遍"，关掉正好能看顶栏状态）。
-     *    ★**仍然没有「取消」按钮**（用户 2026-09-26 明确要求："我直接不要那个取消按钮了"）：
+     *    ★**仍然没有「取消」按钮**（2026-09-26 定稿：不设该按钮）：
      *    关闭方式齐全 —— 点任意条目即切换并关闭、点弹窗外关闭、返回键关闭。
      */
     private inner class LiveListDialog(
@@ -7450,8 +7432,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * 只是配色改成**跟随弹窗主题**（不再写死白色/黑色）：
          * 弹窗是浅色还是深色由 `Theme.Bilimiao` 的 DayNight 决定，写死颜色会在浅色主题下看不见。
          *
-         * ★★第四批第 6 条：**里面的文字改成居中**。用户原话："那个画质选质，还有源选质的那个弹窗，
-         *   里面的文字没有居中，它靠边上去了。你看我软件大概的设置都是怎么做的？"
+         * ★★第四批第 6 条：**里面的文字改成居中**（当时行文字未居中、贴着弹窗边缘）。
          *   病根是[自建内容的弹窗]没有 Material 正文那 24dp 内边距：这些行是我们自己 addView 进去的，
          *   只给了 4dp 左右内边距 → 文字几乎贴到弹窗边缘，而标题（`setTitle`，走 Material 标题样式）
          *   自带内边距，两者一比就显得"靠边、不居中"。
@@ -7463,8 +7444,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          *     （`MainActivity.showNotificationPermissionTips()` 同样是它），标题自带内边距、并不"靠边"，
          *     与"正文居中"并不冲突 —— 用户抱怨的是正文那几行。
          *
-         * ★★第七批的高度账（用户点名"弹窗内容高度必须按真实屏幕高度封顶 + 可滚，
-         *   [dialogContentMaxHeightPx] 已按屏幕 62% 改好，别改回去"）：
+         * ★★第七批的高度账（已定稿：内容区按真实屏幕高度封顶 + 可滚，
+         *   [dialogContentMaxHeightPx] 已按屏幕 62% 改好，不要再改）：
          * ```
          * 列表上限 = dialogContentMaxHeightPx() - DIALOG_TAB_STRIP_DP   （铺开 Tab 栏时）
          * ```
@@ -7899,7 +7880,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 手势音量的**唯一出口**，跑在自己的 `HandlerThread` 上 —— **UI 线程一个字节都不写**。
      *
-     * ## ★★要修的到底是什么（用户实测："音量手势 UI 没有实时跟进，过了一两秒才显示"）
+     * ## ★★要修的到底是什么（实测：音量手势 UI 没有实时跟进，要过一两秒才显示）
      *
      * 老写法在 `ACTION_MOVE` 里**同步**调 `AudioManager.setStreamVolume(...)`。这一句是
      * **跨进程调用**，链路每一步都能查到（证据在报告里逐行列出）：
@@ -8035,7 +8016,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ```
      * 左半区 = 亮度，右半区 = 音量
      * ```
-     * 用户要的是"老样子复用点播那套逻辑和 UI"，所以这里不做反向映射。
+     * 要的是复用点播那套逻辑和 UI，所以这里不做反向映射。
      * ★**提示气泡的位置是"反"的，这也是照抄点播**：调右半区（音量）气泡显示在**左半区**，
      *   调左半区（亮度）气泡显示在**右半区** —— 手指不挡提示，用户点名要的就是这个手感。
      *   依据是 GSY 的两份布局（`video_volume_dialog.xml` 内容贴左 / `video_brightness.xml` 贴右），
@@ -8064,7 +8045,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                     //   就会一直挂着、控制条被永久压住 —— 这里清掉它，一次点击即可恢复正常。
                     if (pipEntryPending && !isInPictureInPictureMode) pipEntryPending = false
                     // ★第七批：正在输入弹幕时，单击画面 = **收起键盘**（而不是把控制条切走）。
-                    //   理由：用户点一下画面多半是想"看画面了、先别打字"；而控制条这时本来就该亮着
+                    //   理由：点一下画面多半是想看画面、先别打字；而控制条这时本来就该亮着
                     //   （[hideControlsRunnable] 与 [applyControlsVisibility] 都不在输入时隐藏）。
                     //   ★只在这一种情况下改变单击语义；没在输入时，单击仍是"显隐控制条"（手势语义一行未改）。
                     if (isDanmakuInputActive()) {
@@ -8189,8 +8170,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val dx = abs(event.rawX - downRawX)
             if (dy <= touchSlop || dy <= dx) return false
 
-            // ★第十五批第 4 条：**横屏时"从顶栏那一块起手"一律不进手势**（用户："我想让它的那个
-            //   区域，如果我从那里下滑的话，音量和亮度是不会触发的……"）。判据与高度见
+            // ★第十五批第 4 条：**横屏时"从顶栏那一块起手"一律不进手势**（顶栏那一块不再是手势的起手区）。
+            //   判据与高度见
             //   [landscapeGestureShieldBottomPx]，形态口径与 [isPageLandscape] 同源（真实尺寸）。
             //   ★这里**返回 false**（而不是把事件吃掉）：与下面"横向滑动 / 起手在画面外"两条路
             //     完全一样 —— 事件照旧喂给 GestureDetector，单击显隐控制条、双击暂停的语义一个字
@@ -8200,8 +8181,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
             // ★★本轮（2026-09-26）：**起手点必须落在视频画面区域内**，才允许进入亮度/音量手势。
             //
-            // 用户原话："我在竖屏的状态下拖动某一些区域，比如说**底栏的那个黑色块区域**，
-            // 它也能调音量……就是在竖屏的情况下，只能点它的**播放区域**。"
+            // 竖屏下拖动底栏那块黑色区域也能调音量 —— 竖屏下只应响应**播放区域**。
             //
             // 判据是**正向**的一条：`按下点在 [videoContainer] 矩形内`（见 [isInsideVideoStage]）——
             // **不是**"排除底栏"那种反着写的判据。反着写必须枚举"哪些区域不该响应"
@@ -8241,8 +8221,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * 横屏"顶栏手势盾"的**底边**（绝对屏幕 Y，与 `event.rawY` 同一套坐标）：起手点在这条线
          * 之上（更靠屏幕顶）时**不进亮度/音量手势**。
          *
-         * ## 为什么要有它（用户原话）
-         * 用户："我想让它的那个区域，如果我从那里下滑的话，音量和亮度是不会触发的……"
+         * ## 为什么要有它
+         * 顶栏那一块起手下滑时，不应进入亮度/音量手势。
          * 横屏画面是**全屏铺满**的（[applyVideoStageLayout] 里 `band = 0`），顶栏那一块也是画面，
          * 于是从屏幕顶部（顶栏/状态栏那一条）往下滑同样满足"起手在画面内"，会误触左右半区的
          * 亮度/音量。这里只挡**手势的起手区**，版式与画面高度一个字节都不动 ——
@@ -8326,7 +8306,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // ★第十三批：跟手性诊断（**只为日志**，不改任何手势行为）。
             //   `event.eventTime` 是这一串触摸样本在系统里**产生的时刻**，与 `uptimeMillis()` 同一个
             //   时基；两者之差 = "手指已经动了多久，我们才开始处理它"。主线程被跨进程写入堵住时，
-            //   这个值会涨到几百甚至上千毫秒 —— 那正是用户说的"过了一两秒 UI 才跟上"；
+            //   这个值会涨到几百甚至上千毫秒 —— 那正是要避免的"过了一两秒 UI 才跟上"；
             //   修好之后它应该只剩一帧左右的量级（抬手时由 [endDrag] 记成一条日志）。
             val now = SystemClock.uptimeMillis()
             if (dragMoves == 0) dragStartedAt = now
@@ -8346,7 +8326,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * 换算与点播同一套（`DanmakuVideoPlayer.kt:1743-1751`）：
          * `Δ音量 = max × ΔY × 2 / 屏高`，即"半屏高度的滑动 = 满音量"。
          *
-         * ## ★★第十三批：UI 线程只做 UI（用户实测："手势的 UI 没有实时跟进，过了一两秒才显示"）
+         * ## ★★第十三批：UI 线程只做 UI（实测：手势 UI 没有实时跟进，要过一两秒才显示）
          *
          * ### 上一版（第十一批第 2 条）修到哪、为什么还不够
          * 那一版把写入降到"档位变了才写 + 同一帧最多写一次（16ms 节流）"，但**写入本身仍在 UI 线程**：
@@ -8404,8 +8384,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // ★★2026-09-29（用户真机实测后拍板，**本行第二次定稿**）：音量与亮度统一为
             //   **÷(屏高 × 3)** —— 整屏滑动 ≈ 改变 1/3 量程（3 屏走完整条行程）。
             //
-            // 用户原话（装 vc197 = ×2 那版之后）："现在的音量怎么那么灵敏呢？……两个都是非常灵敏，
-            // 两个是完全一模一样的灵敏了。我要求回到上一个点播的那样，那个我都习惯了。"
+            // 实测（vc197 = ×2 那版）：音量过于灵敏，且音量与亮度灵敏度完全一样；
+            // 期望回到上一版点播的手感。
             // ⇒ 结论：**点播的 `×2` 也偏灵敏**（那是上游导入 GSY 时带的系数），
             //   所以这一版把**点播与直播的音量一起改成 ÷3**，与两边**亮度**的既有系数完全一致：
             //   ```
@@ -8422,7 +8402,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   才是真正生效的那份。两边音量现在都是"基准档位 + 按下点起的累计位移 / (屏高×3)"，
             //   结构相同（`mDownY` 在音量分支不推进 —— GSY 字节码实证）⇒ 同一位移同一档位。
             // ★历史：这一行被"灵敏度"来回改过三次（÷3 → ×2 → ÷3）。**要再动它之前，先看这条注释**
-            //   与用户原话：他不接受"半屏走完"（×2），也不接受"比点亮更迟钝"。改就四个一起改。
+            //   与手感口径：×2 那种"半屏走完"不接受，"比点亮更迟钝"也不接受。改就四个一起改。
             //
             // 其它已排查、不改变灵敏度的项：死区（点播 `mThreshold=80px` 才开始调；本页 `touchSlop`
             // 约 8~24px 就进手势 ⇒ 本页更早响应）；除数（点播 `curHeight = 横屏 ? mScreenWidth :
@@ -8529,10 +8509,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // ══════════════════════════════════════════════════════════════════════
     // 竖屏版式：上面视频、下面弹幕列表
     //
-    // 第三批用户原话："竖屏的情况下，能不能把播放的区域往靠上一点？像我第一张图一样"
-    // （那张图是 B 站官方 App 的竖屏直播页：上面视频，下面整块是弹幕/聊天区）。
-    // 第四批用户把它修正成："这个直播的画面太上了，太顶了。它把那个状态栏，还有我们点一下
-    // 显示几秒的那个 Tab 栏（顶栏）也顶住了，**应该放在那个顶栏和状态栏下面**。"
+    // 第三批：竖屏下把播放区域往靠上一点（参考 B 站官方 App 的竖屏直播页：上面视频，
+    // 下面整块是弹幕/聊天区）。
+    // 第四批修正：画面顶得太高，把状态栏和"点一下显示几秒"的顶栏都压住了 ——
+    // **视频带必须落在状态栏 + 顶栏之下**。
     //
     // 落地成"两套版式、一个开关"，**视频带的顶边由顶栏说话**：
     // ```
@@ -8558,7 +8538,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 所以"放在状态栏和顶栏下面"这一条用**一个值**就表达完了，不用分别去要两段的 insets。
      *
      * ★顶栏是**浮层**（GONE 之后 4 秒才随单击回来），但这条**不跟着它显隐变**：
-     *   · 这正是用户的要求 ——"让视频**始终**在其下，不要压在它下面"；
+     *   · 这正是那条要求：视频**始终**在顶栏之下，不被它压住；
      *   · 依据与宿主"底栏留白"那条完全一样：被 GONE 的 View 不会重新 layout，
      *     `top/bottom` 保留**最后一次显示时的位置** —— 拿到的就是稳定的"顶栏占位"。
      * ★顶栏还没量出来（首帧之前）返回 0：视频带先贴顶，紧接着 [installPageLayoutWatchers] 里

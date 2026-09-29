@@ -77,14 +77,14 @@ class MiaoHttp(var url: String? = null) {
             }
             // Web API 自动加 WBI 签名。
             //
-            // ★ 2026-09 收敛（用户要求："直播需要 WBI 你就给他，不需要的就不给他那个认证"）：
+            // ★ 2026-09 收敛（判据：直播接口需要 WBI 就签，不需要的不给那个认证）：
             //   判据从原来的 `"api.bilibili.com" in url`（**等于给全 App 的 Web 接口泛签**）
             //   改成 WbiSigner.autoScopeFor(url) —— 只有**直播域名 + 直播里确实需要签名的端点**才返回非空。
             //
             //   为什么必须收：WbiSigner 修好之前它从来没生效过（nav 解析必抛异常被吞），
             //   所以"未签名 URL"是评论 / 分区榜 / 番剧点评 / 播放进度上报等区域的**实际基线**；
             //   签名一修好，按 api.bilibili.com 泛签就会把这些区域的请求形态全部改掉
-            //   （加 wts + w_rid），用户明确反对这种"修一个坏三个"的影响面。
+            //   （加 wts + w_rid），这种"修一个坏三个"的影响面必须避免。
             //   非直播接口将来确实要签名时：在它自己的调用点写 WbiScope.NON_LIVE，不要回来动这里。
             val autoScope = url?.let { WbiSigner.autoScopeFor(it) }
             val hasSign = url?.let { "sign=" in it || "w_rid=" in it } == true
@@ -191,8 +191,8 @@ class MiaoHttp(var url: String? = null) {
          * WBI 签名总开关（由 FlagsSettingPage 同步写入 SettingPreferences.WbiSignEnabled，默认开）。
          *
          * ★2026-09 收敛后的语义：它**只约束非直播接口的显式 opt-in**（[WbiSigner.WbiScope.NON_LIVE]）。
-         *   直播链路（弹幕 token / 发弹幕）**不受它影响** —— 用户要求"不需要用户说开不开，
-         *   那直播的直接需要的就给他"，否则一个设置项就能把直播弹幕卡死。
+         *   直播链路（弹幕 token / 发弹幕）**不受它影响** —— 直播直接需要的就给它，
+         *   不需要额外开关放行，否则一个设置项就能把直播弹幕卡死。
          *   另外也不再存在"按 api.bilibili.com 自动签"这回事，见 [buildRequest] 里的注释。
          */
         @Volatile

@@ -147,7 +147,7 @@ class LiveDanmakuHistoryAPI {
      * `data.admin`（房管的最近 10 条）+ `data.room`（普通用户的最近 10 条）合并成一条时间线。
      *
      * ★两处防御：
-     * 1. `text` 为空/全空白的条目直接丢（别在列表里出现"用户名："这种缺一半的行）；
+     * 1. `text` 为空/全空白的条目直接丢（别在列表里出现只有用户名、没有内容的那种半行）；
      * 2. 时间解析失败（`timeline` 是 `"0000-00-00 00:00:00"` 或字段缺失）时为 0，
      *    `sortedBy` 是**稳定排序**，所以这些条目保持接口给的原始相对顺序。
      */
@@ -166,7 +166,7 @@ class LiveDanmakuHistoryAPI {
             if (text.isBlank()) continue
             // ★实测历史里真有"只有 U+202B（从右到左标记）"这种**看不见**的条目
             //   （bilibili-API-collect 的真实样本 10 条里有 4 条就是它），
-            //   别让它们变成列表里一行"用户名："空气 —— 见 [hasVisibleContent]
+            //   别让它们变成列表里一行"只有用户名"的空气行 —— 见 [hasVisibleContent]
             if (!hasVisibleContent(text)) continue
             // 昵称：优先顶层 nickname，退到 user.base.name（PiliPlus 取的就是后者）
             val uname = raw.nickname.takeIf { it.isNotBlank() }
@@ -197,7 +197,7 @@ class LiveDanmakuHistoryAPI {
      * 判据 = 至少一个"既不是空白、也不是格式字符（Unicode `Cf`）、也不是控制字符"的字符。
      * 为什么需要它：弹幕文本实测会出现只有 `U+202B`（RIGHT-TO-LEFT EMBEDDING）这种
      * **零宽格式字符**的条目（多半是进场/礼物占位），`String.isBlank()` 判不出来，
-     * 而它进列表就是一行看不见内容的"用户名："。
+     * 而它进列表就是一行只有用户名、看不见内容的空行。
      */
     private fun hasVisibleContent(text: String): Boolean = text.any { ch ->
         !ch.isWhitespace() && Character.getType(ch) != Character.FORMAT.toInt() && !ch.isISOControl()

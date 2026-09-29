@@ -100,7 +100,7 @@ class MessagePage : ComposePage() {
  *
  * ★ name 用极简文案（回复 / @我 / 赞 / 私信 / 系统）：
  *   5 个长名字（"回复我的""我的@""收到的赞""私信""系统通知"）在窄屏上会被挤成两行、Tab 条整体抬高，
- *   用户 2026-09-25 实测反馈"要极简、好识别，要不然多的话它又抬上去，不好看"。
+ *   所以要极简、好识别 —— 名字一多就会被挤成两行、把 Tab 条抬上去。
  *   只动显示名：id 与下面的角标（unread.reply / at / like / chat / sys_msg）逻辑一个字都没改。
  */
 private sealed class MessagePageTab(

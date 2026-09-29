@@ -91,7 +91,7 @@ private fun Context.findHostLifecycleOwner(): androidx.lifecycle.LifecycleOwner?
 }
 
 /**
- * 设置里的"更多"页面原先全挤在「实验性功能」一页里（1138 行 / 9 个分类，用户反馈"杂物间"）。
+ * 设置里的"更多"页面原先全挤在「实验性功能」一页里（1138 行 / 9 个分类，杂乱得像杂物间）。
  * 现在按大类拆成**可选区块**：每个页面只显示自己那几块，状态与弹窗仍留在本文件（不搬家）。
  */
 private enum class MoreSection {
@@ -795,7 +795,7 @@ private fun FlagsSettingPageContent(
                                 )
                             } else {
                                 // 老版本（vc124 及以前）的记录里没存 oid/type，只有"视频 BVxxxx"这段文字
-                                // → 从里面把 BV 抠出来，换成 aid 再复检（用户实测撞上过"缺少参数"）
+                                // → 从里面把 BV 抠出来，换成 aid 再复检（不换会撞上"缺少参数"）
                                 val bv = Regex("BV[0-9A-Za-z]{10}").find(lastResult.where)?.value
                                 if (bv != null) {
                                     launcher.recheckByBv(
@@ -831,7 +831,7 @@ private fun FlagsSettingPageContent(
             //   图文动态申诉 POST x/dynamic/feed/dyn/appeal（uid + link + reason）
             // 入口：上面「上次检测结果」点开 → 与检测弹窗同一个构建入口，底部「自动申诉」= 官方同款两个输入
             // （理由预填内置长文案，可在弹窗里当场改，不落盘）；下面只剩「图文动态申诉」和「官方申诉页（备用）」。
-            // ★ 2026-09-27 用户砍掉两个入口（"非必要"）：
+            // ★ 2026-09-27 砍掉两个入口（理由：非必要）：
             //   · 「自动申诉上一条评论」——理由/链接在下面的申诉弹窗里本来就能改，多一个入口纯冗余；
             //   · 「申诉理由（点开编辑）」——弹窗里已经预填了默认长文案，用户当场改当场用，
             //     不再单独持久化一份（"实时保存个屁，不保了"）。
@@ -859,7 +859,7 @@ private fun FlagsSettingPageContent(
                 summary = { Text("原生接口不可用时（拿不到网页登录态）的兜底入口") },
                 onClick = {
                     if (ClickGuard.allow("flags:antifraud_appeal")) {
-                        // 走外部浏览器（用户 2026-09-25 拍板："你还是跳外部吧，一劳永逸"）：
+                        // 走外部浏览器 —— 免去替对方页面长期适配主题的成本：
                         // 内置 WebView 得替 B站 页面适配主题（深色注入后表单白底白字），不值当。
                         runCatching {
                             context.startActivity(

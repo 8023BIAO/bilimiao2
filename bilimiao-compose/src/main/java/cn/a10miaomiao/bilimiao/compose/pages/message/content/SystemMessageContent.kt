@@ -270,7 +270,7 @@ private class SystemMessageContentModel(
 
     /**
      * 全页**唯一**的链接跳转入口 —— 列表正文里的点击、弹窗里的"打开链接"都走这里，
-     * 两处绝不会各判一套规则（用户 2026-09-25 反馈的"点 github 链接弹不支持"就是旧分流造成的）。
+     * 两处绝不会各判一套规则（旧分流造成过"点 github 链接弹不支持"，已修）。
      *
      * [target] 是解析阶段就规范化好的目标（见 parseSystemMessageContent），规则表：
      *
@@ -333,7 +333,7 @@ fun SystemMessageContent() {
                     SystemMessageItemBox(
                         item = item,
                         // ② 点整行任意位置 → 弹窗看全文（标题 / 正文全文 / 时间）。
-                        //    不新开界面、不加新路由：用户明确说"不想再写一个界面，点进去再写一个界面"。
+                        //    不新开界面、不加新路由：这里刻意不做"点进去再看一个界面"。
                         onClick = {
                             showSystemMessageDetailDialog(context, item, viewModel::openLink)
                         },
@@ -669,7 +669,7 @@ private fun buildSystemMessageContent(
 
 /**
  * ② 点整行弹出的"看全文"弹窗：标题 / 正文全文 / 时间都在一个 MessageDialog 里说完
- * —— 不新建详情页、不加新路由（用户 2026-09-25："我真的不想再写一个界面，点进去再写一个界面"）。
+ * —— 不新建详情页、不加新路由（刻意不做"点进去再看一个界面"）。
  *
  * 按钮按 DialogX 固定槽位**按位置**分配（Material 布局是 `btn_selectOther` + 空隙 +
  * `btnSelectNegative` + `btnSelectPositive`，即最左 / 中间 / 最右，与评论反诈弹窗同一套排法）：

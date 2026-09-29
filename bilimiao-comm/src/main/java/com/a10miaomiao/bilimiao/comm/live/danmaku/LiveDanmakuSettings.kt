@@ -12,7 +12,7 @@ import kotlin.math.roundToInt
  * 直播弹幕的**有效渲染参数**（纯数据 + 纯读取，不依赖任何 Android UI）。
  *
  * ## ★定稿：直播弹幕与点播**彻底解耦** —— 每一个参数都只来自 `live_danmaku_*`
- * 用户原话（本轮）："这他妈的相关的直播弹幕屏蔽词也给它去掉了，这个设置也不要了。"
+ * 直播弹幕的屏蔽词相关设置本轮整体去掉。
  * 于是三条线一起收口（第 1 条是本轮新增，第 2、3 条是上一轮列的遗留、本轮一起做）：
  * 1. **不做任何关键词过滤**：`filterEnabled` / `filterKeywords` / `buildFilter()` 与
  *    `LiveDanmakuTextFilter` 整个删掉。点播的 `danmaku_filter_enabled` /
@@ -20,7 +20,7 @@ import kotlin.math.roundToInt
  *    用户在点播里把词表写到天上去，直播也一条都不会被拦。
  * 2. **可见性只看 `live_danmaku_enable`**：不再 ∩ 点播那三层开关
  *    （`danmaku_enable` ∩ `{mode}_danmaku_show` ∩ `{mode}_danmaku_r2l_show`）。
- *    点播里把弹幕总开关关了，直播该显示还是显示（用户要的就是"彻底解耦"）。
+ *    点播里把弹幕总开关关了，直播该显示还是显示 —— 这正是"彻底解耦"的含义。
  * 3. **车道上限只看直播自己的「弹幕显示区域」**：不再读点播的「滚动弹幕最大行数」
  *    （`{mode}_danmaku_r2l_max_line`）。浮层的车道数 = `区域高度 ÷ 车道高`，
  *    所以**区域全屏 = 不限**（`maxLanes` 字段随之整个删除）。

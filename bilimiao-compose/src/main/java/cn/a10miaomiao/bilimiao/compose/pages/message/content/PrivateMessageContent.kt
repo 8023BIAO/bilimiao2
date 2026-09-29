@@ -90,12 +90,12 @@ internal const val DEFAULT_FACE_URL = "https://i0.hdslb.com/bfs/face/member/nofa
  *
  * 为什么必须只有一份：Glide 的缓存键就是"URL 字符串（+请求尺寸）"。会话列表和私信对话原来
  * 都直接用接口给的**裸 URL**，看着一样，但只要两处拼法/取值不同，缓存就永远不共用 ——
- * 这正是用户问的"难道它们不是共用一个吗"以及"一处出来了、另一处出不来"的机制。
+ * 这正好解释了"明明看着一样、缓存却不共用"以及"一处出来了、另一处出不来"的机制。
  *
  * 为什么必须 autoHttps：B 站头像字段有三种形态 —— `https://…`（正常）、`http://…`（明文）、
  * `//i0.hdslb.com/…`（协议相对）。本 App targetSdk=36 且没开 usesCleartextTraffic：明文 http 会被
  * 系统直接拦掉，协议相对地址会被 Glide 当成相对路径 —— 两种都是"永远加载不出来"，
- * 表现就是用户说的"挂几个小时还是占位图"。autoHttps 把这两种都补成 https。
+ * 表现就是挂几个小时还是占位图。autoHttps 把这两种都补成 https。
  *
  * 为什么加 `@200w_200h`：项目里所有头像都这么写（DynamicModuleAuthorBox / MyFollowerPage /
  * ReplyItemBox…）。头像原图动辄上百 KB，走 B 站图片 CDN 的 200×200 缩略图只有几 KB ——

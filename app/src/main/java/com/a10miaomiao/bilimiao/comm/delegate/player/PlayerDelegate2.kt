@@ -1680,7 +1680,7 @@ class PlayerDelegate2(
         controller.updatePlayerMode(newConfig)
         // ★ 配置变化时无条件解除"挂起"(拖到屏幕边缘后 UI 全隐藏)状态：
         //   以前只靠 ScaffoldView.orientation 的 setter 在"方向值真的变了"时复位，
-        //   而关掉系统自动旋转后手动转设备可能根本不产生方向变化 → UI 永久锁死（用户报的"界面被锁住"）。
+        //   而关掉系统自动旋转后手动转设备可能根本不产生方向变化 → UI 永久锁死（界面被锁住）。
         player?.setHoldStatus(false)
         if (scaffoldApp.orientation != newConfig.orientation) {
             controller.onChangedScreenOrientation(newConfig.orientation)

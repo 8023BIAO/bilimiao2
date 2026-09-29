@@ -55,7 +55,7 @@ import kotlin.math.roundToInt
  * [LiveDanmakuSettings.watch]（DataStore 流）→ `collectAsStateWithLifecycle`（初值走主线程 O(1) 的
  * [LiveDanmakuSettings.loadCached]）→ 一路传给浮层。
  *
- * ★与点播**彻底解耦**（用户："这他妈的相关的直播弹幕屏蔽词也给它去掉了"）：
+ * ★与点播**彻底解耦**：
  *   · 可见性 = `live_danmaku_enable`，**不再** ∩ 点播的三层开关；
  *   · 车道上限只由「弹幕显示区域」决定，**不再**读点播「滚动弹幕最大行数」；
  *   · **不做任何关键词过滤**，点播的词表对直播一条都不生效。
@@ -78,11 +78,8 @@ import kotlin.math.roundToInt
  * ══════════════════════════════════════════════════════════════════════════
  * ## 竖屏弹幕列表：**常驻停靠**（vc168 任务：不挡底栏、不靠按钮切换）
  *
- * ### 用户原话（这一版要解决的两件事）
- * > "还有弹幕列表把那个按钮给挡住了，我有点想让它也放到底栏去，要么就是**固定在那个视频下面**，
- * >  直接不要有一个说什么按钮才能让它显示去……就把那个列表**一直显示在它的下面**，
- * >  如果说它是竖屏的情况下。还有那个弹幕列表，就**一直显示到底部**就行了。
- * >  奇了怪了，它竟然也会卡到我那个底栏的几个按钮。"
+ * ### 这一版要解决的两件事（症状）
+ * 弹幕列表被那颗浮动按钮挡住、还想让列表常驻在视频下方并一直显示到底部，同时不能压住底栏按钮。
  *
  * 拆成两条硬要求：
  * 1. **去掉"点按钮才显示"**：不再有浮动胶囊，竖屏时列表**常驻**；
@@ -178,8 +175,8 @@ import kotlin.math.roundToInt
  * ══════════════════════════════════════════════════════════════════════════
  * ### ★转屏后列表回不来 / 视频与列表之间那条黑缝：根因与修法（本轮，2026-09-26）
  *
- * 用户原话①："怎么我旋转全屏，再转回竖屏，我竖屏状态下专属的弹幕（用户名+内容那种列表）怎么不见了？"
- * 用户原话②："中间有一大块黑屏空呢……竖屏的情况下把它给占满？"
+ * 症状①：全屏转回竖屏后，竖屏专属的弹幕列表（用户名+内容那种）不见了。
+ * 症状②：视频与列表之间空出一大块黑屏，竖屏下没有占满。
  *
  * #### 根因（两个症状是**同一个**结构性缺陷的两面）
  * 上一版把"列表画不画、画在哪"押在**播放页那个槽 View 的一次量测结果**上：
@@ -193,7 +190,7 @@ import kotlin.math.roundToInt
  * | 场景 | 播放页实际行为（可复核的代码路径） | 上一版宿主的反应 |
  * |---|---|---|
  * | **转回竖屏** | `measurePortraitStageAfterLayout()` 的"当场量"分支在**窗口还没按新方向 resize** 时就跑了（`rootLayout.isLaidOut && !isLayoutRequested` 为真），量到的是**上一个方向的页面尺寸**：竖屏配置 + 横屏页面 → `videoContainer.bottom`（≈783）> `bottomBar.top`（≈1004）之间放不下 96dp → 走"地方太小"分支 `applyListSlot(top, 0)`；而那个一次性布局监听**已经用掉了**，resize 真正到来时**再没有任何东西会重量槽** | 槽高 0 → `rect.height < 96dp` → `listShown=false`，面板 GONE；锚点监听虽然还会响一次，但槽**永远是 0 高** → **列表再也不回来**（滚动弹幕接管，用户看到的就是"列表不见了"） |
- * | **视频换比例** | `onVideoSizeChanged()` 只做 `videoContainer.videoAspectRatio = w/h; requestLayout()`（`LivePlayerActivity` 1436-1443），**不会**再量版式 → 槽顶边停在"第一次量版式时按**默认 16:9** 算出来的值" | 比 16:9 **宽**的流：视频带变矮、槽顶边没变 → 视频与列表之间留一条**黑缝**（用户原话②）；比 16:9 **高**的流：列表**压住画面底部**。两个方向都是"槽是镜像、不是真值"造成的 |
+ * | **视频换比例** | `onVideoSizeChanged()` 只做 `videoContainer.videoAspectRatio = w/h; requestLayout()`（`LivePlayerActivity` 1436-1443），**不会**再量版式 → 槽顶边停在"第一次量版式时按**默认 16:9** 算出来的值" | 比 16:9 **宽**的流：视频带变矮、槽顶边没变 → 视频与列表之间留一条**黑缝**（症状②）；比 16:9 **高**的流：列表**压住画面底部**。两个方向都是"槽是镜像、不是真值"造成的 |
  *
  * 换句话说：**槽顶边只是"视频带底边"的一个镜像，而镜像是会过期的**；
  * 上一版把镜像当真值，还没有任何"镜像过期/不可用"时的退路，所以一次坏的量测就能永久关掉列表。
@@ -222,8 +219,7 @@ import kotlin.math.roundToInt
  * ### 数据来源与性能（★本轮两条改动：横屏也累积 + 进房铺历史）
  * - 数据**只读复用** `client.messages`（`DANMU_MSG`）——不新开连接、不改协议、不加第二个订阅者：
  *   缓冲是在 [LiveDanmakuOverlay] 已有的那个 `collect` 里顺路存的（见那边的注释）。
- * - ★**横屏 / PiP / 听音频期间照样往里存**（用户实测："我在横屏的状态下，那些用户发弹幕，
- *   他不会记录在我的竖屏那里区域显示。我返回竖屏，我发现一条都没有。"）：
+ * - ★**横屏 / PiP / 听音频期间照样往里存**（否则横屏收到的弹幕不落列表，转回竖屏一条都没有）：
  *   上一版是 `if (listSupported) chat else null` —— 横屏连存字符串都不做；
  *   现在**恒传同一份 [chat]**，变的只有"列表画不画"（[listShown]）。
  *   累积代价 = 一次 `SnapshotStateList` 插入 + 200 条硬上限的裁剪；面板不在屏上时
@@ -309,7 +305,7 @@ class LiveDanmakuOverlayHost(
      * ## 为什么弹幕长连接**照旧**
      * 这个门**不碰** `active` / `settings.visible`（[start]/[stop] 与 `client.connect()` 的门都在那边）：
      * 关弹幕的房间里 WS 仍然连、心跳照发（在线人数/事件流无害），只是不再有东西把弹幕画出来。
-     * 用户明确要求"不要因此引入重连风暴"——这里连一次 connect/disconnect 都不会发生。
+     * 这里刻意不引入重连风暴：连一次 connect/disconnect 都不会发生。
      *
      * ★默认 false = 没关闭：播放页拿不到判定（风控/断网）时也走这一档，绝不误关。
      */
@@ -464,8 +460,8 @@ class LiveDanmakuOverlayHost(
                 if (on && settings.visible) client.connect()
             }
 
-            // ★**进房铺一次"最近的历史弹幕"**（用户："点进去发现有最近的弹幕或者评论……
-            //   我他妈也要抄这个，要不然我进去一脸懵，人家最近在讨论什么我都不知道"）。
+            // ★**进房铺一次"最近的历史弹幕"**：进去就能看到别人最近在聊什么，
+            //   而不是一片空白干等新弹幕。
             //   · 独立协程：不阻塞上面那个 connect()（它要握手），也不受连接成败影响；
             //   · 失败静默：`client.fetchHistory()` 契约上**永不抛**、失败/空都回空列表，
             //     结果只落在 `LiveDanmakuTrace.historyState`（release 也写 trace 文件）；
@@ -747,7 +743,7 @@ class LiveDanmakuOverlayHost(
     /**
      * 显示/隐藏**本宿主自带的浮动入口**（旧版右下角那个「弹幕列表」小胶囊）。
      *
-     * ★vc168"常驻停靠"之后**胶囊已经删掉了**（用户："直接不要有一个说什么按钮才能让它显示"），
+     * ★vc168"常驻停靠"之后**胶囊已经删掉了**（列表常驻显示，不再有浮动入口），
      *   本方法保留**只为兼容旧调用点**（比如播放页某处仍写着 `setDanmakuListEntryVisible(false)`
      *   想关掉重复入口）：现在调用它什么都不会发生，但也不会把代码编译搞坏。
      */
@@ -950,7 +946,7 @@ class LiveDanmakuOverlayHost(
                 // ★本轮（2026-09-26）给面板套上**App 的主题**：这份组合是一棵**独立**的
                 //   ComposeView（不在 `ComposeFragment` 的 `BilimiaoTheme` 子树里），不套的话
                 //   列表里 `MaterialTheme.colorScheme.primary` 会落到 Material3 的**基线紫** ——
-                //   用户要的"名字跟随我们主题色"就等于没做。
+                //   "名字跟随主题色"这件事就等于没做。
                 //   · 色板仍由**同一个** `appColorScheme()` 算（调色算法全工程只有一份）；
                 //   · 主题键的读取复用 `liveSheetThemeState()`（与直播设置弹窗 `LiveSettingSheet`
                 //     同一个函数、同一批键），原因见那个函数的 KDoc：本页是独立 Activity、没有 Store/DI；
@@ -1175,7 +1171,7 @@ class LiveDanmakuOverlayHost(
         val bottomLimit = ((bottomBoundTop ?: (parentTop + parentHeight)) - parentTop - parentPaddingTop)
             .coerceIn(0, contentHeight)
         val slot = slotView
-        // 顶边第一优先：**画面底边**（= 用户要的"视频带底边"，也是唯一"活"的那个真值）
+        // 顶边第一优先：**画面底边**（= 列表要贴的"视频带底边"，也是唯一"活"的那个真值）
         val pictureTop = videoPictureBottomInWindow()?.let { it - parentTop - parentPaddingTop }
         val rawTop: Int
         val rawBottom: Int
@@ -1298,7 +1294,7 @@ class LiveDanmakuOverlayHost(
     }
 
     /**
-     * "视频**画面**底边"在窗口坐标里的 y —— **列表顶边的首选来源**（用户要的"紧贴视频带底边"）。
+     * "视频**画面**底边"在窗口坐标里的 y —— **列表顶边的首选来源**（列表就紧贴这条边）。
      *
      * 三级来源，从可信到兜底：
      * 1. 播放页通过 [bindPortraitListArea] 显式接的 `videoView` 锚点（最可信：它知道自己哪个 View 是画面）；

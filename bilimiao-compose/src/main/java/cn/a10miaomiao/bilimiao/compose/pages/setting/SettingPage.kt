@@ -469,7 +469,7 @@ private fun SettingPageContent(
                                 )
                                 // 拖动条：原页面调 sliderIntPreference 的项，搜索页用**同一个 DSL** 渲染
                                 // （range / steps / 数值文案都由索引从原调用点原样带过来）。
-                                // 以前这类项被压成 INT 用输入框渲染 —— 用户反馈"拖动条搜出来变输入框"
+                                // 以前这类项被压成 INT 用输入框渲染 —— 拖动条搜出来就变成了输入框
                                 // （R9），就是这里。spec 判空只是防御索引/手改不一致，正常不会走到空。
                                 SettingSearchItem.Kind.SLIDER_INT -> {
                                     val spec = item.slider

@@ -120,7 +120,7 @@ data class LiveRoomInfoByRoom(
  * ★实测 5 个房间（2026-09-26，真实 Chromium 打开直播间抓的原样响应，见报告）：
  * | 房间 | close_guard | close_gift | close_online | close_danmaku |
  * |---|---|---|---|---|
- * | 8178490 央视新闻（用户实测"关了弹幕"） | **true** | **true** | false | false |
+ * | 8178490 央视新闻（实测样本：关了弹幕） | **true** | **true** | false | false |
  * | 545068 / 22747736 / 7734200 / 21452505（正常） | false / false / **true** / false | false… | false | false |
  * ⇒ **`close_danmaku` 在这 5 个房间里恒为 false**（它不是"这个房间关了弹幕"的判据，
  *   至少不是本次要的那个；真正区分开的是 [LiveRoomInfoByRoom.new_switch_info] 的

@@ -322,7 +322,7 @@ object LiveLastRoomStore {
      *   理由：多窗口下"别的页面还 RESUMED"**不等于**"用户在 App 内切页" —— Android 10+ 的多窗口
      *   允许多个 Activity **同时 RESUMED**（主界面在另一个窗口里亮着，直播间这个窗口被隐藏/收起）。
      *   这时这次 stop 同样是"用户离开直播间"，记录必须留下，否则系统把直播间窗口收掉之后
-     *   就无处可恢复（用户实测："系统小窗 → 回桌面 → 回软件，直播间消失、只剩直播 Tab"）。
+     *   就无处可恢复（从小窗回桌面再回软件，直播间没了、只剩直播 Tab）。
      *   ★PiP 不走这个例外（它有自己的记录点与判据），那条路行为一个字节不变。
      *   ★复核 R1（task-53 补记）：桌面/自由窗口环境（Samsung DeX / ChromeOS 桌面模式）下
      *   `isInMultiWindowMode` **可能恒为 true** —— 那里"App 内切页"与"窗口被收起"本来就分不清，
@@ -377,10 +377,10 @@ object LiveLastRoomStore {
             "restore" to pending.restore,
             "livePageCount" to livePageCount,
         )
-        // ★★2026-09-26 用户实测严重 bug 回退："任务被划掉 / 进程被杀之后再打开 App，
-        //   它又把那个直播间拉回来了 —— 保活强得离谱"。根因就是下面这次**冷启动补读**：
+        // ★★2026-09-26 严重 bug 回退：任务被划掉 / 进程被杀之后再打开 App，
+        //   那个直播间又被拉回来了 —— 保活过头。根因就是下面这次**冷启动补读**：
         //   记录是持久化到 DataStore 的，进程没了它还在 → 重开必然恢复 ✗。
-        //   用户要的只是"**切到别的 App 再回来还在直播间**" ✓，不是"杀掉还能复活" ✗。
+        //   需要支持的只是**切到别的 App 再回来还在直播间** ✓，不是"杀掉还能复活" ✗。
         //   ⇒ 冷启动一律不补读；本进程写过的记录才作数（memoryAuthoritative = true）。
         //   真要恢复"被系统回收后重开"的场景，请先与用户确认语义再加回来。
         memoryAuthoritative = true
@@ -437,7 +437,7 @@ object LiveLastRoomStore {
      *   曾经为"系统小窗里点「X」关窗"加过一个 `force` 参数去越过 [taskRemovedSuppressRecord]，
      *   后果是"**在小窗里划掉最近任务**"这条路被带坏 —— `onTaskRemoved` 刚立抑制位+清账，
      *   紧接着页面 `onDestroy` 走窗口分支强制补记 ⇒ 同进程重开 App 又把直播间开回来
-     *   （用户明确骂过的"保活强得离谱"）。抑制位就是抑制位：**任何**窗口内销毁都不许越过它。
+     *   （就是上面那条"保活过头"）。抑制位就是抑制位：**任何**窗口内销毁都不许越过它。
      */
     private fun record(room: String) {
         if (room.isBlank()) {
@@ -609,7 +609,7 @@ object LiveLastRoomStore {
             LivePageTrace.note("lastRoom.restore.skip", "reason" to "ourTaskGone")
             return
         }
-        // ★★★让路一拍（2026-09-29 用户实测"直播间被开了两遍"，见 [RESTORE_HANDOFF_DELAY_MS]）：
+        // ★★★让路一拍（2026-09-29 修的是"直播间被开了两遍"，见 [RESTORE_HANDOFF_DELAY_MS]）：
         //   宿主是**主界面**时，先别急着拉起 —— 系统可能正在把**小窗里那个直播间**带回前台
         //   （它会自己 resume 并消费掉这笔账）。这一拍就是给系统让路。
         //   · 宿主是直播间自己（`onActivityResumed` / `onLivePageDestroyed` 两条触发点）时不延迟：
@@ -797,7 +797,7 @@ object LiveLastRoomStore {
             }
             // 走到这里 = App 从**非直播间**页面退到后台（点播页 / 直播 Tab / 设置页…）
             // → 上次那条"应当恢复"不再代表用户离开时的位置，作废
-            //   （用户实测过的那条："在点播页退桌面 → 回软件，被拉去直播间" ✗）
+            //   （在点播页退桌面 → 回软件，被拉去直播间，这条是 ✗）
             // ★诊断日志（只读）：记录作废的原因
             LivePageTrace.note(
                 "lastRoom.clear",

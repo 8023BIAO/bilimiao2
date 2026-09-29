@@ -128,7 +128,7 @@ object SettingConstants {
     // （SettingPreferences.Live.of）取的是同一个常量，不会出现"UI 显示默认关、代码当默认开"的漂移。
     //
     // ★直播设置页精简（本轮）：下面这几项的**默认值一个字没改**，只是设置页不再显示它们。
-    //   判据是"播放页/首页有没有更顺手的入口"（用户原话逐条见 LiveSettingPage 文件头 KDoc）：
+    //   判据是"播放页/首页有没有更顺手的入口"（逐条理由见 LiveSettingPage 文件头 KDoc）：
     //     · `live_background_play` / `live_pip_on_background` → 播放页底栏「设置」浮层 + 底栏 PIP 按钮；
     //     · `live_double_tap_pause` → 默认就是开，需要改时同上；
     //     · `live_danmaku_enable` → 播放页底栏「弹幕」按钮（当场生效并写回同一个键）；
@@ -138,7 +138,7 @@ object SettingConstants {
     /** 后台继续直播：默认**关**（退后台 = 暂停），与 LivePlayerActivity.onStop 的现有行为一致 */
     const val LIVE_BACKGROUND_PLAY_DEFAULT = false
     /**
-     * 退后台自动进 PIP 小窗：默认**关**（[A2-fix 2026-09-26] 用户要求"只有点小窗按钮才有小窗"）。
+     * 退后台自动进 PIP 小窗：默认**关**（[A2-fix 2026-09-26] 只有点小窗按钮才进小窗）。
      * 直播页 [enterPipMode] 的手动按钮不受本值影响；[LivePlayerActivity.onUserLeaveHint] 的
      * 自动进入分支因默认关闭而不再触发。旧版本若曾显式写过 true，仍按持久化值走。
      */
@@ -158,7 +158,7 @@ object SettingConstants {
     /**
      * 双击暂停：默认**开**，与 LivePlayerActivity 手势层现有行为一致。
      *
-     * ★本轮起设置页**不再显示**这一项（用户："我都想默认就是开启双击暂停的"）：
+     * ★本轮起设置页**不再显示**这一项（默认就是开，不需要单独给一个开关）：
      *   默认值仍是这里这个 true，键 `live_double_tap_pause` 与读取逻辑
      *   （`LivePlayerActivity.onDoubleTapPauseEnabled()`）原样保留 ——
      *   ① 老用户以前手动关过的话，读出来还是关（尊重用户已经表达过的意愿，不偷偷改他的盘）；
@@ -203,7 +203,7 @@ object SettingConstants {
     /**
      * 【已停用】"跟随点播弹幕设置"的默认值（键 `live_danmaku_follow_vod`，原默认 true）。
      *
-     * 用户原话："单独设置就单独设置，这两个跟随又是不跟随的样子，我都蒙了。就让直播的那个弹幕成另一套吧。"
+     * 直播弹幕**单独成一套**，不再有"跟随点播 / 不跟随"两种状态并存的局面：
      * → 本轮把这个开关**从设置页和弹幕链路里整个删掉**（UI 与读取都没了），直播弹幕的
      *   字号/不透明度/速度/显示区域固定走它自己那套 `live_danmaku_*` 键。
      *

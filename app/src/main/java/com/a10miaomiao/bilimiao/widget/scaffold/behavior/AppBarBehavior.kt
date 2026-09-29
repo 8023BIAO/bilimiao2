@@ -128,7 +128,7 @@ class AppBarBehavior : CoordinatorLayout.Behavior<View> {
      * "藏起来"时该往下平移多少。
      *
      * 底栏是两段拼的：`appBarMenuHeight`(菜单排) + `appBarTitleHeight`(页名那一条)。
-     * 以前固定只平移菜单排那 50dp，于是页名那 20dp 永远留在屏幕上（用户实机反馈："滚动了还露着一条「首页」"）。
+     * 以前固定只平移菜单排那 50dp，于是页名那 20dp 永远留在屏幕上（实机反馈：滚动之后仍会露着一条「首页」）。
      * 现在按设置项「标题行一起隐藏」决定要不要把它算进来。
      */
     private val hiddenOffsetY: Int

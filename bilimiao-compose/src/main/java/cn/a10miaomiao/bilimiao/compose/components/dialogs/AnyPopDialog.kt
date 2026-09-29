@@ -142,8 +142,8 @@ private fun DialogFullScreen(
             // `configChanges=orientation|screenSize|...`，**旋转时 Activity 不会重建**；
             // 而上面那两行只在重组时求值一次，重组又发生在 decorView 重新布局**之前** ——
             // 于是旋转时拿到的是**旧方向**的宽高，之后再没有人重新 setLayout，
-            // 弹窗就永久停在旧尺寸/旧位置上（用户报的"竖屏点筛选弹出、切横屏后不是全屏覆盖、
-            // 非要重启 Activity 才对"就是这个）。
+            // 弹窗就永久停在旧尺寸/旧位置上（竖屏点开筛选、切到横屏后不是全屏覆盖、
+            // 非要重启 Activity 才对）。
             // 这里挂一个布局监听：宿主尺寸一变就重新 setLayout，不用重启 Activity，
             // 也不依赖 Activity 重建/onConfigurationChanged。
             DisposableEffect(activityWindow, dialogWindow) {

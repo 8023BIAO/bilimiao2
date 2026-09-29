@@ -6,7 +6,7 @@ import androidx.media3.common.PlaybackException
  * **"这一串失败到底是主播下播，还是线路/网络抖动"** —— 直播播放页的**下播判据**
  * （纯新增，2026-09-26；纯逻辑：无 IO、无 Android 状态、时间由调用方喂进来）。
  *
- * ## 为什么必须有它（要解决的正是用户实测的"一直在换流换流"）
+ * ## 为什么必须有它（要解决的正是反复换流的问题）
  * 修前，播放中途主播下播时，所有恢复路径都只看**播放器自己**的信号：
  * ```
  * STATE_ENDED            → LivePlayerDelegate.handleStreamEnded()  → 重取流
