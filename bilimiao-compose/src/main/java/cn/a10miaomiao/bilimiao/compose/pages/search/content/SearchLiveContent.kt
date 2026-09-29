@@ -48,6 +48,7 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
+import cn.a10miaomiao.bilimiao.compose.pages.search.searchErrorText
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.live.LiveAPI
@@ -230,8 +231,10 @@ private class SearchLiveContentViewModel(
                 // 刷新把这一代请求作废了：结果已经过期，整批丢掉
                 if (loadEpoch.get() != epoch) return@launch
                 if (!res.isSuccess) {
-                    // 接口自己报错（如 -352 风控）也走失败态，文案优先用服务端给的 message
-                    list.fail.value = res.message.ifBlank { "请求失败（code=${res.code}）" }
+                    // 接口自己报错（如 -352 风控）也走失败态，但**不再把服务端原文直接摊给用户**：
+                    // 原文（本次是「签名错误」）说的是它自己的判定，用户既看不懂也无从下手 ——
+                    // 统一过 searchErrorText 换成和真实原因相符、能照着做的人话（用户实测反馈）
+                    list.fail.value = searchErrorText(res.code, res.message)
                     return@launch
                 }
                 val room = res.data?.room
@@ -259,7 +262,8 @@ private class SearchLiveContentViewModel(
                 if (e is CancellationException) throw e
                 e.printStackTrace()
                 if (loadEpoch.get() == epoch) {
-                    list.fail.value = e.message ?: e.toString()
+                    // 异常原文（okhttp/gRPC 的 IOException 之类）同样是术语，翻译成人话再上屏
+                    list.fail.value = searchErrorText(e)
                 }
             } finally {
                 // 只有最新一代才复位加载标志：被插队/被丢弃的旧批次不得把新批次的 loading 抹掉

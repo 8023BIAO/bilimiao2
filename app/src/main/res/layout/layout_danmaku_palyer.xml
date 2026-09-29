@@ -127,13 +127,15 @@
                 android:textColor="#ff6666"
                 android:visibility="gone" />
 
+            <!-- 单独 tint 成纯白：ic_baseline_send_24 自带 android:tint="?attr/colorControlNormal"（主题灰），与同排邻居写死的 #FFFFFF 语义不一致；这里用框架 android:tint 固定成白色，它由 ImageView 自己读、不依赖 AppCompat 布局替换（app:tint 只在被换成 AppCompatImageView 时才生效），也不动全局 drawable（另有 4 处消费者）。
+                 另注：弹幕关闭时本按钮仍会按播放器既有逻辑（alpha = 0.5f）变暗，那是「弹幕关」的有意状态提示，不是 tint 造成的，别当 bug 去修。 -->
             <ImageView
                 android:id="@+id/send_danmaku_mini"
                 android:layout_width="36dp"
                 android:layout_height="36dp"
                 android:paddingRight="8dp"
                 android:src="@drawable/ic_baseline_send_24"
-                app:tint="@color/white"
+                android:tint="@color/white"
                 android:contentDescription="发送弹幕按钮"/>
 
             <ImageView

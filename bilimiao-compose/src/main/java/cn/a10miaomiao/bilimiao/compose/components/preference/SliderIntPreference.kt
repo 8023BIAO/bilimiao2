@@ -34,7 +34,11 @@ inline fun LazyListScope.sliderIntPreference(
     item(key = key, contentType = "SliderIntPreference") {
         val state = rememberState()
         val value by state
-        val sliderState = rememberSliderState(value)
+        // 存量越界值（老版输入框能写进 0/40）不能带进滑块：
+        // M3 Slider 的 value 超出 valueRange 时，行尾 valueText 仍会拿到原值（显示 40sp），
+        // 而实际生效值是夹过的 —— 显示与行为不一致。这里只夹"传进去的初始值"，
+        // 不夹 onSliderValueChange 的回调值（拖动产出的值必然落在 range 内，夹了是死代码）。
+        val sliderState = rememberSliderState(value.coerceIn(valueRange))
         val sliderValue by sliderState
         SliderIntPreference(
             state = state,

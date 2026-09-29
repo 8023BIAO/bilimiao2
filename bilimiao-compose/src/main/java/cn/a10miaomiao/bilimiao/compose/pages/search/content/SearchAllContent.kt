@@ -47,6 +47,7 @@ import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
 import cn.a10miaomiao.bilimiao.compose.pages.search.components.MoreConditionsDialog
 import cn.a10miaomiao.bilimiao.compose.pages.search.components.MoreConditionsDialogState
 import cn.a10miaomiao.bilimiao.compose.pages.search.components.SearchItemCard
+import cn.a10miaomiao.bilimiao.compose.pages.search.searchErrorText
 import com.a10miaomiao.bilimiao.comm.mypage.MenuActions
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
@@ -170,7 +171,9 @@ private class SearchAllContentViewModel(
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            list.fail.value = e.message ?: e.toString()
+            // gRPC 的异常原文是 HTTP 码 / 解析器术语，不直接上屏：翻译成人话再给 ListStateBox
+            // （与同页其它 Tab 同一口径，见 searchErrorText）
+            list.fail.value = searchErrorText(e)
             list.loading.value = false
         } finally {
             list.loading.value = false

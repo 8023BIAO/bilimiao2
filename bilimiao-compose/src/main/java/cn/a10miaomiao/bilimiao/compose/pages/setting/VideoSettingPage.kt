@@ -33,7 +33,6 @@ import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.preference.customSetsPreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.multiSelectIntPreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.sliderIntPreference
-import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.store.WindowStore
@@ -552,20 +551,20 @@ private fun VideoSettingPageContent(
                 },
                 defaultValue = false,
             )
-            // 字幕字号：可手输纯数字（数字键盘），建议 12~30，默认 16
-            textIntPreference(
+            // 字幕字号：拖动条 12~30sp，valueSteps=17 → 每段正好 1sp（12…30 全整数），默认 16
+            sliderIntPreference(
                 key = SettingPreferences.PlayerSubtitleTextSize.name,
-                defaultValue = DEFAULT_SUBTITLE_TEXT_SIZE,
                 title = {
                     Text("字幕字号")
                 },
-                label = " sp",
-                summary = { value ->
-                    val v = value.coerceIn(MIN_SUBTITLE_TEXT_SIZE, MAX_SUBTITLE_TEXT_SIZE)
-                    Text(
-                        "当前 ${v}sp（建议 $MIN_SUBTITLE_TEXT_SIZE~$MAX_SUBTITLE_TEXT_SIZE，" +
-                            "默认 $DEFAULT_SUBTITLE_TEXT_SIZE）。超出范围会按边界值生效"
-                    )
+                valueRange = MIN_SUBTITLE_TEXT_SIZE..MAX_SUBTITLE_TEXT_SIZE,
+                defaultValue = DEFAULT_SUBTITLE_TEXT_SIZE,
+                valueSteps = 17,
+                valueText = {
+                    Text("${it}sp")
+                },
+                summary = {
+                    Text("当前 ${it.coerceIn(MIN_SUBTITLE_TEXT_SIZE, MAX_SUBTITLE_TEXT_SIZE)}sp（默认 $DEFAULT_SUBTITLE_TEXT_SIZE）")
                 },
             )
 

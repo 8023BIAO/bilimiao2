@@ -38,6 +38,7 @@ import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
 import cn.a10miaomiao.bilimiao.compose.pages.search.components.SearchItemCard
+import cn.a10miaomiao.bilimiao.compose.pages.search.searchErrorText
 import cn.a10miaomiao.bilimiao.compose.pages.article.ArticleReaderPage
 import com.a10miaomiao.bilimiao.comm.mypage.MenuActions
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
@@ -136,7 +137,9 @@ private class SearchByTypeContentViewModel(
             list.data.value = if (next.isBlank()) fresh else list.data.value + fresh
         } catch (e: Exception) {
             e.printStackTrace()
-            list.fail.value = e.message ?: e.toString()
+            // 全站搜索走 gRPC，异常原文是 HTTP 码 / 解析器术语，同样不直接上屏：
+            // 翻成"网络请求失败"或"原文（未知错误）"，见 searchErrorText（用户要求相符合的提示）
+            list.fail.value = searchErrorText(e)
             list.loading.value = false
         } finally {
             list.loading.value = false

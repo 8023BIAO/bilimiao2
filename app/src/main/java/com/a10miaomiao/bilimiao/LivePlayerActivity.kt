@@ -1420,7 +1420,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private var lastSentPipParamsKey: String? = null
 
     /**
-     * 控制条（顶栏 + 底栏那几颗按钮 + 输入条）当前**实际**是否可见；真正的取值由 [applyControlsVisibility] 写。
+     * 控制条（顶栏 + 底栏那几颗按钮 + 输入条）的**用户意图**：true = 希望显示、false = 希望收起。
+     * 写入由 [applyControlsVisibility] / [setControlsVisible] 完成；★本轮起 [hideControlsForPip]
+     * （为进小窗而收条）**不改它**（见那个函数的 KDoc）。
+     *
+     * ★因此它**不等于"当前实际可见性"**：PiP 期间它可能仍是 true 而两栏实际不可见 ——
+     *   凡是"PiP 里也可能被调到"的显示请求都要过 [controlsAllowed] 门，别拿它当可见性用；
+     *   **谁要读"现在到底可不可见"，就去读 View 本身**（[topBar] 的 `visibility`，例如
+     *   [TapCatcher.onSingleTapConfirmed] 的单击显隐判据）；
+     *   "回到全屏该恢复成什么样"才是它唯一该被读的地方（[onResume] / [onStop] 的恢复分支）。
      * ★第七批起它不管输入条（那时输入条常驻）；★第八批起**又管了** —— 输入条与按钮同一套显隐
      *   （用户："为什么不和那几个按钮一起显示一两秒呢？"），只有"正在输入"与 PiP 两档例外，
      *   见 [applyControlsVisibility]。
@@ -2059,6 +2067,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   ★第七批：同上，清完要重新求值一次（输入条的门控读它）。
         val wasPipEntryPending = pipEntryPending
         pipEntryPending = false
+        // ★W2（已知理论风险，记录在案、**不新增机制**）：这一行是**直通**（不过 [controlsAllowed]
+        //   门）—— 它成立的前提是"进 PiP 不走 onStop"（本函数上面那段与 [onResume] 的注释都记着
+        //   这条）。若某个 ROM 在 PiP 里也派发 onStop，这里会把"用户意图"再确认成可见
+        //   （小窗上又冒出两栏）；真机若遇到，修法是给它加 [controlsAllowed] 门，而不是再加状态。
         if (wasPipEntryPending) applyControlsVisibility(controlsVisible)
         // ★本轮：真退到后台，就把"一次性方向钉住"一并交还给自动旋转（[releaseOneShotOrientationHold]）。
         //   两个理由：① 页面都不可见了，没必要让加速度计还在后台按 5Hz 跑着等"用户转手机"；
@@ -2347,11 +2359,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             if (!isInPictureInPictureMode) {
                 pipEntryPending = true
             }
-            // ★第七批：把输入条按门控收掉（小窗里多一条挡住画面毫无意义，
-            //   而且 PiP 窗口里根本弹不出输入法）。这里只是**重新求值一次可见性**：
-            //   传当前值不改变顶栏/按钮的显隐，只让 [applyControlsVisibility] 里那道
-            //   "PiP / 即将进 PiP → 收起输入条"的门生效。
-            applyControlsVisibility(controlsVisible)
+            // ★第七批 + ★本轮修正：这里必须**当场、无条件把整条控制条收掉**（顶栏 + 底栏 + 输入条），
+            //   不能只"重新求值一次可见性" —— 那一版传的是 `controlsVisible`，而
+            //   [applyControlsVisibility] 里 `visible == true` 那一支**优先于** PiP 档
+            //   （见 `topBar` / `bottomBar` 的 when），于是离开前控制条正好亮着时，顶栏底栏会
+            //   **原样亮到窗口缩完**（用户抱怨的"最前面那一两秒"）。
+            //   [hideControlsForPip] 与 [enterPipMode] 同款：撤掉自动隐藏计时 + 立刻置为不可见，
+            //   幂等、无副作用；★且它**不改"用户意图"**（见那个函数的 KDoc）—— 所以"没进成小窗"
+            //   时（[onStop] / [onResume] 清标记后）回到前台仍是**进去之前那个样子**，
+            //   不会退化成"两栏收着、要点一下画面才出来"。
+            hideControlsForPip()
             return
         }
         if (delegate?.isPlaying == true && !isInPictureInPictureMode) {
@@ -2399,10 +2416,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             dismissLiveSettingSheet()
             // ★第七批：小窗里**输入条必须收掉**（同时把键盘收掉、焦点清掉：PiP 窗口里输入法根本没法用，
             //   留着焦点只会在退出小窗时突然弹一次键盘）。
-            //   ★第八批：它现在与那几颗按钮同一套显隐（[applyControlsVisibility]），这里传当前值只是
-            //   "重新求值一次"，让"PiP → 输入条 GONE"那一档生效。
+            //   ★本轮修正：这里改成**无条件把整条控制条收掉**（[hideControlsForPip] = 撤计时 + 不可见），
+            //   不再传 `controlsVisible` —— 走到这一支就说明"已经在小窗里"，
+            //   而 [applyControlsVisibility] 的 `visible == true` 支优先于 PiP 档，传当前值只会在
+            //   "进小窗前控制条正好亮着"时把两栏**再确认一次可见**（同时也堵住"系统不经
+            //   [enterPipMode] / [onUserLeaveHint] 直接缩成小窗"那条没有前置收条的路径）。
             dismissDanmakuInput()
-            applyControlsVisibility(controlsVisible)
+            hideControlsForPip()
             // ★★第八批（用户实测第 4 条）：**进小窗立刻把版式切成"画面铺满"**——
             //   小窗里没人重排过版式（[syncPageLayoutToRealSize] 在 PiP 里是有意 return 的），
             //   不切的话竖屏那条 62% 的带子 + 全屏顶栏留下的 topMargin 会被原样带进小窗，
@@ -2938,9 +2958,19 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         applyDanmakuInputClosedUi()
         // ★宿主侧：竖屏列表不显示 + 滚动弹幕不渲染（横屏同样不渲染）
         danmakuHost?.setRoomDanmakuClosed(closed)
-        // 输入条整行的显隐规则不变（仍跟四颗按钮走），这里只是把"当前可见性"再落实一次
+        // 输入条整行的显隐规则不变（仍跟四颗按钮走），这里把"当前可见性"再落实一次。
+        // ★本轮：必须**过门** —— 这是唯一一处"PiP 里也可能被调到"的直通调用：判定是异步的
+        //   （[probeRoomDanmakuPolicy] 的结果可能在用户已经进了小窗之后才回来），而
+        //   [controlsVisible] 现在的语义是"用户意图"、PiP 期间可能仍是 true
+        //   （[hideControlsForPip] 不再改它）→ 直传会在小窗里把两栏**又亮出来**（反例：打开一个
+        //   关弹幕的直播间 → 立刻点「小窗」→ 判定回来 → 顶栏底栏出现在小窗上）。
+        //   门关时走 [hideControlsForPip]（只收可见性、不动意图）；门开时与改动前逐字等价。
         if (::danmakuInputRow.isInitialized && ::topBar.isInitialized) {
-            applyControlsVisibility(controlsVisible)
+            if (controlsAllowed()) {
+                applyControlsVisibility(controlsVisible)
+            } else {
+                hideControlsForPip()
+            }
         }
     }
 
@@ -6335,13 +6365,26 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   所以回调里读 `isInPictureInPictureMode` 是准的 —— [onPictureInPictureModeChanged] 里那句
      *   `hideControlsForPip()` 一定生效。
      */
-    // ★2026-09-26 用户实测后**回退**上一轮"进 PiP 就把控制条收死"的做法：
-    //   原话"让它显示几秒就显示几秒啊……越改越烂"。现在门控恒为 true —— 控制条按自己的
-    //   4 秒计时显示/隐藏（点画面唤出、到点自动收起），PiP 里也一样，不再有"永久收起"的特殊态。
-    //   ★第七批补记：[pipEntryPending] / `isInPictureInPictureMode` 现在**只**用来管
-    //   **[danmakuInputRow] 那条输入条**的显隐（见 [applyControlsVisibility]）——
-    //   顶栏与底栏那几颗按钮的显隐仍然不受它们影响（上一条回退结论不变）。
-    private fun controlsAllowed(): Boolean = true
+    // ★2026-09-28 **恢复这条门**（上一轮曾把它和当时那版实现一起回退过）：
+    //   门本身没错，它只回答"现在允不允许显示控制条"；上一轮回退的起因是当时那版实现还有别的毛病
+    //   （进小窗那一刻控制条又冒出来 / 返回全屏后底栏字号变小），而病根不在门，在
+    //   [onConfigurationChanged] 末尾那句**无条件**的 `showControlsTemporarily()`（类注释第 3 条记着）：
+    //   小窗一出现配置变更它就又把控制条打开，同时也让底栏按钮按小窗宽度被测量。
+    //   那句现在改走本门（调用点没动：门开着才显示，门关着连自动隐藏计时都不留），
+    //   于是"门"不再等于"进过小窗就把控制条永久收死"的特殊态。
+    //   ★"回到直播间还能看到两栏"由三条**各自幂等**的放行路保证，且都**不经过本门**：
+    //   ① `onPictureInPictureModeChanged(false)`：先清 [pipEntryPending] 再
+    //      `applyControlsVisibility(true)`（那里的注释写明这一行的语义就是"已经出来了"）；
+    //   ② [onResume]：清 [pipEntryPending] → 重新求值一次 → `controlsVisible` 还是 false 就
+    //      `showControlsTemporarily()`（此刻门已开）；
+    //   ③ [onStop]：置位之后没进成小窗（划走被 ROM 拦下 / 熄屏但没进 PiP）就清标记 + 重新求值。
+    //   另有两条兜底：[enterPipMode] 进小窗失败时清标记并恢复；
+    //   [TapCatcher.onSingleTapConfirmed] 里那道安全阀（能点到手势层就说明本页是全屏可交互的）。
+    //   它们覆盖了 [pipEntryPending] 的**全部三个置位点**（[enterPipMode] / [onUserLeaveHint] /
+    //   本回调的 PiP 进入分支），所以不存在"标记挂死 → 两栏永久不显示"的路径。
+    //   ★第七批那条"标记**只**用来管输入条"的补记随本次恢复作废：`isInPictureInPictureMode` /
+    //   [pipEntryPending] 重新同时管**顶栏 + 底栏那几颗按钮 + 输入条**。
+    private fun controlsAllowed(): Boolean = !isInPictureInPictureMode && !pipEntryPending
 
     /**
      * 真正把顶栏 / 底栏那几颗按钮 / 输入条刷成该有的样子（**不看任何门控**，
@@ -6407,10 +6450,24 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 虽然那时门控也会把它压成不可见，但留着一条待执行的 Runnable 没有意义。
      * ★第七批：调用点会先置 [pipEntryPending]，所以这里顺带把**输入条**也收掉
      *   （见 [applyControlsVisibility] 的门控）—— 小窗里不该多一条挡画面的输入条。
+     *
+     * ★★本轮（语义修正）：**只为进小窗而收条，不改"用户意图"** —— [applyControlsVisibility]
+     *   会顺带把 [controlsVisible] 写成 false，而那个字段承载的是"用户希望控制条显示还是收起"
+     *   （[onResume] / [onStop] 的恢复分支读的就是它）。为进小窗收条如果把意图也抹成"隐藏"，
+     *   "置了 [pipEntryPending] → 自动进小窗**没成功** → 真的走完 [onStop] → 回前台"那条路
+     *   就只剩收起态，要点一下画面才出来。所以：保存原值 → 收条 → 把意图写回去。
+     *   · "PiP 期间一定是隐藏"**不靠这个字段**：靠 [controlsAllowed] 门 + [applyControlsVisibility]
+     *     里那两个 `pipLike`（读 `isInPictureInPictureMode || pipEntryPending`）分支 ——
+     *     写回字段**不会**改变刚算好的 View 显隐（`pipLike` 与字段无关）。
+     *   · 因此 **PiP 期间 [controlsVisible] 可能为 true 而实际不可见**：凡是"PiP 里也可能被调到"的
+     *     显示请求都必须过 [controlsAllowed] 门，**不能**把 `controlsVisible` 直接传给
+     *     [applyControlsVisibility]（现存唯一这种调用点是 [applyRoomDanmakuClosed]，已过门）。
      */
     private fun hideControlsForPip() {
         mainHandler.removeCallbacks(hideControlsRunnable)
+        val intent = controlsVisible
         applyControlsVisibility(false)
+        controlsVisible = intent
     }
 
     /** 显示控制条并重新计时（打开弹窗/手势/转屏时用）；PiP 期间它什么都不做（见 [controlsAllowed]） */
@@ -7958,7 +8015,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                         holdControls()
                         return true
                     }
-                    if (controlsVisible) setControlsVisible(false) else showControlsTemporarily()
+                    // ★本轮：判据必须用"**当前是不是真的可见**"（View 的 `visibility`），不能用
+                    //   [controlsVisible] —— 后者自本轮起是"用户意图"，在 PiP 过渡 / 退化窗口里
+                    //   （`enterPictureInPictureMode` 返回 true 但小窗始终没来、[pipEntryPending]
+                    //   还挂着）可能为 true 而两栏实际收着：那种状态下第一下点击会变成"再收一次"
+                    //   （要点第二下才亮）。★安全阀在上面**先**跑，所以这里读到的 pending 已经清过
+                    //   —— 顺序不能倒过来，否则退化窗口里第一下仍然是"再收一次"。
+                    val controlsShown = ::topBar.isInitialized && topBar.visibility == View.VISIBLE
+                    if (controlsShown) setControlsVisible(false) else showControlsTemporarily()
                     return true
                 }
 

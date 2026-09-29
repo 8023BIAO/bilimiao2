@@ -626,8 +626,8 @@ class PlayerController(
         if (sponsorEnabled && !sponsorWasEnabled) {
             delegate.playerSource?.let { delegate.loadSponsorSegments(it) }
         }
-        // 字幕字号（sp）：设置页允许手输，这里兜底夹到合理区间（12~30），
-        // 避免误输 0 把字幕弄没、或 999 糊满屏
+        // 字幕字号（sp）：设置页用拖动条 12~30，这里兜底夹到合理区间，
+        // 避免库里残留的越界值（以前手输过的 0 / 999 之类）把字幕弄没或糊满屏
         player.subtitleTextSizeSp =
             (preferences[SettingPreferences.PlayerSubtitleTextSize] ?: 16)
                 .coerceIn(12, 30)

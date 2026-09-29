@@ -59,7 +59,7 @@ data class SettingSearchItem(
     /** 搜索用关键词（标题 + 大类 + 页面 + 分组 + 英文键名 + 少量同义词） */
     val keywords: String,
     /**
-     * 数值输入框的单位（原页面 `textIntPreference(label = " sp")` 的原样拷贝，含前导空格）。
+     * 数值输入框的单位（原页面 `textIntPreference(label = " MB")` 的原样拷贝，含前导空格）。
      * 它是**输入弹窗里输入框的字段名**（TextIntPreference 把 label 渲染成字段标签），
      * 不是 summary 文案 —— 丢了用户点开弹窗就看不到单位（复核发现 9/9 全丢）。
      * 其它 Kind 恒为空串。
@@ -156,7 +156,10 @@ object SettingsSearchIndex {
         SettingSearchItem(prefName = "PlayerAiSubtitleShow", prefKey = "player_ai_subtitle_show", title = "AI字幕显示", category = "① 播放", page = "播放器设置", section = "字幕设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "AI字幕显示 ① 播放 播放器设置 字幕设置 PlayerAiSubtitleShow player_ai_subtitle_show subtitle"),
         SettingSearchItem(prefName = "PlayerSubtitleTextSize", prefKey = "player_subtitle_text_size", title = "字幕字号", category = "① 播放", page = "播放器设置", section = "字幕设置",
-            kind = SettingSearchItem.Kind.TEXT_INT, default = DEFAULT_SUBTITLE_TEXT_SIZE, keywords = "字幕字号 ① 播放 播放器设置 字幕设置 PlayerSubtitleTextSize player_subtitle_text_size subtitle font size 大小", label = " sp"),
+            kind = SettingSearchItem.Kind.SLIDER_INT, default = DEFAULT_SUBTITLE_TEXT_SIZE, keywords = "字幕字号 ① 播放 播放器设置 字幕设置 PlayerSubtitleTextSize player_subtitle_text_size subtitle font size 大小",
+            slider = SettingSearchItem.SliderSpec.IntSlider(range = MIN_SUBTITLE_TEXT_SIZE..MAX_SUBTITLE_TEXT_SIZE, steps = 17, valueText = {
+                    Text("${it}sp")
+                })),
         SettingSearchItem(prefName = "DanmakuEnable", prefKey = "danmaku_enable", title = "启用弹幕", category = "① 播放", page = "弹幕设置", section = "基础设置",
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "启用弹幕 ① 播放 弹幕设置 基础设置 DanmakuEnable danmaku_enable danmaku 弹屏"),
         SettingSearchItem(prefName = "DanmakuSysFont", prefKey = "danmaku_sys_font", title = "弹幕使用系统字体", category = "① 播放", page = "弹幕设置", section = "基础设置",

@@ -71,6 +71,7 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
+import cn.a10miaomiao.bilimiao.compose.pages.search.searchErrorText
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.db.LiveSearchHistoryDB
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
@@ -331,7 +332,9 @@ private class LiveSearchPageViewModel(
                 // 关键字/刷新换过代了：这次的结果已经过期，整批丢掉
                 if (loadEpoch.get() != epoch) return@launch
                 if (!res.isSuccess) {
-                    list.fail.value = res.message.ifBlank { "请求失败（code=${res.code}）" }
+                    // 与搜索页直播 Tab 是同一条接口、同一类错误（本次 -3「签名错误」就出在这里）：
+                    // 不摊服务端原文，统一翻成人话 —— 口径与 searchErrorText 一致
+                    list.fail.value = searchErrorText(res.code, res.message)
                     return@launch
                 }
                 val room = res.data?.room
@@ -356,7 +359,8 @@ private class LiveSearchPageViewModel(
                 if (e is CancellationException) throw e
                 e.printStackTrace()
                 if (loadEpoch.get() == epoch) {
-                    list.fail.value = e.message ?: e.toString()
+                    // 异常原文（okhttp/gRPC 的 IOException 之类）翻译成人话再上屏
+                    list.fail.value = searchErrorText(e)
                 }
             } finally {
                 // 只有最新一代才复位加载标志：被插队/被丢弃的旧批次不得把新批次的 loading 抹掉
