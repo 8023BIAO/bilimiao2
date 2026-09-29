@@ -2222,7 +2222,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   整任务被划掉那条另有保护（`PlaybackService.onTaskRemoved` → store 的
         //   `taskRemovedSuppressRecord` + `clear()`，本分支不参与）。
         // ══════════════════════════════════════════════════════════════════
-        val closedInWindow = runCatching {
+        val closedInWindow = pipEnteredThisSession || runCatching {
             isInMultiWindowMode || isInPictureInPictureMode
         }.getOrDefault(false)
         if (isFinishing && !userExitedPage && !isChangingConfigurations && closedInWindow) {
