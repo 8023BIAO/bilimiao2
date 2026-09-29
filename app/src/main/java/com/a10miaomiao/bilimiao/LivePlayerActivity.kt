@@ -8347,15 +8347,27 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // ★★本轮（2026-09-29）用户拍板：**直播间音量一律照点播那套来**。
             //   原文："直接给我用点播那套，我给我装上，我试试看，怎么个事啊？"
             //
-            // 点播的音量系数（`widget/player/DanmakuVideoPlayer.kt:1731-1734`，落在 GSY
-            // `touchSurfaceMove` 的 `mChangeVolume` 分支，已用 javap 反编译核对）：
+            // 点播的音量系数（`widget/player/DanmakuVideoPlayer.kt:1718-1733` —— 那是 **App 自己
+            // override** 的 `touchSurfaceMove`；GSY 库里的原版不是这个数，见下）：
             // ```
-            // deltaV = max * deltaY * 2 / curHeight
-            // volumePercent = downVolume*100/max + deltaY*2*100/curHeight
+            // deltaV = max * deltaYNeg * 2 / curHeight
+            // volumePercent = mGestureDownVolume*100/max + deltaYNeg*2*100/curHeight
             // ```
-            // 两边的**唯一**差别是"增量 vs 累计位移"的写法，系数相同 ⇒ 整条行程灵敏度逐字一致：
-            //   · GSY 那边 `deltaY` 是**逐事件增量**、`mGestureDownVolume` **每帧累加**（浮点除法不截断）；
-            //   · 本页 `deltaY = 按下点 − 现在` 是**累计位移**，一次算到目标档位。
+            // ★别照 GSY 反编译结果"纠错"：v13.2.1 的 `GSYVideoControlView.touchSurfaceMove`
+            //   `mChangeVolume` 分支是 `×3.0f`（javap：`ldc_w float 3.0f` 两处 → `f2i` →
+            //   `setStreamVolume(3, mGestureDownVolume + deltaV, 0)`），它的亮度是 `-deltaY / curHeight`；
+            //   是**本 App 的 override** 把音量改成 ×2、把亮度改成 `/(curHeight × 3f)` ——
+            //   所以"点播那套"要抄的是 override 之后的 ×2，不是 GSY 原版。
+            // 两边的**结构也相同**（不存在"增量 vs 累计"这一层差别）：点播音量分支里 `mDownY`
+            //   **不推进**（GSY 字节码里 `putfield mDownY` 只有"按下"与"亮度分支"两处），所以
+            //   `deltaYNeg = mDownY − event.getY()` 本身就是**按下点起的累计位移**；而
+            //   `mGestureDownVolume` 只在"进入音量模式"那一帧读一次（`mChangeVolume` 一旦为真，
+            //   `onTouch` 就不再调 `touchSurfaceMoveFullLogic`），此后每帧写的都是**绝对档位**
+            //   `mGestureDownVolume + (int)(…)` ⇒ `(int)` 截断**不跨帧累积**。
+            //   本页 `deltaY = downRawY − event.rawY` 同样是累计位移、同样是"基准档位 + 截断后的
+            //   增量"，逐帧提交绝对档位（[StreamVolumeWriter] 最后一档必胜）⇒ 同一次位移同一个档位。
+            //   （反证：若真按"逐帧增量 + 每帧 toInt"算，max=15 / 屏高 2400 时，每帧 8px 的增量
+            //     都是 15×8×2/2400 = 0.1 → 截断成 0，整条手势一档都不动 —— 点播显然不是这样。）
             // 之前 6 倍偏差的来历就是把本页音量写成了**亮度**的 `/(屏高 × 3)`（1 屏 = 1/3 量程），
             // 而点播音量是 `×2 / 屏高`（1 屏 = 2 倍量程，**半屏走完整条行程**）。
             // 历史提醒：这一行曾按"灵敏度"反馈被来回改过两次（÷3 ⇄ ×2）—— 本轮判据不是手感猜测，
@@ -8364,10 +8376,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // 其它干扰项本轮一并排查完毕（结论：都不会改变灵敏度）
             //   · 死区：点播 `mThreshold = 80px` 才开始调（GSY 字节码里 `bipush 80`）；本页
             //     `touchSlop`（约 8~24px）就进手势 ⇒ 本页**更早**响应，不是更迟钝；
-            //   · 除数：点播 `curHeight = mScreenHeight`，本页 [pageHeightPx] = 播放页高度 ≈ 整屏
-            //     ⇒ 同一量级；
+            //   · 除数：点播 `curHeight = 横屏 ? mScreenWidth : mScreenHeight`（GSY 的横竖屏交换写法；
+            //     两个页面都声明了 `configChanges=orientation|screenSize`、转屏不重建 Activity，所以
+            //     竖屏 = 屏幕高、横屏 = 建视图那一刻的屏宽 ≈ 当前屏高）；本页 [pageHeightPx] = 播放页
+            //     高度 ≈ 整屏 ⇒ 同一量级；
             //   · 亮度：点播是**增量累加**（`mDownY` 每帧推进），本页是累计位移 ⇒ 等价；两边系数
-            //     都是 `/(屏高 × 3)`，**本来就一致**（本轮不动它）。
+            //     都是 `/(屏高 × 3)`（★这个 ×3 同样是 App override 加的，GSY 原版亮度只有 `÷屏高`），
+            //     **本来就一致**（本轮不动它）。
             val deltaV = (max * deltaY * 2 / pageHeight).toInt()
             val volumePercent =
                 (downVolume * 100 / max + deltaY * 2 * 100 / pageHeight).toInt()
