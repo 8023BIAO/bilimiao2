@@ -1,5 +1,3 @@
-[releases APK](../../releases/latest)
-
 - BiliMiao · 10miaomiao · [bilimiao2](https://github.com/10miaomiao/bilimiao2)
 - [BilibiliSponsorBlock](https://github.com/hanydd/BilibiliSponsorBlock)
 - [Bilibili-thread-ripper](https://github.com/MrTangLuyao/Bilibili-thread-ripper)
