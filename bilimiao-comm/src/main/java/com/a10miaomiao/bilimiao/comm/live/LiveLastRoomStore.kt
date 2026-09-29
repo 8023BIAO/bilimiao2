@@ -86,6 +86,29 @@ object LiveLastRoomStore {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 主线程 Handler：只用于 [evaluateRestore] 的"让路一拍"（见那里的 KDoc） */
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * "让路一拍"的延迟。
+     *
+     * ★★★2026-09-29 用户实测（**双开直播间**）：从系统小窗点回 App 时，**系统自己**会把
+     *   小窗里的直播间带回前台（先播上了），紧接着我们这条恢复线又 `startActivity` 了一次
+     *   ⇒ 用户看到"正常的在播放，然后过一会儿又开了一遍直播间"。
+     *   根因：两个恢复者抢同一个记录 —— 系统走任务恢复（`LivePlayerActivity` 自己 resume），
+     *   我们走 [evaluateRestore]（宿主是 `MainActivity` 就拉起）。
+     *   谁先到由 ROM 决定，日志与代码都无法排序 ⇒ **唯一的确定性办法是我们主动让路**：
+     *   宿主是主界面时，先把"该不该恢复"推迟这么一小段；这段时间里如果系统的恢复生效，
+     *   直播间页会 resume，在 `observer.onActivityResumed` 里把这笔账**消费掉**
+     *   （"人已经在直播间里了"那条既有防循环逻辑）⇒ 我们这一拍醒来就没有账可恢复了。
+     *   而"系统确实没恢复"（直播间已被销毁/清栈）时，这个延迟只表现为**晚 ~0.3 秒**弹出直播间，
+     *   用户无感。
+     */
+    private const val RESTORE_HANDOFF_DELAY_MS = 320L
+
+    /** 让路一拍用的 Runnable（重复 resume 时先撤销上一次，保证只落一次） */
+    private var handoffRunnable: Runnable? = null
+
     private val attachLock = Any()
 
     /**
@@ -257,9 +280,9 @@ object LiveLastRoomStore {
      * 和"把小窗过渡期的控制条收起来"）。而**手动点底栏/顶栏「画中画」按钮**不会走这里 ——
      * 那条路用户并没有离开 App（主界面就在小窗后面），不该记、也不该在回来时被"恢复"打扰。
      */
-    fun onLivePageLeavingApp(context: Context, roomId: String) {
+    fun onLivePageLeavingApp(context: Context, roomId: String, force: Boolean = false) {
         ensureAttached(context)
-        record(roomId)
+        record(roomId, force)
     }
 
     /**
@@ -365,14 +388,24 @@ object LiveLastRoomStore {
     // 状态机内部
     // ══════════════════════════════════════════════════════════════════════
 
-    /** 记下"上次停在哪个直播间" + "应当恢复"（幂等：同一房间重复记录不再写盘） */
-    private fun record(room: String) {
+    /**
+     * 记下"上次停在哪个直播间" + "应当恢复"（幂等：同一房间重复记录不再写盘）。
+     *
+     * @param force `true` = 越过 [taskRemovedSuppressRecord] 那道抑制。
+     *   只有一处用它：**直播间在系统小窗 / PiP 里被点「X」关掉**时补记
+     *   （`LivePlayerActivity.onDestroy` 的"窗口里被销毁"分支）——
+     *   那一刻抑制位可能是被同一次窗口收起顺带立起来的，但用户的意图确实是
+     *   "我还带着这个直播间"（他随手关窗，回 App 期望落回直播间）。
+     *   整任务被划掉那条路**不传 force**，抑制照旧生效（"划掉不复活"是用户明确要过的）。
+     */
+    private fun record(room: String, force: Boolean = false) {
         if (room.isBlank()) {
             LivePageTrace.note("lastRoom.record.skip", "reason" to "blankRoom")
             return
         }
         // ★task-55 保护②：整任务刚被划掉 ⇒ 不再记账（见 [taskRemovedSuppressRecord]）
-        if (taskRemovedSuppressRecord) {
+        //   `force` 是唯一的例外口（点「X」关小窗那条路，见 [record] 的 KDoc）
+        if (taskRemovedSuppressRecord && !force) {
             LivePageTrace.note(
                 "lastRoom.record.skip",
                 "reason" to "taskRemoved",
@@ -499,8 +532,14 @@ object LiveLastRoomStore {
         return room
     }
 
-    /** 触发一次"该不该恢复"的判定；该开就开（判据见 [takePendingForRestore]） */
-    private fun evaluateRestore() {
+    /**
+     * 触发一次"该不该恢复"的判定；该开就开（判据见 [takePendingForRestore]）。
+     *
+     * @param afterHandoff `true` = 本次调用来自"让路一拍"那一拍（延迟到点后的重入）。
+     *   它用来防止**自己把自己又排一次**变成死循环（宿主一直是主界面时，
+     *   [RESTORE_HANDOFF_DELAY_MS] 那道让路必须先让一次、再真正判一次）。
+     */
+    private fun evaluateRestore(afterHandoff: Boolean = false) {
         val host = resumedHost
         if (host == null) {
             LivePageTrace.note("lastRoom.evaluate", "host" to "none")
@@ -514,6 +553,27 @@ object LiveLastRoomStore {
                 "finishing" to host.isFinishing,
                 "destroyed" to host.isDestroyed,
             )
+            return
+        }
+        // ★★★让路一拍（2026-09-29 用户实测"直播间被开了两遍"，见 [RESTORE_HANDOFF_DELAY_MS]）：
+        //   宿主是**主界面**时，先别急着拉起 —— 系统可能正在把**小窗里那个直播间**带回前台
+        //   （它会自己 resume 并消费掉这笔账）。这一拍就是给系统让路。
+        //   · 宿主是直播间自己（`onActivityResumed` / `onLivePageDestroyed` 两条触发点）时不延迟：
+        //     那两种情况"该不该恢复"的判断本来就是确定的。
+        //   · 重复触发先撤销上一次，保证同一时刻只有一个待落地的恢复。
+        if (host.javaClass.name == HOST_ACTIVITY && !afterHandoff) {
+            handoffRunnable?.let { mainHandler.removeCallbacks(it) }
+            val runnable = Runnable {
+                handoffRunnable = null
+                evaluateRestore(afterHandoff = true)
+            }
+            handoffRunnable = runnable
+            LivePageTrace.note(
+                "lastRoom.restore.handoff",
+                "room" to (pending.roomId ?: "-"),
+                "delayMs" to RESTORE_HANDOFF_DELAY_MS,
+            )
+            mainHandler.postDelayed(runnable, RESTORE_HANDOFF_DELAY_MS)
             return
         }
         val room = takePendingForRestore()

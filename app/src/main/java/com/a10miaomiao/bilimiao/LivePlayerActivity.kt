@@ -2232,8 +2232,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 "multiWindow" to runCatching { isInMultiWindowMode }.getOrDefault(false),
                 "pip" to runCatching { isInPictureInPictureMode }.getOrDefault(false),
             )
-            // 用户主动关掉小窗 = 用户主动退出直播间：记录作废，下次进 App **不该**被开回直播间
-            LiveLastRoomStore.onLivePageExited(applicationContext)
+            // 用户关掉小窗 = "我还带着这个直播间"，只是页面被窗口销毁了：
+            // **补记一次账**（回 App 时由 [LiveLastRoomStore.evaluateRestore] 落回直播间）。
+            // ★这里**不**调 `onLivePageExited`（那是"用户主动退出直播间"的语义，会清账）——
+            //   上一版就是这么写的，结果用户回 App 时"啥都没了"（他实测：最小化后回软件
+            //   "无任何记忆"）。语义定稿：**关窗 ≠ 取消观看**，两者都该能回到直播间。
+            LiveLastRoomStore.onLivePageLeavingApp(applicationContext, rawRoomId, force = true)
         }
         if (isFinishing &&
             !userExitedPage &&                                  // ①
