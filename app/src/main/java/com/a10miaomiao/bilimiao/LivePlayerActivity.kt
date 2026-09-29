@@ -8344,23 +8344,33 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 dragStartWriteMs = writer.writeTotalMs
             }
             val deltaY = downRawY - event.rawY // 向上滑 = 变大
-            // ★2026-09-26 用户实测"手势太灵敏，一滑就全黑/音量归零"。
-            //   病根：本页用"绝对位移 × 2 / 屏高"，而点播（GSY）用的是"增量 / (屏高 × 3) 累加"
-            //   —— 两者是线性等价的写法，但系数差了 **6 倍**（2 vs 1/3）。
-            //   这里改成与点播同一个系数：整屏滑到底约改变 1/3 量程，跟点播手感一致。
-            // ★2026-09-26 对着点播**逐字抄**（用户："我的写代码在那里，你不会去对着抄吗？"）：
-            //   点播 `DanmakuVideoPlayer.kt:1748-1754` 的音量公式是
-            //     `deltaV = (max * deltaY * 2 / curHeight)`，气泡百分比另算
-            //     `volumePercent = downVolume*100/max + deltaY*2*100/curHeight`。
-            //   我上一轮把**亮度**的 `/(curHeight*3)` 误抄到了音量上（差 6 倍），这里改回 ×2。
-            // ★★2026-09-26 用户实测："还是太灵敏，比我普通视频的音量调节差很多"。
-            //   复盘：早先的 ÷3（3 屏走完全程）那一版，用户**没有**抱怨灵敏度（只抱怨卡顿）；
-            //   后来我"对着点播逐字抄"改回 ×2（点播源码里那个系数）⇒ 灵敏度**放大 6 倍** ⇒ 就是这个反馈。
-            //   而"卡顿"已经由另一处修复解决（音量写入搬到后台线程 + 气泡先刷，见 StreamVolumeWriter）——
-            //   所以这里把手感回到用户认可的那一版：**划满 3 个屏高走完整条行程**（÷3）。
-            val deltaV = (max * deltaY / (pageHeight * 3)).toInt()
+            // ★★本轮（2026-09-29）用户拍板：**直播间音量一律照点播那套来**。
+            //   原文："直接给我用点播那套，我给我装上，我试试看，怎么个事啊？"
+            //
+            // 点播的音量系数（`widget/player/DanmakuVideoPlayer.kt:1731-1734`，落在 GSY
+            // `touchSurfaceMove` 的 `mChangeVolume` 分支，已用 javap 反编译核对）：
+            // ```
+            // deltaV = max * deltaY * 2 / curHeight
+            // volumePercent = downVolume*100/max + deltaY*2*100/curHeight
+            // ```
+            // 两边的**唯一**差别是"增量 vs 累计位移"的写法，系数相同 ⇒ 整条行程灵敏度逐字一致：
+            //   · GSY 那边 `deltaY` 是**逐事件增量**、`mGestureDownVolume` **每帧累加**（浮点除法不截断）；
+            //   · 本页 `deltaY = 按下点 − 现在` 是**累计位移**，一次算到目标档位。
+            // 之前 6 倍偏差的来历就是把本页音量写成了**亮度**的 `/(屏高 × 3)`（1 屏 = 1/3 量程），
+            // 而点播音量是 `×2 / 屏高`（1 屏 = 2 倍量程，**半屏走完整条行程**）。
+            // 历史提醒：这一行曾按"灵敏度"反馈被来回改过两次（÷3 ⇄ ×2）—— 本轮判据不是手感猜测，
+            // 而是"与点播源码同一个系数"；此后只按真机手感再调节一次，别再凭推理来回翻。
+            //
+            // 其它干扰项本轮一并排查完毕（结论：都不会改变灵敏度）
+            //   · 死区：点播 `mThreshold = 80px` 才开始调（GSY 字节码里 `bipush 80`）；本页
+            //     `touchSlop`（约 8~24px）就进手势 ⇒ 本页**更早**响应，不是更迟钝；
+            //   · 除数：点播 `curHeight = mScreenHeight`，本页 [pageHeightPx] = 播放页高度 ≈ 整屏
+            //     ⇒ 同一量级；
+            //   · 亮度：点播是**增量累加**（`mDownY` 每帧推进），本页是累计位移 ⇒ 等价；两边系数
+            //     都是 `/(屏高 × 3)`，**本来就一致**（本轮不动它）。
+            val deltaV = (max * deltaY * 2 / pageHeight).toInt()
             val volumePercent =
-                (downVolume * 100 / max + deltaY * 100 / (pageHeight * 3)).toInt()
+                (downVolume * 100 / max + deltaY * 2 * 100 / pageHeight).toInt()
             val target = (downVolume + deltaV).coerceIn(0, max)
             // ① 气泡**先**刷（★第十三批的顺序）：用户看到的即时反馈优先 ——
             //    这条路上一个跨进程调用都没有，所以"每个 MOVE 都跟手"由它保证。
