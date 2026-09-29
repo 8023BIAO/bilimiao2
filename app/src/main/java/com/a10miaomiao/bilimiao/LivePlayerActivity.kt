@@ -2037,6 +2037,19 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   且此刻进程里没有别的前台页面 → 记下这个直播间（onUserLeaveHint 通常已经记过一次，
         //   这里覆盖熄屏 / 来电 / 被别的 App 抢前台等**不走 hint** 的路径，幂等）。
         if (!isFinishing && !isChangingConfigurations) {
+            // ★2026-09-29：**窗口形态**（系统小窗 / 分屏 / PiP 之外的窗口）下，"直播间不可见了"
+            //   本身就是"用户还带着这个直播间"的信号 —— 而且这条路**必须**记：
+            //   · 系统小窗被**最小化**时，页面可能**只是被藏起来、并不销毁**（`onDestroy` 不来），
+            //     那样"窗口里被销毁"那条补记根本不会执行 ⇒ 回 App 时账本空 ⇒ 用户看到"啥都没了"
+            //     （他实测："我回到软件是啥都没了"）。
+            //   · 这条**同样**受 task-removed 抑制（[LiveLastRoomStore.onLivePageWindowMinimized]
+            //     内部走同一个 `record`），所以"划掉最近任务不复活"不会被带坏。
+            val windowed = runCatching {
+                isInMultiWindowMode || isInPictureInPictureMode
+            }.getOrDefault(false)
+            if (windowed) {
+                LiveLastRoomStore.onLivePageWindowMinimized(applicationContext, rawRoomId)
+            }
             // ★task-47：多窗口（**非 PiP**）下把"别的页面还 resumed"那道门让开 ——
             //   多窗口允许多个 Activity 同时 RESUMED，"直播间 stop 而主界面还亮着"不代表
             //   用户在 App 内切页，而是"直播间这个窗口正在被收起/隐藏"。
@@ -2212,15 +2225,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   · 系统清栈（点桌面图标回 App / 系统回收）→ 页面**不在**小窗里；
         //   · 用户点 X 关窗 → 页面**就在**小窗里（`isInMultiWindowMode || isInPictureInPictureMode`）。
         //
-        // 认错的代价正是用户看到的那一幕：点 X 之后紧接着的补记账（下面那个 if）会写下
-        // `[LiveLastRoomStore.onLivePageLeavingApp]`，而 `[onLivePageDestroyed] → evaluateRestore()`
-        // 下一秒就把"该恢复"当成真的 ⇒ **下次进 App 自动把直播间开回来**。
-        // 按用户意图定：**把 X 关窗当作"用户主动退出直播间"** ⇒ 走 [onLivePageExited] 那条清账路
-        // （与返回键退出同一个语义、同一个 API），并跳过下面的补记账。
-        //
-        // ★为什么不会误伤"系统清栈仍要恢复"那条：那种情况页面不在小窗里 ⇒ 进不了本分支；
-        //   整任务被划掉那条另有保护（`PlaybackService.onTaskRemoved` → store 的
-        //   `taskRemovedSuppressRecord` + `clear()`，本分支不参与）。
+        // ★用户 2026-09-29 二次确认（这是**定稿语义**，别再翻）：
+        //   · **点「X」关掉小窗 = 关掉这个直播间** ⇒ 记录作废，下次进 App **不该**自动开回来；
+        //   · **最小化小窗 = 我还带着这个直播间** ⇒ 回 App 要落回直播间（那条走
+        //     [onStop] 里的 `windowed` 记录点 + 系统自己的窗口恢复，与本分支无关）。
+        //   安卓在回调层**分不清这两个动作**（都是"窗口里的 Activity 被销毁"），
+        //   但两者的**页面命运**不同：点 X 之后这个直播间就是被用户关掉了，
+        //   而最小化时若页面只是被藏起来（不销毁），根本走不到本函数。
+        //   所以这里按"点 X = 主动退出"处理最不容易误伤。
         // ══════════════════════════════════════════════════════════════════
         val closedInWindow = pipEnteredThisSession || runCatching {
             isInMultiWindowMode || isInPictureInPictureMode
@@ -2232,12 +2244,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 "multiWindow" to runCatching { isInMultiWindowMode }.getOrDefault(false),
                 "pip" to runCatching { isInPictureInPictureMode }.getOrDefault(false),
             )
-            // 用户关掉小窗 = "我还带着这个直播间"，只是页面被窗口销毁了：
-            // **补记一次账**（回 App 时由 [LiveLastRoomStore.evaluateRestore] 落回直播间）。
+            // 用户在系统小窗 / PiP 里把小窗关掉了 = 主动退出这个直播间：
+            // **记录作废**（与返回键退出同一个语义、同一个 API），并跳过下面的补记账。
+            // ★这里**绝不能**改成"补记账"：那样点一次 X 之后，回 App 就会被自动开回直播间
+            //   （用户 2026-09-29 连着报过两次）。
             // ★这里**不**调 `onLivePageExited`（那是"用户主动退出直播间"的语义，会清账）——
-            //   上一版就是这么写的，结果用户回 App 时"啥都没了"（他实测：最小化后回软件
-            //   "无任何记忆"）。语义定稿：**关窗 ≠ 取消观看**，两者都该能回到直播间。
-            LiveLastRoomStore.onLivePageLeavingApp(applicationContext, rawRoomId, force = true)
+            //   点 X 关掉小窗 = 主动退出 ⇒ 记录作废；最小化 ⇒ 回 App 仍要落回直播间（另走
+            //   [onStop] 的 `windowed` 记录点）。
+            LiveLastRoomStore.onLivePageExited(applicationContext)
         }
         if (isFinishing &&
             !userExitedPage &&                                  // ①

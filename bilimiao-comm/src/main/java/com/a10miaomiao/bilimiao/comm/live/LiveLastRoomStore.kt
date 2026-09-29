@@ -280,9 +280,24 @@ object LiveLastRoomStore {
      * 和"把小窗过渡期的控制条收起来"）。而**手动点底栏/顶栏「画中画」按钮**不会走这里 ——
      * 那条路用户并没有离开 App（主界面就在小窗后面），不该记、也不该在回来时被"恢复"打扰。
      */
-    fun onLivePageLeavingApp(context: Context, roomId: String, force: Boolean = false) {
+    fun onLivePageLeavingApp(context: Context, roomId: String) {
         ensureAttached(context)
-        record(roomId, force)
+        record(roomId)
+    }
+
+    /**
+     * ★2026-09-29：**直播间所在的那个窗口被收起/最小化**（页面还在、只是不可见）——
+     * 这是"用户还带着这个直播间"的直接信号，且**恰好落在原设计的空档里**：
+     * · [onLivePageLeavingApp]（`onUserLeaveHint`）—— 最小化/关窗都**不触发**它；
+     * · [onLivePageStopped]（`onStop`）—— 多窗口下会被"别的页面还 resumed"那道门放行，
+     *   但它读的是"进程里有没有别的前台页面"，系统小窗场景下**并不稳定**；
+     * · `onDestroy` 的窗口分支 —— 只有窗口**被销毁**时才走（最小化若只是"藏而不销"就到不了）。
+     * 所以这里给"窗口形态的直播间离开"一个**确定**的记录点，由页面在"窗口态 onStop"里调用。
+     * 它**同样**受 [taskRemovedSuppressRecord] 约束（划掉最近任务不复活）。
+     */
+    fun onLivePageWindowMinimized(context: Context, roomId: String) {
+        ensureAttached(context)
+        record(roomId)
     }
 
     /**
@@ -391,21 +406,19 @@ object LiveLastRoomStore {
     /**
      * 记下"上次停在哪个直播间" + "应当恢复"（幂等：同一房间重复记录不再写盘）。
      *
-     * @param force `true` = 越过 [taskRemovedSuppressRecord] 那道抑制。
-     *   只有一处用它：**直播间在系统小窗 / PiP 里被点「X」关掉**时补记
-     *   （`LivePlayerActivity.onDestroy` 的"窗口里被销毁"分支）——
-     *   那一刻抑制位可能是被同一次窗口收起顺带立起来的，但用户的意图确实是
-     *   "我还带着这个直播间"（他随手关窗，回 App 期望落回直播间）。
-     *   整任务被划掉那条路**不传 force**，抑制照旧生效（"划掉不复活"是用户明确要过的）。
+     * ★这里**没有**"强制记账"的逃生口，这是有意的（2026-09-29 对抗复核 M1 抓到的回归）：
+     *   曾经为"系统小窗里点「X」关窗"加过一个 `force` 参数去越过 [taskRemovedSuppressRecord]，
+     *   后果是"**在小窗里划掉最近任务**"这条路被带坏 —— `onTaskRemoved` 刚立抑制位+清账，
+     *   紧接着页面 `onDestroy` 走窗口分支强制补记 ⇒ 同进程重开 App 又把直播间开回来
+     *   （用户明确骂过的"保活强得离谱"）。抑制位就是抑制位：**任何**窗口内销毁都不许越过它。
      */
-    private fun record(room: String, force: Boolean = false) {
+    private fun record(room: String) {
         if (room.isBlank()) {
             LivePageTrace.note("lastRoom.record.skip", "reason" to "blankRoom")
             return
         }
         // ★task-55 保护②：整任务刚被划掉 ⇒ 不再记账（见 [taskRemovedSuppressRecord]）
-        //   `force` 是唯一的例外口（点「X」关小窗那条路，见 [record] 的 KDoc）
-        if (taskRemovedSuppressRecord && !force) {
+        if (taskRemovedSuppressRecord) {
             LivePageTrace.note(
                 "lastRoom.record.skip",
                 "reason" to "taskRemoved",
