@@ -21,6 +21,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- 下载服务以 dataSync 类型常驻前台，Android 14+ 需要单独声明该类型的权限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!--
+      「我们自己的任务还在不在最近任务里」—— 用来区分系统小窗被**最小化**还是被**点叉关掉**
+      （见 `LiveLastRoomStore.ourTaskStillInRecents`）。normal 权限：安装即授予、不弹框。
+      ★不加它（部分 ROM / 老系统）`getAppTasks()` 会抛 SecurityException，
+      那条判据就永远走"保持原行为"的兜底 —— 最小化回 App 又会落到首页。
+    -->
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
 
 
     <application

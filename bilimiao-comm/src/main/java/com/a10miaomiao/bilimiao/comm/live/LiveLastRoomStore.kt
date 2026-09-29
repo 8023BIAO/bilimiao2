@@ -387,6 +387,25 @@ object LiveLastRoomStore {
     }
 
     /**
+     * "我们自己的任务还在最近任务里吗？" —— 用来区分**最小化**与**点叉关窗**（见 [evaluateRestore]）。
+     *
+     * 实现：`ActivityManager.getAppTasks()` 列出**本 App 的任务**（需要
+     * `android.permission.GET_TASKS`，它是 normal 权限、本工程给点播"后台小窗"用时已声明）。
+     * 判据只看"有没有我们自己的任务"这一件事，不看它是不是前台：
+     * · 最小化 → 任务还在列表里 ⇒ `true`；
+     * · 点叉关窗 → 窗口被移除，任务也随之消失 ⇒ `false`。
+     *
+     * ★失败语义：拿不到（权限被 ROM 收紧 / 抛异常 / 空列表）时返回 **true** ——
+     *   即"保持原有恢复行为"。理由：这条门只是为了**少做一件错事**，
+     *   不该因为取证失败就让"最小化要能回来"这条需求再次失效。
+     */
+    private fun ourTaskStillInRecents(context: Context): Boolean = runCatching {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            ?: return@runCatching true
+        am.appTasks.isNotEmpty()
+    }.getOrDefault(true)
+
+    /**
      * 旧守卫（`LivePlayerActivity.ReturnToLiveGuard`）的兜底取用口。
      *
      * 与主路径**同一套判据、同一个一次性记录**：只有"记录还在 + 前台是主界面 +
@@ -574,6 +593,20 @@ object LiveLastRoomStore {
                 "finishing" to host.isFinishing,
                 "destroyed" to host.isDestroyed,
             )
+            return
+        }
+        // ★★★2026-09-29 晚（用户第 4 次真机反馈，**定稿判据**）：窗口态下"点叉"与"最小化"
+        //   在页面回调里长得一模一样（都是"窗口里的 Activity 被销毁"），靠 `isInMultiWindowMode`
+        //   之类的标志**分不开**。但两者有一件客观不同的事：**这个任务还在不在最近任务里** ——
+        //   · 点「X」关窗 → 那个窗口/任务被移除 ⇒ 我们的任务**不在** `getAppTasks()` 里；
+        //   · 最小化 → 任务还在（用户还能从最近任务里点回来）⇒ **在**。
+        //   而且用户真正遇到的分岔就一条：**最小化之后回软件落在首页**（账没记上/没恢复）。
+        //   所以这里只加一道**窄门**：宿主回到前台、准备拉起时，若"我们自己的任务已经不在
+        //   最近任务里"（= 用户是点叉关掉的）就**不拉起**；任务还在（= 最小化）就照常恢复。
+        //   ★这条门只回答"要不要拉起"，不消费账本；判不出来（API 异常/空）时**保持原行为**
+        //     （宁可多恢复一次，也不要让最小化那条路又变成"啥都没有"）。
+        if (host.javaClass.name == HOST_ACTIVITY && !ourTaskStillInRecents(host)) {
+            LivePageTrace.note("lastRoom.restore.skip", "reason" to "ourTaskGone")
             return
         }
         // ★★★让路一拍（2026-09-29 用户实测"直播间被开了两遍"，见 [RESTORE_HANDOFF_DELAY_MS]）：
