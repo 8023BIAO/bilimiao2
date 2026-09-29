@@ -288,7 +288,7 @@ private fun LazyListScope.liveBrowsePreferenceItems() {
             Text(if (it == SettingConstants.LIVE_GRID_SPAN_AUTO) "自适应" else "${it}列")
         },
         summary = {
-            Text("首页「直播」Tab 的卡片列数。自适应 = 按屏幕宽度铺（手机 1 列，平板/横屏自动多列）")
+            Text("首页「直播」Tab／直播搜索／关注直播列表 的卡片列数。自适应 = 按屏幕宽度铺（手机 1 列，平板/横屏自动多列）")
         },
     )
 }

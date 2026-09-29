@@ -48,6 +48,7 @@ import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
+import cn.a10miaomiao.bilimiao.compose.pages.live.rememberLiveGridSpan
 import cn.a10miaomiao.bilimiao.compose.pages.search.searchErrorText
 import cn.a10miaomiao.bilimiao.compose.pages.user.UserSpacePage
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
@@ -105,8 +106,8 @@ import java.util.concurrent.atomic.AtomicLong
  * 关键字由搜索页给（不能让用户再输一遍）、没有历史面板、容器要和本页其它 Tab 一致。
  * 所以只把它的**取数机制**（分页 / 去重 / 过期响应丢弃）和**卡片**搬过来，页面壳子按
  * `SearchByTypeContent` 的写法来。
- * `LiveSearchPage.kt` 里的 `LiveRoomCard`/`hotText()` 都是 private，所以卡片在这里**复制一份**
- * —— 两份的视觉层次刻意保持一致（人气定位的修复也是两份同步改的，见 [LiveRoomCard] 的注释）。
+ * `LiveSearchPage.kt` 里的 `LiveRoomCard` 是 private，所以卡片在这里**复制一份**
+ * —— 两份的视觉层次刻意保持一致（角标删除等改动一律两份同步，见 [LiveRoomCard] 的注释）。
  *
  * ## Tab 是怎么挂进搜索页的（原机制，读懂后照做）
  * `SearchResultPage.kt` 里：
@@ -469,11 +470,13 @@ internal fun SearchLiveContent(
         refreshing = isRefreshing,
         onRefresh = { viewModel.refresh() },
     ) {
+        // 列数跟随设置（设置 → 播放 → 直播设置 → 直播列表 → 每行卡片数）：
+        //   0 = 自适应；1~5 = 固定列数。与直播搜索页共用同一个读取器，见 [rememberLiveGridSpan]。
+        val gridSpan = rememberLiveGridSpan()
         LazyVerticalGrid(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            // 自适应列数：与全站搜索其它 Tab 完全同款（手机 1 列，平板/横屏自动多列）
-            columns = GridCells.Adaptive(300.dp),
+            columns = if (gridSpan == 0) GridCells.Adaptive(300.dp) else GridCells.Fixed(gridSpan),
             contentPadding = windowInsets.toPaddingValues(
                 top = 0.dp,
             )
@@ -537,18 +540,17 @@ internal fun SearchLiveContent(
 /**
  * 一张直播间卡片（**复制**自 `pages/live/LiveSearchPage.kt` 的 private `LiveRoomCard`）。
  *
- * 为什么复制而不是共用：那个文件属于另一路交付物，里面的 `LiveRoomCard`/`hotText()` 都是 private ——
+ * 为什么复制而不是共用：那个文件属于另一路交付物，里面的 `LiveRoomCard` 是 private ——
  * 要么改它，要么复制一份（本次选择）。
- * ★两份刻意保持一字不差，包括"人气叠在封面右下角"与"`hotText()` 只取服务端文案"这两处修复：
- *   `LiveSearchPage.kt` 里那份**同步改了同一个位置**（"在直播页搜索"走的正是那个路由 —— 首页直播 Tab
- *   的搜索框 `HomeLiveContent.kt` 的 LiveSearchEntry → `LiveSearchPage`）。只改一份 = 漏一半。
+ * ★两份刻意保持一字不差（`LiveSearchPage.kt` 里那份同步改同一个位置 —— 首页直播 Tab 的搜索框
+ *   `HomeLiveContent.kt` 的 LiveSearchEntry → `LiveSearchPage`）。只改一份 = 漏一半。
  *   将来若要统一，应抽成公共组件（已写进交付报告的风险项）。
  *
- * 信息层次（用户点名要的四样：封面 / 标题 / UP / 人气）：
+ * 信息层次（封面 / 主播名 / 标题）：
  * ```
  * ┌───────────────┐
  * │   （封面）      │  ┐
- * │ 主播名    [人气]│  ├ 底部渐变条 + 右下角人气胶囊
+ * │ 主播名          │  ├ 底部渐变条只放主播名
  * ├───────────────┤  ┘
  * │ 标题（最多两行） │
  * └───────────────┘
@@ -556,18 +558,19 @@ internal fun SearchLiveContent(
  * ★2026-09-29：封面左上角那颗「直播中」角标已删除 ——
  *   这一屏搜出来的条条都是直播，角标不携带信息、还挡住封面左上角。`LiveSearchPage.kt` 那份
  *   同款角标**同批删掉**（两份卡片一直是"同步改"的约定，见上）。
+ * ★2026-09-30：封面右下角那颗**热度胶囊也整体删除**（原本走 `hotText()` 显示服务端的
+ *   `watched_show.text_large`）—— 接口给的热度有两种口径（"当前人气" / "累计看过"），
+ *   卡片上显示哪种都会有一半房间是错的。`LiveSearchPage.kt` 那份**同批删掉**。
+ *   胶囊没了，原先"给胶囊预留右半行"的 Spacer 也一并撤掉：主播名现在可以用满整行。
  *
- * ★人气的位置为什么是"叠在封面右下角"、而不是跟在主播名后面（用户实测反馈的修复点）：
- *   原来人气是底部渐变条 Row 里的第三个孩子（名字 / Spacer / 人气），位置由名字宽度决定；
- *   现在人气是**封面 Box 里独立的一颗角标**（`align(BottomEnd)` + 6dp），锚在封面右下角，
- *   名字再长也推不动它。渐变条那一行只留名字，并且用"名字 fill = false + Spacer weight(1f)"
- *   给右下角**预留半行**，保证长名字的省略号不会伸到人气胶囊底下（取舍与推导见 [LiveRoomCard]）。
+ * ★底部渐变条那一行：名字那一块宽度由文字决定、不撑满整行，
+ *   所以点名字右边的空白依旧算点卡片（进直播间）。
  *
  * ## 两个点击区（与首页直播 Tab 的 `HomeLiveContent.kt` 同一套写法）
  * ```
  * ┌───────────────────────┐
  * │                （封面）│  ┐
- * │  主播名        [人气]  │  ├─ 点这里 → 进直播间（onClick）
+ * │  主播名                │  ├─ 点这里 → 进直播间（onClick）
  * ├───────────────────────┤  ┘
  * │ 标题                   │  ┘
  * └───────────────────────┘
@@ -629,13 +632,11 @@ private fun LiveRoomCard(
             ) {
                 // ★UP 名 = 进用户空间的入口：把左边这块「主播名」包成**内层可点 Row**。
                 //   为什么包一层而不是直接给 Text 挂 clickable：两者点击范围其实一样大，
-                //   但这样做和首页直播卡片（HomeLiveContent.kt:889-909）是**同一份写法** ——
+                //   但这样做和首页直播卡片（HomeLiveContent.kt:1162-1176）是**同一份写法** ——
                 //   将来那边把「Ⓤ 图标 + 名字」一起纳入点击区时，两份卡片不会长歪。
-                //   fill = false：内层 Row 的宽度仍由名字文字决定、不撑满整行 ——
-                //   点名字右边的空白依旧算点卡片（进直播间），长名字按下面那条"半行上限"打省略号。
+                //   名字这一块宽度由文字决定、不撑满整行：点名字右边的空白依旧算点卡片（进直播间）。
                 Row(
                     modifier = Modifier
-                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(4.dp))
                         .clickable(onClickLabel = "进入UP主空间", onClick = onClickUpper),
                     verticalAlignment = Alignment.CenterVertically,
@@ -648,41 +649,10 @@ private fun LiveRoomCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                // ★这颗 Spacer 是**给右下角人气胶囊预留的右半行**，不是排版装饰（删掉人气就会被名字推着走）：
-                //   Row 里两个带 weight 的孩子各拿 `weightUnitSpace × weight` —— 名字那块 fill = false，
-                //   实际宽度 = min(名字宽度, 半行)；这颗 fill = true 的 Spacer 则**永远**吃满另外半行。
-                //   ★关键：fill = false 省下来的空间**不会**重新分给兄弟（Row 的测量实现里，
-                //     带 weight 的孩子各自按 weightUnitSpace × weight 定量测，没有二次分配），
-                //     所以"名字 + 这颗 Spacer"必须成对存在：只留一颗，半行上限就没了。
-                //   结果：名字再长，右半行也不会被挤掉 —— 右下角那颗胶囊的位置与名字长度完全无关。
-                Spacer(modifier = Modifier.weight(1f))
             }
-            // 人气：**叠在封面右下角**（同首页直播 Tab 的 LiveRoomCard，HomeLiveContent.kt:1088-1107）。
-            // ★为什么从"行内贴右"改成"叠封面右下角"：人气要像直播 Tab 那样固定住，
-            //   而直播 Tab 的人气就在封面右下角（半透明胶囊）。锚点从"名字行的行尾"换成"封面右下角"后，
-            //   人气的位置只由卡片宽度决定，跟主播名一个字都不相干。
-            //   文案仍旧走 [hotText]（只取服务端的 watched_show.text_large），只改位置、不改文案来源。
-            // 没有服务端文案就不画这颗胶囊：半透明底的空壳比什么都不画更像 bug。
-            val hotText = item.hotText()
-            if (hotText.isNotBlank()) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f),
-                            shape = RoundedCornerShape(4.dp),
-                        )
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = hotText, // 人气
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
+            // ★封面右下角那颗热度胶囊已整体删除（2026-09-30，做减法）。
+            //   原因：接口给的 `text_large` 有两种口径（"当前人气" / "累计看过"），卡片上显示哪种都会有一半房间是错的；
+            //   首页「直播」Tab 的同款角标先前也已删除。**不要再加回来。**
         }
         Text(
             text = item.title,
@@ -697,15 +667,6 @@ private fun LiveRoomCard(
     }
 }
 
-/**
- * 卡片右下角的人气文案：**只**用接口给的 `watched_show.text_large`，取不到就不显示。
- * （实测有的房间 `online` 是"当前人气"、有的房间才是"累计看过"，口径并不统一；
- *   只有 `text_large` 是服务端按 `watched_show.switch` 选好的成品文案。）
- */
-private fun LiveSearchRoomItem.hotText(): String {
-    val text = watched_show?.text_large.orEmpty()
-    return if (text.isNotBlank()) text else ""
-}
 
 /** 搜到 0 条时的提示：比"空空如也"多告诉用户两件事 —— 搜的是什么词、下一步能干什么 */
 @Composable

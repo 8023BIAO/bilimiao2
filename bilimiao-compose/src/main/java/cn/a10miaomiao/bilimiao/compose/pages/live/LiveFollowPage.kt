@@ -236,11 +236,13 @@ private fun LiveFollowPageContent(viewModel: LiveFollowPageViewModel) {
             refreshing = isRefreshing,
             onRefresh = { viewModel.refresh() },
         ) {
+            // 列数跟随设置（设置 → 播放 → 直播设置 → 直播列表 → 每行卡片数）；
+            // 与首页「直播」Tab / 直播搜索页共用同一个读取器，见 [rememberLiveGridSpan]。
+            val gridSpan = rememberLiveGridSpan()
             LazyVerticalGrid(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                // 与首页直播 Tab / 直播搜索页同一套自适应列数（手机 1 列，平板/横屏自动多列）
-                columns = GridCells.Adaptive(300.dp),
+                columns = if (gridSpan == 0) GridCells.Adaptive(300.dp) else GridCells.Fixed(gridSpan),
                 contentPadding = windowInsets.toPaddingValues(top = 0.dp),
             ) {
                 items(

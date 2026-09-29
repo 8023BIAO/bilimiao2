@@ -1130,7 +1130,7 @@ internal fun LiveRoomCard(
             // ★封面上的两个叠加角标都已删除（2026-09-29，做减法；别再加回来）：
             //   ① 左上角「直播中」—— 列表内全部都是直播，该角标不携带信息且会遮挡封面；
             //   ② 右下角「N人看过」—— `online` 在部分房间是"当前人气"、部分房间才是"累计看过"，
-            //      硬拼成"人看过"属于口径错误（依据：`LiveSearchInfo.kt:84`、`LivePlayerActivity.kt:6378`）。
+            //      硬拼成"人看过"属于口径错误（依据：`LiveSearchInfo.kt:84`、`LivePlayerActivity.kt:6377`）。
         }
         Text(
             text = item.title,

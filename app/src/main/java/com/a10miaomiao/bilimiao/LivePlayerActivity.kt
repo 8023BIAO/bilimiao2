@@ -93,7 +93,8 @@ import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.toast
 // ★数字文案统一走 `NumberUtil.converString`（社区、视频卡片等多处共用同一份实现；
-//   //   本页顶栏「在线人数」已于 2026-09-26 撤掉，首页直播卡片的数字角标也已于 2026-09-29 删除）。
+//   本页顶栏「在线人数」已于 2026-09-26 撤掉，首页直播卡片与直播搜索卡片上的数字角标也已删除
+//   —— 前者的 `online`／`text_large` 有两种口径，显示哪种都会有一半房间是错的）。
 //   所以"1.2万"这个口径全 App 只有一份实现。
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
