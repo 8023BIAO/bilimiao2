@@ -1,6 +1,7 @@
 package com.a10miaomiao.bilimiao.player
 
 import com.a10miaomiao.bilimiao.widget.player.SponsorTime
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -34,6 +35,18 @@ class SponsorTimeTest {
     @Test
     fun formatClampsNegativeToZero() {
         assertEquals("00:00.000", SponsorTime.format(-5L))
+    }
+
+    /** 护栏：`SponsorTime.format` 必须固定 Locale.US（阿语默认区域会写阿拉伯-印度数字） */
+    @Test
+    fun formatIgnoresDefaultLocale() {
+        val original = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("ar-EG"))
+            assertEquals("01:11.000", SponsorTime.format(71_000L))
+        } finally {
+            Locale.setDefault(original)
+        }
     }
 
     @Test

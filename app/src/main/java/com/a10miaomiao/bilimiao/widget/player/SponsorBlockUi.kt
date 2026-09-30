@@ -435,7 +435,8 @@ object SponsorBlockUi {
             addView(rowOf(ctx, button(ctx, "设为当前") {
                 endEt.setText(SponsorTime.format(player.currentPosition.coerceAtLeast(0L)))
             }, button(ctx, "视频结尾") {
-                if (durationSec > 0) endEt.setText(SponsorTime.format((durationSec * 1000).toLong()))
+                // 直接用毫秒原值：先换算成秒再乘回来会让 1001ms 变成 1000ms（浮点截断 1ms）
+                if (player.duration > 0L) endEt.setText(SponsorTime.format(player.duration))
             }))
             addView(categoryTv)
             addView(actionTv)
@@ -573,6 +574,12 @@ object SponsorBlockUi {
     /** seek 迟迟不落地（底层卡住）就别一直挂着轮询 */
     private const val TRIAL_ARM_TIMEOUT_MS = 5_000L
 
+    /** 位置连续这么久没前进 = 播不动了（用户暂停 / 缓冲 / 已播完 / 位置钉死）→ 干净退出，不留 50ms 空转 */
+    private const val TRIAL_STALL_MS = 3_000L
+
+    /** 到点暂停最多重试这么多次轮询（50ms × 20 ≈ 1s）：GSY 缓冲态下 onVideoPause() 是空操作 */
+    private const val TRIAL_PAUSE_RETRY_MAX = 20
+
     private fun cancelTrial() {
         trialJob?.cancel()
         trialJob = null
@@ -583,12 +590,15 @@ object SponsorBlockUi {
      *
      * 为什么用 50ms 轮询而不是给播放器挂进度回调：本仓播放器的进度回调是进度条/弹幕层在用的，
      * 再挂一个"到点暂停"要动播放器内部状态（越界，且容易和连播/续播记账打架）；
-     * 轮询只读 public 的 `currentPosition`，下面三条出口都会干净退出，不留任何回调或协程。
+     * 轮询只读 public 的 `currentPosition`，下面四条出口都会干净退出，不留任何回调或协程。
      *
-     * 三条出口（都不会误暂停别人的播放）：
-     *  1. 位置 >= endMs → `onVideoPause()`（本次试播的全部目的，只生效一次）；
+     * 四条出口（都不会误暂停别人的播放，且**每条都有界**）：
+     *  1. 位置 >= endMs → `onVideoPause()`；GSY 只在 `isPlaying()` 为真时才真的暂停
+     *     （本仓 v13.2.1），刚越过终点那一帧若在缓冲就是空操作 ⇒ 核对 `currentState` 没停就
+     *     在后续轮询重试，上限 [TRIAL_PAUSE_RETRY_MAX] 次（约 1s），确认停了才退出；
      *  2. 位置掉回 start 之前 1s 以上 → 用户自己跳走了，放弃；
-     *  3. seek 5s 还没落地 → 放弃，不留死循环。
+     *  3. 位置连续 [TRIAL_STALL_MS] 没前进（用户暂停 / 缓冲 / 已播完 / 位置钉死）→ 放弃；
+     *  4. seek [TRIAL_ARM_TIMEOUT_MS] 还没落地 → 放弃，不留死循环。
      *
      * ★ `seekTo` 是异步的（`GSYVideoBaseManager.getCurrentPosition()` 直接转发底层播放器，
      *   seek 完成前可能还报旧位置），所以要先等位置落到起点附近，再判"到点/跳走" ——
@@ -603,6 +613,9 @@ object SponsorBlockUi {
         trialJob = scope.launch {
             var seekLanded = false
             var waitedMs = 0L
+            var lastPos = -1L
+            var stalledMs = 0L
+            var pauseTries = 0
             while (true) {
                 delay(TRIAL_POLL_MS)
                 waitedMs += TRIAL_POLL_MS
@@ -616,9 +629,17 @@ object SponsorBlockUi {
                 }
                 if (pos >= endMs) {
                     player.onVideoPause()
-                    break
+                    // 空操作（缓冲态）不算数：位置还在动/还会再越过终点，下一轮接着试；有上限
+                    if (player.currentState == GSYVideoPlayer.CURRENT_STATE_PAUSE) break
+                    if (++pauseTries >= TRIAL_PAUSE_RETRY_MAX) break
+                    continue
                 }
                 if (pos < startMs - TRIAL_TOL_MS) break
+                // 停滞看门狗：位置不再前进 = 播不动了（暂停/缓冲/已播完/钉死），干净退出。
+                // 放在"到点"之后：停在终点附近时先试一次暂停，再让看门狗兜底。
+                if (pos <= lastPos) stalledMs += TRIAL_POLL_MS else stalledMs = 0L
+                lastPos = pos
+                if (stalledMs >= TRIAL_STALL_MS) break
             }
             // 跑完就把引用放掉（顺带松开对 player/Activity 的强引用）；被 cancel 时走不到这里，
             // 但 cancelTrial() 已经置空了，两条路都不会留下活着的轮询。
