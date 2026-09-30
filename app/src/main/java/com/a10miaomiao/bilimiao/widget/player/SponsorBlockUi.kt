@@ -574,11 +574,21 @@ object SponsorBlockUi {
     /** seek 迟迟不落地（底层卡住）就别一直挂着轮询 */
     private const val TRIAL_ARM_TIMEOUT_MS = 5_000L
 
-    /** 位置连续这么久没前进 = 播不动了（用户暂停 / 缓冲 / 已播完 / 位置钉死）→ 干净退出，不留 50ms 空转 */
+    /**
+     * 起播预算：seek 落地后位置**一直不动**的累计时间超过它才放弃。
+     * 起播前缓冲**不计入**停滞看门狗（刚 seekTo 完位置就贴着 start，但画面还在缓冲 —— 那不是"播不动"）；
+     * 只有"位置不动"才吃这份预算：慢慢起播（位置已经在往前挪）不算超时，也就不会被误杀。
+     */
+    private const val TRIAL_START_TIMEOUT_MS = 8_000L
+
+    /** 起播**之后**位置连续这么久没前进 = 播不动了（用户暂停 / 缓冲 / 已播完 / 位置钉死）→ 干净退出 */
     private const val TRIAL_STALL_MS = 3_000L
 
-    /** 到点暂停最多重试这么多次轮询（50ms × 20 ≈ 1s）：GSY 缓冲态下 onVideoPause() 是空操作 */
-    private const val TRIAL_PAUSE_RETRY_MAX = 20
+    /**
+     * 到点暂停重试预算：第 1 次在 0ms、第 61 次在 3000ms ⇒ 正好覆盖"到点那一帧起缓冲整整 3.0s"。
+     * （GSY 缓冲态下 `onVideoPause()` 是空操作，所以要重试；60 次只够到 2950ms，差最后一拍。）
+     */
+    private const val TRIAL_PAUSE_RETRY_MAX = 61
 
     private fun cancelTrial() {
         trialJob?.cancel()
@@ -590,15 +600,22 @@ object SponsorBlockUi {
      *
      * 为什么用 50ms 轮询而不是给播放器挂进度回调：本仓播放器的进度回调是进度条/弹幕层在用的，
      * 再挂一个"到点暂停"要动播放器内部状态（越界，且容易和连播/续播记账打架）；
-     * 轮询只读 public 的 `currentPosition`，下面四条出口都会干净退出，不留任何回调或协程。
+     * 轮询只读 public 的 `currentPosition`，下面五条出口都会干净退出，不留任何回调或协程。
      *
-     * 四条出口（都不会误暂停别人的播放，且**每条都有界**）：
+     * 五条出口（判定顺序即下面代码的顺序，都不会误暂停别人的播放，且**每条都有界**）：
      *  1. 位置 >= endMs → `onVideoPause()`；GSY 只在 `isPlaying()` 为真时才真的暂停
      *     （本仓 v13.2.1），刚越过终点那一帧若在缓冲就是空操作 ⇒ 核对 `currentState` 没停就
-     *     在后续轮询重试，上限 [TRIAL_PAUSE_RETRY_MAX] 次（约 1s），确认停了才退出；
+     *     在后续轮询重试，上限 [TRIAL_PAUSE_RETRY_MAX] 次（≈3s），确认停了才退出
+     *     （"到点"排在"等起播"之前：短片段会在起播判据成立之前先越过终点）；
      *  2. 位置掉回 start 之前 1s 以上 → 用户自己跳走了，放弃；
-     *  3. 位置连续 [TRIAL_STALL_MS] 没前进（用户暂停 / 缓冲 / 已播完 / 位置钉死）→ 放弃；
-     *  4. seek [TRIAL_ARM_TIMEOUT_MS] 还没落地 → 放弃，不留死循环。
+     *  3. seek 落地后位置一直不动累计超过 [TRIAL_START_TIMEOUT_MS]（起播预算）→ 放弃；
+     *  4. 起播后位置连续 [TRIAL_STALL_MS] 没前进（用户暂停 / 缓冲 / 已播完 / 位置钉死）→ 放弃；
+     *  5. seek [TRIAL_ARM_TIMEOUT_MS] 还没落地 → 放弃，不留死循环。
+     *
+     * ★ 为什么"等起播"要单独一段：`seekTo` 之后位置会**立刻**贴着 start 报出来，但画面可能还在缓冲
+     *   （位置贴着 start ≠ 已经在播）—— 一落地就武装停滞看门狗的话，弱网下起播缓冲 ≥3s 就会被误判
+     *   "播不动了"，试播静默放弃（弹窗已关、视频自己播下去、到终点不停）。所以看门狗只在位置真的
+     *   前进过（`pos > start + TRIAL_TOL_MS`）之后才武装。
      *
      * ★ `seekTo` 是异步的（`GSYVideoBaseManager.getCurrentPosition()` 直接转发底层播放器，
      *   seek 完成前可能还报旧位置），所以要先等位置落到起点附近，再判"到点/跳走" ——
@@ -613,6 +630,8 @@ object SponsorBlockUi {
         trialJob = scope.launch {
             var seekLanded = false
             var waitedMs = 0L
+            var started = false
+            var waitStartMs = 0L
             var lastPos = -1L
             var stalledMs = 0L
             var pauseTries = 0
@@ -635,7 +654,18 @@ object SponsorBlockUi {
                     continue
                 }
                 if (pos < startMs - TRIAL_TOL_MS) break
-                // 停滞看门狗：位置不再前进 = 播不动了（暂停/缓冲/已播完/钉死），干净退出。
+                if (!started) {
+                    if (pos > startMs + TRIAL_TOL_MS) {
+                        started = true
+                    } else {
+                        // 起播阶段：只有位置不动才吃起播预算（慢慢起播不算超时）
+                        if (pos <= lastPos) waitStartMs += TRIAL_POLL_MS
+                        lastPos = pos
+                        if (waitStartMs > TRIAL_START_TIMEOUT_MS) break
+                        continue
+                    }
+                }
+                // 停滞看门狗（起播后才武装）：位置不再前进 = 播不动了（暂停/缓冲/已播完/钉死），干净退出。
                 // 放在"到点"之后：停在终点附近时先试一次暂停，再让看门狗兜底。
                 if (pos <= lastPos) stalledMs += TRIAL_POLL_MS else stalledMs = 0L
                 lastPos = pos
