@@ -285,16 +285,21 @@ private class SMSLoginPageViewModel(
 
     override suspend fun getGTApiJson(): JSONObject? {
         val queryMap = UrlUtil.getQueryKeyValueMap(Uri.parse(recaptchaUrl))
-        if (queryMap.containsKey("recaptcha_token")) {
-            recaptchaToken = queryMap["recaptcha_token"] ?: ""
-            return JSONObject().apply {
-                put("success", 1)
-                put("challenge", queryMap["gee_challenge"] ?: "")
-                put("gt", queryMap["gee_gt"] ?: "")
-            }
-        } else {
-            messageDialog.alert("加载验证码出现错误")
+        if (!queryMap.containsKey("recaptcha_token")) {
+            // ★与密码登录（LoginPage.getGTApiJson）同一契约：参数不全就返回 null。
+            //   这里**不**弹 alert：此刻用户在验证码页上，弹在背后等于没提示；
+            //   提示交给验证码页自己的兜底面板（"验证码参数获取失败，请重试"）。
             return null
+        }
+        recaptchaToken = queryMap["recaptcha_token"] ?: ""
+        val gt = queryMap["gee_gt"].orEmpty()
+        val challenge = queryMap["gee_challenge"].orEmpty()
+        // ★缺 gt/challenge 也当失败：交出去只会 loadUrl 出一个画不出来的页面（白屏）
+        if (gt.isBlank() || challenge.isBlank()) return null
+        return JSONObject().apply {
+            put("success", 1)
+            put("challenge", challenge)
+            put("gt", gt)
         }
     }
 

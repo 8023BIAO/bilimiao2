@@ -29,6 +29,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.TextureView
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
@@ -79,6 +80,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.min
+
+/**
+ * 手势主轴判定比：位移比超过 **3:1** 才认主轴（水平 `dx > 3*dy`、垂直 `dy > 3*dx`）。
+ * 对齐 PiliPlus `plugin/pl_player/view/view.dart:989-1021`；1:1 的老判据在斜滑时会把意图判反。
+ * 直播侧（`LivePlayerActivity.startDragIfNeeded`）是同一套语义，改这里记得同步那边。
+ */
+private const val GESTURE_MAIN_AXIS_RATIO = 3f
 
 
 class DanmakuVideoPlayer : StandardGSYVideoPlayer {
@@ -1814,9 +1822,17 @@ initDanmakuTouchListener()
         getLocationOnScreen(screenLocation)
         val screenMidX = screenLocation[0] + measuredWidth * 0.5f
         val isLeftSide = rawDownX < screenMidX
-        if (absDx > mThreshold && absDx > absDy) {
+        // ★手势主轴改**位移比 3:1**（对齐 PiliPlus `view.dart:989-1021`：`dx > 3*dy` 才算水平、
+        //   `dy > 3*dx` 才算垂直），两边都不满足就**不选主轴**、保持原状态等下一次 MOVE。
+        //   老判据 `absDx > absDy`（1:1）在斜滑时容易把意图判反：想看进度却切了音量/亮度。
+        // ★阈值同时受 `mThreshold` 与系统 `scaledTouchSlop` 约束，取两者较大值：
+        //   `mThreshold` 是 GSY 里写死的 80px（**Int**），属**新版行为基线**（密度无关，保留它 = 不改变既有手感）；
+        //   `touchSlop` 让"极轻的一划"在本机密度下也不至于误判（PiliPlus 同样叠了系统 slop）。
+        val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+        val threshold = maxOf(mThreshold.toFloat(), touchSlop.toFloat())
+        if (absDx > threshold && absDx > absDy * GESTURE_MAIN_AXIS_RATIO) {
             mChangePosition = true
-        } else if (absDy > mThreshold) {
+        } else if (absDy > threshold && absDy > absDx * GESTURE_MAIN_AXIS_RATIO) {
             // 左半区 = 亮度，右半区 = 音量
             if (isLeftSide) {
                 mBrightness = true
@@ -1932,7 +1948,7 @@ initDanmakuTouchListener()
      *
      * ★ 注意范围：这个标志只管**补偿**这一路。`checkSponsorSkip()` 里"离片段起点不到 1 秒就跳"
      *   那一路（`shouldSkipAt` 的第二个析取项，**不看 prev**）是另一个问题、也挡不住，改
-     *   `lastSponsorPosMs` 只会把窗口放大 —— 那条由按 UUID 的"提交免跳名单"承接（task-19）。
+     *   `lastSponsorPosMs` 只会把窗口放大 —— 那条由按 UUID 的"提交免跳名单"承接。
      */
     private var suppressSponsorCompensationOnce = false
 

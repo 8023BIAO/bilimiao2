@@ -240,18 +240,31 @@ private class LoginPageViewModel(
         return true
     }
 
+    /**
+     * 取极验验证码参数（`gt` + `challenge`）。
+     *
+     * ★契约：**参数不全一律返回 null** —— 没有 `recaptcha_token`，或 `gee_gt`/`gee_challenge` 任一为空
+     *   （原来会返回一个缺字段的 `JSONObject`，验证码页 `getString` 一抛就是白屏）。
+     *   调用方 `GeetestValidatorActivity` **必须**据此走页内兜底提示 + 重试；这里**不要**往下层页面弹
+     *   alert（用户看到的是验证码页，弹在背后等于没提示）。以后新增调用方也按这个契约处理 null。
+     */
     override suspend fun getGTApiJson(): JSONObject? {
         val queryMap = UrlUtil.getQueryKeyValueMap(Uri.parse(verifyUrl))
-        if (queryMap.containsKey("recaptcha_token")) {
-            recaptchaToken = queryMap["recaptcha_token"] ?: ""
-            return JSONObject().apply {
-                put("success", 1)
-                put("challenge", queryMap["gee_challenge"] ?: "")
-                put("gt", queryMap["gee_gt"] ?: "")
-            }
-        } else {
-            messageDialog.alert("加载验证码出现错误")
+        if (!queryMap.containsKey("recaptcha_token")) {
+            // ★这里**不再**往下层页面弹 alert：此刻用户看到的是验证码页，弹在背后等于没提示
+            //   （他只会看到一张白页）。返回 null，让验证码页自己的兜底给提示 + 重试。
             return null
+        }
+        recaptchaToken = queryMap["recaptcha_token"] ?: ""
+        val gt = queryMap["gee_gt"].orEmpty()
+        val challenge = queryMap["gee_challenge"].orEmpty()
+        // ★参数不全也当失败返回 null：别把缺 gt/challenge 的 JSON 交给验证码页
+        //   （那边只会 loadUrl 出一个永远画不出来的页面 = 白屏）
+        if (gt.isBlank() || challenge.isBlank()) return null
+        return JSONObject().apply {
+            put("success", 1)
+            put("challenge", challenge)
+            put("gt", gt)
         }
     }
 

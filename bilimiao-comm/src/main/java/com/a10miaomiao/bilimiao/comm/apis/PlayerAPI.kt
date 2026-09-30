@@ -2,6 +2,7 @@ package com.a10miaomiao.bilimiao.comm.apis
 
 import android.os.SystemClock
 import android.widget.Toast
+import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.exception.AreaLimitException
@@ -13,6 +14,7 @@ import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.proxy.ProxyServerInfo
 import com.a10miaomiao.bilimiao.comm.utils.PlayerDiag
 import com.a10miaomiao.bilimiao.comm.utils.PreviewDiag
+import com.a10miaomiao.bilimiao.comm.utils.RandomBase64Util
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
@@ -81,13 +83,49 @@ class PlayerAPI {
         if (fnval > 2) {
             params.put("fourk", "1")
         }
+        // ★ 反风控 / 免登录 1080P / 假指纹参数（逐条对齐 PiliPlus `lib/http/video.dart:213-237`）。
+        //   这些值会一起进 ApiHelper.createParams 的 `sign`（签名对**全量**参数排序后算），
+        //   所以不是随手加的噪声：改名/改值都会同步反映到签名里。
+        //   · try_look=1：未登录也能协商到 1080P；**登录后不带**（账号自己有权限）。
+        //     登录态用 BilimiaoCommApp.commApp.loginInfo —— 和 ApiHelper 决定要不要加
+        //     access_key/mid 是**同一个**来源，两边不会打架。
+        //   · voice_balance=0：对齐上游默认（`video.dart:211` `bool voiceBalance = false`）。
+        //     **别顺手改 1**：那是服务端响度均衡，会把**所有视频**的音频输出改掉，
+        //     要开需先单独确认（上游也只有 gRPC 音频那条路才传 true）。
+        //   · gaia_source / isGaiaAvoided / web_location：PiliPlus 同款风控字段（键名照抄，
+        //     注意 `isGaiaAvoided` 就是这个驼峰写法）。
+        //   · 假指纹四件套：dm_img_list / dm_img_inter（固定值）+ dm_img_str / dm_cover_img_str
+        //     （每次请求新生成的随机串，生成规则见 [RandomBase64Util]）。
+        val isLogin = BilimiaoCommApp.commApp.loginInfo != null
+        if (!isLogin) {
+            params["try_look"] = "1"
+        }
+        params["voice_balance"] = "0"
+        params["gaia_source"] = "pre-load"
+        params["isGaiaAvoided"] = "true"
+        params["web_location"] = "1315873"
+        params["dm_img_list"] = "[]"
+        params["dm_img_inter"] = """{"ds":[],"wh":[0,0,0],"of":[0,0,0]}"""
+        val dmImgStr = RandomBase64Util.string(16, 64)
+        val dmCoverImgStr = RandomBase64Util.string(32, 128)
+        params["dm_img_str"] = dmImgStr
+        params["dm_cover_img_str"] = dmCoverImgStr
         // ★ 诊断日志（用户 2026-09-19 要求）：把"我们到底请求了什么、服务端给了什么"写下来。
         //   清晰度不是客户端能"解锁"的：qn/fnval/fourk 只是"我想要什么"，
         //   真正给什么由服务端按**账号权限 + 内容**决定（accept_quality 就是它给的清单）。
         PlayerDiag.log(
             "playurl-req",
             "x/player/playurl (UGC) avid=$avid cid=$cid qn=$quality fnval=$fnval " +
-                "fourk=${params["fourk"] ?: "0"} otype=json module=普通视频"
+                "fourk=${params["fourk"] ?: "0"} otype=json module=普通视频 " +
+                "login=$isLogin try_look=${params["try_look"] ?: "0"} " +
+                "voice_balance=${params["voice_balance"]} gaia_source=${params["gaia_source"]} " +
+                "isGaiaAvoided=${params["isGaiaAvoided"]} web_location=${params["web_location"]} " +
+                "dm_img_list=${params["dm_img_list"]} " +
+                // 固定 JSON 串也只记"有/无"，不落整串（和下面两个随机串一个原则）
+                "dm_img_inter=${if (params["dm_img_inter"] != null) "有" else "无"} " +
+                // 随机串只记"长度 + 前 6 位"：够确认真机每次都在变，又不会把整串写进日志
+                "dm_img_str=${dmImgStr.length}字符/${dmImgStr.take(6)}… " +
+                "dm_cover_img_str=${dmCoverImgStr.length}字符/${dmCoverImgStr.take(6)}…"
         )
         val res = MiaoHttp.request {
             url = BiliApiService.biliApi("x/player/playurl", *params.toList().toTypedArray())

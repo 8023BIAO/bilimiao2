@@ -169,18 +169,24 @@ object LiveDanmakuPacket {
      * - `ver=0/1` → 明文包，直接产出；
      * - `ver=2` → zlib 解压，**解压出来还是同格式包 → 递归**（方案 §2.4「压缩与嵌套」，
      *   对应 blbl `LiveMessageClient.kt:248-261`）；
-     * - `ver=3` → brotli：**优雅跳过**（不抛异常、不崩、不重连），只回调一条日志。
-     *   我们请求的是 `protover=2`，服务端不该发 brotli；真收到说明 B 站改了策略，
-     *   这时"少收几条弹幕"远好过"整个连接炸掉"。
+     * - `ver=3` → brotli：**本层只跳过并回调**（不抛异常、不崩；本文件保持纯函数，不碰连接）。
+     *   我们请求的是 `protover=2`，服务端不该发 brotli；真收到说明 B 站改了策略。
+     *   ★调用方（客户端）会按 [onBrotli] 的计数决定"主动断开重连 / 降级 protover"——
+     *   只跳过会变成"连接看着好好的、整场一条弹幕都没有"。
      *
      * 循环边界（防越界/防死循环）照 blbl `LiveMessageClient.kt:335-346`：
      * `off + 16 <= size` 且 `total in 16..(size-off)`。
      *
      * @param onSkip 跳过/异常时的说明回调（默认不做事，保持纯函数语义；客户端把日志传进来）
+     * @param onBrotli 每个 ver=3 包回调一次（带包长）：给客户端做"连续 N 个都没解析成功"的护栏计数
      */
-    fun decode(data: ByteArray, onSkip: (String) -> Unit = {}): List<Packet> {
+    fun decode(
+        data: ByteArray,
+        onSkip: (String) -> Unit = {},
+        onBrotli: (bodyLen: Int) -> Unit = {},
+    ): List<Packet> {
         val out = ArrayList<Packet>(8)
-        decodeInto(data, out, onSkip, 0)
+        decodeInto(data, out, onSkip, onBrotli, 0)
         return out
     }
 
@@ -188,6 +194,7 @@ object LiveDanmakuPacket {
         data: ByteArray,
         out: MutableList<Packet>,
         onSkip: (String) -> Unit,
+        onBrotli: (bodyLen: Int) -> Unit,
         depth: Int,
     ) {
         if (depth > MAX_DEPTH) {
@@ -227,14 +234,18 @@ object LiveDanmakuPacket {
                     if (inflated == null) {
                         onSkip("ver=2 zlib 解压失败，丢弃该包（len=${body.size}）")
                     } else {
-                        decodeInto(inflated, out, onSkip, depth + 1)
+                        decodeInto(inflated, out, onSkip, onBrotli, depth + 1)
                     }
                 }
 
-                VER_BROTLI -> onSkip(
-                    "ver=3 brotli 帧已跳过（len=${body.size}）：本客户端请求 protover=$AUTH_PROTOVER，" +
-                        "只用 JDK 自带的 zlib，未引入 org.brotli:dec"
-                )
+                VER_BROTLI -> {
+                    onSkip(
+                        "ver=3 brotli 帧已跳过（len=${body.size}）：本客户端请求 protover=$AUTH_PROTOVER，" +
+                            "只用 JDK 自带的 zlib，未引入 org.brotli:dec"
+                    )
+                    // ★单独回调一条给客户端计数（别让调用方去匹配上面那句文案）
+                    onBrotli(body.size)
+                }
 
                 else -> out.add(Packet(ver = ver, op = op, seq = seq, body = body))
             }

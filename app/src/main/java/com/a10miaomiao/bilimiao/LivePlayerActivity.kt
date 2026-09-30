@@ -778,6 +778,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          */
 
         /**
+         * 手势主轴判定比：纵向位移必须超过横向的 **3 倍**才认（`dy > 3*dx`）。
+         * 与点播 `DanmakuVideoPlayer.touchSurfaceMoveFullLogic` 同一套语义（对齐 PiliPlus
+         * `plugin/pl_player/view/view.dart:989-1021`）；1:1 的老判据在斜滑时会把"想上下滑"
+         * 判成横向而丢掉手势。
+         */
+        private const val GESTURE_MAIN_AXIS_RATIO = 3f
+
+        /**
          * ★第十三批：这里原来有一个 `VOLUME_WRITE_MIN_INTERVAL_MS = 16`（"同一帧最多写一次系统音量"）。
          * **它已经不需要了，别再搬回来**：
          * · 节流存在的唯一理由是"让 UI 线程少挨几次 binder" —— 而本轮把写入整个搬到了
@@ -2605,6 +2613,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★小窗里为什么直接退直播间：PiP 的窗口方向 ≠ 设备方向（见 [isPageLandscape] 的 KDoc），
      *   16:9 小窗在竖屏手机上也是"横"的 —— 按 [isPageLandscape] 判会把小窗误当成全屏去转方向；
      *   而且小窗里按返回的语义本来就是"关掉它"。
+     * ★分屏/自由窗口/桌面模式里为什么也直接退直播间：这类形态同样是"宽 > 高"，[isPageLandscape]
+     *   必然为真，但系统在**多窗口下会忽略 `setRequestedOrientation`**（[exitFullscreenToPortrait]
+     *   只做"转方向 + 钉住"），于是那一支等于什么都没发生 —— 用户连按返回都没反应，只能上滑杀任务。
+     *   多窗口下"退全屏"本身没有可执行的含义（窗口形状由系统决定），所以直接退页面。
+     *   ★单窗口横屏的既有语义（第一次退全屏、第二次退页面）**一个字不变**。
      *
      * ★入口：系统返回键（[onBackPressed]）与顶栏那颗返回图标（[buildUi]）都调这里 ——
      *   同一屏上的两个"返回"不该有两种语义（点播播放页 `VideoPlayerActivity.onBackPressed()`
@@ -2618,12 +2631,22 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "back.handleBack",
             "from" to callerTag(),
             "room" to rawRoomId,
-            "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
+            "multiWindow" to isInMultiWindowModeSafe(),
             "pip" to (runCatching { isInPictureInPictureMode }.getOrDefault(false)),
             "landscape" to isPageLandscape(),
             "isFinishing" to isFinishing,
         )
         if (isInPictureInPictureMode) {
+            exitPage()
+            return
+        }
+        // ★多窗口（分屏 / 自由窗口 / 桌面模式）下**不要**走"只退全屏"那一支：
+        //   系统在多窗口下忽略 setRequestedOrientation（[exitFullscreenToPortrait] 只转方向 + 钉住），
+        //   而 [isPageLandscape] 按真实布局尺寸判断 ⇒ 分屏里"宽>高"时这一支是做无用功，
+        //   每次返回都只是"再请求一次竖屏" ⇒ 返回键被永久吞掉（只能上滑杀任务）。
+        //   多窗口下"退全屏"没有可执行含义（窗口形状由系统定），因此直接退页面；
+        //   单窗口横屏仍然是"第一次退全屏、第二次退页面"。
+        if (isInMultiWindowModeSafe()) {
             exitPage()
             return
         }
@@ -2633,6 +2656,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         }
         exitPage()
     }
+
+    /**
+     * `isInMultiWindowMode` 的安全取值：API 24+，老设备/异常一律当"单窗口"（false）。
+     *
+     * 单独包一层是为了让"日志"与"判断"取同一个值 —— 两边各写一次 `runCatching` 迟早会漂。
+     */
+    private fun isInMultiWindowModeSafe(): Boolean =
+        runCatching { isInMultiWindowMode }.getOrDefault(false)
 
     /**
      * ★**长期保留**（task-53 取证时加、task-57 收尾时**决定留下**）：返回本函数的**直接调用方**
@@ -8180,11 +8211,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             return detector.onTouchEvent(event) || super.onTouchEvent(event)
         }
 
-        /** 竖直位移超过 slop 且**明显大于**横向位移 → 进入手势；返回 true 表示本串事件已被接管 */
+        /**
+         * 竖直位移超过 slop 且**明显大于**横向位移 → 进入手势；返回 true 表示本串事件已被接管。
+         *
+         * ★主轴判据是**位移比 3:1**（`dy > 3*dx`），与点播 `touchSurfaceMoveFullLogic` /
+         *   PiliPlus `view.dart:989-1021` 同一套语义 —— 斜滑不再被判成亮度/音量。
+         *   横向分支本页没有（进度不是靠拖画面调的），所以只判纵向这一支。
+         */
         private fun startDragIfNeeded(event: MotionEvent): Boolean {
             val dy = abs(event.rawY - downRawY)
             val dx = abs(event.rawX - downRawX)
-            if (dy <= touchSlop || dy <= dx) return false
+            if (dy <= touchSlop || dy <= dx * GESTURE_MAIN_AXIS_RATIO) return false
 
             // ★第十五批第 4 条：**横屏时"从顶栏那一块起手"一律不进手势**（顶栏那一块不再是手势的起手区）。
             //   判据与高度见

@@ -577,9 +577,17 @@ class BangumiPlayerSource(
         }
     }
 
+    /**
+     * 上报观看进度（`x/v2/history/report`，type=4 番剧）。
+     *
+     * ★契约与 UGC（[VideoPlayerSource.historyReport]）完全一致，判据在 `PlayerDelegate2.historyReport`：
+     * `progress` > 0 = 播放中的真实秒数；`progress` < 0 = **已看完**（距结尾 ≤1 秒）
+     * ⇒ `progress` 发 **-1**、`realtime` 仍发**真实秒数**（总时长换算）。
+     */
     override suspend fun historyReport(progress: Long) {
         try {
-            val realtimeProgress = progress.toString()  // 秒数
+            val watchedToEnd = progress < 0L
+            val realtimeSec = if (watchedToEnd) defaultPlayerSource.duration / 1000 else progress
             MiaoHttp.request {
                 url = "https://api.bilibili.com/x/v2/history/report"
                 formBody = ApiHelper.createParams(
@@ -587,8 +595,8 @@ class BangumiPlayerSource(
                     "cid" to id,
                     "epid" to epid,
                     "sid" to sid,
-                    "progress" to realtimeProgress,
-                    "realtime" to realtimeProgress,
+                    "progress" to (if (watchedToEnd) "-1" else progress.toString()),
+                    "realtime" to realtimeSec.toString(),
                     "type" to "4",
                     "sub_type" to "1",
                 )

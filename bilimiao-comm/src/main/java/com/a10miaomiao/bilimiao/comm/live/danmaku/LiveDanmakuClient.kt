@@ -240,6 +240,12 @@ class LiveDanmakuClient(private val roomId: Long) {
         reconnectAttempt = 0
         authFailCount = 0
         hostIndex = 0
+        // 新会话（页面进入 / 用户手动重试）：brotli 护栏回到默认 protover=2，会话级强拆计数清零
+        authProtover = LiveDanmakuPacket.AUTH_PROTOVER
+        brotliForcedReconnects = 0
+        brotliGaveUp = false
+        brotliSkipsRun = 0
+        brotliNoted = false
         // ★新增（历史/昵称这条路）：每次 connect() 重新读一次"我是谁"（可能刚登录/刚换号）
         selfUidCache = -1L
         // ★每次 connect() 都重取 token（方案 §2.3：token 会过期；blbl 也是在 connect() 内部取）
@@ -505,6 +511,36 @@ class LiveDanmakuClient(private val roomId: Long) {
     @Volatile
     private var connectingSinceMs = 0L
 
+    // ── brotli（ver=3）护栏 ─────────────────────────────────────────────
+    // 背景：`onMessage` 对**任意**服务端帧都会刷新 lastServerFrameAtMs，所以"服务端只发 ver=3"
+    // 时静默看门狗永远不会判死 —— 连接看着好好的，整场一条弹幕都没有。这里按包计数，够了就重连/降级。
+    //
+    // ★为什么这几个字段要 @Volatile（而不是 AtomicInteger）：
+    //   它们跨三个线程 —— 解码协程（Dispatchers.Default，写计数/降级）、`openSocket()/connect()`
+    //   的复位（宿主协程/IO）、OkHttp 读线程（`sendAuth` 读 `authProtover`）。
+    //   与同文件的 `closed`/`healthJob`/`decodeJob`/`reviveJob`/`hosts` 保持同一套可见性约定。
+    //   计数只由**解码协程**一路自增、复位路径只写 0/false ⇒ 不存在需要原子性的读-改-写竞争，
+    //   `@Volatile` 提供的可见性已经够；偶发"复位与自增交错"最多让计数少算一拍，影响有界。
+    /** 本连接上连续跳过了多少个 ver=3 包（解析出任何东西就清零） */
+    @Volatile
+    private var brotliSkipsRun = 0
+    /** 最近一个 ver=3 包的 body 长度（进日志用） */
+    @Volatile
+    private var brotliLastLen = 0
+    /** 已经为 brotli 强拆过几次连接（**会话级**上限，防止无限重连刷服务端） */
+    @Volatile
+    private var brotliForcedReconnects = 0
+    /** 本连接是否已经记过一条"值得注意"的 brotli 日志（避免每包刷屏） */
+    @Volatile
+    private var brotliNoted = false
+    /** 强拆到上限后只提示一次，不再反复刷 trace */
+    @Volatile
+    private var brotliGaveUp = false
+
+    /** 认证包里请求的 protover：默认 2(zlib)；被 brotli 逼到降级后改 1(明文 JSON，本客户端能直接解) */
+    @Volatile
+    private var authProtover = LiveDanmakuPacket.AUTH_PROTOVER
+
     /** 发送互斥：防连点导致同一条弹幕发两遍 */
     private val sending = AtomicBoolean(false)
 
@@ -721,6 +757,18 @@ class LiveDanmakuClient(private val roomId: Long) {
     private fun openSocket() {
         if (closed) return
         if (hosts.isEmpty()) return
+        // ★静默看门狗必须在这里也启一次（[startHealthCheck] 自带幂等：已在跑就直接返回）：
+        //   60s 自愈走的是 scheduleReconnect → connectOnce → 这里，**完全绕过 connect()**；
+        //   只在 connect() 里启的话，"先 Failed、再自愈回来"的连接没有看门狗 ——
+        //   表现就是"看着连着、一条弹幕都没有、永远不会自己好"。
+        //   为什么不选"stopAll() 里不销毁它"：stopAll() 是关页面/退出直播间的唯一收摊口，
+        //   看门狗留在那儿会带着 socket/闭包活过页面销毁；放在这里既补上自愈路径，
+        //   又保持 close()/failPermanently 能真正全停。
+        startHealthCheck()
+        // 新连接：brotli 连击计数与本连接的"记过日志"标志清零（会话级的强拆次数不清）
+        brotliSkipsRun = 0
+        brotliLastLen = 0
+        brotliNoted = false
         val target = hosts[hostIndex.coerceIn(0, hosts.size - 1)]
 
         stopHeartbeat()
@@ -966,13 +1014,78 @@ class LiveDanmakuClient(private val roomId: Long) {
                 if (closed) continue
                 if (frame.gen != generation.get()) continue // 上一条连接的残留帧，丢掉
                 runCatching {
-                    LiveDanmakuPacket.decode(frame.bytes) { skip ->
-                        LiveDanmakuTrace.decodeSkips.incrementAndGet()
-                        log("解包跳过：$skip")
-                    }.forEach { handlePacket(it) }
+                    // brotli（ver=3）计数：本帧跳过了几个 ver=3 包。解析出任何包就说明连接是好的，
+                    // 连击清零；否则累计到阈值就重连/降级（见 [onBrotliSkipped]）。
+                    var brotliInFrame = 0
+                    val packets = LiveDanmakuPacket.decode(
+                        data = frame.bytes,
+                        onSkip = { skip ->
+                            LiveDanmakuTrace.decodeSkips.incrementAndGet()
+                            log("解包跳过：$skip")
+                        },
+                        onBrotli = { len ->
+                            brotliInFrame++
+                            brotliLastLen = len
+                        },
+                    )
+                    if (packets.isNotEmpty()) {
+                        brotliSkipsRun = 0
+                    } else if (brotliInFrame > 0) {
+                        onBrotliSkipped(brotliInFrame)
+                    }
+                    packets.forEach { handlePacket(it) }
                 }.onFailure { log("解包/分发异常（已吞掉，不影响后续帧）", it) }
             }
         }
+    }
+
+    /**
+     * brotli（ver=3）护栏：同一连接上"连续 N 个 ver=3 包且一个都没解析成功"就主动断开重连，
+     * 第二次触发改成**降级 protover=1（明文）**再重连 —— 不能整场静默。
+     *
+     * 为什么需要：`onMessage` 对**任意**帧都刷新 `lastServerFrameAtMs`，所以服务端只推 ver=3 时，
+     * 75s 静默看门狗永远不会触发；用户看到的是"连着、没弹幕、永远不会自己好"。
+     *
+     * 为什么有上限：真遇到服务端策略变化（连 protover=1 也只发 brotli），无上限重连就是拿风控赌命；
+     * 强拆到 [BROTLI_MAX_FORCED_RECONNECTS] 次后只留一条值得注意的日志。
+     */
+    private fun onBrotliSkipped(countInFrame: Int) {
+        brotliSkipsRun += countInFrame
+        if (!brotliNoted) {
+            brotliNoted = true
+            // ① "值得注意"的日志：roomId + ver + 包长（trace 是浮层/排查文件的来源，log 是 logcat）
+            val msg = "收到 ver=3(brotli) 包但本客户端只有 zlib（roomId=$roomId ver=3 len=$brotliLastLen）"
+            log(msg)
+            LiveDanmakuTrace.note(msg)
+        }
+        if (brotliSkipsRun < BROTLI_SKIP_RECONNECT_AFTER) return
+        brotliSkipsRun = 0
+        if (brotliForcedReconnects >= BROTLI_MAX_FORCED_RECONNECTS) {
+            if (!brotliGaveUp) {
+                brotliGaveUp = true
+                val msg = "brotli 已强拆 $brotliForcedReconnects 次仍只有 ver=3（roomId=$roomId）→ 不再重连"
+                log(msg)
+                LiveDanmakuTrace.note(msg)
+                // ★让用户"看见"（**复用现有浮层状态条**，不新增任何 UI / Toast / 设置项）：
+                //   浮层 LiveDanmakuOverlay.buildStatusText 在 connectionText 以 "Failed" 开头时，
+                //   会把 lastConnectError 显示成"弹幕连接失败：…"（statusHint 默认开）。
+                //   文案中性、不带内部术语 —— 用户只需要知道"不是没弹幕，是连不上、怎么恢复"。
+                LiveDanmakuTrace.connectionText = "Failed"
+                LiveDanmakuTrace.lastConnectError = "弹幕连接异常，退出重进可恢复"
+            }
+            return
+        }
+        brotliForcedReconnects++
+        // 第一次：原 protover 重连（可能是这一次握手/节点的问题）；
+        // 第二次起：降级 protover=1（明文），服务端不再压缩，本客户端能直接解
+        val degrade = brotliForcedReconnects >= 2 && authProtover != 1
+        if (degrade) authProtover = 1
+        val reason = "连续 $BROTLI_SKIP_RECONNECT_AFTER 个 ver=3 包且一个都没解析成功" +
+            if (degrade) "（第 $brotliForcedReconnects 次：降级 protover=1）" else "（第 $brotliForcedReconnects 次）"
+        log("$reason → 主动断开重连")
+        LiveDanmakuTrace.note("$reason → 主动断开重连")
+        runCatching { ws?.close(WS_CLOSE_NORMAL, "brotli unsupported") }
+        onSocketBroken(reason)
     }
 
     private fun handlePacket(packet: LiveDanmakuPacket.Packet) {
@@ -1326,10 +1439,11 @@ class LiveDanmakuClient(private val roomId: Long) {
             roomId = roomId,
             uid = uid,
             token = token,
+            protover = authProtover,
             seq = seq.getAndIncrement(),
         )
         val ok = webSocket.send(ByteString.of(*packet))
-        log("已发认证包 op=7 uid=$uid protover=${LiveDanmakuPacket.AUTH_PROTOVER} keyLen=${token.length} ok=$ok")
+        log("已发认证包 op=7 uid=$uid protover=$authProtover keyLen=${token.length} ok=$ok")
     }
 
     /**
@@ -1471,6 +1585,12 @@ class LiveDanmakuClient(private val roomId: Long) {
 
         /** 静默判死阈值 75s：「距上次收到任意服务端帧」超过它就重连（BiliPai 同文件 `:3`） */
         private const val SILENCE_TIMEOUT_MS = 75_000L
+
+        /** 同一连接上连续多少个 ver=3(brotli) 包且一个都没解析成功 → 主动断开重连（见 [onBrotliSkipped]） */
+        private const val BROTLI_SKIP_RECONNECT_AFTER = 3
+
+        /** brotli 强拆连接的**会话级**上限：超过就只记日志，不再无限重连（防拿风控赌命） */
+        private const val BROTLI_MAX_FORCED_RECONNECTS = 3
 
         /** 握手超时：见 [startConnectTimeout]（readTimeout=0 的必要补丁） */
         private const val CONNECT_TIMEOUT_MS = 15_000L

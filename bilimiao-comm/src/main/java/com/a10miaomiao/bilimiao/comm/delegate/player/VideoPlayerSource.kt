@@ -424,16 +424,26 @@ class VideoPlayerSource(
         return BiliApiService.sponsorBlockAPI.getSegments(bv, cid)
     }
 
+    /**
+     * 上报观看进度（`x/v2/history/report`，type=3）。
+     *
+     * ★契约（判据在 `PlayerDelegate2.historyReport`，那边才有播放器的权威总时长）：
+     * - `progress` > 0：播放中的**真实秒数**，两个字段都照发；
+     * - `progress` < 0：**已看完**（距结尾 ≤1 秒）⇒ `progress` 发 **-1**（B 站据此标"已看完"），
+     *   `realtime` 仍发**真实秒数**（用总时长换算，绝不是 -1）。
+     */
     override suspend fun historyReport(progress: Long) {
         try {
-            val realtimeProgress = progress.toString()  // 秒数
+            val watchedToEnd = progress < 0L
+            // 秒数：正常 = 传进来的真实进度；已看完 = 总时长（ms→s），realtime 不能发 -1
+            val realtimeSec = if (watchedToEnd) defaultPlayerSource.duration / 1000 else progress
             MiaoHttp.request {
                 url = "https://api.bilibili.com/x/v2/history/report"
                 formBody = ApiHelper.createParams(
                     "aid" to aid,
                     "cid" to id,
-                    "progress" to realtimeProgress,
-                    "realtime" to realtimeProgress,
+                    "progress" to (if (watchedToEnd) "-1" else progress.toString()),
+                    "realtime" to realtimeSec.toString(),
                     "type" to "3"
                 )
                 method = MiaoHttp.POST

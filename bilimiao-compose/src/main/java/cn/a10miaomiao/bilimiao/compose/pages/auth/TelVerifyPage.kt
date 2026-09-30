@@ -312,19 +312,22 @@ private class TelVerifyPageViewModel(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            // 断网时 captchaPre 抛 IOException，原先会冒泡到调用方的 launch → 崩进程
-            toast("获取验证信息失败：${e.message}")
+            // 断网时 captchaPre 抛 IOException，原先会冒泡到调用方的 launch → 崩进程。
+            // ★与密码/短信两条登录路径同一契约：失败返回 null、**不弹 toast** ——
+            //   此刻用户在验证码页上，提示弹在背后看不见；提示交给验证码页自己的兜底面板。
             return null
         }
         if (res.isSuccess) {
             val resData = res.requireData()
-            val geeGt = resData.gee_gt
-            val geeChallenge = resData.gee_challenge
+            val gt = resData.gee_gt.orEmpty()
+            val challenge = resData.gee_challenge.orEmpty()
+            // ★缺 gt/challenge 一律当失败（与 LoginPage/SMSLoginPage 一致）：交出去只会白屏
+            if (gt.isBlank() || challenge.isBlank()) return null
             recaptchaToken = resData.recaptcha_token
             return JSONObject().apply {
                 put("success", 1)
-                put("challenge", geeChallenge)
-                put("gt", geeGt)
+                put("challenge", challenge)
+                put("gt", gt)
             }
         } else {
             return null

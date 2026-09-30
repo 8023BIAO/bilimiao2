@@ -61,24 +61,43 @@ import kotlin.math.min
 private val TIMESTAMP_REGEX = Regex("\\d{1,3}[:：]\\d{1,2}(?:[:：]\\d{1,2})?")
 private val TIME_SEP_REGEX = Regex("[:：]")
 
-/** 评论正文里需要识别的固定模式（URL/av/BV/ac/sm/cv/时间戳/表情） */
+/**
+ * 评论正文里需要识别的固定模式（URL/av/BV/ac/sm/cv/时间戳/表情）。
+ *
+ * ★av/BV/ac/sm/cv 这几支的边界要用 **ASCII** lookaround，**不能**用 `\b`：JVM/ART 的 `\b` 是
+ *   Unicode 感知（`Character.isLetterOrDigit`），而 `\w` 默认只认 ASCII ⇒ 汉字与 `a` 之间
+ *   **没有**词边界，`看av123` 原来一支都命中不了。`(?<![A-Za-z0-9_])` / `(?![A-Za-z0-9_])`
+ *   才是"前后不粘 ASCII 词字符"：`看av123` 能命中，`xav123` / `av123abc` 仍不命中。
+ *
+ * ★URL 那一支的 `\b` **保持不动** —— 它的边界语义是"URL 到哪儿结束"，不是"关键字独立成词"：
+ *   实测 `https://b23.tv/abc/` 会被尾部 `\b` 裁成 `https://b23.tv/abc`、`https://…abc后面`
+ *   会把汉字一起吞进链接、`看https://…` 因头部 `\b` 识别不出。换掉会改变 URL 的吞并范围，
+ *   属于另一个问题，得单独设计 + 单独用例（头部 `\b` 也有同款汉字边界问题，同样留待单独处理）。
+ */
 private val REPLY_TEXT_REGEX_BASE = """(?i)""" +
-        """(\b(https?://|www\.)[\w-]+(\.[\w-]+)+([/\S]*)*\b)|""" +  // URL（优先匹配）
-        """(\b(av\d{1,15})\b)|""" +     // B站av号（1-15位数字）
-        """(\b(BV[\dA-Za-z]{10})\b)|""" + // B站BV号（固定10位）
-        """(\b(ac\d{1,10})\b)|""" +     // A站ac号（1-10位数字）
-        """(\b(sm\d{1,10})\b)|""" +     // Niconico sm号（1-10位数字）
-        """(\b(cv\d{1,8})\b)|""" +      // B站专栏cv号（1-8位数字）
+        """(\b(https?://|www\.)[\w-]+(\.[\w-]+)+([/\S]*)*\b)|""" +  // URL（优先匹配；边界语义不同，不动）
+        """(?<![A-Za-z0-9_])av\d{1,15}(?![A-Za-z0-9_])|""" +   // B站av号（1-15位数字）
+        """(?<![A-Za-z0-9_])BV[\dA-Za-z]{10}(?![A-Za-z0-9_])|""" + // B站BV号（固定10位）
+        """(?<![A-Za-z0-9_])ac\d{1,10}(?![A-Za-z0-9_])|""" +   // A站ac号（1-10位数字）
+        """(?<![A-Za-z0-9_])sm\d{1,10}(?![A-Za-z0-9_])|""" +   // Niconico sm号（1-10位数字）
+        """(?<![A-Za-z0-9_])cv\d{1,8}(?![A-Za-z0-9_])|""" +    // B站专栏cv号（1-8位数字）
         """(\d{1,3}[:：]\d{1,2}(?:[:：]\d{1,2})?)|""" + // 时间戳
         """(\[[^\[\]\s]{1,30}])"""     // 匹配emote表情
 
 /**
  * 拼接完整正则：@用户名 这一支只有在真的有名字时才追加。
  * 原实现结尾固定留一个 `|`，@列表为空时会匹配空串，导致 find 出的节点数暴增。
+ *
+ * ★@ 的候选昵称按**长度倒序**排：正则的 `|` 是"左边先试、先匹配上就算赢"，**不是**最长匹配，
+ *   所以只有长的排前面，`@张三丰` 才不会被同表的 `@张三` 抢走、只剩一个"丰"。
+ *   昵称表来自接口数据，顺序不保证 ⇒ 这里显式定序，结果与数据顺序无关。
+ *   （`internal` 只为让同模块 `src/test` 能直接跑这条规则，行为不变。）
  */
-private fun buildReplyTextRegex(atNames: Set<String>): Regex {
+internal fun buildReplyTextRegex(atNames: Set<String>): Regex {
     if (atNames.isEmpty()) return Regex(REPLY_TEXT_REGEX_BASE)
-    val atPart = atNames.joinToString("|") { Regex.escape(it) }
+    val atPart = atNames
+        .sortedByDescending { it.length }
+        .joinToString("|") { Regex.escape(it) }
     return Regex("$REPLY_TEXT_REGEX_BASE|@(?:$atPart)")
 }
 

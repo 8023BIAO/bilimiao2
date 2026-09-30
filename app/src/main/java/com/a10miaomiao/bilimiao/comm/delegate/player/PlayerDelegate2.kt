@@ -106,6 +106,12 @@ import org.kodein.di.instance
 import java.io.File
 import java.net.UnknownHostException
 
+/**
+ * "已看完"的容差：播放位置距总时长 ≤ 这个值（ms）时，进度上报发 `progress=-1`
+ * （对齐 PiliPlus `plugin/pl_player/controller.dart:1450-1497` 的"距结尾 ≤1 秒"）。
+ */
+private const val WATCHED_TO_END_TOLERANCE_MS = 1000L
+
 
 class PlayerDelegate2(
     private val activity: AppCompatActivity,
@@ -314,6 +320,19 @@ class PlayerDelegate2(
     private var playerClosed = false
 
     private var lastReportProgress = 0L // 最后记录的播放位置
+
+    /**
+     * 本视频是否已经上报过"已看完"（`progress=-1`）。
+     *
+     * 为什么需要：进度回调是**每 1000ms 一拍**（GSY `progressTask` 自续期 1000ms，见
+     * `GSYVideoControlView$4`），而"距结尾 ≤1 秒"这个窗口正好 1000ms ⇒ 同一段结尾会被调到
+     * **最多 2 次**（窗口内那一拍 + `onAutoCompletion`），不挡就会连发两条 -1。
+     * 上游 PiliPlus 的 `.completed` 是一次性状态迁移、不会重复，这里对齐它。
+     * ★复位规则：**任何一次真实进度上报都会重新武装**（拖回前面重看/重播后再看到结尾，
+     *   仍会再发一次 -1）—— 因为中途那些真实进度已经把服务端的"已看完"覆盖掉了，
+     *   不重发的话历史里就停在"看到 05:00"而不是"已看完"。
+     */
+    private var sentWatchedToEnd = false
 
     /**
      * 上一次真正装进播放器的视频 id（cid）。
@@ -908,9 +927,27 @@ class PlayerDelegate2(
 //        if (!userStore.isLogin()) {
 //            return
 //        }
-        // 5秒记录一次
-        if (currentPosition > 0 && currentPosition - lastReportProgress < 5000) {
+        // ★"已看完"（对齐 PiliPlus `controller.dart:1450-1497`）：播到**距结尾 ≤1 秒**时，
+        //   上报的 `progress` 要发 **-1**（B 站据此把这条记成"已看完"）。
+        //   判据只能放在这里 —— 只有播放器手里有**权威总时长**；来源侧只按契约把负数映射成
+        //   `progress=-1` + `realtime=真实秒数`（见两个 historyReport 的 KDoc）。
+        val durationMs = player?.duration ?: 0L
+        val watchedToEnd = durationMs > 0L && currentPosition > 0L &&
+            durationMs - currentPosition <= WATCHED_TO_END_TOLERANCE_MS
+        // ★"已看完"只发一次：这个 1 秒窗口里进度回调会被调到最多 2 次（1000ms 一拍 + onAutoCompletion），
+        //   不挡就连发两条 -1。任何一次**真实进度**上报都会重新武装（见 [sentWatchedToEnd]）。
+        if (watchedToEnd && sentWatchedToEnd) return
+        // 5秒记录一次。★只有"已看完"这一拍**不受节流限制**：
+        //   完结那一拍几乎总落在"距上次上报 <5s"里（前面每 5s 一发），不放行的话 -1 永远发不出去；
+        //   其余节流语义（间隔、触发点）一字未改。
+        if (!watchedToEnd && currentPosition > 0 && currentPosition - lastReportProgress < 5000) {
             return
+        }
+        if (watchedToEnd) {
+            sentWatchedToEnd = true
+        } else {
+            // 真实进度上报 ⇒ 重新武装"已看完"（拖回前重看/重播后再看到结尾要能再发一次）
+            sentWatchedToEnd = false
         }
         lastReportProgress = currentPosition
         // ★ 播放中每约 30 秒记一条堆内存：治 OOM 时能看出是"一直涨"还是"某一刻炸"
@@ -920,7 +957,8 @@ class PlayerDelegate2(
         savePlaybackPosition()
         activity.lifecycleScope.launch(Dispatchers.IO) {
             // 上报云端进度（下次进来 playurl 的 last_play_time 就是它）
-            playerSource?.historyReport(progressSec)
+            // -1 = 已看完（来源侧发 progress=-1、realtime 用总秒数）；其余发真实秒数
+            playerSource?.historyReport(if (watchedToEnd) -1L else progressSec)
         }
     }
 
@@ -1117,6 +1155,7 @@ class PlayerDelegate2(
                 player?.seekTo(lastPosition)
                 lastPosition = 0L
                 lastReportProgress = 0L
+                sentWatchedToEnd = false
                 loadingBoxController.hideLoading()
                 player?.setLooping(source.isLoop)
                 player?.startPlayLogic()
@@ -1205,6 +1244,7 @@ class PlayerDelegate2(
             } else {
             }
             lastReportProgress = 0L
+            sentWatchedToEnd = false
             player?.setLooping(source.isLoop)
             player?.startPlayLogic()
             player?.requestLayout()
