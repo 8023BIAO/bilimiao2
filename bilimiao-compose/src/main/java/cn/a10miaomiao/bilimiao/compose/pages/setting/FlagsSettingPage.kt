@@ -472,8 +472,6 @@ private fun FlagsSettingPageContent(
         //   ThreadRipperDataSource 只在"这次请求拿得到长度"时才切分并发，拿不到长度
         //   （部分 MP4 渐进请求 length=UNSET）就原样透传单连接，并发失败还有熔断兜底。
         val prefValues = prefFlow.collectAsStateWithLifecycle().value
-        // 游客模式状态（必须在 Composable 作用域内）
-        val loginInfoState by userStore.stateFlow.collectAsStateWithLifecycle()
         // 组合期直接读 SharedPreferences 会在主线程做首次磁盘加载（进页面就掉帧）→ 异步读
         var hasBackup by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
@@ -595,8 +593,12 @@ private fun FlagsSettingPageContent(
                             hasBackup = false
                         },
                     )
-                } else if (loginInfoState != null) {
-                    // 已登录且无备份 → 显示"游客模式" category + "开启游客模式" item
+                } else if (BilimiaoCommApp.commApp.loginInfo != null) {
+                    // 真的有登录数据（Cookie/Token）且无备份 → 才显示"游客模式" category
+                    // ★2026-10-01 修：这里原先是 `loginInfoState != null`，而它是 UserStore.State
+                    //   （一个**永不为 null** 的数据类）⇒ 条件恒真，没登录也会显示"开启游客模式"，
+                    //   点下去只弹"未登录，无需启用游客模式"、返回后照旧在，用户会以为按钮坏了。
+                    //   判据与 toggleGuestMode 保持一致：只看有没有真正的登录数据。
                     preferenceCategory(
                         key = "guest_mode_category",
                         title = { Text("游客模式") }

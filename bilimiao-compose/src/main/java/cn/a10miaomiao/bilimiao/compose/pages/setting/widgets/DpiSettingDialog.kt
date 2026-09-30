@@ -33,14 +33,24 @@ import com.a10miaomiao.bilimiao.comm.toast
 @Composable
 fun DpiSettingDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val defaultDpi = context.applicationContext.resources.configuration.densityDpi
-    val defaultFontScale = context.applicationContext.resources.configuration.fontScale
+    // 「系统默认」= applicationContext 那份 configuration：MainActivity 只在 **Activity 自己**的
+    // configuration 上套自定义值（attachBaseContext → createConfigurationContext），
+    // application 这份不会被改，所以这两个数始终是系统原始值。
+    val sysDpi = context.applicationContext.resources.configuration.densityDpi
+    val sysFontScale = context.applicationContext.resources.configuration.fontScale
+    // 输入框初值必须是**已经保存过的**值：以前无论存过什么，都拿系统默认填，
+    // 于是"改完再点开又变回默认值"（用户 2026-10-01 反馈）。
+    val prefs = remember {
+        android.preference.PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
+    }
+    val savedDpi = prefs.getInt("app_dpi", 0).takeIf { it in 80..640 }
+    val savedFontScale = prefs.getFloat("app_font_scale", 0f).takeIf { it in 0.5f..3.0f }
     var dpiText by remember {
-        val t = defaultDpi.toString()
+        val t = (savedDpi ?: sysDpi).toString()
         mutableStateOf(TextFieldValue(t, TextRange(t.length)))
     }
     var fontScaleText by remember {
-        val t = defaultFontScale.toString()
+        val t = (savedFontScale ?: sysFontScale).toString()
         mutableStateOf(TextFieldValue(t, TextRange(t.length)))
     }
     OverlayAlertDialog(
@@ -48,7 +58,7 @@ fun DpiSettingDialog(onDismiss: () -> Unit) {
         title = { Text("DPI 设置") },
         text = {
             Column {
-                Text("系统默认DPI：$defaultDpi   字缩：$defaultFontScale")
+                Text("系统默认DPI：$sysDpi   字缩：$sysFontScale")
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = dpiText,
