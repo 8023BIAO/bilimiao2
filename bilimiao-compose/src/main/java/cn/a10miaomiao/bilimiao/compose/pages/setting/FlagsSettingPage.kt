@@ -537,9 +537,6 @@ private fun FlagsSettingPageContent(
                 title = {
                     Text("导出身份信息")
                 },
-                summary = {
-                    Text("导出身份信息到文件")
-                },
                 onClick = {
                     exportAuthLauncher.launch("bilimiao_auth_${System.currentTimeMillis()}.json")
                 },
@@ -550,7 +547,7 @@ private fun FlagsSettingPageContent(
                     Text("导入身份信息")
                 },
                 summary = {
-                    Text("导入身份信息文件，成功后自动重启")
+                    Text("导入后自动重启")
                 },
                 onClick = {
                     importAuthLauncher.launch(arrayOf("application/json", "*/*"))
@@ -562,7 +559,7 @@ private fun FlagsSettingPageContent(
                     Text("导出设置")
                 },
                 summary = {
-                    Text("导出全部设置（含私人 ID，别外发）")
+                    Text("含私人 ID，别外发")
                 },
                 onClick = {
                     exportLauncher.launch("bilimiao_settings_${System.currentTimeMillis()}.json")
@@ -574,7 +571,7 @@ private fun FlagsSettingPageContent(
                     Text("导入设置")
                 },
                 summary = {
-                    Text("导入设置文件内容，成功后自动重启")
+                    Text("导入后自动重启")
                 },
                 onClick = {
                     importLauncher.launch(arrayOf("application/json", "*/*"))
@@ -587,7 +584,7 @@ private fun FlagsSettingPageContent(
                     preference(
                         key = "return_login",
                         title = { Text("返回登录") },
-                        summary = { Text("恢复之前备份的登录信息，清除游客模式") },
+                        summary = { Text("恢复备份的登录信息") },
                         onClick = {
                             viewModel.toggleGuestMode(false)
                             hasBackup = false
@@ -611,7 +608,7 @@ private fun FlagsSettingPageContent(
                     preference(
                         key = "enable_guest",
                         title = { Text("开启游客模式") },
-                        summary = { Text("临时清除登录状态，以匿名身份访问B站") },
+                        summary = { Text("清除登录状态，匿名访问") },
                         onClick = { showGuestConfirmDialog = true },
                     )
                 }
@@ -640,8 +637,8 @@ private fun FlagsSettingPageContent(
                 title = { Text("发评论后自动检测是否被限流（总开关）") },
                 summary = {
                     Text(
-                        if (it) "已开启：查出被限流会弹窗，可删除或去申诉；下面的复查设置才生效"
-                        else "已关闭：整个反诈都不跑，下面的复查设置灰着、改了也不生效"
+                        if (it) "检出限流会弹窗，下方复查才生效"
+                        else "整个反诈都不运行"
                     )
                 },
             )
@@ -654,9 +651,9 @@ private fun FlagsSettingPageContent(
                 summary = {
                     Text(
                         when {
-                            !antifraudOn -> "总开关关着 —— 先打开上面的开关"
-                            it -> "已开启：正常也会继续盯，直到状态变化或盯满时长"
-                            else -> "只查一次（评论可能先正常、过一会儿才被限流）"
+                            !antifraudOn -> "先打开上面的总开关"
+                            it -> "正常也继续盯，直到状态变化或盯满时长"
+                            else -> "只查一次，可能漏掉稍后被限流"
                         }
                     )
                 },
@@ -671,12 +668,12 @@ private fun FlagsSettingPageContent(
                 enabled = { antifraudOn && antifraudRecheckOn },
                 title = { Text("复查监控时长") },
                 valueText = { v -> Text("$v 分钟") },
-                summary = { v ->
+                summary = {
                     Text(
                         when {
-                            !antifraudOn -> "总开关关着 —— 先打开上面的开关"
-                            !antifraudRecheckOn -> "自动复查关着，这一项不生效"
-                            else -> "首查 5 秒后开始，之后每 30 秒查一次，共盯 $v 分钟"
+                            !antifraudOn -> "先打开上面的总开关"
+                            !antifraudRecheckOn -> "自动复查关着，不生效"
+                            else -> "首查 5 秒后每 30 秒复查一次"
                         }
                     )
                 },
@@ -686,7 +683,7 @@ private fun FlagsSettingPageContent(
             preference(
                 key = "antifraud_about",
                 title = { Text("参考项目：biliSendCommAntifraud") },
-                summary = { Text("哔哩发评反诈（点开 GitHub）") },
+                summary = { Text("哔哩发评反诈") },
                 onClick = {
                     // 防连点：连点 N 次不该拉起 N 个浏览器
                     if (ClickGuard.allow("flags:antifraud_about")) {
@@ -785,7 +782,7 @@ private fun FlagsSettingPageContent(
                 preference(
                     key = "antifraud_recheck",
                     title = { Text("重新检测这条评论") },
-                    summary = { Text("不发新评论也能复检；评论常常几分钟后才被限流") },
+                    summary = { Text("不发新评论也能复检") },
                     onClick = {
                         if (ClickGuard.allow("flags:antifraud_recheck")) {
                             val launcher = cn.a10miaomiao.bilimiao.compose.pages.community.components
@@ -846,7 +843,7 @@ private fun FlagsSettingPageContent(
                 key = "antifraud_appeal_dynamic",
                 title = { Text("图文动态申诉") },
                 summary = {
-                    Text("动态/图文被限流、隐藏时用：填动态 id 或链接（官方 24 小时最多 3 次）")
+                    Text("填动态 ID 或链接（官方限 24 小时 3 次）")
                 },
                 onClick = {
                     if (ClickGuard.allow("flags:antifraud_appeal_dynamic")) {
@@ -863,7 +860,7 @@ private fun FlagsSettingPageContent(
             preference(
                 key = "antifraud_appeal",
                 title = { Text("B站官方申诉页（备用）") },
-                summary = { Text("原生接口不可用时（拿不到网页登录态）的兜底入口") },
+                summary = { Text("原生申诉不可用时使用") },
                 onClick = {
                     if (ClickGuard.allow("flags:antifraud_appeal")) {
                         // 走外部浏览器 —— 免去替对方页面长期适配主题的成本：
@@ -893,7 +890,7 @@ private fun FlagsSettingPageContent(
             preference(
                 key = "sponsor_block_entry",
                 title = { Text("空降助手") },
-                summary = { Text("自动跳过赞助/恰饭/片头片尾片段") },
+                summary = { Text("自动跳过赞助与片头片尾") },
                 onClick = viewModel::toSponsorBlockSettingPage,
             )
 
@@ -912,8 +909,8 @@ private fun FlagsSettingPageContent(
                 title = { Text("启用分段并发下载") },
                 summary = {
                     Text(
-                        if (it) "已开启：分段切成多块并发下载；拿不到长度的请求自动退回单连接"
-                        else "分段切成多块并发下载，海外/卡顿时建议开"
+                        if (it) "已开启：拿不到长度的请求自动退回单连接"
+                        else "分段并发下载，卡顿时建议开"
                     )
                 },
             )
@@ -938,8 +935,8 @@ private fun FlagsSettingPageContent(
                     // 把"这个档位实际会发生什么"直接算给用户看（上游的算法：区间平均等分，每份至少 64KB）
                     val n = if (v <= 0) maxThreads else v
                     Text(
-                        if (!ripperOn) "总开关关着 —— 先打开上面的开关"
-                        else "把一个分段分给 $n 条连接并发拉（默认 4，最多 $maxThreads 条）"
+                        if (!ripperOn) "先打开上面的总开关"
+                        else "一个分段分给 $n 条连接并发拉"
                     )
                 },
             )
@@ -954,10 +951,7 @@ private fun FlagsSettingPageContent(
                 enabled = { ripperOn },
                 title = { Text("智能节点调度") },
                 summary = {
-                    Text(
-                        "按实测吞吐加权分配分块（快的节点多领活、慢的不再平均占坑）；" +
-                            "速度分 90 秒过期、单次不足 48KB 不计分。关掉 = 老的「平均轮转」。"
-                    )
+                    Text("按实测速度加权分配，快的节点多领活")
                 },
             )
             switchPreference(
@@ -966,7 +960,7 @@ private fun FlagsSettingPageContent(
                 enabled = { ripperOn },
                 title = { Text("自适应抢跑延迟") },
                 summary = {
-                    Text("抢跑错峰按实测首块耗时自动调整（400~900ms）；只会比原来的固定 900ms 更早，不会更晚。")
+                    Text("抢跑延迟自动调整（约 400~900ms）")
                 },
             )
             switchPreference(
@@ -975,7 +969,7 @@ private fun FlagsSettingPageContent(
                 enabled = { ripperOn },
                 title = { Text("412/429 风控退让") },
                 summary = {
-                    Text("被限流时先降一档并发 + 冷静 180 秒；冷静期内再次被限流才熔断 10 分钟（原来是一被限流就熔断）。")
+                    Text("被限流时降低并发并冷静 180 秒")
                 },
             )
             switchPreference(
@@ -986,11 +980,9 @@ private fun FlagsSettingPageContent(
                 summary = { on ->
                     Text(
                         if (on) {
-                            "已开启：会把同一份签名地址换到 B站其它 CDN 域名上试（候选 2~4 → 最多 12 条）；" +
-                                "签名能否跨域名复用未经验证，若出现大量失败请关掉。"
+                            "已开启：同一签名换 CDN 域名重试，大量失败请关闭"
                         } else {
-                            "把 API 给的地址换到 B站其它 CDN 域名，候选更多、抢跑更有牌可打。" +
-                                "★ 默认关：签名能否跨域名复用未经验证，可能反而引入 403/412。"
+                            "实验性：同一签名换 CDN 域名重试，可能引入 403/412"
                         }
                     )
                 },
@@ -1004,13 +996,12 @@ private fun FlagsSettingPageContent(
                 enabled = false,
                 title = { Text("Q：什么时候该调大？") },
                 summary = {
-                    Text("卡顿、4K 缓冲跟不上就调大；手机一般 4~8 条够用，连接越多开销越大。")
+                    Text("卡顿或 4K 缓冲跟不上就调大，一般 4~8 条够用")
                 },
             )
             preference(
                 key = "thread_ripper_about",
                 title = { Text("参考项目：Bilibili-thread-ripper") },
-                summary = { Text("本功能思路来源（点开 GitHub）") },
                 onClick = {
                     // 防连点：连点 N 次不该拉起 N 个浏览器
                     if (ClickGuard.allow("flags:thread_ripper_about")) {
@@ -1041,13 +1032,13 @@ private fun FlagsSettingPageContent(
                 // 否则没动过开关的用户看到"关"，实际每次播放都在竞速
                 defaultValue = true,
                 title = { Text("CDN 竞速") },
-                summary = { Text("播放前并发测试各 CDN 节点延迟，自动选最快的") },
+                summary = { Text("播放前测速，自动选最快节点") },
             )
             switchPreference(
                 key = SettingPreferences.AudioIndependentCdn.name,
                 defaultValue = false,
                 title = { Text("音频不跟随 CDN") },
-                summary = { Text("音频用默认 CDN，仅视频参与竞速") },
+                summary = { Text("音频用默认节点，只视频竞速") },
             )
             val cdnLabel = CdnHosts.list.find { it.key == currentCdnKey }?.label ?: "默认（API 自动分配）"
             preference(
@@ -1073,7 +1064,7 @@ private fun FlagsSettingPageContent(
                     Text("锁定底栏")
                 },
                 summary = {
-                    Text("底栏不再随滚动隐藏，始终固定显示")
+                    Text("底栏始终显示，不随滚动隐藏")
                 },
                 defaultValue = true,
             )
@@ -1086,7 +1077,7 @@ private fun FlagsSettingPageContent(
                         Text("标题行一起隐藏")
                     },
                     summary = {
-                        Text("滚动隐藏时，页名那一条也一起收起来")
+                        Text("滚动隐藏时页名一起收起")
                     },
                     defaultValue = true,
                 )
@@ -1108,14 +1099,14 @@ private fun FlagsSettingPageContent(
                 defaultValue = 50,
                 title = { Text("图片缓存上限") },
                 label = " MB",
-                summary = { Text("当前: ${it}MB，Glide 图片磁盘缓存上限，重启后生效") },
+                summary = { Text("当前：${it}MB，重启后生效") },
             )
             textIntPreference(
                 key = SettingPreferences.PlayerDiskCacheSize.name,
                 defaultValue = 512,
                 title = { Text("视频播放磁盘缓存") },
                 label = " MB",
-                summary = { Text("当前: ${it}MB，用于本地缓存视频数据，暂停/回退时减少重复网络请求。调大可缓存更长时间的内容") },
+                summary = { Text("当前：${it}MB，调大可缓存更久") },
             )
             preference(
                 key = "reset_all",
@@ -1123,7 +1114,7 @@ private fun FlagsSettingPageContent(
                     Text("重置所有设置")
                 },
                 summary = {
-                    Text("清除所有偏好设置、屏蔽数据、缓存，部分需重启生效")
+                    Text("清除设置、屏蔽数据与缓存")
                 },
                 onClick = {
                     showResetDialog = true
@@ -1145,7 +1136,7 @@ private fun FlagsSettingPageContent(
             preference(
                 key = "github_repo",
                 title = { Text("我的 GitHub 仓库") },
-                summary = { Text("8023BIAO/bilimiao2（本 App 的源码）") },
+                summary = { Text("8023BIAO/bilimiao2") },
                 onClick = {
                     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
                     intent.data = android.net.Uri.parse("https://github.com/8023BIAO/bilimiao2")
@@ -1156,7 +1147,7 @@ private fun FlagsSettingPageContent(
             preference(
                 key = "github_upstream",
                 title = { Text("原版项目（本 App 的上游）") },
-                summary = { Text("10miaomiao/bilimiao2 · 感谢原作者") },
+                summary = { Text("10miaomiao/bilimiao2，感谢原作者") },
                 onClick = {
                     if (ClickGuard.allow("flags:github_upstream")) {
                         runCatching {

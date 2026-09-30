@@ -271,7 +271,7 @@ private fun DanmakuFilterTabContent(
                 key = SettingPreferences.DanmakuFilterEnabled.name,
                 title = { Text("启用弹幕过滤") },
                 summary = {
-                    if (it) Text("已启用，将过滤包含关键词的弹幕")
+                    if (it) Text("按关键词过滤")
                     else Text("未启用")
                 },
                 defaultValue = false,
@@ -290,7 +290,7 @@ private fun DanmakuFilterTabContent(
                 enabled = { filterEnabled },
                 title = { Text("过滤重复弹幕") },
                 summary = {
-                    if (it) Text("已启用，将过滤内容相同的弹幕")
+                    if (it) Text("过滤内容相同的弹幕")
                     else Text("未启用")
                 },
                 defaultValue = false,
@@ -355,7 +355,7 @@ private fun DanmakuFilterTabContent(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "注：支持正则表达式（语法：/正则表达式主体/）",
+                        text = "支持正则表达式（/正则/）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

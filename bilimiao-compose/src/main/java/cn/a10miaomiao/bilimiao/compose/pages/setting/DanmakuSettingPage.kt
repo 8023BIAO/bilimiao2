@@ -111,7 +111,7 @@ private fun DanmakuSettingPageContent(
                     if (it) {
                         Text("已启用")
                     } else {
-                        Text("未启用，启用后才能进行其它设置")
+                        Text("未启用，其它设置不生效")
                     }
                 },
                 defaultValue = true,
@@ -125,7 +125,7 @@ private fun DanmakuSettingPageContent(
                     Text("弹幕使用系统字体")
                 },
                 summary = {
-                    Text("修改后需重启APP生效")
+                    Text("重启应用后生效")
                 },
                 defaultValue = true,
             )
@@ -143,7 +143,7 @@ private fun DanmakuSettingPageContent(
                     Text("弹幕显示设置")
                 },
                 summary = {
-                    Text("各模式下弹幕的样式、大小、位置等")
+                    Text("各模式的样式、大小与位置")
                 },
                 onClick = viewModel::toDisplaySetting
             )

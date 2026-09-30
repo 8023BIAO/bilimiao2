@@ -33,6 +33,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.MessageDialogState
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
+import com.a10miaomiao.bilimiao.comm.apis.WebNavInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.auth.LoginInfo
 import com.a10miaomiao.bilimiao.comm.entity.auth.WebKeyInfo
@@ -40,9 +41,11 @@ import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.UserStore
+import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.BiliGeetestUtil
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.a10miaomiao.bilimiao.store.WindowStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -279,6 +282,141 @@ private class LoginPageViewModel(
     fun toSMSLogin() {
         pageNavigation.navigate(SMSLoginPage())
     }
+
+    /**
+     * Token / Cookie 直接登录。
+     *
+     * - 输入里出现 `SESSDATA`（或分号分隔的多段 Cookie）→ 按 Cookie 处理；
+     *   先用 `x/member/web/account` **只带这段 Cookie** 验证（不写全局 CookieManager），通过才落盘。
+     * - 其余按 `access_token` 处理：`account()` 的 token 版验证通过后写 auth 文件。
+     *
+     * ★Cookie 只对 Web 接口生效（APP 接口只带 Cookie 时返回 `mid=0`，实测），所以这里如实提示限制。
+     */
+    fun loginByTokenOrCookie(raw: String, onSuccess: () -> Unit) = viewModelScope.launch(Dispatchers.IO) {
+        val input = raw.trim()
+        if (input.isBlank()) {
+            messageDialog.alert("请输入 access_token 或 Cookie")
+            return@launch
+        }
+        val isCookie = input.contains("SESSDATA", ignoreCase = true) || input.contains(";")
+        loading.value = true
+        try {
+            if (isCookie) {
+                val cookies = parseCookie(input)
+                if (cookies.isEmpty()) {
+                    messageDialog.alert("Cookie 格式不对，应形如 SESSDATA=xxx; bili_jct=yyy")
+                    return@launch
+                }
+                val res = BiliApiService.authApi
+                    .webNav(cookies.joinToString("; ") { "${it.name}=${it.value}" })
+                    .awaitCall()
+                    .json<ResponseData<WebNavInfo>>()
+                val navInfo = res.data
+                val mid = navInfo?.mid ?: 0L
+                // 拿不到真实资料就不写"已登录"（宁可不写，也不写假档案）
+                if (!res.isSuccess || navInfo == null || !navInfo.isLogin || mid == 0L) {
+                    messageDialog.alert("Cookie 无效或已过期" + res.message.toErrorSuffix())
+                    return@launch
+                }
+                val cookieInfo = LoginInfo.CookieInfo(
+                    cookies = cookies,
+                    domains = listOf(".bilibili.com", "bilibili.com"),
+                )
+                BilimiaoCommApp.commApp.setCookie(cookieInfo)
+                BilimiaoCommApp.commApp.saveAuthInfo(
+                    LoginInfo(
+                        // Cookie 登录没有 access_token：只留 mid 让界面能显示账号
+                        token_info = LoginInfo.TokenInfo(
+                            access_token = "",
+                            refresh_token = "",
+                            mid = mid,
+                            expires_in = 0,
+                        ),
+                        sso = null,
+                        cookie_info = cookieInfo,
+                    )
+                )
+                // 资料全部来自 nav 的真实返回；nav 不提供的字段只能给默认值
+                // （这些字段 App 接口才给，Cookie 通道拿不到）
+                val user = UserInfo(
+                    mid = mid,
+                    name = navInfo.uname,
+                    face = navInfo.face ?: "",
+                    coin = navInfo.money.toDouble(),
+                    bcoin = 0.0,
+                    sex = 0,
+                    rank = 0,
+                    silence = 0,
+                    show_videoup = 0,
+                    show_creative = 0,
+                    level = navInfo.level_info?.current_level ?: 0,
+                    vip_type = navInfo.vipType,
+                    audio_type = 0,
+                    dynamic = 0,
+                    following = 0,
+                    follower = 0,
+                )
+                withContext(Dispatchers.Main) {
+                    userStore.setUserInfo(user)
+                    // 如实说清楚：Cookie 只覆盖网页接口，且冷启动会被 UserStore 的 App 接口判定为失效
+                    toast("Cookie 已保存：仅网页接口生效，重启后需重新登录")
+                    onSuccess()
+                    pageNavigation.popBackStack()
+                }
+            } else {
+                val res = BiliApiService.authApi
+                    .accountByToken(input)
+                    .awaitCall()
+                    .json<ResponseData<UserInfo>>()
+                val user = res.data
+                if (!res.isSuccess || user == null || user.mid == 0L) {
+                    messageDialog.alert("Token 无效或已过期" + res.message.toErrorSuffix())
+                    return@launch
+                }
+                BilimiaoCommApp.commApp.saveAuthInfo(
+                    LoginInfo(
+                        token_info = LoginInfo.TokenInfo(
+                            access_token = input,
+                            refresh_token = "",
+                            mid = user.mid,
+                            expires_in = 0,
+                        ),
+                        sso = null,
+                        cookie_info = null,
+                    )
+                )
+                withContext(Dispatchers.Main) {
+                    userStore.setUserInfo(user)
+                    toast("已通过 Token 登录")
+                    onSuccess()
+                    pageNavigation.popBackStack()
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            e.printStackTrace()
+            messageDialog.alert("登录失败：" + (e.message ?: e.toString()))
+        } finally {
+            loading.value = false
+        }
+    }
+
+    /** 失败提示里带上服务端 message（`message == "0"` 这种没信息量的就不带） */
+    private fun String.toErrorSuffix(): String =
+        if (isBlank() || this == "0") "" else "：$this"
+
+    /** `SESSDATA=x; bili_jct=y` → Cookie 列表（忽略空段和没有 `=` 的段） */
+    private fun parseCookie(raw: String): List<LoginInfo.Cookie> = raw.split(";").mapNotNull { pair ->
+        val index = pair.indexOf('=')
+        if (index <= 0) return@mapNotNull null
+        val name = pair.substring(0, index).trim()
+        val value = pair.substring(index + 1).trim()
+        if (name.isEmpty() || value.isEmpty()) {
+            null
+        } else {
+            LoginInfo.Cookie(name = name, value = value, expires = 0, http_only = 0)
+        }
+    }
 }
 
 @Composable
@@ -299,6 +437,7 @@ private fun LoginPageContent(
     val scrollState = rememberScrollState()
     val passwordFocusRequester = remember { FocusRequester() }
     var passwordIsFocus by remember { mutableStateOf(false) }
+    var showTokenLoginDialog by remember { mutableStateOf(false) }
 
     val usernameKeyboardActions = remember(passwordFocusRequester) {
         KeyboardActions(
@@ -424,18 +563,32 @@ private fun LoginPageContent(
             Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
+                // 三个入口 + 窄屏：用 SpaceEvenly 均分，别用固定 20dp 间距（360dp 屏会挤到裁字）
+                horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 TextButton(onClick = viewModel::toSMSLogin) {
                     Text(text = "手机号登录")
                 }
-                Spacer(modifier = Modifier.width(20.dp))
                 TextButton(onClick = viewModel::toQrLogin) {
                     Text(text = "二维码登录")
+                }
+                TextButton(onClick = { showTokenLoginDialog = true }) {
+                    Text(text = "Token 登录")
                 }
             }
             Spacer(modifier = Modifier.height(windowInsets.bottomDp.dp + bottomAppBarHeight.dp))
 
+        }
+        if (showTokenLoginDialog) {
+            TokenLoginDialog(
+                loading = loading,
+                onDismiss = { showTokenLoginDialog = false },
+                onConfirm = { input ->
+                    viewModel.loginByTokenOrCookie(input) {
+                        showTokenLoginDialog = false
+                    }
+                },
+            )
         }
     }
 

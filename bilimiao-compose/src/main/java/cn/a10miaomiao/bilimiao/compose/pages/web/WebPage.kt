@@ -226,6 +226,11 @@ private class WebPageViewModel(
                     }
                     if (stillInStack) {
                         if (pageNavigation.popBackStack(WebPage(startUrl), inclusive = true)) {
+                            // ★ 弹掉中间页之后是把**同一个目标页**再压一次：它与上面那次导航
+                            //   同路由同参数、间隔 <1s，会被 PageNavigation.navigate 的"连点闸门"
+                            //   静默吞掉 ⇒ 用户看到"闪一下又回到原页"（2026-10-01：评论里 b23.tv
+                            //   短链点不开的根因）。这里是有意的重复导航，先清指纹再导航。
+                            pageNavigation.resetNavDedupe()
                             BilibiliNavigation.navigationTo(pageNavigation, url)
                         }
                     }

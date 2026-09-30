@@ -147,7 +147,7 @@ private fun HomeSettingPageContent(
                     // ★`?: "未知"` 不能省：老用户把「首页入口」存成已退役的值（7 = 原「分区」）时，
                     //   直接拼 null 会显示"当前: null"。显示"未知"与下拉里 valueToText 的兜底一致，
                     //   实际行为 = 首页按"没有匹配的入口"落到第一个 Tab（不会崩）。
-                    Text(text = "当前: " + (viewModel.entryViews[it] ?: "未知"))
+                    Text(text = "当前：" + (viewModel.entryViews[it] ?: "未知"))
                 },
                 values = entryViewValues,
                 valueToText = {

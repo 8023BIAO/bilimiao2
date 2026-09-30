@@ -8,6 +8,7 @@ import com.a10miaomiao.bilimiao.comm.network.ApiHelper.BILI_APP_VERSION
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.utils.RSAUtil
+import kotlinx.serialization.Serializable
 import java.util.*
 
 class AuthApi {
@@ -16,6 +17,49 @@ class AuthApi {
         url = BiliApiService.biliApp(
             "x/v2/account/mine",
         )
+    }
+
+    /**
+     * 用一段 `access_token` 验证登录态并取回用户信息（**不看全局登录态**）。
+     *
+     * ★`asGuest = true` 是**必须的**，不是借用"游客"语义：`MiaoHttp.buildRequest` 只要
+     * `!isWebApi && !asGuest` 就会把**已保存的**身份塞进头（`x-bili-mid` + `Authorization`，
+     * 见 `MiaoHttp.kt` 的 APP 头区块）。这里要验的是用户刚粘贴的 token，若不禁掉那块，
+     * 同一个请求会带两个 `Authorization`（旧的在前）且 `x-bili-mid` 还是旧账号 ——
+     * 切号/重登时验的就是旧身份。`asGuest` 同时让请求不带本机 Cookie，避免旧 SESSDATA 混进来。
+     *
+     * 还有两个配套：
+     * · `notoken=1`：`ApiHelper.createParams` 默认把"当前登录态"注入 query 的 `access_key`/`mid`
+     *   （`ApiHelper.addAccessKeyAndMidToParams`），这里必须显式传自己的 `access_key`；
+     *   `sign` 照显式参数计算。
+     * · `Authorization` 头自己补（`asGuest` 只跳过 MiaoHttp 自动加的那份，自定义 headers 照发）。
+     */
+    fun accountByToken(accessToken: String) = MiaoHttp.request {
+        url = BiliApiService.createUrl(
+            "https://app.bilibili.com/x/v2/account/mine",
+            "access_key" to accessToken,
+            "notoken" to "1",
+        )
+        asGuest = true
+        headers["Authorization"] = "identify_v1 $accessToken"
+    }
+
+    /**
+     * 用一段 Cookie 取 **Web** 登录资料（`x/web-interface/nav`，**不写全局 CookieManager**）。
+     *
+     * `asGuest = true` 让 MiaoHttp 只带这里给的这段 Cookie（见 MiaoHttp.buildRequest），
+     * 所以验证失败不会把无效 Cookie 留在本机；`isWebApi = true` 跳过 APP 专有头。
+     *
+     * ★为什么不复用 `account()`：APP 接口（`app.bilibili.com`）**不认 Cookie** —— 只带
+     * SESSDATA 时它照样回 `code=0`，但 `mid=0`、`name` 为空（匿名档），只有 Web 接口认。
+     * 所以 Cookie 登录的"验证 + 资料"都从 nav 取（nav 还在 `MiaoHttp` 里被排除在 WBI 之外，
+     * 请求形态不会被签名改变）。
+     */
+    fun webNav(cookie: String) = MiaoHttp.request {
+        url = "https://api.bilibili.com/x/web-interface/nav"
+        isWebApi = true
+        asGuest = true
+        guestCookie = cookie
     }
 
 //    fun authInfo(access_token: String): Observable<ResultInfo<UserInfo>> {
@@ -357,4 +401,29 @@ class AuthApi {
 
         headers["cookie"] = cookie
     }
+}
+
+/**
+ * `x/web-interface/nav` 的响应体（只取登录判断与展示要用的字段）。
+ *
+ * 放在这里而不是 `entity/`：它只服务于 [AuthApi.webNav] 这条"Cookie 登录"的路径。
+ * 每个字段都给默认值 —— nav 字段极多且会变，少一个不该让整次解析失败
+ * （同 `LiveSelfNickname.kt` 里那份私有 DTO 的写法）。
+ */
+@Serializable
+data class WebNavInfo(
+    val isLogin: Boolean = false,
+    val mid: Long = 0,
+    val uname: String = "",
+    val face: String? = null,
+    /** 硬币数（nav 里叫 money） */
+    val money: Int = 0,
+    val level_info: LevelInfo? = null,
+    val vipStatus: Int = 0,
+    val vipType: Int = 0,
+) {
+    @Serializable
+    data class LevelInfo(
+        val current_level: Int = 0,
+    )
 }

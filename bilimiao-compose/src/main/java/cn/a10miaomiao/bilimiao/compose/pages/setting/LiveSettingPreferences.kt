@@ -106,7 +106,7 @@ private fun LazyListScope.livePlayPreferenceItems() {
         },
         // listPreference 的 summary 回调给的就是"当前值"，用它拼最准（不会滞后）
         summary = { value ->
-            Text("进直播间时请求的画质（当前：${LiveSettingOptions.qualityName(value)}）。最高/最低可用 = 由播放器按房间实际支持的清晰度挑")
+            Text("进直播间时请求的画质（当前：${LiveSettingOptions.qualityName(value)}）")
         },
         defaultValue = SettingConstants.LIVE_DEFAULT_QUALITY_DEFAULT,
         values = LiveSettingOptions.qualitySelectionList,
@@ -119,7 +119,7 @@ private fun LazyListScope.livePlayPreferenceItems() {
             Text("默认线路策略")
         },
         summary = { value ->
-            Text("直播流有多条 CDN 线路（当前：${LiveSettingOptions.linePolicyName(value)}）")
+            Text("当前：${LiveSettingOptions.linePolicyName(value)}")
         },
         defaultValue = SettingConstants.LIVE_LINE_POLICY_DEFAULT,
         values = LiveSettingOptions.linePolicySelectionList,
@@ -131,7 +131,7 @@ private fun LazyListScope.livePlayPreferenceItems() {
             Text("自动重连")
         },
         summary = {
-            Text("断流 / 取流失败时自动重试并换线路（默认开；关掉后失败只会提示，需要手动点重试）")
+            Text("断流时自动重试并换线路；关闭后需手动重试")
         },
         defaultValue = SettingConstants.LIVE_AUTO_RECONNECT_DEFAULT,
     )
@@ -150,9 +150,9 @@ private fun LazyListScope.livePlayPreferenceItems() {
             if (it) {
                 // ★2026-09-26 语义更新（与直播页「旋转」按钮对齐）：开着的时候点一次旋转 =
                 //   先切到另一个方向停住，**手机再转一下就继续跟随**（不再永久锁死 ✗）。
-                Text("竖着拿就竖屏看，横过来自动全屏（默认开）。底栏「旋转」可临时切一次，之后仍跟随手机方向")
+                Text("竖屏竖看，横过来全屏")
             } else {
-                Text("不跟随重力感应；屏幕方向由播放页底栏的旋转按钮手动切换（此时它是唯一的方向开关）")
+                Text("不跟随重力，用底栏旋转按钮切换")
             }
         },
         defaultValue = SettingConstants.LIVE_AUTO_ROTATE_DEFAULT,
@@ -194,7 +194,7 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text("${it}sp")
         },
         summary = {
-            Text("只对直播生效。默认 ${SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT}sp（和原来一样大）")
+            Text("只对直播生效，默认 ${SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT}sp")
         },
     )
     sliderIntPreference(
@@ -211,7 +211,7 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text("$it%")
         },
         summary = {
-            Text("只对直播生效。默认 100% = 完全不透明（和原来一样）")
+            Text("只对直播生效")
         },
     )
     // ★本轮新增：弹幕速度（键 `live_danmaku_speed`，Float 倍率 0.5~2.0，默认 1.0）。
@@ -244,7 +244,7 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text("弹幕显示区域")
         },
         summary = { value ->
-            Text("弹幕最多占播放区多大（当前：${LiveDanmakuSettings.areaPercentText(value)}），默认全屏。只对直播生效")
+            Text("当前：${LiveDanmakuSettings.areaPercentText(value)}，只对直播生效")
         },
         defaultValue = SettingConstants.LIVE_DANMAKU_AREA_PERCENT_DEFAULT,
         values = LiveDanmakuSettings.AREA_PERCENT_OPTIONS,
@@ -288,7 +288,7 @@ private fun LazyListScope.liveBrowsePreferenceItems() {
             Text(if (it == SettingConstants.LIVE_GRID_SPAN_AUTO) "自适应" else "${it}列")
         },
         summary = {
-            Text("首页「直播」Tab／直播搜索／关注直播列表 的卡片列数。自适应 = 按屏幕宽度铺（手机 1 列，平板/横屏自动多列）")
+            Text("直播列表每行卡片数；自适应按屏宽铺")
         },
     )
 }

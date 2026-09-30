@@ -202,27 +202,27 @@ private fun SettingPageContent(
     }
     val settingPages = remember(viewModel) {
         listOf(
-            SettingPageLink("播放器设置", "后台/小窗、视频源、字幕、下载", "① 播放", "播放 播放器 缓冲 画质 格式 字幕 下载 小窗", viewModel::toVideoSettingPage),
-            SettingPageLink("弹幕设置", "弹幕显示、样式与过滤", "① 播放", "弹幕 danmaku 显示 样式 过滤 关键词", viewModel::toDanmakuSettingPage),
-            SettingPageLink("弹幕显示设置", "弹幕字号、不透明度、速度、行数（默认/小屏/全屏/画中画）", "① 播放", "弹幕 显示 字号 大小 不透明度 透明度 速度 移速 行数 模式 默认 小屏 全屏 画中画 danmaku display", viewModel::toDanmakuDisplaySettingPage),
+            SettingPageLink("播放器设置", "后台、小窗、字幕、下载", "① 播放", "播放 播放器 缓冲 画质 格式 字幕 下载 小窗", viewModel::toVideoSettingPage),
+            SettingPageLink("弹幕设置", "显示、样式与过滤", "① 播放", "弹幕 danmaku 显示 样式 过滤 关键词", viewModel::toDanmakuSettingPage),
+            SettingPageLink("弹幕显示设置", "字号、不透明度、速度与行数", "① 播放", "弹幕 显示 字号 大小 不透明度 透明度 速度 移速 行数 模式 默认 小屏 全屏 画中画 danmaku display", viewModel::toDanmakuDisplaySettingPage),
             // 直播设置的搜索入口（页面级）：搜"直播 / 小窗 / 画质 / 线路 / 弹幕"都能直达
-            SettingPageLink("直播设置", "默认画质、线路策略、弹幕与列表", "① 播放", "直播 live 直播间 画质 清晰度 原画 高清 流畅 线路 cdn 重连 自动重连 自动旋转 旋转 横屏 竖屏 弹幕 danmaku 字号 字体 大小 不透明度 透明度 速度 移速 显示区域 范围 列表 排序 卡片 列数 每行 网格", viewModel::toLiveSettingPage),
-            SettingPageLink("定时关闭", "在「播放器设置 → 播放控制设置」里", "① 播放", "定时 关闭 睡眠 停止", viewModel::toAutoStopTimerPage),
+            SettingPageLink("直播设置", "画质、线路、重连与弹幕", "① 播放", "直播 live 直播间 画质 清晰度 原画 高清 流畅 线路 cdn 重连 自动重连 自动旋转 旋转 横屏 竖屏 弹幕 danmaku 字号 字体 大小 不透明度 透明度 速度 移速 显示区域 范围 列表 排序 卡片 列数 每行 网格", viewModel::toLiveSettingPage),
+            SettingPageLink("定时关闭", "在播放器设置里", "① 播放", "定时 关闭 睡眠 停止", viewModel::toAutoStopTimerPage),
             SettingPageLink("主题", "配色与深色模式", "② 界面", "主题 配色 颜色 深色 夜间 纯黑", viewModel::toThemePage),
             SettingPageLink("首页设置", "首页入口显示", "② 界面", "首页 主页 首页入口 入口显示 卡片 列数 时光姬", viewModel::toHomeSettingPage),
-            SettingPageLink("底栏与导航", "锁定底栏、滚动隐藏行为", "② 界面", "底栏 导航 滚动 隐藏 标题行", viewModel::toBottomBarSettingPage),
-            SettingPageLink("内容屏蔽", "按标题 / UP / 标签 / UP名屏蔽", "③ 内容与评论", "屏蔽 过滤 标题 up 标签 黑名单", viewModel::toFilterSettingPage),
-            SettingPageLink("推荐过滤", "时长、播放量、封面、相关推荐等", "③ 内容与评论", "推荐 过滤 时长 播放量 封面 相关 推广", viewModel::toFilterRecommendPage),
-            SettingPageLink("评论区", "评论关键字、二级回复显示", "③ 内容与评论", "评论 评论区 关键字 二级 回复", viewModel::toFilterCommentPage),
-            SettingPageLink("空降助手", "自动跳过片头片尾 / 赞助片段", "④ 扩展", "空降 跳过 片头 片尾 赞助 恰饭", viewModel::toSponsorBlockSettingPage),
-            SettingPageLink("海外加速", "分段并发下载，改善卡顿", "④ 扩展", "海外 加速 并发 分段 卡顿 线程", viewModel::toThreadRipperSettingPage),
+            SettingPageLink("底栏与导航", "锁定与滚动隐藏", "② 界面", "底栏 导航 滚动 隐藏 标题行", viewModel::toBottomBarSettingPage),
+            SettingPageLink("内容屏蔽", "按标题、UP、标签、UP名", "③ 内容与评论", "屏蔽 过滤 标题 up 标签 黑名单", viewModel::toFilterSettingPage),
+            SettingPageLink("推荐过滤", "时长、播放量、封面", "③ 内容与评论", "推荐 过滤 时长 播放量 封面 相关 推广", viewModel::toFilterRecommendPage),
+            SettingPageLink("评论区", "关键字、二级回复", "③ 内容与评论", "评论 评论区 关键字 二级 回复", viewModel::toFilterCommentPage),
+            SettingPageLink("空降助手", "自动跳过赞助与片头片尾", "④ 扩展", "空降 跳过 片头 片尾 赞助 恰饭", viewModel::toSponsorBlockSettingPage),
+            SettingPageLink("海外加速", "分段并发下载", "④ 扩展", "海外 加速 并发 分段 卡顿 线程", viewModel::toThreadRipperSettingPage),
             SettingPageLink("CDN", "竞速、固定主机、音频独立", "④ 扩展", "cdn 节点 线路 主机 竞速", viewModel::toCdnSettingPage),
             SettingPageLink("评论反诈", "发评后自动检测是否被限流", "④ 扩展", "评论 反诈 限流 吞评 复查 申诉", viewModel::toAntifraudSettingPage),
-            SettingPageLink("账号与存储", "游客模式、身份导入导出、缓存与重置", "⑤ 账号与数据", "账号 登录 游客 身份 导入 导出 备份 缓存 重置 清空", viewModel::toAccountDataSettingPage),
-            SettingPageLink("关于本应用", "版本号、仓库、错误日志", "⑥ 关于", "关于 版本 版本号 vc github 仓库 错误 日志 致谢", viewModel::toAboutSettingPage),
+            SettingPageLink("账号与存储", "游客模式、导入导出、缓存", "⑤ 账号与数据", "账号 登录 游客 身份 导入 导出 备份 缓存 重置 清空", viewModel::toAccountDataSettingPage),
+            SettingPageLink("关于本应用", "版本、仓库与错误日志", "⑥ 关于", "关于 版本 版本号 vc github 仓库 错误 日志 致谢", viewModel::toAboutSettingPage),
             // 动作型：没有独立页面（点了直接弹窗/执行），但同样要能被搜到
-            SettingPageLink("显示与字号", "应用内 DPI 与字体缩放，点了直接改", "② 界面", "dpi 字号 字体 缩放 字体大小 显示 太大 太小", { showDpiDialog = true }),
-            SettingPageLink("备份与恢复", "导出 / 导入全部设置（在「账号与存储」里）", "⑤ 账号与数据", "备份 恢复 导出 导入 设置文件 json 迁移", viewModel::toAccountDataSettingPage),
+            SettingPageLink("显示与字号", "应用内 DPI 与字体缩放", "② 界面", "dpi 字号 字体 缩放 字体大小 显示 太大 太小", { showDpiDialog = true }),
+            SettingPageLink("备份与恢复", "导出、导入全部设置", "⑤ 账号与数据", "备份 恢复 导出 导入 设置文件 json 迁移", viewModel::toAccountDataSettingPage),
             SettingPageLink("退出登录", "清除登录状态", "⑤ 账号与数据", "退出 登出 logout 切号 账号", { showLogoutDialog.value = true }),
         )
     }
@@ -251,7 +251,7 @@ private fun SettingPageContent(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     singleLine = true,
-                    placeholder = { Text("搜索设置（如：弹幕 / 缓存 / 底栏）") },
+                    placeholder = { Text("搜索设置（弹幕、缓存、底栏）") },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             TextButton(onClick = { searchQuery = "" }) { Text("清空") }
@@ -265,13 +265,13 @@ private fun SettingPageContent(
             preference(
                 key = "video",
                 title = { Text("播放器设置") },
-                summary = { Text("后台/小窗、视频源、字幕、下载、定时关闭") },
+                summary = { Text("后台、小窗、字幕、下载") },
                 onClick = viewModel::toVideoSettingPage
             )
             preference(
                 key = "danmaku",
                 title = { Text("弹幕设置") },
-                summary = { Text("弹幕显示、样式与过滤") },
+                summary = { Text("显示、样式与过滤") },
                 onClick = viewModel::toDanmakuSettingPage,
             )
             // 直播设置（第四阶段）：直播的后台/小窗/画质/线路/弹幕/列表是一整块独立语义，
@@ -282,7 +282,7 @@ private fun SettingPageContent(
                 // ★2026-09-26 用户实测纠错：副标题原来写"后台/小窗、默认画质、线路、直播弹幕与列表" ✗
                 //   —— 但"后台继续直播 / 退后台自动进小窗"这两项**当前没有任何 UI 入口**（值仍被播放页读取），
                 //   写在这里等于骗用户去点一个不存在的东西 ✗。改成与本页实际内容一致。
-                summary = { Text("默认画质、线路策略、自动重连、弹幕与列表") },
+                summary = { Text("画质、线路、重连与弹幕") },
                 onClick = viewModel::toLiveSettingPage,
             )
             // 「定时关闭」搬进「播放器设置 → 播放控制设置」了（用户：在播放器点齿轮进来要能找到它），
@@ -305,14 +305,14 @@ private fun SettingPageContent(
             preference(
                 key = "bottom_bar",
                 title = { Text("底栏与导航") },
-                summary = { Text("锁定底栏、滚动隐藏行为") },
+                summary = { Text("锁定与滚动隐藏") },
                 onClick = viewModel::toBottomBarSettingPage,
             )
             // 显示与字号：单项设置，按"能内联就内联"的规则直接放在这一级（点了就弹窗）
             preference(
                 key = "display_scale",
                 title = { Text("显示与字号") },
-                summary = { Text("应用内 DPI 与字体缩放，点这里直接改") },
+                summary = { Text("应用内 DPI 与字体缩放") },
                 onClick = { showDpiDialog = true },
             )
 
@@ -321,19 +321,19 @@ private fun SettingPageContent(
             preference(
                 key = "filter",
                 title = { Text("内容屏蔽") },
-                summary = { Text("按标题 / UP / 标签 / UP名屏蔽") },
+                summary = { Text("按标题、UP、标签、UP名") },
                 onClick = viewModel::toFilterSettingPage
             )
             preference(
                 key = "filter_recommend",
                 title = { Text("推荐过滤") },
-                summary = { Text("时长、播放量、封面、相关推荐等") },
+                summary = { Text("时长、播放量、封面") },
                 onClick = viewModel::toFilterRecommendPage,
             )
             preference(
                 key = "filter_comment",
                 title = { Text("评论区") },
-                summary = { Text("评论关键字、二级回复显示") },
+                summary = { Text("关键字、二级回复") },
                 onClick = viewModel::toFilterCommentPage,
             )
 
@@ -342,13 +342,13 @@ private fun SettingPageContent(
             preference(
                 key = "sponsor_block",
                 title = { Text("空降助手") },
-                summary = { Text("自动跳过片头片尾 / 赞助片段") },
+                summary = { Text("自动跳过赞助与片头片尾") },
                 onClick = viewModel::toSponsorBlockSettingPage,
             )
             preference(
                 key = "thread_ripper",
                 title = { Text("海外加速") },
-                summary = { Text("分段并发下载，改善卡顿") },
+                summary = { Text("分段并发下载") },
                 onClick = viewModel::toThreadRipperSettingPage,
             )
             preference(
@@ -368,13 +368,13 @@ private fun SettingPageContent(
                 key = SettingPreferences.AiSummaryEnabled.name,
                 defaultValue = false,
                 title = { Text("AI 视频总结") },
-                summary = { Text("视频详情页「简介」上方显示 B站官方接口生成的摘要") },
+                summary = { Text("在视频简介上方显示 AI 摘要") },
             )
             switchPreference(
                 key = SettingPreferences.WbiSignEnabled.name,
                 defaultValue = true,
                 title = { Text("WBI 签名") },
-                summary = { Text("给 B站 Web API 自动签名（遇到 -352 报错时可试着关掉）") },
+                summary = { Text("遇到 -352 报错时可关闭") },
             )
 
             // ===== ⑤ 账号与数据 =====
@@ -382,7 +382,7 @@ private fun SettingPageContent(
             preference(
                 key = "account_storage",
                 title = { Text("账号与存储") },
-                summary = { Text("游客模式、身份导入导出、缓存与重置") },
+                summary = { Text("游客模式、导入导出、缓存") },
                 onClick = viewModel::toAccountDataSettingPage,
             )
 
@@ -391,7 +391,7 @@ private fun SettingPageContent(
             preference(
                 key = "about",
                 title = { Text("关于本应用") },
-                summary = { Text("版本号、仓库、错误日志与诊断") },
+                summary = { Text("版本、仓库与错误日志") },
                 onClick = viewModel::toAboutSettingPage,
             )
 
@@ -433,7 +433,7 @@ private fun SettingPageContent(
                             Text("没找到「$q」相关的设置", style = MaterialTheme.typography.bodyLarge)
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "换个词试试，例如：弹幕、缓存、底栏、倍速、屏蔽、空降",
+                                "换个词试试，例如：弹幕、缓存、底栏",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

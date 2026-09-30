@@ -37,6 +37,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -95,6 +96,12 @@ data class UserSpacePage(
         }
         val viewModel = diViewModel() {
             UserSpaceViewModel(it, id, archiveViewModel, articleViewModel)
+        }
+        // 在别人的空间里点抽屉里的自己头像：nav entry（含 ViewModelStore）被 launchSingleTop 复用，
+        // VM 还停在旧用户 → 页面切不过去。这里只提示一句，不重建页面（见
+        // UserSpaceViewModel.hintIfStuckOnOtherSpace 的说明）。
+        LaunchedEffect(viewModel, id) {
+            viewModel.hintIfStuckOnOtherSpace(id)
         }
 //        AnimatedContent()
         UserSpacePageContent(viewModel, archiveViewModel)

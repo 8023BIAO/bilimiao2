@@ -102,6 +102,8 @@ private fun EditProfilePageContent(viewModel: EditProfileViewModel) {
 
     val fail by viewModel.fail.collectAsStateWithLifecycle()
     val profile by viewModel.profile.collectAsStateWithLifecycle()
+    // 经验值：拿不到时是 null，卡片里就不出现这一行（见 EditProfileViewModel.exp）
+    val exp by viewModel.exp.collectAsStateWithLifecycle()
     val submitting by viewModel.submitting.collectAsStateWithLifecycle()
     val submittingField by viewModel.submittingField.collectAsStateWithLifecycle()
     val lastResult by viewModel.lastResult.collectAsStateWithLifecycle()
@@ -138,6 +140,7 @@ private fun EditProfilePageContent(viewModel: EditProfileViewModel) {
     EditProfileForm(
         viewModel = viewModel,
         profile = currentProfile,
+        exp = exp,
         submitting = submitting,
         submittingField = submittingField,
         lastResult = lastResult,
@@ -149,6 +152,7 @@ private fun EditProfilePageContent(viewModel: EditProfileViewModel) {
 private fun EditProfileForm(
     viewModel: EditProfileViewModel,
     profile: AccountMyInfoInfo,
+    exp: String?,
     submitting: Boolean,
     submittingField: String?,
     lastResult: ProfileSubmitResult?,
@@ -218,6 +222,9 @@ private fun EditProfileForm(
                 InfoRow(label = "昵称", value = profile.name)
                 InfoRow(label = "个性签名", value = profile.sign.ifBlank { "（未填写）" })
                 InfoRow(label = "硬币", value = profile.coins.toInt().toString())
+                // 经验值（`12345/20000`）：只在自己空间出现，且**拿不到就整行不出现**——
+                // 不摆占位符，用户看不出"这条是坏的"（对齐 PiliPlus 我的页 硬币+经验 同一行的口径）
+                exp?.let { InfoRow(label = "经验", value = it) }
                 InfoRow(label = "UID", value = profile.mid.toString())
             }
         }

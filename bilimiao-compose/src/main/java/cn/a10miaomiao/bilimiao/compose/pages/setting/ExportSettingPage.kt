@@ -130,7 +130,7 @@ private fun ExportSettingPageContent() {
 
         item("info") {
             Text(
-                text = "导出全部设置到 JSON 文件，包括：\n• 播放/弹幕/主题/首页等参数\n• 屏蔽关键字/UP主/标签/UP名\n• 评论屏蔽词 / 弹幕过滤\n• 时光姬时间 / DPI / 代理\n\n导入后会自动重启应用。",
+                text = "导出全部设置到 JSON 文件，包括播放、弹幕、主题、屏蔽等。\n导入后会自动重启应用。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)

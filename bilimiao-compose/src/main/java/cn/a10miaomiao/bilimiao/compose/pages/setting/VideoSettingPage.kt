@@ -216,7 +216,7 @@ private fun VideoSettingPageContent(
                     Text("后台播放")
                 },
                 summary = {
-                    Text("切换应用或锁屏后继续播放音频")
+                    Text("切到后台或锁屏后继续播放")
                 },
                 defaultValue = false,
             )
@@ -226,7 +226,7 @@ private fun VideoSettingPageContent(
                     Text("小窗播放")
                 },
                 summary = {
-                    Text("退出APP时自动转为小窗悬浮播放，回到APP后自动恢复")
+                    Text("退出应用后自动小窗播放")
                 },
                 defaultValue = false,
             )
@@ -236,7 +236,7 @@ private fun VideoSettingPageContent(
                     Text("占用音频焦点")
                 },
                 summary = {
-                    Text("关闭后可以与其它APP同时播放")
+                    Text("关闭后可与其它应用同时播放")
                 },
                 defaultValue = true,
             )
@@ -255,7 +255,7 @@ private fun VideoSettingPageContent(
                 // ★ 把当前值写进摘要（用户要求）：不然每次都要点进去才知道现在选的是哪个。
                 //   listPreference 的 summary 回调会给出"当前值"，用它拼出来最准（不会滞后）。
                 summary = { value ->
-                    Text("不能播放时，换个格式试试吧（当前：${viewModel.fnvalSelectionName(value)}）")
+                    Text("播放异常时换个格式（当前：${viewModel.fnvalSelectionName(value)}）")
                 },
                 defaultValue = SettingConstants.PLAYER_FNVAL_DASH,
                 values = viewModel.fnvalSelectionList,
@@ -272,8 +272,8 @@ private fun VideoSettingPageContent(
                 },
                 summary = { value ->
                     Text(
-                        "当前：${viewModel.dashBufferSecSelectionName(value)}。" +
-                            "缓冲越久越抗卡、但更吃内存（DASH/MP4 都生效；堆内上限固定 64MB，不会因此爆内存）"
+                        "当前：${viewModel.dashBufferSecSelectionName(value)}，" +
+                            "缓冲越久越抗卡、越占内存"
                     )
                 },
                 defaultValue = 15,
@@ -300,7 +300,7 @@ private fun VideoSettingPageContent(
                     Text("$it%")
                 },
                 summary = {
-                    Text("整条音量需要的上下滑动距离 = 画面高的这个百分比；调小更灵敏、调大更迟钝；点播与直播共用")
+                    Text("调小更灵敏，调大更迟钝")
                 },
             )
             // 亮度手势滑动距离：整条亮度 = 屏高的几倍（0.5×~6.0×，步进 0.5×，默认 3.0× = 今天的手感）。
@@ -317,7 +317,7 @@ private fun VideoSettingPageContent(
                     Text("${it / 10f}×")
                 },
                 summary = {
-                    Text("整条亮度需要的上下滑动距离 = 屏高的这个倍数；调小更灵敏、调大更迟钝；点播与直播共用")
+                    Text("调小更灵敏，调大更迟钝")
                 },
             )
             // 定时关闭：原来只在设置首页一级挂着，用户在播放器点齿轮进来找不到它（用户反馈）
@@ -341,9 +341,9 @@ private fun VideoSettingPageContent(
                 },
                 summary = {
                     if (it) {
-                        Text(text = "播放时才会显示")
+                        Text(text = "仅在播放时显示")
                     } else {
-                        Text(text = "通知栏播放器已关闭")
+                        Text(text = "已关闭")
                     }
                 },
                 defaultValue = true,
@@ -354,7 +354,7 @@ private fun VideoSettingPageContent(
                     Text("播放器自动控制")
                 },
                 summary = {
-                    Text("打开或关闭视频详情时自动进行的操作")
+                    Text("打开或关闭详情页时的自动操作")
                 },
                 values = viewModel.openModeSelectionList,
                 defaultValue = SettingConstants.PLAYER_OPEN_MODE_DEFAULT,
@@ -366,7 +366,7 @@ private fun VideoSettingPageContent(
                     Text("播放器播放顺序")
                 },
                 summary = {
-                    Text("可以多个选项组合选择")
+                    Text("可多选组合")
                 },
                 defaultValue = SettingConstants.PLAYER_ORDER_DEFAULT,
                 values = viewModel.orderSelectionList,
@@ -378,7 +378,7 @@ private fun VideoSettingPageContent(
                     Text("随机播放")
                 },
                 summary = {
-                    Text("播放完一个视频后，随机播放下一个视频，单个视频循环时无效")
+                    Text("播完后随机播下一个（单个循环时无效）")
                 },
                 defaultValue = false,
             )
@@ -388,7 +388,7 @@ private fun VideoSettingPageContent(
                     Text("全屏播放屏幕方向")
                 },
                 summary = {
-                    Text("长按播放器全屏按钮可打开此选项")
+                    Text("长按全屏按钮也可打开")
                 },
                 defaultValue = SettingConstants.PLAYER_FULL_MODE_AUTO,
                 values = viewModel.fullModeSelectionList,
@@ -429,7 +429,7 @@ private fun VideoSettingPageContent(
                     Text("长按倍速倍率")
                 },
                 summary = {
-                    Text("长按屏幕时临时加快的倍率（当前 ${longPressSpeedText(it)}）")
+                    Text("当前 ${longPressSpeedText(it)}，长按屏幕临时加速")
                 },
                 defaultValue = 300,
                 values = listOf(150, 200, 300, 400),
@@ -443,7 +443,7 @@ private fun VideoSettingPageContent(
                     Text("快进/快退步长")
                 },
                 summary = {
-                    Text("双击屏幕左/右侧的跳转秒数；通知栏 ± 按钮跟随该步长。选\"关闭\"则双击任意位置都是播放/暂停（通知栏 ± 仍用默认 10 秒）")
+                    Text("双击左右侧跳转的秒数；选「关闭」则双击为播放/暂停")
                 },
                 // 默认"关闭"：双击屏幕很容易误触（用户要求）
                 defaultValue = 0,
@@ -461,9 +461,9 @@ private fun VideoSettingPageContent(
                 },
                 summary = {
                     if (it) {
-                        Text("拖动进度时在画面中央显示该时间点的缩略图（对齐 PiliPlus/B 站；视频没有缩略图数据时不显示）")
+                        Text("拖动进度时显示缩略图（无缩略图数据时不显示）")
                     } else {
-                        Text("已关闭：拖动时只显示时间气泡")
+                        Text("已关闭，仅显示时间气泡")
                     }
                 },
                 defaultValue = true,
@@ -525,9 +525,9 @@ private fun VideoSettingPageContent(
                 },
                 summary = {
                     if (it) {
-                        Text(text = "已启用，播放时可拖拽小屏播放器")
+                        Text(text = "已开启，小屏可拖拽")
                     } else {
-                        Text(text = "启用后，小屏状态时播放器手势无效")
+                        Text(text = "开启后小屏手势失效")
                     }
                 },
                 defaultValue = false,
@@ -568,9 +568,9 @@ private fun VideoSettingPageContent(
                 },
                 summary = {
                     if (it) {
-                        Text("字幕功能已打开")
+                        Text("已开启")
                     } else {
-                        Text("字幕功能已关闭")
+                        Text("已关闭")
                     }
                 },
                 defaultValue = true,
@@ -581,7 +581,7 @@ private fun VideoSettingPageContent(
                     Text("AI字幕显示")
                 },
                 summary = {
-                    Text("此AI字幕是指UP主手动生成的AI字幕，并非每个视频都有")
+                    Text("UP 主上传的 AI 字幕，不是每个视频都有")
                 },
                 defaultValue = false,
             )
@@ -596,9 +596,6 @@ private fun VideoSettingPageContent(
                 valueSteps = 17,
                 valueText = {
                     Text("${it}sp")
-                },
-                summary = {
-                    Text("当前 ${it.coerceIn(MIN_SUBTITLE_TEXT_SIZE, MAX_SUBTITLE_TEXT_SIZE)}sp（默认 $DEFAULT_SUBTITLE_TEXT_SIZE）")
                 },
             )
 

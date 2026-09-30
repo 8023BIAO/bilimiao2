@@ -64,7 +64,7 @@ fun CdnSelectDialog(
         text = {
             Column {
                 Text(
-                    "自动测速并按延迟排序。点击选择即可。",
+                    "自动测速，按延迟排序",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                 )

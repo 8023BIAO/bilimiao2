@@ -15,6 +15,7 @@ import com.a10miaomiao.bilimiao.comm.apis.MemberProfileApi
 import com.a10miaomiao.bilimiao.comm.apis.ProfileAvatarUploader
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
+import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.entity.user.AccountMyInfoInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
@@ -26,6 +27,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.instance
@@ -83,6 +87,20 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
 
     private val _profile = MutableStateFlow<AccountMyInfoInfo?>(null)
     val profile: StateFlow<AccountMyInfoInfo?> get() = _profile
+
+    /**
+     * 「当前资料」卡片里那一行经验值，形如 `12345/20000`；null = 不显示这一行。
+     *
+     * ★ 数据源：`x/space/acc/info`（[com.a10miaomiao.bilimiao.comm.apis.UserApi.accInfo]）——
+     *   聊天页取昵称/头像用的就是它（ChatPage.kt:289），本页只是多读一个 `level_info`，
+     *   **不新增接口封装**。为什么不直接读 `myinfo`：它的响应里虽然也带 `level_info`，
+     *   但我们接的 [AccountMyInfoInfo] 在 comm 模块里没声明这个字段，本页改动不跨模块。
+     *
+     * ★ 拿不到就保持 null（页面少一行），不弹错误：这是只读的展示数据，
+     *   用户来这一页是为了改昵称/头像，不该被一条读不到的附加信息打断。
+     */
+    private val _exp = MutableStateFlow<String?>(null)
+    val exp: StateFlow<String?> get() = _exp
 
     /** true = 有提交在飞。UI 的禁用态读它；真正的互斥靠 [_submitting] 的 CAS，不靠 UI */
     private val _submitting = MutableStateFlow(false)
@@ -167,6 +185,12 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
                 return@launch
             }
             _profile.value = data
+            // 经验值只对**自己**有意义（编辑资料页目前也只能从自己的空间进，这道 mid 判断是兜底）
+            // ★ isSelf 的 **Long 重载只挂在 UserStore.State 上**，类级 UserStore 只有 String 版
+            //   （UserStore.kt:138）—— 这里必须 toString()，写法与 UserFavouriteDetailContent.kt:466 一致
+            if (userStore.isSelf(data.mid.toString())) {
+                loadExp(data.mid)
+            }
             // 资料真的到手了，才值得做一次**只读**的 web 登录态体检：
             // 缺 SESSDATA/bili_jct 的话，页面上常驻一行提示 +「去网页登录」，
             // 而不是等用户选完图点上传才失败（报告 P0-1：TV 扫码登录很可能没有 web 登录态）
@@ -189,6 +213,40 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
         _fail.value = message
         if (_profile.value != null) {
             toast(if (message is String) message else "网络请求失败")
+        }
+    }
+
+    /**
+     * 读经验值，拼成「当前/下一级」两个数字（页面只负责显示）。
+     *
+     * ★ 顺带读的是一份**额外的轻请求**（`x/space/acc/info`，只有一个 card 对象）：
+     *   失败/少字段/格式怪 → 直接返回（[exp] 保持原值或 null），不 toast、不写 [_fail]，
+     *   因为编辑资料页的主数据（昵称/签名/硬币）已经由 `myinfo` 拿到了。
+     *
+     * ★ 满级（Lv6）的处理照抄 PiliPlus 的 `LevelInfo.fromJson`：
+     *   服务端这时给的 `next_exp` 可能是 0 / `"--"` / 一个天文数字，直接显示会变成「经验 x/0」，
+     *   所以满级时下一级就取当前值（进度条走满的观感）。
+     */
+    private suspend fun loadExp(mid: Long) {
+        val text = try {
+            val res = BiliApiService.userApi
+                .accInfo(mid.toString())
+                .awaitCall()
+                .json<ResultInfo<SpaceAccInfo>>()
+            val level = res.data?.level_info ?: return
+            val current = level.current_exp.asExpNumber() ?: return
+            val next = if ((level.current_level ?: 0) >= MAX_LEVEL) {
+                current
+            } else {
+                level.next_exp.asExpNumber() ?: return
+            }
+            "$current/$next"
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+        if (text != null) {
+            _exp.value = text
         }
     }
 
@@ -538,8 +596,39 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
          * 拉早了只是白拉一次（拉不到也不影响上传已成功这个事实）。
          */
         private const val FACE_REFRESH_DELAY_MS = 1_000L
+
+        /** B 站满级：到这一级 `next_exp` 不再有意义，经验按「当前/当前」显示（见 [loadExp]） */
+        private const val MAX_LEVEL = 6
     }
 }
+
+/**
+ * `x/space/acc/info` 里本页只要的那两个经验字段。
+ *
+ * ★ 为什么不复用 comm 的 [com.a10miaomiao.bilimiao.comm.entity.user.MemberInfo]：
+ *   那个模型是按**评论 member** 的形状写的（`vip` 是 accessStatus/vipStatus/vipType 那套 camelCase），
+ *   拿它接 acc/info 的响应会因缺字段直接解析失败。聊天页取昵称/头像时也是就地声明小模型
+ *   （ChatPage.kt:286 的 `AccInfo`），这里沿用同一手法：只声明要用的字段、**全部带默认值**。
+ *
+ * ★ 经验值用 [JsonElement] 而不是 Int/Long：同一个字段在不同等级/接口下既见过数字、
+ *   也见过字符串（满级时见过 `"--"`、也见过超出 Int 的天文数字），写死类型会有解析炸掉的风险，
+ *   统一交给 [asExpNumber] 收口。
+ */
+@Serializable
+private data class SpaceAccInfo(
+    val level_info: LevelInfo? = null,
+) {
+    @Serializable
+    data class LevelInfo(
+        val current_level: Int? = null,
+        val current_exp: JsonElement? = null,
+        val next_exp: JsonElement? = null,
+    )
+}
+
+/** 经验字段转数字：数字与纯数字字符串都认；`"--"`、null、对象等一律 null（= 不显示这一行） */
+private fun JsonElement?.asExpNumber(): Long? =
+    (this as? JsonPrimitive)?.content?.trim()?.toLongOrNull()
 
 /**
  * 头像专用：选中的图片 → 一个可直接上传的本地文件。

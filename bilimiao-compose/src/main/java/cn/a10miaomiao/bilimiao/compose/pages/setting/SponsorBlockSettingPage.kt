@@ -107,9 +107,9 @@ private fun SponsorBlockSettingPageContent() {
                 title = { Text("启用空降助手") },
                 summary = {
                     if (it) {
-                        Text("播放时按下面的策略自动跳过赞助/恰饭/片头片尾等片段")
+                        Text("按下面策略自动跳过片段")
                     } else {
-                        Text("已关闭：不会向第三方服务查询，也不画片段色块")
+                        Text("已关闭，不再查询服务端")
                     }
                 },
                 defaultValue = true,
@@ -120,7 +120,7 @@ private fun SponsorBlockSettingPageContent() {
                     key = "sponsor_master_hint",
                     title = { Text("下面这些设置暂时不可改") },
                     enabled = false,
-                    summary = { Text("把上面的「启用空降助手」打开即可调整") },
+                    summary = { Text("打开上方开关即可调整") },
                 )
             }
 
@@ -134,10 +134,10 @@ private fun SponsorBlockSettingPageContent() {
                     summary = { value ->
                         Text(
                             when (SponsorSkipType.of(value)) {
-                                SponsorSkipType.Disable -> "完全不管（连色块都不画）"
-                                SponsorSkipType.ShowOnly -> "只在进度条上画色块提示，不跳"
-                                SponsorSkipType.SkipManually -> "到点弹「跳过」按钮，你点了才跳（4 秒后消失）"
-                                SponsorSkipType.SkipOnce -> "自动跳，同一片段只跳一次（拖回去不再弹）"
+                                SponsorSkipType.Disable -> "完全不管，也不画色块"
+                                SponsorSkipType.ShowOnly -> "只画色块提示，不跳"
+                                SponsorSkipType.SkipManually -> "弹「跳过」按钮，点了才跳"
+                                SponsorSkipType.SkipOnce -> "同一片段只自动跳一次"
                                 SponsorSkipType.AlwaysSkip -> "每次经过都自动跳"
                             }
                         )
@@ -160,8 +160,8 @@ private fun SponsorBlockSettingPageContent() {
                 enabled = { sponsorEnabled },
                 summary = { value ->
                     Text(
-                        if (value <= 0) "不限制：任何长度的片段都按上面的策略处理"
-                        else "短于 ${value} 秒的片段只画色块、不自动跳"
+                        if (value <= 0) "不限制片段时长"
+                        else "短于 ${value} 秒只画色块、不跳"
                     )
                 },
             )
@@ -170,7 +170,7 @@ private fun SponsorBlockSettingPageContent() {
                 title = { Text("跳过时弹提示") },
                 enabled = { sponsorEnabled },
                 summary = {
-                    Text(if (it) "跳过片段时提示跳过了哪一类" else "静默跳过，不弹任何提示")
+                    Text(if (it) "提示跳过了哪一类" else "静默跳过")
                 },
                 defaultValue = true,
             )
@@ -179,7 +179,7 @@ private fun SponsorBlockSettingPageContent() {
                 title = { Text("上报已跳过") },
                 enabled = { sponsorEnabled },
                 summary = {
-                    Text(if (it) "把「已跳过」回报给服务端做统计（只带下面的匿名用户ID）" else "不上报")
+                    Text(if (it) "只上报匿名用户 ID 与跳过次数" else "不上报")
                 },
                 defaultValue = true,
             )
@@ -190,35 +190,35 @@ private fun SponsorBlockSettingPageContent() {
                 key = "sponsor_username",
                 title = { Text("公开昵称") },
                 enabled = sponsorEnabled,
-                summary = { Text("排行榜/统计里显示的名字（支持中文）。不设就显示那串公开ID") },
+                summary = { Text("排行榜显示的名字，不设用公开 ID") },
                 onClick = { SponsorBlockSettingsUi.showUsernameDialog(context) }
             )
             preference(
                 key = "sponsor_user_id",
                 title = { Text("私人ID") },
                 enabled = sponsorEnabled,
-                summary = { Text("投票/提交用的身份，相当于密码（别外发）。可编辑或重掷随机值") },
+                summary = { Text("相当于密码，别外发") },
                 onClick = { SponsorBlockSettingsUi.showUserIdDialog(context) }
             )
             preference(
                 key = "sponsor_block_server",
                 title = { Text("自定义服务端") },
                 enabled = sponsorEnabled,
-                summary = { Text("留空 = 官方 bsbsb.top；可填镜像站") },
+                summary = { Text("留空用官方服务端") },
                 onClick = { SponsorBlockSettingsUi.showServerDialog(context) }
             )
             preference(
                 key = "sponsor_block_colors",
                 title = { Text("片段颜色") },
                 enabled = sponsorEnabled,
-                summary = { Text("自定义进度条上各类别色块的颜色（不改就用默认色）") },
+                summary = { Text("进度条色块颜色，不改用默认") },
                 onClick = { SponsorBlockSettingsUi.showColors(context) }
             )
             preference(
                 key = "sponsor_block_stats",
                 title = { Text("空降助手状态") },
                 enabled = sponsorEnabled,
-                summary = { Text("服务端是否在线 / 被跳过的片段次数 / 累计节省时间") },
+                summary = { Text("在线状态、跳过次数与节省时间") },
                 onClick = { SponsorBlockSettingsUi.showStats(context) }
             )
 
@@ -227,7 +227,7 @@ private fun SponsorBlockSettingPageContent() {
             preference(
                 key = "sponsor_about_item",
                 title = { Text("关于空降助手") },
-                summary = { Text("数据来自公益项目 BilibiliSponsorBlock（小电视空降助手）") },
+                summary = { Text("数据来自 BilibiliSponsorBlock 公益项目") },
                 onClick = {
                     runCatching {
                         context.startActivity(

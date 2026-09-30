@@ -222,7 +222,8 @@ import kotlin.math.roundToInt
  *    竖屏下"亮度气泡跑到屏幕外、音量气泡不贴边"的根因是**两套坐标系的混用**
  *    （页面的屏幕坐标 vs 系统给悬浮窗分配的父框），完整证据与修法见 [applyHudGeometry] 的 KDoc；
  * 2. **竖屏改成"上面视频、下面弹幕列表"**（用户给的第一张参考图 = B 站官方竖屏直播页）：
- *    视频压成**一条带**（宽 ÷ 视频比例，封顶 [PORTRAIT_VIDEO_MAX_HEIGHT_FRACTION] 页高），
+ *    视频压成**一条带**（宽 ÷ 视频比例；高度上限 = 可用高 − 下方列表 reserve，
+ *    见 [PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION] / [portraitBandReservePx]），
  *    横屏一个字不改（仍是整屏视频 + 沉浸式）；★第四批把这条带的**顶边**从"贴顶"改成
  *    "顶栏之下"（[videoBandTopPx]），理由见下面第四批第 3 条；
  * 3. **把留给列表的那块地方交给弹幕宿主**：
@@ -542,15 +543,22 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         private const val HUD_EDGE_MARGIN_DP = 0
 
         /**
-         * 竖屏视频带的**高度上限**（占页面高度的比例）。
+         * 竖屏视频带的**高度下限**（占"可用高"的比例）—— ★2026-10-01 由"上限"改成"下限"。
          *
          * 竖屏版式 = "上面视频、下面弹幕列表"，视频高度 = `页宽 ÷ 视频比例`：
-         * · 16:9 直播（绝大多数）→ 1264px 宽的机器上只有约 711px（25% 页高），列表拿到 ~64% 屏高 ✓；
-         * · **竖屏主播（9:16）**→ 按比例算出来是 2247px（80% 页高），列表就只剩一条缝了 ✗。
-         * 所以封顶 62%：留 38% 页高给列表与底栏（1264×2800 的机器上 ≈ 1064px ≈ 380dp 列表区）。
-         * ★视频比这条带子高时由 [AspectRatioFrameLayout] 居中放（左右留黑边）——不裁切、不变形。
+         * · 16:9 直播（绝大多数）→ 1264px 宽的机器上只有约 711px（25% 可用高）→ **远低于下限，
+         *   一个字都不变** ✓；
+         * · **竖屏主播（9:16）**→ 按比例算出来是 2247px（80% 页高）。旧版在这里**封顶 62%** ⇒
+         *   画面被压到 1643px 高、只剩约 73% 屏宽（左右各一条黑边）——用户实测"竖屏直播显得很小"。
+         *
+         * 现在的口径（见 [AspectRatioFrameLayout.onMeasure]）：上限 = `可用高 − 带子 reserve`
+         * （reserve = [PORTRAIT_LIST_MIN_HEIGHT_DP] + 底栏占位，见 [portraitBandReservePx]）⇒
+         * 9:16 能吃到约 95% 屏宽；**本比例退化成"下限"**：reserve 口径算出来比它更矮时
+         * （分屏 / 折叠屏 / 极矮窗口 / reserve 还没量到）就退回它 —— 保证任何形态下带子都
+         * **不比改动前更矮**（不会为了塞列表把画面压没）。
+         * ★画面始终由 [AspectRatioFrameLayout] 等比摆放（装不下时左右留黑边）——不裁切、**不拉伸**。
          */
-        private const val PORTRAIT_VIDEO_MAX_HEIGHT_FRACTION = 0.62f
+        private const val PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION = 0.62f
 
         /**
          * 竖屏列表区的**最小可用高度**（dp）。低于它就认为"这块版式没排出来"
@@ -5276,11 +5284,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   而画面是 [AspectRatioFrameLayout] 按 [videoWidth]/[videoHeight] 摆出来的
      *   （`videoContainer.videoAspectRatio` 与这里同源，都由 `onVideoSizeChanged` 写），
      *   所以"真实解码尺寸"就是画面比例，正是系统要的那个数；
-     * · **视频带矩形 ≠ 画面矩形**：竖屏带子封顶 [PORTRAIT_VIDEO_MAX_HEIGHT_FRACTION] 页高，
-     *   9:16 的竖屏主播在 1080 宽的页面上是"1080×1488 的带子 + 837×1488 的画面"——
-     *   拿带子比例（0.73）当 PiP 比例，小窗会变成横的，画面反而左右两条大黑边。
+     * · **视频带矩形 ≠ 画面矩形**：竖屏带子按"可用高 − 下方列表 reserve"封顶
+     *   （[PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION] / [portraitBandReservePx]），
+     *   9:16 的竖屏主播在 1080 宽的页面上仍是"带子满宽、画面等比居中放"——
+     *   拿带子比例当 PiP 比例，小窗会变成横的，画面反而左右两条大黑边。
      * ⇒ 黑边的真凶不是这个比例，而是"**PiP 里页面仍按竖屏带子版式排版**"（见 [applyVideoStageLayout]）：
-     *   小窗的窗口比例是对的，但画面在小窗里被那条 62% 的带子挤成了中间一小块。
+     *   小窗的窗口比例是对的，但画面在小窗里被那条带子挤成了中间一小块。
      */
     /**
      * "**画面尺寸已经到手**" —— PiP 那条链路的就绪判据（**点播 `delegate.isOpened()` 的同义物**）。
@@ -5837,6 +5846,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                     "oldTop" to oldTop,
                     "appliedInset" to appliedBottomBarInsetPx,
                 )
+                // ★2026-10-01：底栏顶边也是"视频带 reserve"的输入（reserve = 列表最小高 + 底栏占位，
+                //   见 [portraitBandReservePx]）—— 底栏一变高/变矮（键盘抬起、失败提示行显隐、
+                //   转屏换版式、刚出 PiP 底栏从 GONE 回来）就必须把带子重排一次；不重排，
+                //   带子会按旧 reserve 停在偏高的位置，把下方列表区挤到 96dp 之下
+                //   （宿主随即把面板收起 = 用户看到"弹幕列表忽然没了"）。
+                //   [applyVideoStageLayout] 幂等（band/reserve 没变就一个字节不写），且与
+                //   [measurePortraitStage] 不会形成"改→布局→再改"的自激回路：它只动 videoContainer。
+                applyVideoStageLayout()
                 measurePortraitStage()
                 // ★★第九批：底栏顶边一变（键盘抬栏 / 失败提示行显隐 / 转屏换版式 / 窗口变矮），
                 //   除了当场重量列表槽，还要**落定后再推一次宿主的列表面板** ——
@@ -8320,11 +8337,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * ## 矩形从哪来（"竖屏版式的唯一真相"）
          * 直接读 [videoContainer]（`AspectRatioFrameLayout`）**当前的真实几何**，换算到屏幕坐标：
          * ```
-         * 竖屏：videoContainer = 顶栏之下的视频带，高 = 宽 ÷ 视频比例（封顶 62% 页高）
+         * 竖屏：videoContainer = 顶栏之下的视频带，高 = min(宽 ÷ 视频比例, 可用高 − 列表 reserve)
          *       —— 这与 [measurePortraitStage] 发布出去的 [portraitVideoRect] **是同一个矩形**
          *          （那里面写的就是 `Rect(videoContainer.left, top, right, bottom)`），
          *          也就是弹幕列表要贴的那个"画面底边"的来源；这里直接读容器，不多一份镜像。
-         * 横屏：videoContainer 铺满整页（`bandMaxHeightFraction = 0`）→ 矩形 = 整屏。
+         * 横屏：videoContainer 铺满整页（`bandMinHeightFraction = 0`）→ 矩形 = 整屏。
          *       ★横屏的"屏幕最上面那条（顶栏安全区）"由 [landscapeGestureShieldBottomPx] 在**起手**
          *         处另行挡掉（第十五批第 4 条），不在本判据里表达 —— 本判据只管"在不在画面里"。
          * ```
@@ -8588,12 +8605,38 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (::topBar.isInitialized && topBar.height > 0) topBar.bottom.coerceAtLeast(0) else 0
 
     /**
+     * 竖屏视频带要**给下方让出来的高度**（页内 px）—— 2026-10-01 新版带高的唯一输入。
+     *
+     * ```
+     * reserve = (页高 − 底栏顶边)  +  列表最小高
+     *           └─ 底栏占位（页底→底栏顶） └─ [PORTRAIT_LIST_MIN_HEIGHT_DP]
+     * ```
+     * 用"页高 − 底栏顶边"而不是 `bottomBar.height`：底栏贴页底，两者本该相等，但前者把
+     * "底栏外面还包着一层内边距/页底留白"的情况也算进去 —— 而弹幕列表区的底边认的正是
+     * **底栏顶边**（[measurePortraitStage] 的 `listBottom = bottomBar.top`）。按同一个基准留，
+     * 列表才既不会被输入条压住一截、也不会被挤到 96dp 之下（那会让宿主把面板整个收起）。
+     *
+     * ★拿不到可信几何就返回 **0**（= 不设 reserve）：[AspectRatioFrameLayout] 见到 0 会退回
+     *   [PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION] 的旧口径。首帧（底栏还没布局）、刚出 PiP
+     *   （PiP 里底栏是 GONE）都会命中这一支 —— 按旧版摆一帧，远比"猜一个 reserve 把画面压小"
+     *   安全；底栏一落定，[installPageLayoutWatchers] 里那只底栏监听器会再调一次
+     *   [applyVideoStageLayout]，reserve 随即补上（幂等，值没变就一个字节不写）。
+     */
+    private fun portraitBandReservePx(): Int {
+        if (!::rootLayout.isInitialized || !::bottomBar.isInitialized) return 0
+        val pageHeight = rootLayout.height
+        val barTop = bottomBar.top
+        if (pageHeight <= 0 || bottomBar.height <= 0 || barTop <= 0) return 0
+        return (pageHeight - barTop).coerceAtLeast(0) + dpToPx(PORTRAIT_LIST_MIN_HEIGHT_DP)
+    }
+
+    /**
      * 按当前形态排一次版式（[buildUi] 末尾、[syncPageLayoutToRealSize]、进出小窗各调一次）。
      *
      * ## ★★第八批：**PiP 里必须"画面铺满窗口"**（用户实测第 4 条的修法，根因证据在这段里）
      *
      * ```
-     * 不在 PiP：竖屏 = 顶栏之下的一条带（高 ≤ 62% 页高，顶边 = 顶栏底边）
+     * 不在 PiP：竖屏 = 顶栏之下的一条带（高 = min(宽÷比例, 可用高 − 列表 reserve)，顶边 = 顶栏底边）
      *          横屏 = 容器铺满整页、画面按比例居中
      * 在  PiP：**一律走"铺满"这一支**（band = 0、topMargin = 0）—— 与小窗的形状无关
      * ```
@@ -8604,7 +8647,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ② 可是小窗里**没人重排过版式**：[syncPageLayoutToRealSize] / [syncBottomBarLayout] 在
      *    `isInPictureInPictureMode` 时**直接 return**（那是有意的：小窗的尺寸不代表全屏版式），
      *    而 [applyVideoStageLayout] 的唯一调用点就是 [syncPageLayoutToRealSize]（+ [buildUi]）；
-     * ③ 于是竖屏进小窗时，`videoContainer.bandMaxHeightFraction` 还是 0.62、
+     * ③ 于是竖屏进小窗时，`videoContainer.bandMinHeightFraction` 还是 0.62、
      *    `topMargin` 还是全屏时顶栏的高度（`topBar` 已经 GONE，`top()` 停在最后一次布局的位置）
      *    —— 小窗里画面被压成"小窗高 - 顶栏高"的 62%，还要再按比例居中，四周全是黑边；
      * ④ 竖屏**主播（9:16）**更明显：小窗本身是竖的（窗口比例 = 视频比例），
@@ -8625,7 +8668,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         val portrait = !isPageLandscape(orientationOverride) && !pipFill
         // ① 视频：竖屏 = 顶栏之下的一条带（高度由 [AspectRatioFrameLayout] 按比例量）；
         //          横屏 / PiP = 0f = 关掉带子，容器铺满整页（横屏与改动前逐字一致）
-        val band = if (portrait) PORTRAIT_VIDEO_MAX_HEIGHT_FRACTION else 0f
+        val band = if (portrait) PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION else 0f
+        // ★2026-10-01：带子的高度上限 = 可用高 − reserve（reserve = 列表最小高 + 底栏占位），
+        //   只有竖屏带子模式才需要它；量不到底栏（reserve = 0）时**不猜** —— 由
+        //   [AspectRatioFrameLayout] 退回旧的 0.62 口径摆一帧，宁可先按旧版摆，
+        //   也不要拿一个猜出来的 reserve 去定版式。
+        val bandReserve = if (band > 0f) portraitBandReservePx() else 0
         // ★第四批第 3 条：带子模式下顶边 = 顶栏底边（横屏/听音频/PiP 保持 0 = 铺满/贴顶）
         val bandTop = if (band > 0f) videoBandTopPx() else 0
         val lp = videoContainer.layoutParams
@@ -8637,20 +8685,23 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // ★topMargin 不只是"挪一下"：FrameLayout 给 MATCH_PARENT 子 View 的高度测量里会**扣掉
             //   margin**（`getChildMeasureSpec(parentHeight, padding + margins, MATCH_PARENT)`），
             //   所以 [AspectRatioFrameLayout] 算带子高度时用的可用高度天然就是"页高 - 顶栏"——
-            //   62% 的封顶也落在剩下的这块里，带子不会被顶出屏幕。
+            //   带子高度上限（reserve 口径）也落在剩下的这块里，带子不会被顶出屏幕。
             lp.gravity = Gravity.TOP
             lp.topMargin = bandTop
             videoContainer.layoutParams = lp
         }
         appliedVideoBandTop = bandTop
-        if (videoContainer.bandMaxHeightFraction != band) {
-            videoContainer.bandMaxHeightFraction = band
+        if (videoContainer.bandMinHeightFraction != band ||
+            videoContainer.bandReserveBottomPx != bandReserve
+        ) {
+            videoContainer.bandMinHeightFraction = band
+            videoContainer.bandReserveBottomPx = bandReserve
             videoContainer.requestLayout()
         }
-        // ★诊断日志（只读；签名没变就不写）：视频带版式（top/height、是否 PiP 全幅）
+        // ★诊断日志（只读；签名没变就不写）：视频带版式（top/height、是否 PiP 全幅、reserve）
         LivePageTrace.noteIfChanged(
             "stage.video",
-            "pip=$pipFill|portrait=$portrait|band=$band|bandTop=$bandTop" +
+            "pip=$pipFill|portrait=$portrait|band=$band|bandTop=$bandTop|reserve=$bandReserve" +
                 "|top=${videoContainer.top}|h=${videoContainer.height}|w=${videoContainer.width}" +
                 "|page=${if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"}",
             "stage.video",
@@ -8658,6 +8709,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "portrait" to portrait,
             "bandFraction" to band,
             "bandTop" to bandTop,
+            "bandReservePx" to bandReserve,
             "appliedBandTop" to appliedVideoBandTop,
             "topBarBottom" to (if (::topBar.isInitialized) topBar.bottom else -1),
             "videoRect" to LivePageTrace.rect(Rect(videoContainer.left, videoContainer.top, videoContainer.right, videoContainer.bottom)),
@@ -8885,10 +8937,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * 为什么需要：直播既有 16:9 也有竖屏主播（9:16），
      * 不按比例摆放就会变形。这里在 measure 阶段把子 View 量成"贴比例"的尺寸，
-     * 再由 FrameLayout 的 CENTER gravity 居中（黑边留在两侧/上下）。
+     * 再由 FrameLayout 的 CENTER gravity 居中（黑边留在两侧/上下）——**恒等比，从不拉伸**。
      *
-     * ★本轮新增 [bandMaxHeightFraction]（竖屏"贴顶视频带"）：>0 时**容器自己**也按比例缩成一条带，
+     * ★[bandMinHeightFraction]（竖屏"贴顶视频带"）：>0 时**容器自己**也按比例缩成一条带，
      *   而不是铺满整页 —— 这是"上面视频、下面弹幕列表"这块版式的落地处。横屏传 0，行为与改动前逐字一致。
+     *
+     * ★★2026-10-01 带高口径（用户："竖屏直播尽量全屏铺满、千万不要拉伸"）：
+     * ```
+     * 带高 = min(宽 ÷ 视频比例,  可用高 − bandReserveBottomPx)     ← 且不低于 可用高 × bandMinHeightFraction
+     * ```
+     * 旧口径是 `min(宽÷比例, 可用高 × 0.62)`：9:16 主播的"宽÷比例"（≈1.78×宽）被 0.62 压掉，
+     * 画面只剩约 73% 屏宽。新口径把"下方要留给弹幕列表的地方"（[bandReserveBottomPx]）**先让出来**，
+     * 剩下的全给画面 ⇒ 约 95% 屏宽；16:9（宽÷比例 ≈ 0.56×宽）两种口径下都远低于上限，一个字不变。
+     * 而 [bandMinHeightFraction] 退化成**下限**：只有"让完 reserve 后比旧口径还矮"（分屏/折叠屏/
+     * 极矮窗口）或 reserve 还没量到（0）时才生效 —— 保证不会为了塞列表把画面压得比改动前更小。
      */
     private class AspectRatioFrameLayout(context: Context) : FrameLayout(context) {
 
@@ -8901,19 +8963,28 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         var videoAspectRatio: Float = 0f
 
         /**
-         * ★竖屏"贴顶视频带"的高度上限（占页面高度的比例），0 = 关闭（横屏 / 现状）。
+         * ★竖屏"贴顶视频带"的高度**下限**（占"可用高"的比例），0 = 关闭带子（横屏 / PiP）。
          *
          * 为什么高度算法放在 onMeasure 里、而不是在外面算好了 setLayoutParams：
          * "页面有多高"要等这一帧量完才知道，在外面算就得跟布局时机赛跑（转屏/分屏/折叠屏展开
          * 那几种时机正是历史上"几何还是旧方向"的 bug 来源）。放在这里，用的永远是当前这一帧的真值。
          */
-        var bandMaxHeightFraction: Float = 0f
+        var bandMinHeightFraction: Float = 0f
+
+        /**
+         * ★竖屏带子要**留给下方弹幕列表**的高度（px），0 = 没量到 / 不设 reserve。
+         *
+         * 由 [portraitBandReservePx] 算好推进来（= 列表最小高 + 底栏占位），语义与"为什么不在
+         * onMeasure 里自己算"都写在那边的 KDoc 里：容器看不见底栏，这个值只能由播放页给。
+         * 为 0 时**不参与**上限计算（退回 [bandMinHeightFraction] 的旧口径），绝不猜。
+         */
+        var bandReserveBottomPx: Int = 0
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
             val child = getChildAt(0) ?: return
             val ratio = videoAspectRatio
-            val band = bandMaxHeightFraction > 0f
+            val band = bandMinHeightFraction > 0f
             // 还没拿到真实比例时：老行为是"容器撑满"（等于把画面拉伸铺满），带子模式下先按 16:9 摆一条 ——
             // 宁可先按最常见比例摆一帧，也不要把画面拉成整页高
             if (ratio <= 0f && !band) return
@@ -8921,10 +8992,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val containerHeight = View.MeasureSpec.getSize(heightMeasureSpec)
             if (containerWidth <= 0 || containerHeight <= 0) return
             val effectiveRatio = if (ratio > 0f) ratio else DEFAULT_ASPECT_RATIO
-            // 带子模式下，容器的"可用高度"= 宽 ÷ 比例，并封顶 bandMaxHeightFraction × 页高
+            // 带子模式：上限 = 可用高 − reserve（把下方列表的地方先让出来）；
+            // reserve 没量到（0）或让完比下限还矮 ⇒ 退回下限口径（= 改动前的 62% 行为）
             val height = if (band) {
+                val floorCap = (containerHeight * bandMinHeightFraction).roundToInt()
+                val reserveCap = if (bandReserveBottomPx > 0) {
+                    (containerHeight - bandReserveBottomPx).coerceAtLeast(1)
+                } else {
+                    floorCap
+                }
                 (containerWidth / effectiveRatio).roundToInt()
-                    .coerceAtMost((containerHeight * bandMaxHeightFraction).roundToInt())
+                    .coerceAtMost(maxOf(reserveCap, floorCap))
                     .coerceAtLeast(1)
             } else {
                 containerHeight

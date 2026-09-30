@@ -69,6 +69,12 @@ class UserSpaceViewModel(
 
     val isSelf get() = userStore.isSelf(vmid)
 
+    /**
+     * 已经提示过的「当前空间 mid → 目标 mid」组合，只服务 [hintIfStuckOnOtherSpace]：
+     * 本页 VM 会被同一个 nav entry 复用，返回页面会再进一次组合，靠它避免重复弹同一句提示。
+     */
+    private var hintedKey: String? = null
+
     val tabs = listOf(
         UserSpacePageTabs.Index(this),
         UserSpacePageTabs.Dynamic(vmid),
@@ -171,6 +177,34 @@ class UserSpaceViewModel(
     /** 自己的空间 → 「编辑资料」。目标页已在 BilimiaoPageRoute 里 composable 注册（规则 C） */
     fun toEditProfile() {
         pageNavigation.navigate(EditProfilePage())
+    }
+
+    /**
+     * 在**别人的空间**里从抽屉点了自己头像（目标是自己的空间）时，只给一句提示。
+     *
+     * ★ 为什么需要它：导航框架的 `launchSingleTop` 对"同一个路由、不同参数"只会**复用同一个
+     *   nav entry**（`NavControllerImpl.launchSingleTopInternal` 用旧 entry 的 id 和 ViewModelStore
+     *   建出新 entry），所以本页的 ViewModel 还停在上一个用户上 —— 页面切不过去，
+     *   用户看到的就是"点了没反应、一直在瞎点"。
+     *   ★ 用户 2026-10-01 明确：这里**只加提示**，不重建页面、不改导航结构
+     *   （真要就地切过去得走 VideoDetailPage 那套"单个 VM + 换目标"，是另一件事）。
+     *
+     * 只在「目标是自己、当前却停在别人空间」时提示：
+     * 自己空间点别人头像（同一条复用路径的反向）不会被误伤，正常看别人的空间也不会被打扰。
+     *
+     * ★ 为什么要 [hintedKey]：调用点是 `UserSpacePage.Content()` 里的 `LaunchedEffect(viewModel, id)`
+     *   —— 那是"每次进组合"语义。而本页 VM 恰恰是**被复用**的那个（见上），
+     *   于是"点自己头像 → 进某个详情页 → 返回"会再进一次组合、**再弹一次**同样的提示。
+     *   这里按"当前空间 mid → 目标 mid"记一次：同一组合只提示一次；
+     *   换成第三个空间再点自己头像（vmid 变了）仍会正常提示。
+     */
+    fun hintIfStuckOnOtherSpace(targetId: String) {
+        if (vmid == targetId) return
+        if (!userStore.isSelf(targetId)) return
+        val key = "$vmid->$targetId"
+        if (key == hintedKey) return
+        hintedKey = key
+        toast("当前是他人空间，退出后再进自己的空间")
     }
 
     fun toFans() {

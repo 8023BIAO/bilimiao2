@@ -93,6 +93,24 @@ class PageNavigation(
         hostController.navigate(route, navOptions ?: singleTopNavOptions, navigatorExtras)
     }
 
+    /**
+     * 清掉上面那道"连点闸门"的指纹（[lastNavSignature] / [lastNavAt]）。
+     *
+     * ★ 只给**有意**的重复导航用：内嵌网页（WebPage.kt）交棒给站内页面时走的是
+     *   "先压目标页 → 再把中间页连同目标页一起弹掉 → 重新压同一个目标页"，
+     *   两次导航**同路由同参数**、间隔远小于 1 秒 —— 第二次会被闸门静默吞掉，
+     *   用户看到的就是"闪一下又回到原来那一页"。
+     *   （2026-10-01 用户报障：评论里的 b23.tv 短链点了不跳，根因即此。）
+     *   调用点必须在**弹栈成功之后、重新导航之前**，只影响紧接着的那一次导航。
+     *
+     * ★ 不要为了这个 bug 去掉闸门本身（它挡的是"同一个入口手抖连点压 N 层"）；
+     *   也不要拿它当"失败重试"的开关 —— 那是另一回事。
+     */
+    fun resetNavDedupe() {
+        lastNavSignature = null
+        lastNavAt = 0L
+    }
+
     fun <T : ComposePage> navigate(
         route: T,
         builder: NavOptionsBuilder.() -> Unit

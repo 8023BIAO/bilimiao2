@@ -137,7 +137,7 @@ private fun AutoStopTimerPageContent(
 
         // 滑块说明
         Text(
-            text = "0 - 60 分钟",
+            text = "0~60 分钟",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp)
@@ -188,7 +188,7 @@ private fun AutoStopTimerPageContent(
 
         // 提示文字
         Text(
-            text = "定时关闭会在视频播放达到指定时长后自动暂停",
+            text = "播放到设定时长后自动暂停",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp)
