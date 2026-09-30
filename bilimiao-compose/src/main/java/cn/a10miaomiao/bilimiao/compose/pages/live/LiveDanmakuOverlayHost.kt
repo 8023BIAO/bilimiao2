@@ -972,6 +972,20 @@ class LiveDanmakuOverlayHost(
                 //     （`systemDark` 是无默认值的必填参数，不能直接删掉），
                 //     代价就是浅色档下名字偏暗、对比度掉回 ≈3.25:1。
                 val themeState = remember { liveSheetThemeState(context) }
+                // ★2026-10-01：列表**正文**字号跟着**直播自己的**「弹幕字号」走（`live_danmaku_font_size`，
+                //   与滚动弹幕同一个键 —— 两者都属于"直播弹幕"，不新增设置项）。
+                //   ★必须**订阅**、不能只 `loadCached()` 读一次：竖屏底栏那颗「设置」能在直播间里
+                //     当场改字号（`showLiveSettingSheet`），读一次的话要重进直播间才生效 ——
+                //     用户要的就是"改完列表立刻变"。
+                //   写法与上面滚动浮层那份订阅逐字同款（同一路 Flow、同一个初始值策略：
+                //   `loadCached()` 是主线程 O(1) 的内存快照，首帧就有正确的字号，不会先按默认画一帧再跳）。
+                //   ★与"不可见不干活"那条不变式不冲突：那是针对高频的 `chat.lines`，
+                //     而这里是低频的设置流（只有用户改直播弹幕设置才会推一次），且面板 View
+                //     本身要等列表**显示过一次**才会被 `ensureListPanel()` 建出来。
+                val chatSettingsFlow = remember { LiveDanmakuSettings.watch(context) }
+                val chatSettings by chatSettingsFlow.collectAsStateWithLifecycle(
+                    initialValue = remember { LiveDanmakuSettings.loadCached() },
+                )
                 MaterialTheme(colorScheme = appColorScheme(themeState.copy(darkMode = 2), systemDark = true)) {
                     // ★visible 用的是与 View 显隐**同一个信号**（listShown），不是裸的"竖屏"：
                     //   面板处于隐藏态时，这一份组合必须真的**不订阅** chat.lines
@@ -982,6 +996,8 @@ class LiveDanmakuOverlayHost(
                         // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
                         //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。
                         fadingOut = panelFadingOut.value,
+                        // ★2026-10-01：正文吃直播「弹幕字号」（默认 15sp；提示语/按钮那几处 11sp 标签不吃）
+                        fontSizeSp = chatSettings.fontSizeSp,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

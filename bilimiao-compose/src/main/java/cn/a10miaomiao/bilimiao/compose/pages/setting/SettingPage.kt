@@ -166,6 +166,11 @@ private class SettingPageLink(
     val category: String,
     val keywords: String,
     val nav: () -> Unit,
+    /**
+     * 需要登录才能用的页面：未登录/游客时首页入口与搜索入口都不显示
+     * （判据与 [SettingPageContent] 里的 `loginGatedPrefNames` 成对，别只改一处）。
+     */
+    val requiresLogin: Boolean = false,
 )
 
 @Composable
@@ -217,7 +222,7 @@ private fun SettingPageContent(
             SettingPageLink("空降助手", "自动跳过赞助与片头片尾", "④ 扩展", "空降 跳过 片头 片尾 赞助 恰饭", viewModel::toSponsorBlockSettingPage),
             SettingPageLink("海外加速", "分段并发下载", "④ 扩展", "海外 加速 并发 分段 卡顿 线程", viewModel::toThreadRipperSettingPage),
             SettingPageLink("CDN", "竞速、固定主机、音频独立", "④ 扩展", "cdn 节点 线路 主机 竞速", viewModel::toCdnSettingPage),
-            SettingPageLink("评论反诈", "发评后自动检测是否被限流", "④ 扩展", "评论 反诈 限流 吞评 复查 申诉", viewModel::toAntifraudSettingPage),
+            SettingPageLink("评论反诈", "发评后自动检测是否被限流", "④ 扩展", "评论 反诈 限流 吞评 复查 申诉", viewModel::toAntifraudSettingPage, requiresLogin = true),
             SettingPageLink("账号与存储", "游客模式、导入导出、缓存", "⑤ 账号与数据", "账号 登录 游客 身份 导入 导出 备份 缓存 重置 清空", viewModel::toAccountDataSettingPage),
             SettingPageLink("关于本应用", "版本、仓库与错误日志", "⑥ 关于", "关于 版本 版本号 vc github 仓库 错误 日志 致谢", viewModel::toAboutSettingPage),
             // 动作型：没有独立页面（点了直接弹窗/执行），但同样要能被搜到
@@ -226,6 +231,19 @@ private fun SettingPageContent(
             SettingPageLink("退出登录", "清除登录状态", "⑤ 账号与数据", "退出 登出 logout 切号 账号", { showLogoutDialog.value = true }),
         )
     }
+    // ★2026-10-01 登录门名单：未登录/游客时不显示的**单项**（与请求侧的登录判断成对）——
+    //   · AI 视频总结：VideoDetailViewModel.kt:1032 未登录直接 return；
+    //   · 评论反诈三件套：CommentAntifraudLauncher.kt:127-130 未登录静默 SKIPPED；
+    //   · 已关注UP主白名单：FilterStore.kt:359 依赖服务端按登录态返回的 is_followed（游客恒 0）。
+    //   搜索结果直接读 SettingsSearchIndex（第二条渲染路径），必须用同一份名单挡掉，
+    //   否则"首页藏了、搜索又冒出来"。新增登录门项时**这里和 UI 门控要一起改**。
+    val loginGatedPrefNames = setOf(
+        SettingPreferences.AiSummaryEnabled.name,
+        SettingPreferences.AntifraudEnabled.name,
+        SettingPreferences.AntifraudRecheckEnabled.name,
+        SettingPreferences.AntifraudRecheckMinutes.name,
+        SettingPreferences.FollowWhitelistEnabled.name,
+    )
     ProvidePreferenceLocals(
         flow = rememberPreferenceFlow(dataStore)
     ) {
@@ -357,19 +375,29 @@ private fun SettingPageContent(
                 summary = { Text("竞速、固定主机、音频独立") },
                 onClick = viewModel::toCdnSettingPage,
             )
-            preference(
-                key = "antifraud",
-                title = { Text("评论反诈") },
-                summary = { Text("发评后自动检测是否被限流") },
-                onClick = viewModel::toAntifraudSettingPage,
-            )
+            // ★2026-10-01：评论反诈也是登录门功能 —— 检测的是"自己发的评论"是否被限流，
+            //   未登录根本发不了评论；请求侧 CommentAntifraudLauncher.kt:127-130 未登录会静默 SKIPPED，
+            //   留着入口/开关等于给用户一个永远不生效的东西。与 AI 总结同一套 userState 判据。
+            if (userState.isLogin()) {
+                preference(
+                    key = "antifraud",
+                    title = { Text("评论反诈") },
+                    summary = { Text("发评后自动检测是否被限流") },
+                    onClick = viewModel::toAntifraudSettingPage,
+                )
+            }
             // 单项设置直接内联（按"能内联就内联"）：省掉一次跳转
-            switchPreference(
-                key = SettingPreferences.AiSummaryEnabled.name,
-                defaultValue = false,
-                title = { Text("AI 视频总结") },
-                summary = { Text("在视频简介上方显示 AI 摘要") },
-            )
+            // ★2026-10-01：AI 总结是**登录门**功能（请求侧 VideoDetailViewModel.kt:1032 未登录直接 return，
+            //   只弹一句 toast），未登录/游客时不该显示这个开关（用户反馈"没登录还显示"）。
+            //   登录态用 userState（:181 的 stateFlow），登录/退出后会重组、开关自动跟着出现/消失。
+            if (userState.isLogin()) {
+                switchPreference(
+                    key = SettingPreferences.AiSummaryEnabled.name,
+                    defaultValue = false,
+                    title = { Text("AI 视频总结") },
+                    summary = { Text("在视频简介上方显示 AI 摘要") },
+                )
+            }
             switchPreference(
                 key = SettingPreferences.WbiSignEnabled.name,
                 defaultValue = true,
@@ -421,12 +449,19 @@ private fun SettingPageContent(
                 // 页面入口（有跳转的）
                 val q = searchQuery.trim()
                 val pageHits = settingPages.filter { p ->
-                    p.title.lowercase().contains(q.lowercase()) ||
-                        p.category.lowercase().contains(q.lowercase()) ||
-                        p.keywords.lowercase().contains(q.lowercase())
+                    // requiresLogin 的页面（评论反诈）未登录不进搜索入口 —— 它只能从首页那一行进去，
+                    // 两处都挡住了，未登录就不可能导航到 AntifraudSettingPage（全仓只有 SettingPage.kt:143-144 一处 navigate）。
+                    (userState.isLogin() || !p.requiresLogin) &&
+                        (p.title.lowercase().contains(q.lowercase()) ||
+                            p.category.lowercase().contains(q.lowercase()) ||
+                            p.keywords.lowercase().contains(q.lowercase()))
                 }
                 // 开关 / 数值（可直接在这里改）
-                val itemHits = SettingsSearchIndex.search(q)
+                // ★2026-10-01：搜索结果是**另一条渲染路径**（直接读 SettingsSearchIndex），会绕过首页的门控 ——
+                //   首页藏了、搜索"AI/反诈/白名单"又冒出来。统一用上面的 loginGatedPrefNames 挡掉。
+                val itemHits = SettingsSearchIndex.search(q).filter { item ->
+                    userState.isLogin() || item.prefName !in loginGatedPrefNames
+                }
                 if (pageHits.isEmpty() && itemHits.isEmpty()) {
                     item("no_result") {
                         Column(Modifier.fillMaxWidth().padding(24.dp)) {

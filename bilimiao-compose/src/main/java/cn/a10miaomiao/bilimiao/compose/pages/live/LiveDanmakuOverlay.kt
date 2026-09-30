@@ -1191,6 +1191,13 @@ private class LiveChatBottomScroller(private val listState: LazyListState) {
  *   ★这期间的例外是**明说**的：内容会多订阅 [LiveDanmakuChatLog.lines] 一二百毫秒；
  *   淡完宿主把 View 置 GONE 并把本参数置回 false，组合立刻回到"不组内容"（稳态零开销不变）。
  *   触摸不吃（`clickable` 的 `enabled` 只认 [visible]）、effect 也不再跑（都以 [visible] 为门）。
+ * @param fontSizeSp ★2026-10-01 新增：列表**正文**字号（sp）。来源是**直播自己的**「弹幕字号」
+ *   （`live_danmaku_font_size`，默认 15sp、范围 [LiveDanmakuSettings.FONT_SIZE_SP_MIN]~
+ *   [LiveDanmakuSettings.FONT_SIZE_SP_MAX]），由宿主订阅后一路传下来 —— 用户在直播设置弹窗里
+ *   当场改，列表跟着变。**不新增设置项**，与滚动弹幕共用同一个键（两者都是"直播弹幕"）。
+ *   缺省 = [CHAT_ROW_TEXT_SIZE_SP]（13f）：没接线时与改动前逐字一致。
+ *   ★提示语 / 「↓ 回到底部」按钮那几个 11sp 标签**不吃**这个值（它们是 UI 标签不是弹幕正文，
+ *   跟着 48sp 会炸版）。
  */
 @Composable
 fun LiveDanmakuChatPanel(
@@ -1198,6 +1205,7 @@ fun LiveDanmakuChatPanel(
     visible: Boolean,
     modifier: Modifier = Modifier,
     fadingOut: Boolean = false,
+    fontSizeSp: Float = CHAT_ROW_TEXT_SIZE_SP,
 ) {
     // ★注意这个早退的判据：只看"判定"是不够的 —— 退场动画期间还要留着内容给它淡（见 fadingOut）
     if (!visible && !fadingOut) return
@@ -1391,6 +1399,8 @@ fun LiveDanmakuChatPanel(
                 items(items = chat.lines, key = { it.key }) { line ->
                     LiveDanmakuChatRow(
                         line = line,
+                        // ★2026-10-01：正文字号由宿主从直播「弹幕字号」传下来（见 [CHAT_ROW_TEXT_SIZE_SP]）
+                        fontSizeSp = fontSizeSp,
                         // ★本轮：条目增删/位移的动画（`Modifier.animateItem`，Compose 1.7+ 的 API；
                         //   本工程 foundation = 1.12.1，证据见报告 §1）。
                         //   三个参数按位置给（`animateItem(淡入, 位移, 淡出)`），不写参数名 ——
@@ -1489,9 +1499,15 @@ fun LiveDanmakuChatPanel(
  *   宿主那边用的是同一个 `appColorScheme()` + `liveSheetThemeState()`（与直播设置弹窗同一条路径）。
  *
  * 只换了**颜色的来源**：字号/行高/内边距/最多 4 行/省略号、列表的滚动与去重逻辑，一个字没动。
+ * ★2026-10-01：字号/行高改成由 [fontSizeSp] 驱动（默认仍是 13sp/17sp，见 [CHAT_ROW_TEXT_SIZE_SP]）——
+ *   用户实测"列表内容有点小"，而它以前是**写死**的、不吃直播「弹幕字号」设置。
  */
 @Composable
-private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine, modifier: Modifier = Modifier) {
+private fun LiveDanmakuChatRow(
+    line: LiveDanmakuChatLine,
+    fontSizeSp: Float,
+    modifier: Modifier = Modifier,
+) {
     // 用户名色 = 当前主题色（★不要写死颜色：用户换主题后这里要跟着变）
     val unameColor = MaterialTheme.colorScheme.primary
     // ★本轮：把这条 AnnotatedString **记住**（key = 这一行的三要素 + 用户名色）。
@@ -1513,8 +1529,10 @@ private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine, modifier: Modifier = M
     }
     Text(
         text = text,
-        fontSize = 13.sp,
-        lineHeight = 17.sp,
+        fontSize = fontSizeSp.sp,
+        // ★行高按改动前的 17/13 比例跟着字号走（用户把「弹幕字号」调到 48sp 时行距必须一起放大，
+        //   否则行与行会叠在一起）；默认 13sp ⇒ 17sp，与改动前逐字一致。
+        lineHeight = (fontSizeSp * CHAT_ROW_LINE_HEIGHT_RATIO).sp,
         // 长弹幕最多 4 行（列表是拿来扫读的，一条占满屏就失去意义了）；超出省略
         maxLines = 4,
         overflow = TextOverflow.Ellipsis,
@@ -1626,9 +1644,33 @@ private const val CHAT_FOLLOW_TICK_MS = 200L
 private const val CHAT_PENDING_MAX = 40
 
 /**
+ * 停靠列表**正文**字号的默认值（sp）—— **与改动前写死的那个值相同**（13sp）。
+ *
+ * ★2026-10-01：列表正文原来写死 13sp，用户实测"弹幕区域有点过小、显示的内容也有点小"。
+ *   现在字号由宿主从**直播自己的**「弹幕字号」（`live_danmaku_font_size`，默认 15sp、
+ *   范围 [LiveDanmakuSettings.FONT_SIZE_SP_MIN]~[LiveDanmakuSettings.FONT_SIZE_SP_MAX]）
+ *   一路传下来（[LiveDanmakuChatPanel] 的 `fontSizeSp`）。这个常量只剩两个作用：
+ *   ① 参数缺省值 —— 没有接线时行为与改动前逐字一致；
+ *   ② 行高比例的基准（见 [CHAT_ROW_LINE_HEIGHT_RATIO]）。
+ */
+private const val CHAT_ROW_TEXT_SIZE_SP = 13f
+
+/** 列表正文的**行高**基准（sp），与 [CHAT_ROW_TEXT_SIZE_SP] 配对；比例见 [CHAT_ROW_LINE_HEIGHT_RATIO] */
+private const val CHAT_ROW_LINE_HEIGHT_SP = 17f
+
+/**
+ * 行高 ÷ 字号（= 17/13 ≈ 1.31）—— 改动前那对写死值（13sp/17sp）的比例。
+ * ★不再写死行高：字号被「弹幕字号」放到 48sp 时，行距必须按同一个比例放大，否则行会叠。
+ */
+private const val CHAT_ROW_LINE_HEIGHT_RATIO = CHAT_ROW_LINE_HEIGHT_SP / CHAT_ROW_TEXT_SIZE_SP
+
+/**
  * 停靠列表的**最小可用高度**（宿主算出来的矩形比它矮时，宁可不显示列表、保留滚动弹幕）。
- * 96dp ≈ 5 行 13sp/17sp 的聊天，是"能读"的下限；比这更矮的一条带子里列表只剩两三行，
- * 还不如把滚动弹幕还给用户（见 `LiveDanmakuOverlayHost.refreshDockedPanel`）。
+ * 这是"能读"的**硬门限、不是设计目标**：96dp ≈ 4 行（13sp/17sp + 6dp 内边距）、默认 15sp 下 ≈ 3.7 行；
+ * 比这更矮的一条带子里列表只剩两三行，还不如把滚动弹幕还给用户
+ * （见 `LiveDanmakuOverlayHost.refreshDockedPanel`）。
+ * ★"平时该给多少"由播放页的 reserve 决定（`LivePlayerActivity` 的
+ * `PORTRAIT_LIST_TARGET_HEIGHT_FRACTION`；vc209 曾按本门限给，用户实测嫌小 → 现在给 140dp+）。
  */
 internal val CHAT_DOCKED_MIN_HEIGHT = 96.dp
 

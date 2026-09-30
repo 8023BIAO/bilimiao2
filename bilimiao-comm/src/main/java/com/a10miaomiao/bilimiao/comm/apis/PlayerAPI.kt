@@ -112,8 +112,11 @@ class PlayerAPI {
         //     注意 `isGaiaAvoided` 就是这个驼峰写法）。
         //   · 假指纹四件套：dm_img_list / dm_img_inter（固定值）+ dm_img_str / dm_cover_img_str
         //     （每次请求新生成的随机串，生成规则见 [RandomBase64Util]）。
-        val isLogin = BilimiaoCommApp.commApp.loginInfo != null
-        if (!isLogin) {
+        // ★判据是"有没有 access_token"，不是"有没有登录信息"（2026-10-01 扩写作用域专治这个陷阱）：
+        //   cookie-only 会话（只有 SESSDATA、没有 access_key）走 APP 取流会拿不到流/掉档；
+        //   对它而言"未登录 + try_look=1 的 HTTP"才是能拿到的最优流（与 VideoPlayerSource 同一判据）。
+        val hasToken = !BilimiaoCommApp.commApp.loginInfo?.token_info?.access_token.isNullOrBlank()
+        if (!hasToken) {
             params["try_look"] = "1"
         }
         params["voice_balance"] = "0"
@@ -133,7 +136,7 @@ class PlayerAPI {
             "playurl-req",
             "x/player/playurl (UGC) avid=$avid cid=$cid qn=$quality fnval=$fnval " +
                 "fourk=${params["fourk"] ?: "0"} otype=json module=普通视频 " +
-                "login=$isLogin try_look=${params["try_look"] ?: "0"} " +
+                "has_token=$hasToken try_look=${params["try_look"] ?: "0"} " +
                 "voice_balance=${params["voice_balance"]} gaia_source=${params["gaia_source"]} " +
                 "isGaiaAvoided=${params["isGaiaAvoided"]} web_location=${params["web_location"]} " +
                 "dm_img_list=${params["dm_img_list"]} " +

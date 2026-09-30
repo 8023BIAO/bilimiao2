@@ -97,6 +97,7 @@ import com.a10miaomiao.bilimiao.comm.toast
 //   —— 前者的 `online`／`text_large` 有两种口径，显示哪种都会有一半房间是错的）。
 //   所以"1.2万"这个口径全 App 只有一份实现。
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
+import com.a10miaomiao.bilimiao.comm.utils.ScreenDpiUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.widget.player.PlayerViewDrawable
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -126,7 +127,7 @@ import kotlin.math.roundToInt
  * ```
  * FrameLayout（rootLayout = 用户看到的那一页）
  * ├─ AspectRatioFrameLayout ── TextureView     视频（按视频比例等比，不变形）
- * │     ★竖屏：缩成"顶栏之下的那条带"（宽 ÷ 比例，封顶 62% 页高），顶边 = [videoBandTopPx]
+ * │     ★竖屏：缩成"顶栏之下的那条带"（宽 ÷ 比例，且不高于 `可用高 − 列表 reserve`），顶边 = [videoBandTopPx]
  * │           （状态栏内边距 + 顶栏高度），**底边永远等于列表槽 [danmakuListSlot] 的顶边**
  * │     ★横屏：铺满整页、画面居中（与改动前逐字一致）
  * │     ★PiP：**一律铺满小窗**（关掉带子、顶边归零）—— 小窗里的黑边就是这么没的，
@@ -543,17 +544,21 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         private const val HUD_EDGE_MARGIN_DP = 0
 
         /**
-         * 竖屏视频带的**高度下限**（占"可用高"的比例）—— ★2026-10-01 由"上限"改成"下限"。
+         * 竖屏视频带的**高度下限**（占"带子局部可用高"的比例）—— ★2026-10-01 由"上限"改成"下限"。
          *
-         * 竖屏版式 = "上面视频、下面弹幕列表"，视频高度 = `页宽 ÷ 视频比例`：
-         * · 16:9 直播（绝大多数）→ 1264px 宽的机器上只有约 711px（25% 可用高）→ **远低于下限，
-         *   一个字都不变** ✓；
-         * · **竖屏主播（9:16）**→ 按比例算出来是 2247px（80% 页高）。旧版在这里**封顶 62%** ⇒
-         *   画面被压到 1643px 高、只剩约 73% 屏宽（左右各一条黑边）——用户实测"竖屏直播显得很小"。
+         * ★量纲先说死：本比例乘的是 [AspectRatioFrameLayout.onMeasure] 里的 `containerHeight`
+         *   = **页高 − 带子顶边（顶栏底边）**，不是整页高（`FrameLayout` 给 MATCH_PARENT 子 View
+         *   测量时会扣掉 `topMargin`，见 [applyVideoStageLayout] 的注释）。
+         *
+         * 竖屏版式 = "上面视频、下面弹幕列表"，画面自然高 = `页宽 ÷ 视频比例`：
+         * · 16:9 直播（绝大多数）→ 1264px 宽的机器上只有约 711px → **远低于下限，一个字都不变** ✓；
+         * · **竖屏主播（9:16）**→ 自然高 2247px。旧版在这里**封顶 `0.62 × 可用高` = 1562px** ⇒
+         *   画面 879px 宽 = **69.5% 屏宽**（左右各一条黑边）——用户实测"竖屏直播显得很小"。
          *
          * 现在的口径（见 [AspectRatioFrameLayout.onMeasure]）：上限 = `可用高 − 带子 reserve`
-         * （reserve = [PORTRAIT_LIST_MIN_HEIGHT_DP] + 底栏占位，见 [portraitBandReservePx]）⇒
-         * 9:16 能吃到约 95% 屏宽；**本比例退化成"下限"**：reserve 口径算出来比它更矮时
+         * （reserve = 列表目标高 + 底栏占位，见 [portraitBandReservePx]）⇒ 同一台机器上带高 1858px、
+         * 画面 1045px = **82.7% 屏宽**（vc209 的 96dp 口径是 2026px / 90.2%）；
+         * **本比例退化成"下限"**：reserve 口径算出来比它更矮时
          * （分屏 / 折叠屏 / 极矮窗口 / reserve 还没量到）就退回它 —— 保证任何形态下带子都
          * **不比改动前更矮**（不会为了塞列表把画面压没）。
          * ★画面始终由 [AspectRatioFrameLayout] 等比摆放（装不下时左右留黑边）——不裁切、**不拉伸**。
@@ -561,12 +566,45 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         private const val PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION = 0.62f
 
         /**
-         * 竖屏列表区的**最小可用高度**（dp）。低于它就认为"这块版式没排出来"
+         * 竖屏列表区的**最小可用高度**（dp）—— 这是"这块版式还算不算排出来了"的**硬门限**，
+         * **不是设计目标**（★vc209 的教训：reserve 就按这个数给，列表只剩约 4 行 13sp，
+         * 用户实测"弹幕区域有点过小、内容也有点小"）。低于它就认为"没排出来"
          * （分屏/折叠屏/极矮窗口）：[portraitDanmakuListBounds] 返回 null、
-         * [danmakuListSlot] 量成 0 高（见 [applyListSlot]）→ 宿主自己那道最小高度门限会把面板收起，
+         * [danmakuListSlot] 量成 0 高（见 [applyListSlot]）→ 宿主自己那道同样的 96dp 门限会把面板收起，
          * 滚动弹幕照旧。宁可退版式，也不要给宿主一块放不下东西的矩形。
+         * ★"给多少"由 [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION] / [PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP] 决定。
          */
         private const val PORTRAIT_LIST_MIN_HEIGHT_DP = 96
+
+        /**
+         * 竖屏弹幕列表的**目标高度**（占"带子局部可用高"的比例）—— 2026-10-01 重新配平的主旋钮。
+         *
+         * 为什么要有它：竖屏版式是"上面视频、下面列表"分一块固定的纵向空间，**两边抢的是同一块**：
+         * ```
+         * 页高 = 顶栏 + 视频带 + 列表 + 底栏
+         * ```
+         * · 只给 96dp（vc209）→ 列表约 4 行，用户嫌小；
+         * · 给到 180dp → 9:16 画面掉回 ~77% 屏宽 ≈ 逼近改动前的 0.62 时代，用户嫌画面小。
+         * 所以取中间：**列表拿可用高的 1/5（且不低于 [PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP]）**，
+         * 剩下的全给画面 —— 真机 1264×2800@density3.5（bandTop=280、底栏占位=158、可用高 2520）：
+         * 列表目标 504px = **144dp（≈5.6 行 15sp）**、带高 1858px、9:16 画面 **82.7% 屏宽**
+         * （改动前 69.5%、vc209 90.2%）。两个数都是实测出来的折中，别单方面调大。
+         *
+         * ★画面宽怎么来（**因果链只有这一条**，别按"屏宽占比"当目标去调参）：
+         *   容器宽**恒 = 页宽**（[videoContainer] 是 MATCH_PARENT，本页从不写它的 `lp.width`）；
+         *   画面宽 = `min(页宽, 带高 × 视频比例)` —— 带高 < 画面自然高时等比缩窄、左右留黑边，
+         *   带高 = 自然高时满宽。⇒ reserve 变大 ⇒ 带高变小 ⇒ 画面变窄（单调，上限 100%）。
+         * ★16:9 不受影响：它的自然高 `711 < 任何口径的带高上限`（连 0.62 下限 1562 都远大于它），
+         * 一个字不变。
+         */
+        private const val PORTRAIT_LIST_TARGET_HEIGHT_FRACTION = 0.20f
+
+        /**
+         * 竖屏弹幕列表目标高度的**下限**（dp）：可用高很小时（矮窗/分屏）1/5 会小到没意义，
+         * 用这个数兜底。真正排不下时由 [PORTRAIT_LIST_MIN_HEIGHT_DP] 那道硬门限决定"列表收起"，
+         * 本常量只影响"尽力给多少"。
+         */
+        private const val PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP = 140
 
         /**
          * ★第七批：原来这里还有一个 `PORTRAIT_BUTTONS_PER_ROW = 5`（竖屏每行几颗、两行 5+2 的那套
@@ -1033,6 +1071,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /** 视频带上一次量到的矩形；只有它真的变了才重新量版式（见 [installPageLayoutWatchers]） */
     private var lastVideoBandRect: Rect? = null
+
+    /**
+     * ★诊断（只读）：本帧 [portraitBandReservePx] 打算**给列表多少**（px，0 = 不适用）。
+     *
+     * 只进 [LivePageTrace] 的 `stage.video`，不参与任何判断。为什么值得留一个字段：
+     * 列表目标高这条口径被独立复核质疑过一次（"reserve 减在带子局部可用高里 ⇒ 列表短掉一个
+     * 顶栏高"），它的**代数结论是错的**（推导见 [portraitBandReservePx]），但真机上要一眼看清
+     * "设计值 vs 实得值"就必须把设计值也打出来 —— 实得值看 `stage.measure` 的 `slotH`/`listRect`，
+     * 两者（reserve 上限生效时）应当**完全相等**。
+     */
+    private var lastBandListTargetPx = 0
 
     /**
      * 沉浸式策略**上一次真正下发**的值（`true` = 横屏、已隐藏系统栏；`null` = 还没下发过）。
@@ -2307,6 +2356,33 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         delegate = null
         if (currentInstance === this) currentInstance = null
         super.onDestroy()
+    }
+
+    /**
+     * ★2026-10-01：套上 App 内「显示与字号」的自定义 DPI / 字体缩放。
+     *
+     * 写法与 `MainActivity.attachBaseContext`（`MainActivity.kt:773-778`）和点播页
+     * （`VideoPlayerActivity.kt:333-338`）**逐字同款** —— 本页是独立 Activity，不会继承宿主
+     * 覆盖过的 Context，不套的话**只有本页**用系统密度：主界面/点播页按用户调的 DPI 放大、
+     * 直播页不放大，两边的字与控件尺寸对不上。
+     *
+     * ★已知（**与点播页口径一致，本轮不修**）：Manifest 给本页声明了 `density`
+     *   （`AndroidManifest.xml:98`），所以改 DPI **不会重建**本 Activity、只走
+     *   [onConfigurationChanged]，而 `attachBaseContext` 只在创建时执行一次 ⇒
+     *   **改完 DPI 要重进直播间才生效**（点播页同样如此）。
+     *   要"当场生效"只能在 [onConfigurationChanged] 里比 `configuration.densityDpi` 并
+     *   `recreate()`，代价是**重连取流 + 重连弹幕** —— 不值当，故不做。
+     *
+     * ★影响的"分母是 px"的两处（真机手感/观感项，见交付说明）：
+     *   · 音量手势的分母是 [videoContainer] 的高（px）⇒ 密度变大后画面带略矮、行程略短、
+     *     手感略灵敏（PITFALLS #3"系数 × 基准高度"）；亮度手势分母是 `pageHeightPx()`（与密度无关）；
+     *   · 竖屏 reserve 里的 140dp 下限随密度放大 ⇒ 高密度下画面带略矮、列表略高，有 0.62 下限兜底。
+     */
+    override fun attachBaseContext(newBase: Context) {
+        // 与 MainActivity / VideoPlayerActivity 一致：自定义 DPI 设置要生效，否则本页控件尺寸与主界面不一致
+        val configuration: Configuration = newBase.resources.configuration
+        ScreenDpiUtil.readCustomConfiguration(configuration)
+        super.attachBaseContext(newBase.createConfigurationContext(configuration))
     }
 
     /**
@@ -5846,7 +5922,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                     "oldTop" to oldTop,
                     "appliedInset" to appliedBottomBarInsetPx,
                 )
-                // ★2026-10-01：底栏顶边也是"视频带 reserve"的输入（reserve = 列表最小高 + 底栏占位，
+                // ★2026-10-01：底栏顶边也是"视频带 reserve"的输入（reserve = 列表目标高 + 底栏占位，
                 //   见 [portraitBandReservePx]）—— 底栏一变高/变矮（键盘抬起、失败提示行显隐、
                 //   转屏换版式、刚出 PiP 底栏从 GONE 回来）就必须把带子重排一次；不重排，
                 //   带子会按旧 reserve 停在偏高的位置，把下方列表区挤到 96dp 之下
@@ -8573,7 +8649,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     //
     // 落地成"两套版式、一个开关"，**视频带的顶边由顶栏说话**：
     // ```
-    // 竖屏：视频 = 顶栏之下的那条带（顶边 = 状态栏内边距 + 顶栏高，高度 = 宽 ÷ 比例，封顶 62% 页高）
+    // 竖屏：视频 = 顶栏之下的那条带（顶边 = 状态栏内边距 + 顶栏高，高度 = min(宽 ÷ 比例, 可用高 − 列表 reserve)）
     //       ├─ 底边 = 列表槽 [danmakuListSlot] 的顶边（同一时刻同一个值，中间不留黑缝）
     //       ├─ 下面全部留给弹幕列表：矩形由 [portraitDanmakuListBounds] 发布给宿主
     //       └─ 底栏照旧贴底（列表区的底边就是底栏顶，所以面板不会压住按钮）
@@ -8605,29 +8681,64 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (::topBar.isInitialized && topBar.height > 0) topBar.bottom.coerceAtLeast(0) else 0
 
     /**
-     * 竖屏视频带要**给下方让出来的高度**（页内 px）—— 2026-10-01 新版带高的唯一输入。
+     * 竖屏视频带**下方要预留的总高**（px）—— 新版带高的唯一输入。
      *
      * ```
-     * reserve = (页高 − 底栏顶边)  +  列表最小高
-     *           └─ 底栏占位（页底→底栏顶） └─ [PORTRAIT_LIST_MIN_HEIGHT_DP]
+     * 可用高   = 页高 − 视频带顶边（= 顶栏底边）      ← 与 onMeasure 的 containerHeight 同口径
+     * 底栏占位 = 页高 − 底栏顶边
+     * 列表目标 = max(可用高 × [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION],
+     *               [PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP])
+     * reserve  = 列表目标 + 底栏占位                 ← 本函数的返回值
      * ```
-     * 用"页高 − 底栏顶边"而不是 `bottomBar.height`：底栏贴页底，两者本该相等，但前者把
-     * "底栏外面还包着一层内边距/页底留白"的情况也算进去 —— 而弹幕列表区的底边认的正是
-     * **底栏顶边**（[measurePortraitStage] 的 `listBottom = bottomBar.top`）。按同一个基准留，
-     * 列表才既不会被输入条压住一截、也不会被挤到 96dp 之下（那会让宿主把面板整个收起）。
+     *
+     * ## ★坐标系（这条曾被独立复核判成 bug，改注释前先读完这段）
+     * 返回值是**页坐标**里"带子底边以下还有多少东西"（列表 + 底栏），而 [AspectRatioFrameLayout]
+     * 是把它从**带子局部**的可用高 `c = 页高 − bandTop` 里减掉的（`band = c − reserve`）——
+     * **这是对的，因为这两处的差值恰好就是列表区**，`bandTop` 在等式里自动抵消：
+     * ```
+     * 列表实得 = 底栏顶边 − 带子底边 = barTop − (bandTop + band)
+     *          = barTop − bandTop − (c − reserve)
+     *          = barTop − bandTop − (页高 − bandTop − 底栏占位 − 列表目标)      [c、reserve 代入]
+     *          = barTop − bandTop − 页高 + bandTop + (页高 − barTop) + 列表目标   [底栏占位 = 页高 − barTop]
+     *          = 列表目标                                      ∎（与 bandTop 无关）
+     * ```
+     * 真机 1264×2800@3.5（bandTop=280 / barTop=2642 / 底栏占位=158 / c=2520）：
+     * 列表目标 504px ⇒ reserve 662 ⇒ 带高 `max(2520−662, 0.62×2520) = 1858` ⇒
+     * 列表实得 `2642 − (280+1858) = 504px = 144dp` ✓（顶栏再高也照样是 504，因为两边同时抵消）。
+     * ★所以"reserve 是页坐标、却减在带子局部"不是量纲错误，而是**同一个量的两种读法**；
+     *   真要改口径的话，两边必须一起改（见上式的代入），单改一边才会真的错。
+     *
+     * ★两个旋钮的取值理由（为什么不是 96dp、也不是 180dp）写在
+     *   [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION] 的 KDoc 里：视频与列表抢的是同一块纵向空间，
+     *   给列表 96dp 只剩约 4 行、给 180dp 画面就掉回改动前的大小，1/5 是实测折中。
+     * ★底栏占位用"页高 − 底栏顶边"而不是 `bottomBar.height`：底栏贴页底，两者本该相等，但前者把
+     *   "底栏外面还包着一层内边距/页底留白"的情况也算进去 —— 而列表区的底边认的正是**底栏顶边**
+     *   （[measurePortraitStage] 的 `listBottom = bottomBar.top`）。按同一个基准留，列表才既不会被
+     *   输入条压住一截、也不会被挤到 96dp 之下（那会让宿主把面板整个收起）。
      *
      * ★拿不到可信几何就返回 **0**（= 不设 reserve）：[AspectRatioFrameLayout] 见到 0 会退回
      *   [PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION] 的旧口径。首帧（底栏还没布局）、刚出 PiP
      *   （PiP 里底栏是 GONE）都会命中这一支 —— 按旧版摆一帧，远比"猜一个 reserve 把画面压小"
      *   安全；底栏一落定，[installPageLayoutWatchers] 里那只底栏监听器会再调一次
      *   [applyVideoStageLayout]，reserve 随即补上（幂等，值没变就一个字节不写）。
+     *
+     * @param bandTop 本次要用的视频带顶边（[videoBandTopPx]，与写进 layoutParams 的是同一个值）
      */
-    private fun portraitBandReservePx(): Int {
+    private fun portraitBandReservePx(bandTop: Int): Int {
         if (!::rootLayout.isInitialized || !::bottomBar.isInitialized) return 0
         val pageHeight = rootLayout.height
         val barTop = bottomBar.top
         if (pageHeight <= 0 || bottomBar.height <= 0 || barTop <= 0) return 0
-        return (pageHeight - barTop).coerceAtLeast(0) + dpToPx(PORTRAIT_LIST_MIN_HEIGHT_DP)
+        val bottomOccupied = (pageHeight - barTop).coerceAtLeast(0)
+        val available = (pageHeight - bandTop).coerceAtLeast(0)
+        val listTarget = maxOf(
+            (available * PORTRAIT_LIST_TARGET_HEIGHT_FRACTION).roundToInt(),
+            dpToPx(PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP),
+        )
+        // ★诊断（只读）：把"本帧打算给列表多少"记下来，供 stage.video 日志对账 ——
+        //   真机上 `列表实得`（stage.measure 的 slotH / listRect）应等于它（reserve 上限生效时）。
+        lastBandListTargetPx = listTarget
+        return bottomOccupied + listTarget
     }
 
     /**
@@ -8651,7 +8762,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *    `topMargin` 还是全屏时顶栏的高度（`topBar` 已经 GONE，`top()` 停在最后一次布局的位置）
      *    —— 小窗里画面被压成"小窗高 - 顶栏高"的 62%，还要再按比例居中，四周全是黑边；
      * ④ 竖屏**主播（9:16）**更明显：小窗本身是竖的（窗口比例 = 视频比例），
-     *    而带子封顶 62% → 画面只有小窗的 62% 高、62% 宽，四面黑边。
+     *    而带子还在（按"下限口径"摆成一条）→ 画面只有小窗中间一小块，四面黑边。
      * ⇒ 修法就是这一段：**在 PiP 里关掉带子、顶边归零**，容器铺满小窗；此时
      *    【窗口比例 == 画面比例】（都由 [pipAspectRatio] / `videoContainer.videoAspectRatio` 说话），
      *    所以 [AspectRatioFrameLayout] 量出来的画面**正好等于小窗**，一点黑边都没有。
@@ -8669,13 +8780,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ① 视频：竖屏 = 顶栏之下的一条带（高度由 [AspectRatioFrameLayout] 按比例量）；
         //          横屏 / PiP = 0f = 关掉带子，容器铺满整页（横屏与改动前逐字一致）
         val band = if (portrait) PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION else 0f
-        // ★2026-10-01：带子的高度上限 = 可用高 − reserve（reserve = 列表最小高 + 底栏占位），
+        // ★第四批第 3 条：带子模式下顶边 = 顶栏底边（横屏/听音频/PiP 保持 0 = 铺满/贴顶）
+        val bandTop = if (band > 0f) videoBandTopPx() else 0
+        // ★2026-10-01：带子的高度上限 = 可用高 − reserve（reserve = 列表目标高 + 底栏占位），
         //   只有竖屏带子模式才需要它；量不到底栏（reserve = 0）时**不猜** —— 由
         //   [AspectRatioFrameLayout] 退回旧的 0.62 口径摆一帧，宁可先按旧版摆，
         //   也不要拿一个猜出来的 reserve 去定版式。
-        val bandReserve = if (band > 0f) portraitBandReservePx() else 0
-        // ★第四批第 3 条：带子模式下顶边 = 顶栏底边（横屏/听音频/PiP 保持 0 = 铺满/贴顶）
-        val bandTop = if (band > 0f) videoBandTopPx() else 0
+        val bandReserve = if (band > 0f) portraitBandReservePx(bandTop) else 0
         val lp = videoContainer.layoutParams
         if (lp is FrameLayout.LayoutParams &&
             (lp.gravity != Gravity.TOP || lp.topMargin != bandTop)
@@ -8702,6 +8813,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         LivePageTrace.noteIfChanged(
             "stage.video",
             "pip=$pipFill|portrait=$portrait|band=$band|bandTop=$bandTop|reserve=$bandReserve" +
+                // 横屏/PiP（band=0）不适用 ⇒ 显式打 0，免得看到上一帧竖屏的残留值
+                "|listTarget=${if (band > 0f) lastBandListTargetPx else 0}" +
                 "|top=${videoContainer.top}|h=${videoContainer.height}|w=${videoContainer.width}" +
                 "|page=${if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"}",
             "stage.video",
@@ -8710,6 +8823,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "bandFraction" to band,
             "bandTop" to bandTop,
             "bandReservePx" to bandReserve,
+            // ★对账用：真机 `stage.measure` 的 slotH/listRect 应等于它（reserve 上限生效时）
+            "bandListTargetPx" to (if (band > 0f) lastBandListTargetPx else 0),
             "appliedBandTop" to appliedVideoBandTop,
             "topBarBottom" to (if (::topBar.isInitialized) topBar.bottom else -1),
             "videoRect" to LivePageTrace.rect(Rect(videoContainer.left, videoContainer.top, videoContainer.right, videoContainer.bottom)),
@@ -8819,6 +8934,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             } else {
                 pageHeight
             }
+            // ★这里的 `coerceIn(listTop, pageHeight)` **不会**因为 `barTop < listTop` 抛异常：
+            //   Kotlin 的 `Int.coerceIn(min, max)` 只在 `min > max` 时抛，而上一行
+            //   `listTop = …coerceIn(0, pageHeight)` 已保证 `listTop ≤ pageHeight` ⇒ 区间恒合法。
+            //   `barTop < listTop`（带子被 0.62 下限顶到底栏顶边之上，例如键盘抬起时底栏被自己的
+            //   内边距抬到 1611）会把 `listBottom` 夹成 `listTop` ⇒ 列表区 0 高 ⇒ 走下面
+            //   "地方太小"那一支：槽量 0 高、面板按既有规则收起（滚动弹幕接管）。这是**有意的降级**。
+            //   ★与 `applyListSlot` 的 `coerceAtLeast(0)` 不是"两套口径"：这里夹的是**区间内的值**，
+            //   那里夹的是**长度**（负数无意义），两者都在做各自该做的事。
             val listBottom = barTop.coerceIn(listTop, pageHeight)
             if (listBottom - listTop >= dpToPx(PORTRAIT_LIST_MIN_HEIGHT_DP)) {
                 portraitListRect = Rect(0, listTop, pageWidth, listBottom)
@@ -8944,11 +9067,23 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ★★2026-10-01 带高口径（用户："竖屏直播尽量全屏铺满、千万不要拉伸"）：
      * ```
-     * 带高 = min(宽 ÷ 视频比例,  可用高 − bandReserveBottomPx)     ← 且不低于 可用高 × bandMinHeightFraction
+     * 带高 = min(画面自然高 = 容器宽 ÷ 视频比例,  可用高 − bandReserveBottomPx)
+     *                                                      ↑ 且不低于 可用高 × bandMinHeightFraction
      * ```
-     * 旧口径是 `min(宽÷比例, 可用高 × 0.62)`：9:16 主播的"宽÷比例"（≈1.78×宽）被 0.62 压掉，
-     * 画面只剩约 73% 屏宽。新口径把"下方要留给弹幕列表的地方"（[bandReserveBottomPx]）**先让出来**，
-     * 剩下的全给画面 ⇒ 约 95% 屏宽；16:9（宽÷比例 ≈ 0.56×宽）两种口径下都远低于上限，一个字不变。
+     * ★两句话把量纲说死（这条被独立复核质疑过，别再按错的模型调参）：
+     *   · `可用高` 是 **containerHeight**（= 页高 − 带子顶边），**不是整页高**（`topMargin` 已被扣掉）；
+     *   · [bandReserveBottomPx] 是"带子**下方**要预留的总高（列表目标 + 底栏占位）"，减在 `可用高`
+     *     上得到带高 —— 列表实得 = `底栏顶边 − 带子底边` = **列表目标**（`bandTop` 自动抵消，
+     *     推导见 [portraitBandReservePx]）。
+     * ★画面宽怎么来：**容器宽恒 = 页宽**（本页从不写 [videoContainer] 的 `lp.width`），
+     *   画面宽 = `min(页宽, 带高 × 视频比例)` —— 带高 < 自然高时等比缩窄 + 左右黑边，带高 = 自然高时满宽。
+     *   ⇒ reserve 变大 ⇒ 带高变小 ⇒ 画面变窄（单调，上限 100%）。旧口径 `0.62 × 可用高` 时 9:16 只有
+     *   **69.5%** 屏宽，新口径 **82.7%**（真机 1264×2800@3.5：bandTop=280 / 底栏占位=158 / 可用高 2520）。
+     * ★画面**底边恒等于带子底边**（子 View 被量成带高、且与容器同高，`Gravity.CENTER` 不产生竖向余量）
+     *   ⇒ 宿主"列表顶 = **画面**底边"（`LiveDanmakuOverlayHost` 的 `computeDockedRect`）与播放页
+     *   "列表顶 = 带底"（[measurePortraitStage]）**永远是同一条边**，视频与列表之间不会留黑缝。
+     * ★列表那一份**不能给太少也不能给太多**：96dp 只剩约 4 行（vc209 用户实测嫌小）、180dp 会把画面
+     *   打到 77%（逼近改动前的 69.5%）—— 折中与理由见 [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION]。
      * 而 [bandMinHeightFraction] 退化成**下限**：只有"让完 reserve 后比旧口径还矮"（分屏/折叠屏/
      * 极矮窗口）或 reserve 还没量到（0）时才生效 —— 保证不会为了塞列表把画面压得比改动前更小。
      */
@@ -8972,10 +9107,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         var bandMinHeightFraction: Float = 0f
 
         /**
-         * ★竖屏带子要**留给下方弹幕列表**的高度（px），0 = 没量到 / 不设 reserve。
+         * ★竖屏带子**下方要预留的总高**（px）= 列表目标 + 底栏占位，0 = 没量到 / 不设 reserve。
          *
-         * 由 [portraitBandReservePx] 算好推进来（= 列表最小高 + 底栏占位），语义与"为什么不在
-         * onMeasure 里自己算"都写在那边的 KDoc 里：容器看不见底栏，这个值只能由播放页给。
+         * 由 [portraitBandReservePx] 算好推进来；**从 `containerHeight`（带子局部可用高）里减**，
+         * 结果的列表区恰好等于"列表目标"（两处的 `bandTop` 互相抵消，推导与真机算例都在那边的 KDoc 里）。
+         * 名字里的 "Bottom" 指**带子下方**（列表 + 底栏），不是"底栏那一块"。
+         * "为什么不在 onMeasure 里自己算"：容器看不见底栏，这个值只能由播放页给。
          * 为 0 时**不参与**上限计算（退回 [bandMinHeightFraction] 的旧口径），绝不猜。
          */
         var bandReserveBottomPx: Int = 0
@@ -8992,8 +9129,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val containerHeight = View.MeasureSpec.getSize(heightMeasureSpec)
             if (containerWidth <= 0 || containerHeight <= 0) return
             val effectiveRatio = if (ratio > 0f) ratio else DEFAULT_ASPECT_RATIO
-            // 带子模式：上限 = 可用高 − reserve（把下方列表的地方先让出来）；
-            // reserve 没量到（0）或让完比下限还矮 ⇒ 退回下限口径（= 改动前的 62% 行为）
+            // 带子模式：上限 = 可用高 − reserve（把带子**下方**的列表 + 底栏先让出来）；
+            // reserve 没量到（0）或让完比下限还矮 ⇒ 退回下限口径（= 改动前的 62% 行为）。
+            // ★reserve 是"带子下方的总高"，可用高是"带子局部的可用高" —— 两处 bandTop 互相抵消，
+            //   列表实得恰好 = 列表目标（推导 + 真机算例见 [portraitBandReservePx]）。
             val height = if (band) {
                 val floorCap = (containerHeight * bandMinHeightFraction).roundToInt()
                 val reserveCap = if (bandReserveBottomPx > 0) {

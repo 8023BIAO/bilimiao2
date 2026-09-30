@@ -68,7 +68,7 @@ private fun TokenLoginSheet(
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            text = "粘贴 access_token；也可以粘贴含 SESSDATA 的 Cookie",
+            text = "粘贴 access_token、Cookie，或身份导出文件内容",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 2.dp),
@@ -89,11 +89,11 @@ private fun TokenLoginSheet(
                     .padding(top = 12.dp),
                 minLines = 3,
                 maxLines = 8,
-                placeholder = { Text("access_token 或 Cookie") },
+                placeholder = { Text("access_token / Cookie / 导出文件 JSON") },
             )
             Text(
-                // ≤20 字符的一行小字：只说结论，不解释原因
-                text = "Cookie 仅网页接口，用 Token",
+                // ≤20 字符的一行小字：只说结论，不解释原因（Cookie 会话重启后仍在，但走的是网页接口）
+                text = "Cookie 走网页接口，部分功能受限",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp),

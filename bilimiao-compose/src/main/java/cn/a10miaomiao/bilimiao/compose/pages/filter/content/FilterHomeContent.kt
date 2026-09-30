@@ -33,6 +33,7 @@ import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
+import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -64,6 +65,10 @@ fun FilterHomeContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val dataStore = remember { SettingPreferences.run { context.dataStore } }
+    // 登录态：登录门项（已关注UP主白名单）要跟着登录/退出出现/消失 —
+    // 与 SettingPage.kt:181 同一套写法（stateFlow 可观察；UserStore.State 永不为 null，别写 != null）
+    val userStore: UserStore by rememberInstance()
+    val userState = userStore.stateFlow.collectAsStateWithLifecycle().value
 
     var showCommentFilterDialog by remember { mutableStateOf(false) }
     val commentBlockedWords by dataStore.data.map {
@@ -138,12 +143,17 @@ fun FilterHomeContent(
             )
 
             // 【已移除】"白名单" 分类标题 — 不需要隔开
-            switchPreference(
-                key = SettingPreferences.FollowWhitelistEnabled.name,
-                title = { Text("已关注UP主白名单") },
-                summary = { Text("开启后，已关注的UP主不受任何屏蔽规则影响") },
-                defaultValue = false,
-            )
+            // ★2026-10-01：白名单依赖服务端按**登录态**返回的 is_followed（FilterStore.kt:359-360），
+            //   未登录/游客时恒为 0 ⇒ 开关永远不生效。按"未登录用不了的东西不该显示"隐藏这一项；
+            //   它前后都是同级开关、没有分类标题隔断，隐藏后版面不会突兀（所以不用置灰态）。
+            if (userState.isLogin()) {
+                switchPreference(
+                    key = SettingPreferences.FollowWhitelistEnabled.name,
+                    title = { Text("已关注UP主白名单") },
+                    summary = { Text("开启后，已关注的UP主不受任何屏蔽规则影响") },
+                    defaultValue = false,
+                )
+            }
             switchPreference(
                 key = SettingPreferences.BlockPromotion.name,
                 title = { Text("屏蔽推广视频") },

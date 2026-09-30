@@ -1304,7 +1304,10 @@ class PlayerDelegate2(
                     PopTip.show("已切换至【${sourceInfo.description}】").showTop()
                 } else {
                     PopTip.show(
-                        if (BilimiaoCommApp.commApp.loginInfo == null) {
+                        // ★判据同 VideoPlayerSource / PlayerAPI：看**有没有 access_token**，不是看登录态 ——
+                        //   cookie-only 会话没有 access_key，拿到的就是"未登录档"，提示必须说真话
+                        //   （否则会对着一档 720P 说"该清晰度当前不可用"，把服务端的档位限制说成临时故障）。
+                        if (BilimiaoCommApp.commApp.loginInfo?.token_info?.access_token.isNullOrBlank()) {
                             "未登录最高支持【${sourceInfo.description}】，已切到该档"
                         } else {
                             "该清晰度当前不可用，已切到【${sourceInfo.description}】"

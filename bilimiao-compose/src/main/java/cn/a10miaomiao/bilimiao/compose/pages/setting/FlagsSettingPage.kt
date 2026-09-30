@@ -300,7 +300,10 @@ private fun FlagsSettingPageContent(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         if (uri != null) {
-            try {
+            // 点完「导出」到选完文件之间可能退出登录：这里再挡一次，绝不写空壳文件
+            if (BilimiaoCommApp.commApp.loginInfo == null) {
+                Toast.makeText(context, "未登录，无可导出的身份信息", Toast.LENGTH_SHORT).show()
+            } else try {
                 val cookieManager = CookieManager.getInstance()
                 val cookie = cookieManager.getCookie("https://bilibili.com") ?: ""
                 val loginInfo = BilimiaoCommApp.commApp.loginInfo
@@ -538,7 +541,14 @@ private fun FlagsSettingPageContent(
                     Text("导出身份信息")
                 },
                 onClick = {
-                    exportAuthLauncher.launch("bilimiao_auth_${System.currentTimeMillis()}.json")
+                    // ★2026-10-01：未登录时导出的是**空壳**（cookie 只有游客态、没有 access_token），
+                    //   却照旧 toast"身份信息已导出"，用户会以为备份成功了。
+                    //   没有任何可导出的登录数据时不打开文件选择器、也不写文件，直接说清原因。
+                    if (BilimiaoCommApp.commApp.loginInfo == null) {
+                        Toast.makeText(context, "未登录，无可导出的身份信息", Toast.LENGTH_SHORT).show()
+                    } else {
+                        exportAuthLauncher.launch("bilimiao_auth_${System.currentTimeMillis()}.json")
+                    }
                 },
             )
             preference(

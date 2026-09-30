@@ -248,10 +248,12 @@ class VideoDetailViewModel(
             _detailData.value = res
             autoStartPlay()
             // 自动获取AI总结（如果开启）
+            // ★2026-10-01：先判登录再发请求 —— requestAiConclusion 内部（:1032）未登录会直接 return，
+            //   不判的话每次进视频都白跑一次协程 + 空调用（用户反馈"没登录还显示开关"顺带发现）。
             val aiSummaryEnabled = com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences.mapData(activity) {
                 it[com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences.AiSummaryEnabled] ?: false
             }
-            if (aiSummaryEnabled) {
+            if (aiSummaryEnabled && userStore.isLogin()) {
                 requestAiConclusion(silent = true)
             }
         } catch (e: Exception) {

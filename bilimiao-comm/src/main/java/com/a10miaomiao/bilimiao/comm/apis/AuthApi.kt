@@ -3,6 +3,7 @@ package com.a10miaomiao.bilimiao.comm.apis
 import android.webkit.CookieManager
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.entity.auth.LoginInfo
+import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper.BILI_APP_VERSION
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
@@ -427,3 +428,31 @@ data class WebNavInfo(
         val current_level: Int = 0,
     )
 }
+
+/**
+ * nav 响应 → App 的 [UserInfo]（Cookie 登录 / cookie-only 会话的资料刷新共用这一份映射）。
+ *
+ * nav 只给"网页侧"字段：`uname`/`face`/`money`(硬币)/`level_info.current_level`/`vipType` 都是真值；
+ * App 专属字段（关注数/粉丝数/性别/等级外的各种计数）它不给，只能填默认值 —— 这不是造假，
+ * 而是 Cookie 通道拿不到（要 App 接口 + access_token 才有）。
+ *
+ * ★放在这里而不是各处自己拼：Cookie 登录页与 `UserStore` 的冷启动刷新必须是同一套口径。
+ */
+fun WebNavInfo.toUserInfo(): UserInfo = UserInfo(
+    mid = mid,
+    name = uname,
+    face = face ?: "",
+    coin = money,
+    bcoin = 0.0,
+    sex = 0,
+    rank = 0,
+    silence = 0,
+    show_videoup = 0,
+    show_creative = 0,
+    level = level_info?.current_level ?: 0,
+    vip_type = vipType,
+    audio_type = 0,
+    dynamic = 0,
+    following = 0,
+    follower = 0,
+)

@@ -84,7 +84,10 @@ class VideoPlayerSource(
         //   `filter { it.content != null }` 滤干净 ⇒ 菜单只剩 480P/360P，而带 try_look 的 HTTP 请求
         //   **根本没发**。HTTP 那条路带 try_look=1，未登录也能拿到 dash [80,64,32,16]。
         //   ★HTTP 失败/空结果时**仍然回落到 gRPC**（保底），绝不出现"某些视频彻底取不到流"的新洞。
-        val unlogged = BilimiaoCommApp.commApp.loginInfo == null
+        // ★判据是"有没有 access_token"，不是"有没有登录信息"（2026-10-01 扩写作用域专治这个陷阱）：
+        //   cookie-only 会话（只有 SESSDATA、没有 access_key）在 gRPC/APP 那条路上同样没有权益 ——
+        //   它就该按"取流意义上的未登录"走下面带 try_look=1 的 HTTP（与 PlayerAPI 同一判据）。
+        val unlogged = BilimiaoCommApp.commApp.loginInfo?.token_info?.access_token.isNullOrBlank()
         // grpc (proto可能过期，异常时静默回退到JSON API)
         // TODO AI 原声翻译：暂时关闭（原来这里判断"带语言时跳过 gRPC 改走 HTTP"）
         if (!unlogged) {
@@ -98,14 +101,14 @@ class VideoPlayerSource(
         }
         PlayerDiag.log(
             "video",
-            if (unlogged) "未登录 → 直接走 HTTP JSON playurl（带 try_look，qn=$quality fnval=$fnval）"
+            if (unlogged) "无 access_token → 直接走 HTTP JSON playurl（带 try_look，qn=$quality fnval=$fnval）"
             else "gRPC 没给出结果 → 回退 HTTP JSON playurl（fnval=$fnval qn=$quality）"
         )
         val http = runCatching { getHttpPlayerUrl(quality, fnval) }
         http.getOrNull()?.let { return it }
         if (unlogged) {
             // HTTP 也失败/空结果 ⇒ 给 gRPC 一次兜底机会（它仍然可能给出流，别把路走死）
-            PlayerDiag.log("video", "HTTP 取流失败 → 未登录兜底再试 gRPC")
+            PlayerDiag.log("video", "HTTP 取流失败 → 无 token 兜底再试 gRPC")
             try {
                 getGrpcPlayerUrl(quality, fnval)?.let { return it }
             } catch (e: Exception) {

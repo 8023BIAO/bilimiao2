@@ -17,7 +17,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -56,12 +55,15 @@ import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.auth.LoginInfo
 import com.a10miaomiao.bilimiao.comm.entity.auth.QRLoginInfo
 import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
+import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
+import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.string
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.ImageSaveUtil
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.store.WindowStore
 import io.github.alexzhirkevich.qrose.rememberQrCodePainter
 import io.github.alexzhirkevich.qrose.toImageBitmap
@@ -73,6 +75,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
@@ -101,6 +107,9 @@ private class QrCodeLoginPageViewModel(
     val loading = MutableStateFlow(false)
     val qrCodeData = MutableStateFlow<String?>(null)
     val error = MutableStateFlow("")
+
+    /** 错误详情（`code=xxx · 服务端原话`）：唯一线索，单独一行显示给用户截图 */
+    val errorDetail = MutableStateFlow("")
     val isScaned = MutableStateFlow(false)
 
     /**
@@ -139,6 +148,7 @@ private class QrCodeLoginPageViewModel(
         expireSeconds.value = QR_CODE_TTL_SECONDS
         isScaned.value = false
         error.value = ""
+        errorDetail.value = ""
         loading.value = true
         viewModelScope.launch {
             try {
@@ -156,17 +166,36 @@ private class QrCodeLoginPageViewModel(
                     startCountdown(generation)
                     pollJob = viewModelScope.launch { checkQRCode(resData.auth_code, generation) }
                 } else {
-                    error.value = res.message
+                    logQrFailure("取二维码失败", "code" to res.code, "message" to res.message)
+                    error.value = "获取二维码失败，请稍后重试"
+                    errorDetail.value = qrErrorDetail(res.code, res.message)
                 }
             } catch (e: Exception) {
                 if (generation == qrGeneration) {
-                    e.printStackTrace()
-                    error.value = e.message ?: e.toString()
+                    // 原始异常只进日志，页面上给人话
+                    miaoLogger().e("取二维码异常", e.stackTraceToString())
+                    error.value = "获取二维码失败，请稍后重试"
+                    errorDetail.value = ""
                 }
             } finally {
                 if (generation == qrGeneration) loading.value = false
             }
         }
+    }
+
+    /** 服务端 code + 原话：这是用户/我们唯一的线索，必须一起显示（`message == "0"` 时只留 code） */
+    private fun qrErrorDetail(code: Int, message: String): String = buildString {
+        append("code=").append(code)
+        if (message.isNotBlank() && message != "0") append(" · ").append(message)
+    }
+
+    /** 失败详情只走 ERROR 级日志（Release 包只保留 ERROR 级） */
+    private fun logQrFailure(reason: String, vararg details: Pair<String, Any?>) {
+        val text = buildString {
+            append("TV扫码登录失败: ").append(reason)
+            details.forEach { (key, value) -> append("\n[").append(key).append("]=").append(value) }
+        }
+        miaoLogger().e(text)
     }
 
     /**
@@ -201,15 +230,30 @@ private class QrCodeLoginPageViewModel(
         // 每轮进门先验代际：刷新过就直接退出，旧码的任何状态都不许写
         if (generation != qrGeneration) return
         try {
-            val res = withContext(Dispatchers.IO) {
+            // ★刻意不直接 json<ResponseData<QrLoginInfo>>()：非 0/非预期 code 时 data 的形状可能对不上，
+            //   解析异常会把真正的服务端 code/message 盖掉（用户只剩一句"登录失败"）。
+            //   这里先拿原始 body 自己取 code/message/data，并把原始返回记进日志。
+            val body = withContext(Dispatchers.IO) {
                 BiliApiService.authApi
                     .checkQrCode(authCode)
                     .awaitCall()
-                    .json<ResponseData<LoginInfo.QrLoginInfo>>()
+                    .string()
             }
             // ★响应回来时可能已经刷新过（请求在途）：这里再验一次，否则旧码的分支会覆盖新码状态
             if (generation != qrGeneration) return
-            when(res.code) {
+            val root = runCatching {
+                MiaoJson.kotlinJson.parseToJsonElement(body).jsonObject
+            }.getOrNull()
+            if (root == null) {
+                logQrFailure("轮询响应不是 JSON", "body" to body.take(QR_LOG_BODY_LIMIT))
+                error.value = "登录请求失败，请稍后重试"
+                errorDetail.value = ""
+                return
+            }
+            val code = root["code"]?.jsonPrimitive?.intOrNull ?: QR_UNKNOWN_CODE
+            val message = root["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val dataText = root["data"]?.toString().orEmpty()
+            when (code) {
                 86039 -> {
                     // 未确认
                     delay(3000)
@@ -223,31 +267,70 @@ private class QrCodeLoginPageViewModel(
                 }
                 86038, -3 -> {
                     // 过期、失效
+                    logQrFailure("二维码过期/失效", "code" to code, "message" to message)
                     countdownJob?.cancel()
                     expireSeconds.value = 0
                     error.value = "二维码已过期，请刷新"
+                    errorDetail.value = ""
                 }
                 0 -> {
                     // 成功
+                    val loginInfo = runCatching {
+                        MiaoJson.fromJson<LoginInfo.QrLoginInfo>(dataText)
+                    }.getOrNull()
+                    if (loginInfo == null) {
+                        logQrFailure(
+                            "登录信息解析失败",
+                            "code" to code,
+                            "message" to message,
+                            "data" to dataText.take(QR_LOG_BODY_LIMIT),
+                        )
+                        error.value = "登录信息解析失败，请重试"
+                        errorDetail.value = ""
+                        return
+                    }
                     countdownJob?.cancel()
-                    val loginInfo = res.requireData().toLoginInfo()
-                    BilimiaoCommApp.commApp.saveAuthInfo(loginInfo)
+                    BilimiaoCommApp.commApp.saveAuthInfo(loginInfo.toLoginInfo())
                     authInfo()
                 }
                 else -> {
-                    // 发生错误
-                    error.value = "登录失败，请稍后重试\n" + res.message
+                    // 服务端拒绝或未知码：原话是唯一线索，code + message 一起显示，原始返回进日志
+                    logQrFailure(
+                        "TV扫码授权被拒绝/未知码",
+                        "code" to code,
+                        "message" to message,
+                        "data" to dataText.take(QR_LOG_BODY_LIMIT),
+                    )
+                    error.value = "服务端拒绝了这次 TV 扫码登录"
+                    errorDetail.value = qrErrorDetail(code, message)
                 }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             if (generation == qrGeneration) {
-                e.printStackTrace()
-                error.value = e.message ?: e.toString()
+                // 原始异常只进日志，页面上给人话
+                miaoLogger().e("TV扫码轮询异常", e.stackTraceToString())
+                error.value = "登录请求失败，请稍后重试"
+                errorDetail.value = ""
             }
         }
     }
 
+
+    /**
+     * 改用 Token / Cookie 登录：离开二维码页，回到登录页并直接弹出 Token 表单。
+     *
+     * 为什么先 pop 再 navigate：二维码页本来就是从登录页进来的，留着它只会让返回栈里多一层
+     * 已经失效的扫码页（用户要按两次返回才出得去）。这里用 `launchSingleTop = false`：
+     * 必须**新建**一个登录页实例，[LoginPageContent] 里的 `remember` 才会按新参数把弹窗打开
+     * （若要复用栈里那个旧实例，参数更新不会重跑它的初始状态）。
+     */
+    fun toTokenLogin() {
+        pageNavigation.popBackStack()
+        pageNavigation.navigate(LoginPage(openTokenLogin = true)) {
+            launchSingleTop = false
+        }
+    }
 
     private suspend fun authInfo() {
         val res = withContext(Dispatchers.IO) {
@@ -285,6 +368,7 @@ private fun QrCodeLoginPageContent(
 
     val loading = viewModel.loading.collectAsStateWithLifecycle().value
     val error = viewModel.error.collectAsStateWithLifecycle().value
+    val errorDetail = viewModel.errorDetail.collectAsStateWithLifecycle().value
     val qrCodeData = viewModel.qrCodeData.collectAsStateWithLifecycle().value
     val isScaned = viewModel.isScaned.collectAsStateWithLifecycle().value
     val expireSeconds = viewModel.expireSeconds.collectAsStateWithLifecycle().value
@@ -305,6 +389,7 @@ private fun QrCodeLoginPageContent(
     if (
         isFullScreenQrcode
         && !isScaned
+        && error.isBlank()
         && qrPainter != null
     ) {
         Image(
@@ -336,23 +421,36 @@ private fun QrCodeLoginPageContent(
                 color = MaterialTheme.colorScheme.onBackground,
             )
             if (qrPainter != null) {
-                if (error.isBlank()) {
-                    Text(
-                        text = "剩余有效时间：${expireSeconds} 秒",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                Row(
+                // 状态行常驻：失效时显示「二维码已失效」，不再整行消失（用户要看得到状态）
+                Text(
+                    text = if (error.isBlank()) "剩余有效时间：${expireSeconds} 秒" else "二维码已失效",
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.Center,
-                ) {
+                        .padding(top = 12.dp),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (error.isBlank()) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                if (error.isNotBlank()) {
+                    // 失效态只留一个出口，位置固定在二维码区**上方**，不压任何可读内容
+                    TextButton(
+                        onClick = { viewModel.loadQrImage() },
+                        enabled = !loading,
+                    ) {
+                        Text("重新加载")
+                    }
+                } else if (qrPainter != null) {
                     TextButton(
                         onClick = { viewModel.loadQrImage() },
                         // 取码期间禁用：连点会并发取码（旧码的轮询靠代际兜底，但没必要发两次请求）
@@ -388,73 +486,61 @@ private fun QrCodeLoginPageContent(
                     }
                 }
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(300.dp)
-                    .clickable {
-                        isFullScreenQrcode = true
-                    },
-            ) {
-                if (qrPainter != null) {
-                    Image(
-                        painter = qrPainter,
-                        contentDescription = "",
-                        modifier = Modifier
-                            .size(240.dp)
-                            .align(Alignment.Center)
-                            .background(Color.White)
-                            .padding(5.dp)
-                    )
-                    if (isScaned) {
-                        Box(
+            if (error.isNotBlank()) {
+                // ★错误态**整块替换**二维码区：错误文案与按钮绝不叠在码上（码同时隐藏）
+                QrLoginErrorCard(
+                    error = error,
+                    detail = errorDetail,
+                    onTokenLogin = viewModel::toTokenLogin,
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                        .clickable {
+                            isFullScreenQrcode = true
+                        },
+                ) {
+                    if (qrPainter != null) {
+                        Image(
+                            painter = qrPainter,
+                            contentDescription = "",
                             modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.8f))
-                        ) {
-                            Text(
-                                text = "扫描成功\n\n请在扫码端确认登录",
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                fontSize = 20.sp,
+                                .size(240.dp)
+                                .align(Alignment.Center)
+                                .background(Color.White)
+                                .padding(5.dp)
+                        )
+                        if (isScaned) {
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .align(Alignment.Center)
-                            )
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.8f))
+                            ) {
+                                Text(
+                                    text = "扫描成功\n\n请在扫码端确认登录",
+                                    textAlign = TextAlign.Center,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    fontSize = 20.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .align(Alignment.Center)
+                                )
+                            }
                         }
                     }
-                }
-                if (loading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .align(Alignment.Center),
-                        strokeWidth = 3.dp,
-                    )
-                }
-                if (error.isNotBlank()) {
-                    Text(
-                        text = error,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.Center),
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                    Button(
-                        onClick = {
-                            viewModel.loadQrImage()
-                        },
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter),
-                    ) {
-                        Text(
-                            text = "重新加载"
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .align(Alignment.Center),
+                            strokeWidth = 3.dp,
                         )
                     }
                 }
             }
-            if (qrCodeData != null) {
+            if (qrCodeData != null && error.isBlank()) {
                 // 长按复制链接；点击不做事（只保留水波纹，避免误触）
                 Text(
                     text = qrCodeData,
@@ -479,6 +565,12 @@ private fun QrCodeLoginPageContent(
 
 /** 二维码有效期（秒）：接口不返回有效期字段，按官方客户端口径本地倒计时 */
 private const val QR_CODE_TTL_SECONDS = 180
+
+/** 轮询响应里读不到 code 时用的哨兵值（只用于显示/日志，不参与业务分支） */
+private const val QR_UNKNOWN_CODE = -1
+
+/** 失败日志里最多带多少字符的原始返回（避免把整份 body 刷进日志） */
+private const val QR_LOG_BODY_LIMIT = 600
 
 /** 倒计时刷新间隔：一秒一跳即可，500ms 只是让跨秒时的显示更跟手 */
 private const val COUNTDOWN_TICK_MS = 500L
@@ -538,4 +630,47 @@ private fun copyQrCodeLink(activity: Activity, link: String) {
     val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("二维码链接", link))
     toast("二维码链接已复制")
+}
+
+/**
+ * 扫码失败时的错误区。
+ *
+ * ★**整块替换二维码区**（码同时隐藏），所以错误文案与按钮不会叠在码上；
+ * 「重新加载」固定在上方的操作行里，也不压这里的内容。
+ * 正文保留服务端原话（`detail`，唯一线索），并给一条直达 Token / Cookie 登录的出路。
+ */
+@Composable
+private fun QrLoginErrorCard(
+    error: String,
+    detail: String,
+    onTokenLogin: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = error,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.error,
+        )
+        if (detail.isNotBlank()) {
+            Text(
+                text = detail,
+                modifier = Modifier.padding(top = 8.dp),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(
+            onClick = onTokenLogin,
+            modifier = Modifier.padding(top = 8.dp),
+        ) {
+            Text("改用 Token / Cookie 登录")
+        }
+    }
 }
