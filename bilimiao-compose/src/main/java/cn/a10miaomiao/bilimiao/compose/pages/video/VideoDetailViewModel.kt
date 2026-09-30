@@ -21,6 +21,7 @@ import bilibili.app.view.v1.ViewReply
 import bilibili.app.view.v1.ViewReq
 import cn.a10miaomiao.bilimiao.compose.BilimiaoPageRoute
 import cn.a10miaomiao.bilimiao.compose.base.BottomSheetState
+import cn.a10miaomiao.bilimiao.compose.common.navigation.BilibiliNavigation
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.pages.playlist.PlayListPage
 import cn.a10miaomiao.bilimiao.compose.pages.search.SearchResultPage
@@ -43,6 +44,7 @@ import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
+import com.a10miaomiao.bilimiao.comm.network.GrpcStatusException
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.FilterStore
 import com.a10miaomiao.bilimiao.comm.store.PlayListStore
@@ -57,6 +59,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.CancellationException
 import java.net.URL
 import kotlinx.coroutines.withContext
@@ -71,6 +77,7 @@ import com.a10miaomiao.bilimiao.comm.entity.video.AiConclusionData
 import com.a10miaomiao.bilimiao.comm.entity.video.AiConclusionResult
 import com.a10miaomiao.bilimiao.comm.entity.video.AiOutline
 import com.a10miaomiao.bilimiao.comm.entity.video.AiPartOutline
+import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import okhttp3.OkHttpClient
@@ -189,11 +196,25 @@ class VideoDetailViewModel(
 
     private var loadJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * 番剧兜底是否已经试过（见 [tryPgcFallback]）。
+     *
+     * ★ 不变量：**同一目标只打一次**。失败分支里绝不能再回头调 [loadData]（否则"打不开的番剧条目"
+     *   会变成 HTTP 请求循环），也绝不重试。
+     * ★ 唯一的重置点是 [changeVideo]（换视频 = 换了目标，重新给一次机会）；
+     *   **下拉刷新/重试不重置** —— 那正是"失败即停"要挡住的东西。
+     */
+    private var pgcFallbackTried = false
+
     /** 当前在途的 AI 总结请求：切视频/重复点按要取消旧的 */
     private var aiJob: kotlinx.coroutines.Job? = null
 
     fun changeVideo(id: String) {
         _id = id
+        // ★ 换目标 = 新的兜底机会：本 VM 会被"自动连播/切集"复用（见 changeVideoIfNeeded），
+        //   不重置的话"上一条兜底失败"会把后面所有视频的番剧兜底一起封死。
+        //   注意只在这里重置：同一目标内**兜底仍然只打一次**（失败即停，见 tryPgcFallback）。
+        pgcFallbackTried = false
         loadData()
     }
 
@@ -259,11 +280,70 @@ class VideoDetailViewModel(
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             e.printStackTrace()
+            // ★ 番剧兜底：View 接口明确说"这条内容不存在"（-404）时，多半是**番剧/PGC 稿件** ——
+            //   用 web 接口把 redirect_url 拿回来、换到番剧页（自替换本页）。
+            //   兜底只打一次、失败即停，不变量见 tryPgcFallback；失败才落人话错误。
+            if (e is GrpcStatusException && e.isNotFound && tryPgcFallback()) {
+                return@launch
+            }
             _fail.value = e
         } finally {
             _isRefreshing.value = false
             _loading.value = false
         }
+        }
+    }
+
+    /**
+     * 番剧兜底：`View/View` 说"这条内容不存在"（-404）时，用 web 接口换成番剧页。
+     *
+     * 依据（2026-10-01 取证，见 `/root/test/evidence/grpc-header-truncated.md`）：
+     *   · 这类稿件的 web `x/web-interface/view` 会给出 `redirect_url`
+     *     （形如 `https://www.bilibili.com/bangumi/play/ep5578285`）；
+     *   · 而 UGC 的 `View/View` gRPC 对它们一律回 HTTP 200 + **空 body** +
+     *     trailers `grpc-status:2 / grpc-message:-404`（以前的文案就是那句 "gRPC header truncated"）。
+     *
+     * ★★ 不变量（改动前先读）：
+     *   ① **同一目标只打一次**（[pgcFallbackTried]）：置位后永远返回 false —— 不递归、不重试、不回 [loadData]；
+     *      换视频（[changeVideo]）会把标志重置，刷新/重试不会；
+     *   ② **失败即停**：HTTP 失败 / 没有 redirect_url / 解析不出番剧页 / 导航失败
+     *      → 一律返回 false，由调用方退回人话错误（[com.a10miaomiao.bilimiao.comm.network.GrpcStatusException]
+     *      已被 BiliFailBox 翻译）；
+     *   ③ **只在"内容不存在"时被调用**（调用点判 `e.isNotFound`），网络错误/风控/取消都不触发；
+     *   ④ **自替换**：`navigate(番剧页) { popUpTo(当前视频页){inclusive=true} }` ——
+     *      从番剧页返回不会回到这个打不开的视频页；SeasonCheckPage 没有 `navDedupeKey`，
+     *      PageNavigation 的 1 秒同指纹闸门不拦它；
+     *   ⑤ **用户已经离开就不拽人**：导航前比对 `currentDestination.route` 与发请求前的快照，
+     *      不一致说明用户在 HTTP 请求期间按了返回 → 放弃兜底。
+     */
+    private suspend fun tryPgcFallback(): Boolean {
+        if (pgcFallbackTried) return false
+        pgcFallbackTried = true
+        val savedRoute = pageNavigation.hostController.currentDestination?.route ?: return false
+        val redirectUrl = try {
+            val param = if (_id.startsWith("BV")) "bvid" to _id else "aid" to _id
+            val res = MiaoHttp.request {
+                url = BiliApiService.biliApi("x/web-interface/view", param)
+            }.awaitCall().json<ResponseData<JsonElement>>()
+            ((res.data?.jsonObject?.get("redirect_url")) as? JsonPrimitive)?.contentOrNull.orEmpty()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            e.printStackTrace()
+            ""
+        }
+        if (redirectUrl.isBlank()) return false
+        val target = BilibiliNavigation.pgcPageOf(redirectUrl)
+        if (target == null) {
+            miaoLogger().d("pgc-fallback-unmatched" to redirectUrl)
+            return false
+        }
+        return withContext(Dispatchers.Main) {
+            if (pageNavigation.hostController.currentDestination?.route != savedRoute) return@withContext false
+            runCatching {
+                pageNavigation.navigate(target) {
+                    popUpTo(savedRoute) { inclusive = true }
+                }
+            }.onFailure { it.printStackTrace() }.isSuccess
         }
     }
 

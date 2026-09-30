@@ -2,6 +2,7 @@ package com.a10miaomiao.bilimiao.comm.network
 
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
+import android.util.Base64
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -24,6 +25,14 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
 
     companion object {
         private var baseUrl = ApiHelper.GRPC_BASE
+
+        /** gRPC 错误所在的 HTTP/2 trailer 名（B 站：状态码与业务码都在这里，如 -404 会塞在 message） */
+        private const val TRAILER_GRPC_STATUS = "grpc-status"
+        private const val TRAILER_GRPC_MESSAGE = "grpc-message"
+        private const val TRAILER_GRPC_STATUS_DETAILS = "grpc-status-details-bin"
+
+        /** 从 grpc-message / details 原始字节里抠业务码用（形如 -404） */
+        private val NEGATIVE_CODE_REGEX = Regex("-(\\d{1,6})")
 
         private val client = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -133,7 +142,7 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
             var offset = 0
             while (offset < 5) {
                 val read = inputStream.read(header, offset, 5 - offset)
-                if (read == -1) throw IOException("gRPC header truncated")
+                if (read == -1) throw emptyBodyError(res)
                 offset += read
             }
             val compressionFlag = header[0].toInt() and 0xFF
@@ -160,6 +169,51 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
             inputStream.close()
             body.close()
         }
+    }
+
+    /**
+     * HTTP 200、但**一个字节的 gRPC 帧体都没有**时的错误。
+     *
+     * ★ 这不是"服务端什么都没说"：B 站的 gRPC 错误放在 **HTTP/2 trailers** 里
+     *   （`grpc-status` / `grpc-message`，业务码如 `-404` 直接塞在 grpc-message），body 是 0 字节。
+     *   以前这里抛的是 `IOException("gRPC header truncated")` —— 开发者黑话，
+     *   而 BiliFailBox 会把异常 message **逐字**当整页文案（2026-10-01 用户报障：
+     *   时光机番剧条目点进去整页 "gRPC header truncated"）。
+     *   现在：类型化抛 [GrpcStatusException]（调用方可判定"内容在当前接口里不存在"→ 走兜底），
+     *   现场（httpCode / grpc-status / grpc-message / details / trailers）全部进日志。
+     */
+    private fun emptyBodyError(res: Response): IOException {
+        val status = res.trailer(TRAILER_GRPC_STATUS)
+        val message = res.trailer(TRAILER_GRPC_MESSAGE)
+        val details = res.trailer(TRAILER_GRPC_STATUS_DETAILS)
+        // 业务码：优先从 grpc-message 里取（B 站给的是 "-404" 这种）；
+        // 取不到再从 details-bin（base64 的 bilibili.rpc.Status protobuf）的原始字节里找一眼，
+        // **不引 protobuf 解析**、失败就当没有。
+        val bizCode = NEGATIVE_CODE_REGEX.find(message.orEmpty())
+            ?.groupValues?.get(1)?.toIntOrNull()?.unaryMinus()
+            ?: details?.let { d ->
+                runCatching {
+                    String(Base64.decode(d, Base64.DEFAULT), Charsets.ISO_8859_1)
+                }.getOrNull()
+            }?.let { raw -> NEGATIVE_CODE_REGEX.find(raw)?.groupValues?.get(1)?.toIntOrNull()?.unaryMinus() }
+        miaoLogger().d(
+            "grpc-empty-body" to method.name,
+            "httpCode" to res.code,
+            "grpcStatus" to status,
+            "grpcMessage" to message,
+            "grpcStatusDetails" to details,
+            "trailers" to res.trailers.names().joinToString(","),
+        )
+        return GrpcStatusException(
+            grpcStatus = status,
+            grpcMessage = message,
+            bizCode = bizCode,
+            message = "服务端没有返回内容" + if (status.isNullOrBlank()) {
+                ""
+            } else {
+                "（grpc-status=$status${if (message.isNullOrBlank()) "" else " $message"}）"
+            },
+        )
     }
 
     suspend fun awaitCall(): RespT {
@@ -196,4 +250,25 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
             })
         }
     }
+}
+
+/**
+ * gRPC 层失败：**HTTP 200 + 空 body**，真实错误只在 HTTP/2 trailers 里（[grpcStatus] / [grpcMessage]）。
+ *
+ * 为什么要单独一个类型（而不是继续抛一句 `IOException("gRPC header truncated")`）：
+ *   ① 调用方需要判定"内容在**这个**接口里不存在"（[isNotFound]）→ 才能走换接口/换页面的兜底，
+ *      而不是把"服务端明确说没有"当成网络故障；
+ *   ② 用户不该看到开发者黑话 —— BiliFailBox 会把异常 message 逐字当整页文案。
+ * 原始现场（httpCode / grpc-status / grpc-message / details / trailers）在抛出前已进日志。
+ */
+class GrpcStatusException(
+    val grpcStatus: String?,
+    val grpcMessage: String?,
+    /** 服务端业务码（B 站塞在 grpc-message 里，如 -404）；拿不到 = null */
+    val bizCode: Int?,
+    message: String,
+) : IOException(message) {
+
+    /** true = 这条内容在当前接口里不存在（业务码 -404 或 grpc-status 5/NOT_FOUND） */
+    val isNotFound: Boolean get() = bizCode == -404 || grpcStatus == "5"
 }

@@ -7,6 +7,7 @@ import android.view.View
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.navigation.NavController
 import androidx.navigation.Navigation
+import cn.a10miaomiao.bilimiao.compose.base.ComposePage
 import cn.a10miaomiao.bilimiao.compose.pages.article.ArticleReaderPage
 import cn.a10miaomiao.bilimiao.compose.pages.bangumi.BangumiDetailPage
 import cn.a10miaomiao.bilimiao.compose.pages.dynamic.DynamicDetailPage
@@ -152,6 +153,34 @@ object BilibiliNavigation {
         }
 
         return pageNavigation.navigateByUri(uri)
+    }
+
+    /**
+     * 番剧兜底专用：把"站内跳转地址"（`x/web-interface/view` 的 `redirect_url`）解析成番剧页。
+     *
+     * 为什么单独一个**只解析、不导航**的函数：调用方（VideoDetailViewModel 的番剧兜底）要的是
+     * "目标页 + `popUpTo(当前视频页){inclusive=true}`"这套**自替换**，而 [navigationTo] 只能把页面压上去 ——
+     * 换成"先压栈、再弹自己"会把刚压上去的目标页一起弹掉（`popBackStack(route, inclusive)` 连上面的页一起弹）。
+     *
+     * 只认三类，其余一律 null（由调用方退回人话错误，不猜、不透传）：
+     *   · `/bangumi/play/ep123` → [SeasonCheckPage]（epId）
+     *   · `/bangumi/play/ss123` → [SeasonCheckPage]（id = 季）
+     *   · `…/media/md123`       → [SeasonCheckPage]（mediaId）
+     */
+    fun pgcPageOf(url: String): ComposePage? {
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
+        if (uri.scheme != "http" && uri.scheme != "https") return null
+        val path = uri.path ?: return null
+        Regex("(?i)^/bangumi/play/ep(\\d+)").find(path)?.let {
+            return SeasonCheckPage(epId = it.groupValues[1])
+        }
+        Regex("(?i)^/bangumi/play/ss(\\d+)").find(path)?.let {
+            return SeasonCheckPage(id = it.groupValues[1])
+        }
+        Regex("(?i)^/bangumi/media/md(\\d+)").find(path)?.let {
+            return SeasonCheckPage(mediaId = it.groupValues[1])
+        }
+        return null
     }
 
     fun navigationToWeb(

@@ -234,9 +234,10 @@ private class FlagsSettingPageViewModel(
 
 
 /**
- * 版本名**显示用**：去掉尾部的 "-<构建序号>"（例如 V2026.09.25-54 → V2026.09.25）。
- * 那个后缀只是"同一天多次构建"的区分号，对外没必要看到；版本号另外用 VC 显示。
- * （内部 versionName / 发布命名 / 崩溃日志里仍保留完整名字）
+ * 版本名**显示用**：只留对外发布的日期（例如 v2026.10.01）。
+ * ★2026-10-01 用户拍板：对外**只按发布日期说版本**，不再显示 `（VC xxx）` 括号，
+ * 也不再显示同日构建序号（VC 本身已固定不再抬，见 `rules/03` 的版本号规矩）。
+ * （内部 versionName / 崩溃日志里仍保留完整名字）
  */
 private fun displayVersionName(versionName: String?): String {
     val name = versionName?.trim().orEmpty()
@@ -260,17 +261,13 @@ private fun FlagsSettingPageContent(
     val context = LocalContext.current
     // 这个函数是顶层 @Composable（不在 FlagsSettingPageState 类里），要用 CompositionLocal 拿导航
     val pageNavigation = localPageNavigation()
-    // 当前版本：对外版本名 + versionCode（关于页展示；用 PackageManager 取，跨模块安全）
+    // 当前版本：**只显示对外发布日期**（★2026-10-01 用户拍板：不要 `（VC xxx）` 括号；
+    // VC 已固定不再抬，见 rules/03 的版本号规矩）。用 PackageManager 取，跨模块安全。
     // 必须在 LazyColumn 之外算 —— LazyListScope 的 lambda 不是 @Composable 上下文，里面不能调 remember
     val appVersionLabel = remember(context) {
         try {
             val pi = context.packageManager.getPackageInfo(context.packageName, 0)
-            val vc = if (android.os.Build.VERSION.SDK_INT >= 28) {
-                pi.longVersionCode
-            } else {
-                @Suppress("DEPRECATION") pi.versionCode.toLong()
-            }
-            "${displayVersionName(pi.versionName)}（VC $vc）"
+            displayVersionName(pi.versionName)
         } catch (e: Exception) {
             "未知"
         }

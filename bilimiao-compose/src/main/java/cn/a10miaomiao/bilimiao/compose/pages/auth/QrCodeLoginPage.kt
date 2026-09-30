@@ -318,18 +318,17 @@ private class QrCodeLoginPageViewModel(
 
 
     /**
-     * 改用 Token / Cookie 登录：离开二维码页，回到登录页并直接弹出 Token 表单。
+     * 改用 Token / Cookie 登录：离开二维码页，回到登录页（**不自动弹任何弹窗**）。
      *
-     * 为什么先 pop 再 navigate：二维码页本来就是从登录页进来的，留着它只会让返回栈里多一层
-     * 已经失效的扫码页（用户要按两次返回才出得去）。这里用 `launchSingleTop = false`：
-     * 必须**新建**一个登录页实例，[LoginPageContent] 里的 `remember` 才会按新参数把弹窗打开
-     * （若要复用栈里那个旧实例，参数更新不会重跑它的初始状态）。
+     * 为什么先 pop：二维码页本来就是从登录页进来的，留着它只会让返回栈里多一层已经失效的扫码页。
+     * ★**不要**给登录页传"进去就弹 Token 表单"这种**路由参数**：参数会留在返回栈里，
+     *   该页之后每次重新进组合（从子页返回 / 旋屏 / 进程重建）都会再弹一次 —— 用户实测过
+     *   「退出扫码页后 Token 弹窗到处乱弹」。到了登录页由用户自己点「Token 登录」即可，
+     *   按钮保留、走默认导航选项（**不**加 `launchSingleTop = false`，免得反复压层）。
      */
     fun toTokenLogin() {
         pageNavigation.popBackStack()
-        pageNavigation.navigate(LoginPage(openTokenLogin = true)) {
-            launchSingleTop = false
-        }
+        pageNavigation.navigate(LoginPage())
     }
 
     private suspend fun authInfo() {

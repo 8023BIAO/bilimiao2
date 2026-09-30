@@ -62,10 +62,7 @@ import kotlin.contracts.InvocationKind
 import kotlin.contracts.contract
 
 @Serializable
-class LoginPage(
-    /** 从二维码页「改用 Token / Cookie 登录」进来时，直接弹出 Token 表单 */
-    val openTokenLogin: Boolean = false,
-) : ComposePage() {
+class LoginPage : ComposePage() {
 
     @Composable
     override fun Content() {
@@ -73,7 +70,7 @@ class LoginPage(
         LaunchedEffect(Unit) {
             viewModel.checkLogin()
         }
-        LoginPageContent(viewModel, openTokenLogin)
+        LoginPageContent(viewModel)
     }
 
 }
@@ -423,7 +420,6 @@ private class LoginPageViewModel(
 @Composable
 private fun LoginPageContent(
     viewModel: LoginPageViewModel,
-    openTokenLogin: Boolean = false,
 ) {
     PageConfig(title = "登录BILIBILI")
     val userStore: UserStore by rememberInstance()
@@ -439,7 +435,7 @@ private fun LoginPageContent(
     val scrollState = rememberScrollState()
     val passwordFocusRequester = remember { FocusRequester() }
     var passwordIsFocus by remember { mutableStateOf(false) }
-    var showTokenLoginDialog by remember { mutableStateOf(openTokenLogin) }
+    var showTokenLoginDialog by remember { mutableStateOf(false) }
 
     val usernameKeyboardActions = remember(passwordFocusRequester) {
         KeyboardActions(
