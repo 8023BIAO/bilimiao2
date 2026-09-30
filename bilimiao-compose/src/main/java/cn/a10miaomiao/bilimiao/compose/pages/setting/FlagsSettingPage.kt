@@ -674,7 +674,7 @@ private fun FlagsSettingPageContent(
                     )
                 },
             )
-            // ★ 2026-09-27 用户拍板回退「全自动反诈」开关（"感觉多余非必要了，因为一天最多三次"）：
+            // ★ 2026-09-27 定稿回退「全自动反诈」开关（"感觉多余非必要了，因为一天最多三次"）：
             //   现在一律弹窗提醒，弹窗底部「自动申诉」走原生申诉接口（带理由、不跳浏览器），额度记账保留。
             preference(
                 key = "antifraud_about",
@@ -826,7 +826,7 @@ private fun FlagsSettingPageContent(
                 )
             }
             // ── 申诉（原生，2026-09-26）──
-            // 用户拍板：软件里不再走 WebView / 外部浏览器。接口是从官方 H5 前端 JS 里抓的：
+            // 定稿：软件里不再走 WebView / 外部浏览器。接口是从官方 H5 前端 JS 里抓的：
             //   评论申诉 POST x/v2/reply/appeal/submit（oid=BV号 或 url=位置链接 + type=1 + reason + csrf）
             //   图文动态申诉 POST x/dynamic/feed/dyn/appeal（uid + link + reason）
             // 入口：上面「上次检测结果」点开 → 与检测弹窗同一个构建入口，底部「自动申诉」= 官方同款两个输入

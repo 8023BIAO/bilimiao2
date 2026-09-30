@@ -115,7 +115,7 @@ private fun DynamicPageContent(
     val saveableStateHolder = rememberSaveableStateHolder()
 
     /**
-     * UP 栏点头像（用户拍板的**字面语义**）：
+     * UP 栏点头像（定稿的**字面语义**）：
      * - 未选中这个 UP → 筛选他的动态（[DynamicViewModel.selectUpper]）；
      * - **已选中（含进页面自动选中的第 1 个）再点一次 → 进他的用户空间**（[DynamicViewModel.toUserSpace]）。
      *

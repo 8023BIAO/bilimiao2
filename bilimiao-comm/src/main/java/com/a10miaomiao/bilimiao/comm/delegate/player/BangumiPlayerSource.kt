@@ -154,16 +154,16 @@ class BangumiPlayerSource(
                 )
                 if (durl.size == 1) {
                     it.duration = durl[0].length
-                    it.url = if (uposHost.isNotBlank()) {
+                    it.url = UrlUtil.resolveP2pUrl(if (uposHost.isNotBlank()) {
                         UrlUtil.replaceHost(durl[0].url, uposHost)
-                    } else { durl[0].url }
+                    } else { durl[0].url })
                 } else {
                     var duration = 0L
                     it.url = "[concatenating]\n" + durl.joinToString("\n") { d ->
                         duration += d.length
-                        if (uposHost.isNotBlank()) {
+                        UrlUtil.resolveP2pUrl(if (uposHost.isNotBlank()) {
                             UrlUtil.replaceHost(d.url, uposHost)
-                        } else { d.url }
+                        } else { d.url })
                     }
                     it.duration = duration
                 }
@@ -215,7 +215,9 @@ class BangumiPlayerSource(
             }
         }.distinct()
         if (urls.isEmpty()) return ""
-        return if (race && urls.size > 1) CdnSelector.pickAndRank(urls) else urls.joinToString("|")
+        // ★只剩 mcdn/P2P 候选时折叠成官方网关兜底（有普通镜像则原样，顺序数量都不动）
+        val resolved = UrlUtil.resolveP2pFallback(urls)
+        return if (race && resolved.size > 1) CdnSelector.pickAndRank(resolved) else resolved.joinToString("|")
     }
 
 // TODO AI 原声翻译：暂时关闭。恢复时把这段注释放开。
@@ -329,7 +331,7 @@ class BangumiPlayerSource(
                             dash.backupUrl.forEach { if (it.isNotBlank()) add(it) }
                         }
                     }
-                    finalVideoCandidates = CdnSelector.pickAndRank(videoUrls)
+                    finalVideoCandidates = CdnSelector.pickAndRank(UrlUtil.resolveP2pFallback(videoUrls))
 
                     if (audio != null && !audioIndependentCdn) {
                         val audioUrls = buildList {
@@ -342,15 +344,15 @@ class BangumiPlayerSource(
                                 audio.backupUrl.forEach { b -> if (b.isNotBlank()) add(b) }
                             }
                         }
-                        finalAudioCandidates = CdnSelector.pickAndRank(audioUrls)
+                        finalAudioCandidates = CdnSelector.pickAndRank(UrlUtil.resolveP2pFallback(audioUrls))
                     } else {
                         finalAudioCandidates = audio?.let {
-                            if (uposHost.isNotBlank()) UrlUtil.replaceHost(it.baseUrl, uposHost) else it.baseUrl
+                            UrlUtil.resolveP2pUrl(if (uposHost.isNotBlank()) UrlUtil.replaceHost(it.baseUrl, uposHost) else it.baseUrl)
                         }
                     }
                 } else {
                     // CDN 竞速关闭：baseUrl + backupUrl 仍供运行时故障转移
-                    finalVideoCandidates = buildList {
+                    finalVideoCandidates = UrlUtil.resolveP2pFallback(buildList {
                         if (uposHost == "backup") {
                             dash.backupUrl.firstOrNull { it.isNotBlank() }?.let { add(it) }
                             add(dash.baseUrl)
@@ -361,9 +363,9 @@ class BangumiPlayerSource(
                             add(dash.baseUrl)
                             dash.backupUrl.forEach { if (it.isNotBlank()) add(it) }
                         }
-                    }.joinToString("|")
+                    }).joinToString("|")
                     finalAudioCandidates = audio?.let {
-                        buildList {
+                        UrlUtil.resolveP2pFallback(buildList {
                             if (uposHost == "backup") {
                                 it.backupUrl.firstOrNull { b -> b.isNotBlank() }?.let { b -> add(b) }
                                 add(it.baseUrl)
@@ -374,7 +376,7 @@ class BangumiPlayerSource(
                                 add(it.baseUrl)
                                 it.backupUrl.forEach { b -> if (b.isNotBlank()) add(b) }
                             }
-                        }.joinToString("|")
+                        }).joinToString("|")
                     }
                 }
 
@@ -387,7 +389,7 @@ class BangumiPlayerSource(
             is Stream.Content.SegmentVideo -> {
                 val durl = streamContent.value
                 PlayerDiag.log("bangumi-grpc", "[concatenating] MP4 分片 ${durl.segment.size} 段（qn=${videoInfo.quality}）")
-                playerSource.url = "[concatenating]\n" + durl.segment.joinToString("\n") { it.url }
+                playerSource.url = "[concatenating]\n" + durl.segment.joinToString("\n") { UrlUtil.resolveP2pUrl(it.url) }
             }
         }
         return playerSource
@@ -439,16 +441,16 @@ class BangumiPlayerSource(
                 val durl = res.durl ?: throw Exception("Missing durl in proxy bangumi player response")
                 if (durl.size == 1) {
                     it.duration = durl[0].length
-                    it.url = if (uposHost.isNotBlank()) {
+                    it.url = UrlUtil.resolveP2pUrl(if (uposHost.isNotBlank()) {
                         UrlUtil.replaceHost(durl[0].url, uposHost)
-                    } else { durl[0].url }
+                    } else { durl[0].url })
                 } else {
                     var duration = 0L
                     it.url = "[concatenating]\n" + durl.joinToString("\n") { d ->
                         duration += d.length
-                        if (uposHost.isNotBlank()) {
+                        UrlUtil.resolveP2pUrl(if (uposHost.isNotBlank()) {
                             UrlUtil.replaceHost(d.url, uposHost)
-                        } else { d.url }
+                        } else { d.url })
                     }
                     it.duration = duration
                 }

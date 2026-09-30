@@ -680,8 +680,12 @@ class PlayerController(
         val popup = QualityPopupMenu(
             activity = activity,
             anchor = view,
+            // 档位来源保持"服务端下发哪些就列哪些"（不逐项置灰）
             list = sourceInfo.acceptList,
-            value = delegate.quality,
+            // ★勾选口径 = **实际拿到的档**（与底栏 setQualityValue 同源）：
+            //   `delegate.quality` 是"用户请求档"，服务端回退时两者不一致 ——
+            //   请求 1080P 却只拿到 720P 时，菜单必须勾 720P。
+            value = sourceInfo.quality,
             themeColor = player?.themeColor ?: 0,
         )
         popup.setOnChangedQualityListener(delegate::changedQuality)

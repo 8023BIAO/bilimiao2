@@ -112,6 +112,17 @@ import java.net.UnknownHostException
  */
 private const val WATCHED_TO_END_TOLERANCE_MS = 1000L
 
+/**
+ * 进度**明显回退**的阈值（ms）：当前位置比"上次上报位置"小这么多以上，就认定用户在**重看**，
+ * 把节流账本归零（见 [PlayerDelegate2.historyReport]）。
+ *
+ * 为什么必须有它：拖回前面后位置小于上次上报值 ⇒ `position - lastReportProgress` 恒为负 ⇒
+ * 被 5 秒节流**一直挡住** ⇒ 中间的真实进度永远上报不了、"已看完"的一次性标记也永远不复位，
+ * 于是"看完 → 拖回中间 → 再看一遍到结尾"不会再发 `-1`。
+ * 为什么是 5 秒：小于它算"来回微调"，不重置（避免抖动与重复上报）。
+ */
+private const val REWATCH_RESET_THRESHOLD_MS = 5000L
+
 
 class PlayerDelegate2(
     private val activity: AppCompatActivity,
@@ -328,8 +339,10 @@ class PlayerDelegate2(
      * `GSYVideoControlView$4`），而"距结尾 ≤1 秒"这个窗口正好 1000ms ⇒ 同一段结尾会被调到
      * **最多 2 次**（窗口内那一拍 + `onAutoCompletion`），不挡就会连发两条 -1。
      * 上游 PiliPlus 的 `.completed` 是一次性状态迁移、不会重复，这里对齐它。
-     * ★复位规则：**任何一次真实进度上报都会重新武装**（拖回前面重看/重播后再看到结尾，
-     *   仍会再发一次 -1）—— 因为中途那些真实进度已经把服务端的"已看完"覆盖掉了，
+     * ★复位规则（= 实现）：**任何一次真实进度上报都会重新武装** —— 包括重播（`historyReport(0L)`）、
+     *   换视频/换源（两处 `lastReportProgress = 0L` 的复位点），以及**拖回前面 ≥5 秒重看**
+     *   （[REWATCH_RESET_THRESHOLD_MS] 那次账本归零让真实上报重新走通）。
+     *   为什么必须重新武装：中途那些真实进度已经把服务端的"已看完"覆盖成了具体秒数，
      *   不重发的话历史里就停在"看到 05:00"而不是"已看完"。
      */
     private var sentWatchedToEnd = false
@@ -461,7 +474,16 @@ class PlayerDelegate2(
         val p = views.videoPlayer ?: return
         playerSource = source                 // 自定义 setter 会同步 PlayerStore
         playerSourceInfo = keptSourceInfo
-        keptSourceInfo?.quality?.let { if (it > 0) quality = it }
+        // ★重建时恢复的是**用户请求档**，不是上一次实际拿到的档（本轮修的小回归）：
+        //   `keptSourceInfo.quality` 现在表示"实际拿到的档"（可能是回退档）——
+        //   未登录"请求 1080P / 实际 720P"时拿它恢复，重建后就**只请求 720P**，再也回不到 1080P。
+        //   ★读法必须是**同步、非阻塞**的：重建后可能马上触发一次重载，那时必须**当场**就用请求档
+        //   发请求；用协程异步读 DataStore 会先拿旧档发一遍、再被覆盖（顺序/竞争面，复核提过）。
+        //   所以这里只吃 `SettingPreferences.cachedPreferencesOrNull()` 的内存快照
+        //   （O(1)、不用 runBlocking；读法与 playerVolumeSwipeRatio 一致），
+        //   快照还没就绪就退回默认 64（与 openPlayer 里 `it[PlayerQuality] ?: 64` 同一口径）。
+        val requestedQuality = SettingPreferences.cachedPreferencesOrNull()?.get(SettingPreferences.PlayerQuality) ?: 64
+        if (requestedQuality > 0) quality = requestedQuality
         // loadPlayerSource 里番剧被强制成 MP4，重建后切清晰度不能退回 DASH
         if (source is BangumiPlayerSource) {
             fnval = SettingConstants.PLAYER_FNVAL_MP4
@@ -937,6 +959,21 @@ class PlayerDelegate2(
         // ★"已看完"只发一次：这个 1 秒窗口里进度回调会被调到最多 2 次（1000ms 一拍 + onAutoCompletion），
         //   不挡就连发两条 -1。任何一次**真实进度**上报都会重新武装（见 [sentWatchedToEnd]）。
         if (watchedToEnd && sentWatchedToEnd) return
+        // ★位置明显回退 = 用户在**重看**：把节流账本归零，让"真实进度上报 → 重新武装已看完"这条链重新走通。
+        //   没有它的话：拖回后位置小于上次上报值 ⇒ `position - lastReportProgress` 恒为负 ⇒
+        //   被下面的 5 秒节流一直挡住 ⇒ 看完→拖回中间→再看一遍到结尾**不会再发 -1**（本轮修的就是这条）。
+        //   阈值 5 秒（[REWATCH_RESET_THRESHOLD_MS]）：更小的回退算"来回微调"，不重置、不抖动。
+        //   ★语义（为什么账本**归零**而不是"挪到当前位置"）：归零后**回退那一拍就会上报当前这个较低的位置**——
+        //   这正是"重看"该有的行为：① 历史/续播点跟着回退到用户拖到的位置（而不是停在看完的高位）；
+        //   ② 服务端那条"已看完"被这个具体秒数覆盖，于是下次再看到结尾会**重发一条 -1**。
+        //   若改成 `= currentPosition`，回退后要等满 5 秒才恢复上报，上面两条都会晚一拍。
+        //   ★不会给拖动带来额外请求：进度回调只由 GSY 的 1 秒计时器在**播放态**触发
+        //   （`GSYVideoControlView.setProgressAndTime` 里 `mCurrentState == PLAYING` 才回调，
+        //   见其字节码；`setTextAndProgress` 取的是 `getCurrentPositionWhenPlaying()` 的实时位置），
+        //   拖动期间位置不跳变、跳变只发生在松手 seek 之后的那一拍 ⇒ 一次回退最多一条上报。
+        if (currentPosition > 0 && currentPosition < lastReportProgress - REWATCH_RESET_THRESHOLD_MS) {
+            lastReportProgress = 0L
+        }
         // 5秒记录一次。★只有"已看完"这一拍**不受节流限制**：
         //   完结那一拍几乎总落在"距上次上报 <5s"里（前面每 5s 一发），不放行的话 -1 永远发不出去；
         //   其余节流语义（间隔、触发点）一字未改。
@@ -946,7 +983,7 @@ class PlayerDelegate2(
         if (watchedToEnd) {
             sentWatchedToEnd = true
         } else {
-            // 真实进度上报 ⇒ 重新武装"已看完"（拖回前重看/重播后再看到结尾要能再发一次）
+            // 真实进度上报 ⇒ 重新武装"已看完"（拖回重看/重播后再看到结尾要能再发一次）
             sentWatchedToEnd = false
         }
         lastReportProgress = currentPosition
@@ -984,7 +1021,14 @@ class PlayerDelegate2(
     }
 
     fun changedQuality(newQuality: Int) {
-        if (quality != newQuality) {
+        // ★判据用**实际拿到的档**（[playerSourceInfo]?.quality），不能用 `quality`：
+        //   后者只是"用户请求档" —— 请求 1080P 被服务端回退成 720P 时，再点 1080P
+        //   必须**真的重试一次**，否则就是"点了没反应"的空操作。
+        val actualQuality = playerSourceInfo?.quality
+        // ★连点合并（防取流放大）：请求值已经是这个档、且一次装载还在途（装载互斥锁被持有）
+        //   就直接返回 —— 同一个档连点多次只发起一次；换到**别的**档不受影响。
+        if (quality == newQuality && loadMutex.isLocked) return
+        if (actualQuality != newQuality) {
             val previousQuality = quality
             lastPosition = player?.currentPositionWhenPlaying ?: 0L
             quality = newQuality
@@ -1176,7 +1220,10 @@ class PlayerDelegate2(
                 source.getPlayerUrl(quality, fnval)
             }
             if (playerClosed) return
-            quality = sourceInfo.quality
+            // ★**不要**用 sourceInfo.quality 覆盖用户请求值（2026-09 修的根因②）：
+            //   服务端对未登录恒回 quality=64，覆盖后 `quality` 就"掉回 64"，
+            //   下次重载/换清晰度都以 64 去请求 ⇒ 永远拿不回 1080P。
+            //   实际播的是哪一档看 playerSourceInfo.quality（下面是它，提示语也用它说真话）。
             playerSourceInfo = sourceInfo
             keptSourceInfo = sourceInfo
             // ★ 底栏「清晰度」不放图标了，直接显示当前值（1080P / 720P / 4K / 自动）——
@@ -1250,10 +1297,19 @@ class PlayerDelegate2(
             player?.requestLayout()
 
             if (announceQuality) {
+                // ★说真话：`quality` 是**用户请求的档**，`sourceInfo.quality` 是**实际拿到的档**。
+                //   以前这里两边恒等（上面那句覆盖把请求值改成了协商值），"点 1080P 只拿到 720P"
+                //   也会弹"已切换至【720P 高清】"，像成功了 —— 那是死代码，用户实测报过。
                 if (sourceInfo.quality == quality) {
                     PopTip.show("已切换至【${sourceInfo.description}】").showTop()
                 } else {
-                    PopTip.show("清晰度切换失败").showTop()
+                    PopTip.show(
+                        if (BilimiaoCommApp.commApp.loginInfo == null) {
+                            "未登录最高支持【${sourceInfo.description}】，已切到该档"
+                        } else {
+                            "该清晰度当前不可用，已切到【${sourceInfo.description}】"
+                        }
+                    ).showTop()
                 }
             } else {
                 player?.subtitleSourceList = withContext(Dispatchers.IO) {

@@ -310,7 +310,7 @@ import kotlin.math.roundToInt
  *    （`widget/player/DanmakuVideoPlayer.kt:1094`），与「其他页」AppBar 的 `ic_back_24dp`
  *    是同一条 Material arrow_back 路径（[buildUi] 顶栏那一段有完整的选型理由）。
  *
- * ## 第七批（本轮，用户拍板的"底栏重构"）
+ * ## 第七批（本轮，"底栏重构"）
  * 逐条落点：
  * 1. **发弹幕 = 常驻输入条**（软键盘回车键改走「发送」，据此去掉发送按钮与弹窗按钮）：
  *    底栏最上面一条 [danmakuInput]（hint「发个弹幕…」），`imeOptions = IME_ACTION_SEND` ——
@@ -1454,7 +1454,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private var pipEntryPending = false
 
     /**
-     * ★task-55：**用户主动退出本页**的一次性标记（[exitPage] 里在 `finish()` 之前置位）。
+     * ★**用户主动退出本页**的一次性标记（[exitPage] 里在 `finish()` 之前置位）。
      *
      * 为什么要它：本轮给 [onDestroy] 加了"**系统清栈也要记得住**"的补记（那一刻同样
      * `isFinishing == true`，页面侧无法与"系统清栈"区分）。这个标记就是那道分界线 ——
@@ -1464,7 +1464,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private var userExitedPage = false
 
     /**
-     * ★task-55：**本次会话进过 PiP** 的一次性标记（`onPictureInPictureModeChanged(true)` 里置位）。
+     * ★**本次会话进过 PiP** 的一次性标记（`onPictureInPictureModeChanged(true)` 里置位）。
      *
      * 为什么需要它：PiP 小窗被用户叉掉时本页同样 `isFinishing == true`、且"手动点底栏「画中画」"
      * 那条路**账本本来就是空的**（用户没离开 App，[onUserLeaveHint] 没记）—— 没有这个标记，
@@ -1697,9 +1697,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         LivePageTrace.section(
             "LivePage.onCreate",
             "room" to (intent?.getStringExtra(EXTRA_ROOM_ID) ?: "-"),
-            // ★task-55：taskId 是"任务归属"的唯一凭据 —— 同一台机器上对比两个播放页在系统小窗里的
+            // ★taskId 是"任务归属"的唯一凭据 —— 同一台机器上对比两个播放页在系统小窗里的
             //   `taskId`，一眼就能看出"点播没事"是因为它没被销毁、还是因为窗口/任务语义不同。
-            //   （那时点播页也有一份对称日志，task-57 收尾已删；这个 kv 留着，成本为零。）
+            //   （那时点播页也有一份对称日志，收尾时已删；这个 kv 留着，成本为零。）
             "taskId" to taskId,
             "savedState" to (savedInstanceState != null),
             "configOrientation" to resources.configuration.orientation,
@@ -1855,7 +1855,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // ★task-53 取证：**入口先记一条**（上面那条 `onNewIntent` 只在"非复用"分支里写，
+        // ★取证日志：**入口先记一条**（上面那条 `onNewIntent` 只在"非复用"分支里写，
         //   而"同房间复用把本页拉回前台"恰恰是我们最想看清的一条路）。
         LivePageTrace.note(
             "onNewIntent.enter",
@@ -2030,7 +2030,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "isFinishing" to isFinishing,
             "isChangingConfigurations" to isChangingConfigurations,
             "pip" to isInPictureInPictureMode,
-            // ★task-53 取证：小窗/分屏下这一条 + `onPause` 那条是判断"系统在收窗口"的直接证据
+            // ★取证日志：小窗/分屏下这一条 + `onPause` 那条是判断"系统在收窗口"的直接证据
             "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
             "isPlaying" to (delegate?.isPlaying == true),
             "delegate" to (delegate != null),
@@ -2054,7 +2054,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             if (windowed) {
                 LiveLastRoomStore.onLivePageWindowMinimized(applicationContext, rawRoomId)
             }
-            // ★task-47：多窗口（**非 PiP**）下把"别的页面还 resumed"那道门让开 ——
+            // ★多窗口（**非 PiP**）下把"别的页面还 resumed"那道门让开 ——
             //   多窗口允许多个 Activity 同时 RESUMED，"直播间 stop 而主界面还亮着"不代表
             //   用户在 App 内切页，而是"直播间这个窗口正在被收起/隐藏"。
             //   见 [LiveLastRoomStore.onLivePageStopped] 的 `inMultiWindow` 参数说明。
@@ -2158,7 +2158,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "pip" to (runCatching { isInPictureInPictureMode }.getOrDefault(false)),
             "page" to (if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"),
         )
-        // ★task-57 收尾：task-53 那条"`isFinishing` 时打 `Throwable().stackTraceToString()`"的
+        // ★收尾时：那条"`isFinishing` 时打 `Throwable().stackTraceToString()`"的
         //   调用栈**已删** —— 它的取证任务完成（2026-09-29 那次"系统清栈"就是它定位的），而且它会在
         //   **每一次正常返回退出**时都抓一次栈、往日志里灌几 KB，属于噪声。
         //   现在"是谁销毁的"由上面 `onDestroy.enter isFinishing` + [exitPage] / [handleBack] 那两条
@@ -2192,12 +2192,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   （这样"PiP 小窗被系统收掉"与"主界面 resume"谁先谁后都恰好恢复一次）。
         //
         // ══════════════════════════════════════════════════════════════════
-        // ★★task-55：**系统清栈也要记得住**（vc192 取证日志定论的那条路）
+        // ★★**系统清栈也要记得住**（vc192 取证日志定论的那条路）
         //
         // 病灶（vc192 取证日志定论）：系统小窗里 App **一直可见** ⇒ `onUserLeaveHint` 从不触发 ⇒ 账本**从没记上**；
         // 而"点桌面图标回 App"时 MainActivity（`singleTask`）会把它上面的直播间页面**整段清掉**
         // —— 证据：那趟日志里 `onDestroy.finishing.stack` 是 `ActivityThread.handleDestroyActivity`
-        // （**不是**我们调 `finish()`；该栈日志已按 task-57 收尾删除），
+        // （**不是**我们调 `finish()`；该栈日志已在收尾时删除），
         // `host.onNewIntent flags=0x10200000` = NEW_TASK|RESET_TASK_IF_NEEDED
         // ⇒ 页面没了、账本又是空的 ⇒ `restore.skip reason=noPending` ⇒ 落回直播 Tab、直播间消失。
         // 所以这里**补记一次**：紧接着的 [LiveLastRoomStore.onLivePageDestroyed] 会 `evaluateRestore()`，
@@ -2458,13 +2458,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "pipEntryPending" to pipEntryPending,
             "isPlaying" to (delegate?.isPlaying == true),
             "controlsVisible" to controlsVisible,
-            // ★task-53 取证：PiP 与"系统小窗（多窗口）"是两回事，两个标志位一起记才分得清
+            // ★取证日志：PiP 与"系统小窗（多窗口）"是两回事，两个标志位一起记才分得清
             "multiWindow" to (runCatching { isInMultiWindowMode }.getOrDefault(false)),
         )
         // PiP 窗口里没有点按钮的空间：**顶栏与底栏一起收起来**（两栏在小窗里会遮住大部分画面）。
         if (isInPictureInPictureMode) {
             pipEntryPending = true
-            // ★task-55 保护③：本会话进过 PiP —— [onDestroy] 的补记要绕过这条路（理由见字段 KDoc）
+            // ★保护③：本会话进过 PiP —— [onDestroy] 的补记要绕过这条路（理由见字段 KDoc）
             pipEnteredThisSession = true
             // PiP 里误触手势会同时改系统音量和画面亮度，很难发现，直接收起手势层
             gestureHud.hide()
@@ -2624,7 +2624,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   也是"全屏时返回 = 退出全屏"）。
      */
     private fun handleBack() {
-        // ★**长期保留**（task-53 取证时加、task-57 收尾时决定留下 —— 见 [callerTag] 的 KDoc）：
+        // ★**长期保留**（取证时加、收尾时决定留下 —— 见 [callerTag] 的 KDoc）：
         //   `from` = 直接调用方（onBackPressed / 顶栏返回图标那一段），与下面的 [exitPage] 日志配合，
         //   就是"**页面是我们自己退的、还是被系统清栈的**"这条判据的日志侧。
         LivePageTrace.note(
@@ -2666,7 +2666,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         runCatching { isInMultiWindowMode }.getOrDefault(false)
 
     /**
-     * ★**长期保留**（task-53 取证时加、task-57 收尾时**决定留下**）：返回本函数的**直接调用方**
+     * ★**长期保留**（取证时加、收尾时**决定留下**）：返回本函数的**直接调用方**
      * （`类名.方法#行`），给日志里的 `from=` 用。
      *
      * 为什么留（而不是随其他临时取证一起删）——它是"**页面是我们自己退的，还是被系统清栈的**"
@@ -3140,7 +3140,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 //   ② 45 次 × 1s = [OFFLINE_POLL_INTERVAL_MS]，所以**接口频率一个字节没变**
                 //      （仍是 45s 一次的单次尝试，风控口径不变）；
                 //   ③ 倒计时"归零"= 走到 1 之后再问一次接口，然后**回到 45 重新计时**（下一轮 for）。
-                //   ④ ★复核定稿：**倒计时只在前台写 UI**（`pageStarted`，与同类网络动作的门同源）——
+                //   ④ ★定稿：**倒计时只在前台写 UI**（`pageStarted`，与同类网络动作的门同源）——
                 //      退后台时不再每秒一次 setText；但**轮询本身照跑**（开播了必须能自动起播），
                 //      `delay` 与接口频率都不看这个门；回前台后 ≤1s 就写下一次，数字不会停在旧值上。
                 //   取消点天然齐全：这个协程就是 [pollJob] 自己 —— 主播开播那一支 `return@launch`
@@ -3437,8 +3437,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                     //     （开播轮询把画面接上了，弹窗不该再挡着）。
                     hasPlayedThisRoom = true
                     offlineLatched = false
-                    // ★第十五批复核（必改 1）：**画面真的出来了 ⇒ "等开播"这条线结束，倒计时必须在这里收掉。**
-                    //   漏掉它的真路径（复核员实证）：中途下播 → 倒计时在跑 → 用户点底栏「画质」换线/换清晰度
+                    // ★第十五批修正：**画面真的出来了 ⇒ "等开播"这条线结束，倒计时必须在这里收掉。**
+                    //   漏掉它的真路径（实测）：中途下播 → 倒计时在跑 → 用户点底栏「画质」换线/换清晰度
                     //   成功 → PLAYING 把状态行藏起来，**可下一秒倒计时又把"等待开播：44s 后自动检查"写回顶栏**
                     //   并每秒刷新（旧写法 45s 才写一次，所以这个洞在改成每秒刷新之前几乎看不见），
                     //   45s 后还会对正在播的流再 `delegate?.start(requestedQn)` 一次。
@@ -4391,7 +4391,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     }
 
     private fun updateDanmakuButton() {
-        // ★2026-09-26 用户拍板（底栏加到 5 颗后字号会从 14sp 掉到 9sp）：**文案全部缩成 2 字**，
+        // ★2026-09-26 定稿（底栏加到 5 颗后字号会从 14sp 掉到 9sp）：**文案全部缩成 2 字**，
         //   用"整行最宽文案"决定字号档 ⇒ 5 颗都是 2 字 ⇒ 字号**保持 14sp**（与 4 颗时一样大）。
         //   「弹幕开/弹幕关」的**状态**改用**亮度**表示（关 = 变暗 45%），不再靠多一个字。
         danmakuButton.alpha = if (danmakuEnabled) 1f else 0.45f
@@ -5849,7 +5849,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /**
      * 底栏按钮的**固定顺序**（[rebuildBottomBar] 按它摆进底栏，[applyBottomBarTextSizes] 按它算等宽格）。
-     * 顺序即"使用频率"（★第十四批之后共 5 颗，用户拍板的顺序）：
+     * 顺序即"使用频率"（★第十四批之后共 5 颗，定稿顺序）：
      * ```
      * 输入条（在它们左边，不算按钮）：弹幕开关 → 画质 → 设置 → 画中画 → 旋转
      * ```
@@ -6925,7 +6925,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private fun exitPage() {
         // ★诊断日志（只读）：用户主动退出直播间（"回 App 恢复"记录的清理点之一）
-        //   ★task-53 取证：`from` 是**谁调用了 exitPage**（handleBack = 返回键/顶栏返回图标；
+        //   ★取证日志：`from` 是**谁调用了 exitPage**（handleBack = 返回键/顶栏返回图标；
         //   别的字符串 = 代码里另一条路）—— 配合 `onDestroy.enter isFinishing=true` 就能钉死"谁杀掉了直播间"。
         LivePageTrace.note(
             "exitPage",
@@ -6936,7 +6936,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "isFinishing" to isFinishing,
         )
         returnToLiveGuard.disarm()
-        // ★task-55 保护①：用户主动退出的一次性标记 —— [onDestroy] 的"系统清栈补记"必须能分辨
+        // ★保护①：用户主动退出的一次性标记 —— [onDestroy] 的"系统清栈补记"必须能分辨
         //   "用户自己退的"和"系统把页面清掉的"。置位必须在 `finish()` 之前（onDestroy 是紧接着来的）。
         userExitedPage = true
         // ★「记住离开时的位置」：用户**主动收摊** → 清掉"应当恢复"的记录。
@@ -8292,7 +8292,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * ★顶栏被 `GONE` 时仍读得到它的位置：被 GONE 的 View 不会重新 layout，`top/bottom` 保留
          *   **最后一次显示时的位置**（同一事实见 [videoBandTopPx]）—— 那正是"顶栏显示一两秒的
          *   那块区域"，也正是用户要挡的地方；所以这条判据**不与顶栏显隐联动**。
-         * ★复核定稿的一句实话：刚转过屏、顶栏已经 `GONE` 的那一瞬，这个"最后一次位置"可能是
+         * ★定稿时的一句实话：刚转过屏、顶栏已经 `GONE` 的那一瞬，这个"最后一次位置"可能是
          *   **竖屏那次**的（它的 padding 里含竖屏状态栏那一截）→ 盾底比横屏真实的 52dp 大出
          *   那一截（常见 24~40dp）。★偏差方向**恒为偏大**（横屏里顶栏一旦再显示/重排就回到真值），
          *   也就是"只会多挡顶栏下面一小条、绝不会漏挡" —— 所以不为此再读一次实时 insets，

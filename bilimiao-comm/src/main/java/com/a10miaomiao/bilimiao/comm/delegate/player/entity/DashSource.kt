@@ -90,7 +90,9 @@ class DashSource(
                 allUrls.add(url)
             }
         }
-        return allUrls.distinct().joinToString("\n") { url ->
+        // ★只剩 P2P（裸 IP / *.mcdn.bilivideo.com / pcdn 主机）时折叠成官方网关兜底；
+        //   有普通镜像或 os=mcdn 镜像时**原样**（顺序/数量都不动，多 <BaseURL> 的故障转移靠它）。
+        return UrlUtil.resolveP2pFallback(allUrls.distinct()).joinToString("\n") { url ->
             "                    <BaseURL>${xmlEscape(url)}</BaseURL>"
         }
     }

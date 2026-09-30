@@ -197,7 +197,7 @@ class PicInPicHelper(
         // }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // PiP 窗口标题取自播放器标题控件：那个控件只是 visibility=invisible，
-            // 一直在（见 MEMORY：删除控件会让 PiP 没标题）。取空就不设，免得 PiP 顶栏空一块
+            // 一直在（实测：删除控件会让 PiP 没标题）。取空就不设，免得 PiP 顶栏空一块
             val title = playerProvider()?.findViewById<TextView>(R.id.title)?.text
             if (title != null && title.isNotBlank()) {
                 builder.setTitle(title)

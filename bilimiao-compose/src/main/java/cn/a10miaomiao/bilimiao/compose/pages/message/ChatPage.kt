@@ -408,7 +408,7 @@ private class ChatViewModel(
                 tempFile = file
                 val (info, error) = uploadImageForIm(file)
                 if (info == null) {
-                    // 提示统一走 withContext（不再用裸 launch）：task-14 把发送逻辑抽成 suspend 函数后，
+                    // 提示统一走 withContext（不再用裸 launch）：发送逻辑抽成 suspend 函数后，
                     // sendMsgInternal 里的裸 launch 失去了 CoroutineScope 接收者 → 落到 kotlinx 已废弃的
                     // **顶层** launch，真编译直接 DEPRECATION_ERROR（vc186 拦下的就是这条）。
                     // 这一处虽然还在 viewModelScope.launch 的协程体里（接收者还在），也一并统一，
@@ -827,7 +827,7 @@ private fun ChatSendPanel(vm: ChatViewModel) {
         if (uri != null) vm.sendImage(uri)
     }
 
-    // ★左右各 16dp（AGENTS §2.10 的四档；与评论区那条输入条同档）：
+    // ★左右各 16dp（标准间距档；与评论区那条输入条同档）：
     //   原来这里没有左右内边距 → 输入框和发送按钮两边直接顶到屏幕。
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         // 内容区（输入框 + 表情）：吃「剩余高度」且可滚动。
@@ -951,7 +951,7 @@ private fun ChatBubble(
                     if (picture != null) {
                         // 图片气泡：复用评论区的 ImagesGrid（自带圆角、加载态、点击进全局图片预览），
                         // 不给私信另写一套图片渲染。外层 Surface 已限宽 280dp，
-                        // 图片用 Fit 等比缩放，不会裁切（AGENTS 规则 5）。
+                        // 图片用 Fit 等比缩放，不会裁切。
                         Box(modifier = Modifier.padding(4.dp)) {
                             ImagesGrid(listOf(picture.toPreviewModel()))
                         }

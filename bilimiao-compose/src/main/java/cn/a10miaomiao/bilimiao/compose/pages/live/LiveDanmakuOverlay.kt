@@ -1675,10 +1675,10 @@ internal val CHAT_DOCKED_MIN_HEIGHT = 96.dp
  *       2. OLED 上"真黑 vs 深灰"的功耗实测（差 ≈0.3%，可忽略）
  *          https://www.androidauthority.com/true-black-dark-mode-1003537/
  *
- * ★不要改回 `MaterialTheme.colorScheme.*`；也别为它新开设置项。见 AGENTS.md §3.1
- *   "不做运行时全局改主题色"：本页只在**单点**用中性黑（顶栏/底栏的 `scrimColor()` 同款做法）。
+ * ★不要改回 `MaterialTheme.colorScheme.*`；也别为它新开设置项。
+ *   本页只在**单点**用中性黑（顶栏/底栏的 `scrimColor()` 同款做法）。
  */
-// 豁免：AGENTS.md 规则 6 的那一档「叠在/紧邻画面、构成"视频页中性黑"的那一层」：面板**紧邻画面**
+// 豁免：「叠在/紧邻画面、构成"视频页中性黑"的那一层」——面板**紧邻画面**
 //       （顶边 = 画面底边，矩形由宿主实测，见 LiveDanmakuOverlayHost.computeDockedRect），底色与顶栏/底栏的
 //       scrimColor() 蒙层**同源**（同一套"视频页保持中性黑"的约定，都是纯黑）；它故意不跟主题
 //       （理由见上面的 KDoc），所以没法用 MaterialTheme.colorScheme.* 表达。

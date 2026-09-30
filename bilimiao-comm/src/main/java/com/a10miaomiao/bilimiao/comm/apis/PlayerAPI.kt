@@ -59,18 +59,23 @@ class PlayerAPI {
     /**
      * 获取视频播放地址
      * fnval: 976:flv,1:mp4,4048:dash
+     *
+     * @param avid 数字 av 号（可带 `av` 前缀，会自动归一）。**只认纯数字**：塞 BV 会被服务端
+     *   拒掉（-400）—— 与 [getVideoShot] 是同一个坑。
+     * @param bvid 可选 BV 号：当 [avid] 不是纯数字（即调用方手里其实是 BV）时改发 `bvid=`。
+     *   默认 null ⇒ **现有调用方的行为一字不变**（数字 aid 仍走 `avid=`）。
      */
     suspend fun getVideoPalyUrl(
         avid: String,
         cid: String,
         quality: Int = 64,
         fnval: Int = 4048,
+        bvid: String? = null,
 // TODO AI 原声翻译：暂时关闭。恢复时把这段注释放开。
 //         /** AI 原声翻译语言（null/空 = 原声）：写进 cur_language，服务端返回翻译后的音轨/字幕 */
 //         language: String? = null,
     ): PlayurlData {
         val params = mutableMapOf<String, String?>(
-            "avid" to avid,
             "cid" to cid,
             "qn" to quality.toString(),
             "fnval" to fnval.toString(),
@@ -79,6 +84,17 @@ class PlayerAPI {
             "type" to "",
             "otype" to "json",
         )
+        // ★`avid` 只认纯数字（`avid=BV…` → {"code":-400}，getVideoShot 那边已实测踩过）：
+        //   是数字就发 `avid=`；否则改发 `bvid=`（有合法 bvid 就用它，没有就把原值当 bvid 试）。
+        //   两边都不像（既非数字也非合法 BV）时**保持旧行为**（仍发 `avid=`），别把路走死。
+        val rawAid = avid.removePrefix("av").trim()
+        if (rawAid.isNotEmpty() && rawAid.all(Char::isDigit)) {
+            params["avid"] = rawAid
+        } else {
+            val bv = bvid?.trim()?.takeIf { BvUtils.isValidBvid(it) }
+                ?: rawAid.takeIf { BvUtils.isValidBvid(it) }
+            if (bv != null) params["bvid"] = bv else params["avid"] = avid
+        }
         // TODO AI 原声翻译：暂时关闭（原来是 cur_language 写入）
         if (fnval > 2) {
             params.put("fourk", "1")

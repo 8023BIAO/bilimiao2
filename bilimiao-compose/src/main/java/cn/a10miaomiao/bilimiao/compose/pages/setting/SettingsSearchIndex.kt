@@ -62,7 +62,7 @@ data class SettingSearchItem(
     /**
      * 数值输入框的单位（原页面 `textIntPreference(label = " MB")` 的原样拷贝，含前导空格）。
      * 它是**输入弹窗里输入框的字段名**（TextIntPreference 把 label 渲染成字段标签），
-     * 不是 summary 文案 —— 丢了用户点开弹窗就看不到单位（复核发现 9/9 全丢）。
+     * 不是 summary 文案 —— 丢了用户点开弹窗就看不到单位（实测发现 9/9 全丢）。
      * 其它 Kind 恒为空串。
      */
     val label: String = "",

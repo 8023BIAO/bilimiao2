@@ -35,12 +35,12 @@ import com.kongzue.dialogx.dialogs.MessageDialog
  * 检测逻辑在 [CommentAntifraud]（bilimiao-comm），判定规则照搬 biliSendCommAntifraud：
  * https://github.com/freedom-introvert/biliSendCommAntifraud
  *
- * 申诉这一段（2026-09-26 用户拍板的三条）：
+ * 申诉这一段（2026-09-26 定稿的三条）：
  *   ① **不要 WebView / 外部浏览器**：官方 H5 的表单字段已从它的前端 JS 里抓出来（[CommentAppeal]），
  *      原生直接 POST，成功失败都有明确提示；
  *   ② **两个输入**：照官方表单做「所在稿件BV号或位置链接」+「申诉理由」，链接自动填、
  *      理由默认用写好的正式长文案并记住用户改过的版本；
- *   ③ （**已回退**，2026-09-27 用户拍板）曾经有过"全自动反诈"开关：判定被限流就直接静默申诉、
+ *   ③ （**已回退**，2026-09-27 定稿）曾经有过"全自动反诈"开关：判定被限流就直接静默申诉、
  *      连弹窗都没有。用户觉得"一天最多三次，多余非必要" → 现在一律弹窗 + 底部「自动申诉」按钮。
  */
 object CommentAntifraudLauncher {
@@ -433,7 +433,7 @@ object CommentAntifraudLauncher {
             }
             append("\n\n结果仅供参考：阿瓦隆会按账号/评论区/内容分别控评，不代表账号被封。")
         }
-        // ★ 2026-09-27 用户拍板：**回退「全自动反诈」**（"感觉多余非必要了，因为一天最多三次"）。
+        // ★ 2026-09-27 定稿：**回退「全自动反诈」**（"感觉多余非必要了，因为一天最多三次"）。
         //   现在一律弹窗提醒，弹窗底部「自动申诉」走原生接口（带理由、不跳浏览器）—— 这部分保留。
         showResultDialog(
             mark = mark,
@@ -599,7 +599,7 @@ object CommentAntifraudLauncher {
         scope.launch {
             try {
                 toast("正在提交申诉…")
-                // 理由：弹窗里填的（可能被用户改过）优先，否则用内置长文案；不落盘（用户 2026-09-27 拍板）
+                // 理由：弹窗里填的（可能被用户改过）优先，否则用内置长文案；不落盘（2026-09-27 定稿）
                 val base = reasonBase?.takeIf { it.isNotBlank() } ?: CommentAppeal.DEFAULT_REASON
                 val reason = CommentAppeal.composeReason(
                     base = base,

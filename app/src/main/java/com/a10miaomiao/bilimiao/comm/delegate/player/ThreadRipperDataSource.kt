@@ -266,6 +266,15 @@ internal class ThreadRipperDataSource(
         /** 线程数硬上限（核数再多也不超过它：连接、校验、重组本身也有开销） */
         const val MAX_WORKERS = 16
 
+        /**
+         * 解析 `sidx` 时只读文件头部这么多字节。
+         *
+         * `sidx` 每条参考 12 字节，16KB 约可覆盖 1360 段（普通视频的分段数远小于此）；
+         * 头部读不够/段表更长时按"没有 sidx"回退均分 —— 相比动辄几百 MB 的分片，
+         * 这点字节可以忽略，也**不会**为了解析把整个文件拉下来。
+         */
+        const val SIDX_HEAD_BYTES = 16 * 1024
+
         /** 等待分块数据的单次轮询时长：用来周期性检查取消/完成/出错 */
         const val POLL_MS = 200L
 
@@ -493,17 +502,22 @@ internal class ThreadRipperDataSource(
         val host = dataSpec.uri.host.orEmpty()
         // PCDN / MCDN 节点（B 站冷门视频常见）对任意 Range + 多并发支持很差：
         // 命中就直接单连接，别每次都先失败一遍。
-        val pcdnHost = host.contains("pcdn", ignoreCase = true) ||
-            host.contains("mcdn", ignoreCase = true)
-        if (pcdnHost && ThreadRipperSettings.enabled) {
-            RipperDiag.log("skip", "命中 PCDN/MCDN 节点（$host）→ 这个视频走单连接")
+        // ★官方网关（`proxy-tf-all-ws.*`）也要按"别并发"处理：它背后可能仍是 P2P 源，
+        //   只是 host 里没有 pcdn/mcdn 字样、整条原地址被包在 `?url=` 里 ——
+        //   否则刚在地址层兜底成网关，转头又被拆成多段并发拉（海外/被限速场景尤其明显）。
+        val singleConnHost = host.contains("pcdn", ignoreCase = true) ||
+            host.contains("mcdn", ignoreCase = true) ||
+            host.startsWith("proxy-tf-all-ws.", ignoreCase = true) ||
+            dataSpec.uri.query.orEmpty().contains("url=")
+        if (singleConnHost && ThreadRipperSettings.enabled) {
+            RipperDiag.log("skip", "命中 PCDN/MCDN/官方网关节点（$host）→ 这个视频走单连接")
         }
         val splittable = length != C.LENGTH_UNSET.toLong() &&
             length >= MIN_PARALLEL_BYTES &&
             dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET &&
             dataSpec.httpBody == null &&
             !dataSpec.isFlagSet(DataSpec.FLAG_ALLOW_GZIP) &&
-            !pcdnHost &&
+            !singleConnHost &&
             ThreadRipperSettings.enabled &&
             parallelAllowed()
 
@@ -550,19 +564,77 @@ internal class ThreadRipperDataSource(
 
     private fun openParallel(dataSpec: DataSpec, length: Long, threads: Int): Long {
         val start = dataSpec.position
-        val chunkSize = (length + threads - 1) / threads
         val list = ArrayList<Chunk>(threads)
-        var offset = 0L
-        while (offset < length) {
-            val size = minOf(chunkSize, length - offset)
-            list.add(Chunk(dataSpec, start + offset, size))
-            offset += size
+        // ★优先按 DASH `sidx` 的真实分段边界切（同一 m4s 里各段本来就不均，均分会让某条连接
+        //   分到超大段、尾巴拖长）；**只有拿到可信段表**才这么切，否则完全走下面的均分。
+        val sidxRanges = sidxChunkRanges(dataSpec, start, length, threads)
+        if (sidxRanges != null) {
+            sidxRanges.forEach { range -> list.add(Chunk(dataSpec, range.offset, range.size)) }
+        } else {
+            val chunkSize = (length + threads - 1) / threads
+            var offset = 0L
+            while (offset < length) {
+                val size = minOf(chunkSize, length - offset)
+                list.add(Chunk(dataSpec, start + offset, size))
+                offset += size
+            }
         }
         chunks = list
         nextChunk = 0
         list.forEach { chunk -> futures.add(executor.submit(chunk)) }
         notifyStart()
         return length
+    }
+
+    /**
+     * 按 `sidx` 真实分段边界规划本次并发的分块；**任何一步不可信/失败都返回 null**
+     * （调用方回退均分）。
+     *
+     * ★这里**绝不抛**：抛出去会被 [open] 的 catch 当成"并发起不来"，白白触发 10 分钟熔断 ——
+     *   解析失败只是"少一次优化"，不该有副作用。
+     */
+    private fun sidxChunkRanges(
+        dataSpec: DataSpec,
+        start: Long,
+        length: Long,
+        threads: Int,
+    ): List<DashSidxParser.Range>? {
+        val segments = runCatching { readSidxSegments(dataSpec) }.getOrNull() ?: return null
+        val ranges = DashSidxParser.planChunks(segments, start, length, threads) ?: return null
+        val total = segments.sumOf { it.size }
+        val maxSegment = segments.maxOf { it.size }
+        // 诊断：段数 / 总长 / 最大段占比（**不落 URL**）
+        RipperDiag.log(
+            "parallel",
+            "按 sidx 真实分段切：段表=${segments.size} 段 / 总长=${total / 1024}KB / " +
+                "最大段占比=${if (total > 0) maxSegment * 100 / total else 0}% / 本次=${ranges.size} 块",
+        )
+        return ranges
+    }
+
+    /**
+     * 只读文件头部 [SIDX_HEAD_BYTES] 字节（固定从 0 开始，与 [DataSpec.position] 无关：
+     * `sidx` 在文件头，段表里的偏移也是相对文件起点的）并解析。
+     */
+    private fun readSidxSegments(dataSpec: DataSpec): List<DashSidxParser.Segment>? {
+        val headSpec = dataSpec.buildUpon()
+            .setPosition(0)
+            .setLength(SIDX_HEAD_BYTES.toLong())
+            .build()
+        val source = upstreamFactory.createDataSource()
+        return try {
+            source.open(headSpec)
+            val buffer = ByteArray(SIDX_HEAD_BYTES)
+            var read = 0
+            while (read < buffer.size) {
+                val n = source.read(buffer, read, buffer.size - read)
+                if (n == -1) break
+                read += n
+            }
+            DashSidxParser.parse(buffer, read)
+        } finally {
+            runCatching { source.close() }
+        }
     }
 
     // ───────────────────────────── read ─────────────────────────────

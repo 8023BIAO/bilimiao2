@@ -98,7 +98,7 @@ class ReplyEditDialogState(
     var _input = mutableStateOf(TextFieldValue(""))
     val input: TextFieldValue get() = _input.value
 
-    // ★删除（task-46）：`textEmpty` 原来只服务"空内容时画占位符"那一段 decorationBox；
+    // ★已删除：`textEmpty` 原来只服务"空内容时画占位符"那一段 decorationBox；
     //   现在占位符交给统一输入框 `MiaoInputField`（OutlinedTextField 的 placeholder 自己判空），
     //   留着它就是只写不读的死属性。
 
@@ -538,7 +538,7 @@ fun ReplyEditDialog(
     }
 }
 
-// ★删除（task-54）：`circleButtonSize`（原来给两颗工具按钮的 TextButton 用）——
+// ★已删除：`circleButtonSize`（原来给两颗工具按钮的 TextButton 用）——
 //   现在那两颗按钮走统一实现 `MiaoInputToolButton`，尺寸由它内部的 44dp 决定，这里不再需要。
 private val minInputHeight = 90.dp
 private val emotePanelHeight = 300.dp

@@ -124,7 +124,7 @@ class ReplyTextRegexTest {
         assertEquals(listOf("@张三"), hits("回复@张三", names))
     }
 
-    // ---------- 汉字紧贴的 av/BV/ac/sm/cv 号（task-40：`\b` → ASCII 词边界 lookaround）----------
+    // ---------- 汉字紧贴的 av/BV/ac/sm/cv 号（词边界：`\b` → ASCII lookaround）----------
 
     @Test
     fun asciiWordBoundary_numberLinksAfterHan() {
@@ -148,5 +148,77 @@ class ReplyTextRegexTest {
         assertEquals(listOf("av123"), hits("看 av123", names))
         assertEquals(listOf("av123"), hits("av123。", names))
         assertEquals(listOf("av123"), hits("av123", names))
+    }
+
+    // ---------- URL 支：ASCII 头部边界 + 语义化尾部（末尾 `/` 保留、汉字与标点不吞）----------
+
+    @Test
+    fun url_asciiBoundaryAndSensibleTail() {
+        val names = setOf("张三")
+        // 头部：汉字紧贴也能识别；紧贴 ASCII 词字符仍不识别
+        assertEquals(listOf("https://b23.tv/abc"), hits("看https://b23.tv/abc", names))
+        assertEquals(listOf("看", "https://b23.tv/abc", "结尾"), segments("看https://b23.tv/abc结尾", names))
+        assertEquals(emptyList<String>(), hits("xhttps://b23.tv/abc", names))
+        // 尾部：末尾 `/` 保留（旧的 `\b` 会把它裁掉）
+        assertEquals(listOf("https://b23.tv/abc/"), hits("https://b23.tv/abc/", names))
+        assertEquals(listOf("https://b23.tv/abc/"), hits("https://b23.tv/abc/ 后面", names))
+        assertEquals(listOf("https://b23.tv/"), hits("https://b23.tv/", names))
+        // 尾部：汉字不吞（旧规则会把"后面"吞进链接）
+        assertEquals(listOf("https://b23.tv/abc"), hits("https://b23.tv/abc后面", names))
+        assertEquals(listOf("https://b23.tv/abc", "后面"), segments("https://b23.tv/abc后面", names))
+        // 尾部：查询串 / 片段 / 百分号转义保留
+        assertEquals(
+            listOf("https://www.bilibili.com/video/BV1xx411c7mD?spm_id_from=333.999"),
+            hits("https://www.bilibili.com/video/BV1xx411c7mD?spm_id_from=333.999", names)
+        )
+        assertEquals(listOf("https://b23.tv/a?b=1&c=2"), hits("https://b23.tv/a?b=1&c=2", names))
+        assertEquals(listOf("https://b23.tv/abc#frag"), hits("https://b23.tv/abc#frag", names))
+        assertEquals(listOf("https://b23.tv/search?q=%E4%B8%AD"), hits("https://b23.tv/search?q=%E4%B8%AD", names))
+        // 尾部：中英文标点不吞
+        assertEquals(listOf("https://b23.tv/abc"), hits("（https://b23.tv/abc）", names))
+        assertEquals(listOf("https://b23.tv/abc"), hits("https://b23.tv/abc。", names))
+        assertEquals(listOf("https://b23.tv/abc"), hits("见 https://b23.tv/abc, 谢谢", names))
+        assertEquals(listOf("https://b23.tv/abc"), hits("https://b23.tv/abc...", names))
+        assertEquals(listOf("https://b23.tv/abc"), hits("(https://b23.tv/abc)", names))
+        // 尾部：`?` 与 `&` 同类一致（观感"显示完整"，别只留 `&` 却裁掉 `?`）
+        assertEquals(listOf("https://b23.tv/a?"), hits("https://b23.tv/a?", names))
+        assertEquals(listOf("https://b23.tv/a?b=1&"), hits("https://b23.tv/a?b=1&", names))
+        // 尾部：括号配平的 URL 完整保留 `)`（维基类写法很常见）
+        assertEquals(listOf("https://b23.tv/wiki/Foo_(bar)"), hits("https://b23.tv/wiki/Foo_(bar)", names))
+        assertEquals(listOf("https://b23.tv/wiki/Foo_(bar)"), hits("https://b23.tv/wiki/Foo_(bar) 后面", names))
+        assertEquals(listOf("https://b23.tv/wiki/Foo_(bar)"), hits("https://b23.tv/wiki/Foo_(bar),", names))
+        // 尾部：配平括号**之后还有内容**也必须完整（锚点 / 路径 / 查询串 / 尾随字符都别丢）
+        assertEquals(
+            listOf("https://en.wikipedia.org/wiki/Foo_(bar)#Section"),
+            hits("https://en.wikipedia.org/wiki/Foo_(bar)#Section", names),
+        )
+        assertEquals(listOf("https://example.com/a(b)/c"), hits("https://example.com/a(b)/c", names))
+        assertEquals(listOf("https://example.com/a(b)?q=1&r=2"), hits("https://example.com/a(b)?q=1&r=2", names))
+        assertEquals(listOf("https://x.com/a()b"), hits("https://x.com/a()b", names))
+        // 尾部：配平括号后紧跟句读仍要回退（到 `)` 为止；`（…）` 的中文括号天然断开）
+        assertEquals(listOf("https://x.com/a(b)"), hits("https://x.com/a(b).", names))
+        assertEquals(listOf("https://b23.tv/wiki/Foo_(bar)"), hits("（https://b23.tv/wiki/Foo_(bar)）", names))
+        // 尾部：不成对的连续句读仍要回退（去掉 `,)` 后链接照样能打开）
+        assertEquals(listOf("https://b23.tv/abc"), hits("https://b23.tv/abc,)", names))
+        assertEquals(listOf("https://b23.tv/abc"), hits("https://b23.tv/abc(", names))
+        // 已知取舍：未转义的中文路径只链到 `/`（中文按 RFC3986 本该百分号转义）
+        assertEquals(listOf("https://example.com/"), hits("https://example.com/中文", names))
+        // 无路径 / 大小写 / www 前缀
+        assertEquals(listOf("https://b23.tv"), hits("https://b23.tv", names))
+        assertEquals(listOf("HTTPS://B23.TV/Abc"), hits("HTTPS://B23.TV/Abc", names))
+        assertEquals(listOf("www.bilibili.com/video/x"), hits("www.bilibili.com/video/x", names))
+    }
+
+    // ---------- `@` 候选表里的空串/空白昵称（不能让裸 `@` 变成提及）----------
+
+    @Test
+    fun at_blankNamesAreIgnored() {
+        assertEquals(emptyList<String>(), hits("@ 你好", setOf("张三", "")))
+        assertEquals(emptyList<String>(), hits("@", setOf("张三", "")))
+        assertEquals(emptyList<String>(), hits("@", setOf("", "   ")))
+        assertEquals(emptyList<String>(), hits("@ ", setOf("", "   ")))
+        // 正常昵称不受影响，最长匹配也照旧（长名放前面，避免这条重复承担"排序变异"的检出）
+        assertEquals(listOf("@张三"), hits("@张三", setOf("张三", "")))
+        assertEquals(listOf("@张三丰"), hits("@张三丰", setOf("张三丰", "", "张三")))
     }
 }

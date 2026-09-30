@@ -61,21 +61,35 @@ import kotlin.math.min
 private val TIMESTAMP_REGEX = Regex("\\d{1,3}[:：]\\d{1,2}(?:[:：]\\d{1,2})?")
 private val TIME_SEP_REGEX = Regex("[:：]")
 
+/** URL 主体允许的字符：RFC3986 的 pchar 加上 `/ ? # [ ]`（`&` `=` `%` 也在内，查询串与转义要用） */
+private const val URL_BODY_CHARS = """A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%"""
+
 /**
  * 评论正文里需要识别的固定模式（URL/av/BV/ac/sm/cv/时间戳/表情）。
+ *
+ * ★URL 支（2026-09-30 重做）：头部用 ASCII 边界 `(?<![A-Za-z0-9_])`（汉字紧贴也能识别，
+ *   紧贴 ASCII 词字符仍不识别）；尾部**不再用 `\b`** —— 那只是个"贪婪截断器"（会把
+ *   `…/abc/` 末尾的 `/` 裁掉、把 `…abc后面` 的汉字吞进链接）。现在尾部是"语义化字符类 +
+ *   终止集合"：
+ *   · 尾字符集 = RFC3986 合法字符（见 [URL_BODY_CHARS]）；
+ *   · **终止取舍（两条，按序试）**：
+ *     ① 括号配平支：`…(… )` 之后**还可以跟主体**（`…Foo_(bar)#Section`、`…/a(b)/c`、
+ *        `…/a(b)?q=1&r=2`、`…/a()b` 都要完整），它的末字符排除集是 `.,;:![]{}'"` ——
+ *        **不含 `)`**，因为收尾的 `)` 是配平对的一部分；
+ *     ② 普通支：末字符排除集 `.,;:!()[]{}'"`（含 `(` `)`）⇒ `见 https://b23.tv/abc, 谢谢`、
+ *        `…/abc,)`、`…/a(b).` 都回退到最后一个有效字符（`abc` / `…/a(b)`）。
+ *     两支都允许 `- _ ~ / # = ? &` 收尾 ⇒ `…/abc/` 的 `/`、`…/a?` 的 `?` 都保留
+ *     （与 `?b=1&` 的 `&` 同类一致，观感"显示完整"）；非 ASCII（汉字/中文标点）不在字符类里 ⇒ 天然断开。
+ *   · 已知取舍：URL 里**未转义的中文**（`https://example.com/中文`）只链到 `/`（中文按
+ *     RFC3986 本该百分号转义；转义后的 `%E4%B8%AD` 会完整保留）。
  *
  * ★av/BV/ac/sm/cv 这几支的边界要用 **ASCII** lookaround，**不能**用 `\b`：JVM/ART 的 `\b` 是
  *   Unicode 感知（`Character.isLetterOrDigit`），而 `\w` 默认只认 ASCII ⇒ 汉字与 `a` 之间
  *   **没有**词边界，`看av123` 原来一支都命中不了。`(?<![A-Za-z0-9_])` / `(?![A-Za-z0-9_])`
  *   才是"前后不粘 ASCII 词字符"：`看av123` 能命中，`xav123` / `av123abc` 仍不命中。
- *
- * ★URL 那一支的 `\b` **保持不动** —— 它的边界语义是"URL 到哪儿结束"，不是"关键字独立成词"：
- *   实测 `https://b23.tv/abc/` 会被尾部 `\b` 裁成 `https://b23.tv/abc`、`https://…abc后面`
- *   会把汉字一起吞进链接、`看https://…` 因头部 `\b` 识别不出。换掉会改变 URL 的吞并范围，
- *   属于另一个问题，得单独设计 + 单独用例（头部 `\b` 也有同款汉字边界问题，同样留待单独处理）。
  */
 private val REPLY_TEXT_REGEX_BASE = """(?i)""" +
-        """(\b(https?://|www\.)[\w-]+(\.[\w-]+)+([/\S]*)*\b)|""" +  // URL（优先匹配；边界语义不同，不动）
+        """(?<![A-Za-z0-9_])(?:https?://|www\.)[\w-]+(?:\.[\w-]+)+(?::\d+)?(?:[/?#](?:[$URL_BODY_CHARS]*\([$URL_BODY_CHARS]*\)[$URL_BODY_CHARS]*(?<![.,;:!\[\]{}'"])|[$URL_BODY_CHARS]*(?<![.,;:!()\[\]{}'"])))?|""" + // URL（优先匹配；边界与终止集合见上）
         """(?<![A-Za-z0-9_])av\d{1,15}(?![A-Za-z0-9_])|""" +   // B站av号（1-15位数字）
         """(?<![A-Za-z0-9_])BV[\dA-Za-z]{10}(?![A-Za-z0-9_])|""" + // B站BV号（固定10位）
         """(?<![A-Za-z0-9_])ac\d{1,10}(?![A-Za-z0-9_])|""" +   // A站ac号（1-10位数字）
@@ -94,8 +108,10 @@ private val REPLY_TEXT_REGEX_BASE = """(?i)""" +
  *   （`internal` 只为让同模块 `src/test` 能直接跑这条规则，行为不变。）
  */
 internal fun buildReplyTextRegex(atNames: Set<String>): Regex {
-    if (atNames.isEmpty()) return Regex(REPLY_TEXT_REGEX_BASE)
-    val atPart = atNames
+    // ★空串/纯空白昵称要先滤掉：拼进 `@(?:|张三)` 后空分支会先命中，裸 `@` 就被当成提及了
+    val names = atNames.filter { it.isNotBlank() }
+    if (names.isEmpty()) return Regex(REPLY_TEXT_REGEX_BASE)
+    val atPart = names
         .sortedByDescending { it.length }
         .joinToString("|") { Regex.escape(it) }
     return Regex("$REPLY_TEXT_REGEX_BASE|@(?:$atPart)")

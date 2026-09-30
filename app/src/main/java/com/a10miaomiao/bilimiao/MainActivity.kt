@@ -306,7 +306,7 @@ class MainActivity
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // ★task-53 取证：**桌面图标 / 最近任务**那两条路会走到这里 —— 记下系统实际投进来的
+        // ★取证日志：**桌面图标 / 最近任务**那两条路会走到这里 —— 记下系统实际投进来的
         //   action/flags（例如 `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_RESET_TASK_IF_NEEDED`、
         //   有没有 `FLAG_ACTIVITY_CLEAR_TOP`）以及是不是多窗口。
         LivePageTrace.note(
@@ -529,7 +529,7 @@ class MainActivity
 
     override fun onResume() {
         super.onResume()
-        // ★task-53 取证：回 App 那一刻**主界面**看到的世界（与直播间页的 onStop/onDestroy 对照，
+        // ★取证日志：回 App 那一刻**主界面**看到的世界（与直播间页的 onStop/onDestroy 对照，
         //   就能判断"用户点图标时系统把谁带到了前台、有没有清掉它上面的页面"）。
         LivePageTrace.note(
             "host.onResume",
@@ -561,7 +561,7 @@ class MainActivity
         //   "有 Activity resume / 直播间销毁"两个触发点上做 —— 判据（前台是主界面、
         //   没有活着的直播间、记录还在、取走即消费）全部在 LiveLastRoomStore 里，见它的 KDoc。
         LiveLastRoomStore.onHostForeground(this)
-        // ★task-53 取证：主界面 `onStart`（= `onHostForeground` 的入口）—— 重点是**是哪一个
+        // ★取证日志：主界面 `onStart`（= `onHostForeground` 的入口）—— 重点是**是哪一个
         //   前台页面**把 App 带回来的、以及那一刻的多窗口状态。
         LivePageTrace.note(
             "host.onStart",
