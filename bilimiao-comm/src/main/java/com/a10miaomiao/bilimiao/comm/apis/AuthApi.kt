@@ -416,8 +416,8 @@ data class WebNavInfo(
     val mid: Long = 0,
     val uname: String = "",
     val face: String? = null,
-    /** 硬币数（nav 里叫 money） */
-    val money: Int = 0,
+    /** 硬币数（nav 里叫 money；★它是**小数**，样例 `172.4` —— 写成 Int 会让带小数的账号整次解析失败） */
+    val money: Double = 0.0,
     val level_info: LevelInfo? = null,
     val vipStatus: Int = 0,
     val vipType: Int = 0,

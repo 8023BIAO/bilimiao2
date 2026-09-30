@@ -287,7 +287,7 @@ private class LoginPageViewModel(
      * Token / Cookie 直接登录。
      *
      * - 输入里出现 `SESSDATA`（或分号分隔的多段 Cookie）→ 按 Cookie 处理；
-     *   先用 `x/member/web/account` **只带这段 Cookie** 验证（不写全局 CookieManager），通过才落盘。
+     *   先用 `x/web-interface/nav` **只带这段 Cookie** 验证（不写全局 CookieManager），通过才落盘。
      * - 其余按 `access_token` 处理：`account()` 的 token 版验证通过后写 auth 文件。
      *
      * ★Cookie 只对 Web 接口生效（APP 接口只带 Cookie 时返回 `mid=0`，实测），所以这里如实提示限制。
