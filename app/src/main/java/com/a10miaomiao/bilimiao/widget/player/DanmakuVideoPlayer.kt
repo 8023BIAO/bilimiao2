@@ -80,6 +80,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.min
 
+/**
+ * 音量手势的**整条行程** = 播放器盒子高 × 这个比值（0.5 ⇒ 半个盒子高滑完整条音量）。
+ *
+ * 数字对齐 PiliPlus：`view.dart:1109` 的 `level = maxHeight * 0.5`，其中 `maxHeight`
+ * 就是播放器盒子高（同文件 `:1348` 从 widget 传入）。**调大 = 更迟钝**。
+ * 亮度**不走**这个系数（它是另一条手感，本次未动）。
+ */
+private const val VOLUME_FULL_SWIPE_RATIO = 0.5f
+
 
 class DanmakuVideoPlayer : StandardGSYVideoPlayer {
 
@@ -1726,17 +1735,15 @@ initDanmakuTouchListener()
             if (mGestureDownVolume < 0) {
                 mGestureDownVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             }
-            // ★★2026-09-29 用户实测拍板：**音量滑动的灵敏度降到 ÷3**（整屏 = 1/3 量程，3 屏走完）。
-            //   原值 `×2`（半屏走完整条行程）是上游导入 GSY 时带的系数，用户实测两次反馈"太灵敏"
-            //   （"一滑就归零/拉满"、"比我普通视频的音量调节差很多"）；直播间那侧同一时刻
-            //   也按同一系数对齐 ⇒ **四个滑动（点播/直播 × 音量/亮度）统一为 ÷3**。
-            //   点播的亮度本来就是 `-deltaY / (curHeight * 3f)`（见下面 mBrightness 分支），
-            //   所以这一改是"音量向亮度看齐"，不是新拍一个手感。
-            //   ★要回退：把两处 `/ (curHeight * 3)` 换回 `* 2 / curHeight`（音量与气泡必须一起改）。
-            val deltaV = (max * deltaYNeg / (curHeight * 3)).toInt()
+            // ★音量行程基准 = **播放器盒子高**（对齐 PiliPlus `view.dart:1109` 的 `maxHeight * 0.5`）：
+            //   半个盒子高滑完整条音量，不再受"屏幕长边 / 过期 metrics"影响（见文件头常量）。
+            //   盒子还没量出来（measuredHeight <= 0）才退回原来的屏幕长边。
+            //   ★要回退：把下面两处分母一起换回 `curHeight * 3`（音量与气泡必须同一分母）。
+            val boxH = measuredHeight.takeIf { it > 0 } ?: curHeight
+            val deltaV = (max * deltaYNeg / (boxH * VOLUME_FULL_SWIPE_RATIO)).toInt()
             am.setStreamVolume(AudioManager.STREAM_MUSIC, mGestureDownVolume + deltaV, 0)
             val volumePercent =
-                (mGestureDownVolume * 100 / max + deltaYNeg * 100 / (curHeight * 3)).toInt()
+                (mGestureDownVolume * 100 / max + deltaYNeg * 100 / (boxH * VOLUME_FULL_SWIPE_RATIO)).toInt()
             showVolumeDialog(-deltaY, volumePercent)
         } else if (mBrightness) {
             if (Math.abs(deltaY) > mThreshold) {

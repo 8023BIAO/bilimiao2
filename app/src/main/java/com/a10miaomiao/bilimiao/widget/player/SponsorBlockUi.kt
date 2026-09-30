@@ -26,9 +26,12 @@ import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSegment
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSkipType
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.shuyu.gsyvideoplayer.utils.CommonUtil
+import com.shuyu.gsyvideoplayer.video.base.GSYVideoPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -103,8 +106,9 @@ object SponsorBlockUi {
         return dlg
     }
 
-    /** Activity 销毁时调用：关掉所有残留弹窗（从栈顶往下）。 */
+    /** Activity 销毁时调用：关掉所有残留弹窗（从栈顶往下），并取消还在等待"到点暂停"的试播。 */
     fun dismissAll() {
+        cancelTrial()
         dialogStack.toList().forEach { runCatching { it.dismiss() } }
         dialogStack.clear()
     }
@@ -336,10 +340,28 @@ object SponsorBlockUi {
     // ───────────────────────── 提交片段 ─────────────────────────
 
     /**
+     * 上一次没提交完的草稿（key = `"$bvid|$cid"`）：关掉弹窗再打开要接着改，
+     * 这样用户能"先填时间 → 关弹窗 → 拖进度条核对 → 再打开接着改"。
+     *
+     * 为什么只留**一份**而不是 Map：同一时刻只可能在编辑一个视频，留 Map 只会随浏览过的视频无限长。
+     */
+    private class SubmitDraft(
+        val key: String,
+        val start: String,
+        val end: String,
+        val category: SponsorCategory,
+        val action: SponsorActionType,
+    )
+
+    private var submitDraft: SubmitDraft? = null
+
+    /**
      * 提交新片段。
      *
-     * 表单：开始 / 结束（可手输 `mm:ss` 或秒）+「设为当前」+ 分类 + 动作。
-     * 默认区间是"当前时间点"（和 PiliPlus 的快捷提交一致：先设为当前，再手动调两端）。
+     * 表单：开始 / 结束（`mm:ss.SSS`，也可手输纯秒数）+「设为当前」+ 分类 + 动作。
+     * 默认区间是"当前时间点"（和 PiliPlus 的快捷提交一致：先设为当前，再手动调两端）；
+     * 有草稿时用草稿 —— 输入框的值**只**由"用户手输 / 设为当前 / 视频开头·结尾"三件事改写，
+     * 没有任何播放进度回调或定时器会来冲掉它。
      */
     fun showSubmit(
         activity: Activity,
@@ -359,16 +381,18 @@ object SponsorBlockUi {
         val nowMs = player.currentPosition.coerceAtLeast(0L)
         val durationSec = (player.duration / 1000.0).takeIf { it > 0 } ?: 0.0
 
-        var category = SponsorCategory.Sponsor
-        var action = SponsorActionType.Skip
+        val draftKey = "$bvid|$cid"
+        val draft = submitDraft?.takeIf { it.key == draftKey }
+        var category = draft?.category ?: SponsorCategory.Sponsor
+        var action = draft?.action ?: SponsorActionType.Skip
 
         val startEt = EditText(ctx).apply {
             inputType = InputType.TYPE_CLASS_TEXT
-            setText(CommonUtil.stringForTime(nowMs))
+            setText(draft?.start ?: SponsorTime.format(nowMs))
         }
         val endEt = EditText(ctx).apply {
             inputType = InputType.TYPE_CLASS_TEXT
-            setText(CommonUtil.stringForTime(nowMs))
+            setText(draft?.end ?: SponsorTime.format(nowMs))
         }
         val categoryTv = TextView(ctx).apply {
             text = "分类：${category.label}"
@@ -401,17 +425,17 @@ object SponsorBlockUi {
         val form = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(PAD), dp(8), dp(PAD), dp(8))
-            addView(label(ctx, "开始时间（mm:ss 或秒）"))
+            addView(label(ctx, "开始时间（mm:ss.SSS 或秒）"))
             addView(startEt)
             addView(rowOf(ctx, button(ctx, "设为当前") {
-                startEt.setText(CommonUtil.stringForTime(player.currentPosition.coerceAtLeast(0L)))
-            }, button(ctx, "视频开头") { startEt.setText("00:00") }))
-            addView(label(ctx, "结束时间（mm:ss 或秒）"))
+                startEt.setText(SponsorTime.format(player.currentPosition.coerceAtLeast(0L)))
+            }, button(ctx, "视频开头") { startEt.setText(SponsorTime.format(0L)) }))
+            addView(label(ctx, "结束时间（mm:ss.SSS 或秒）"))
             addView(endEt)
             addView(rowOf(ctx, button(ctx, "设为当前") {
-                endEt.setText(CommonUtil.stringForTime(player.currentPosition.coerceAtLeast(0L)))
+                endEt.setText(SponsorTime.format(player.currentPosition.coerceAtLeast(0L)))
             }, button(ctx, "视频结尾") {
-                if (durationSec > 0) endEt.setText(CommonUtil.stringForTime((durationSec * 1000).toLong()))
+                if (durationSec > 0) endEt.setText(SponsorTime.format((durationSec * 1000).toLong()))
             }))
             addView(categoryTv)
             addView(actionTv)
@@ -423,20 +447,51 @@ object SponsorBlockUi {
             })
         }
 
-        // ★ 取消/提交做成弹窗**自己的按钮**，不用 AlertDialog 的系统按钮栏：
+        // ★ 取消/提交/试播做成弹窗**自己的按钮**，不用 AlertDialog 的系统按钮栏：
         //   系统按钮点了会**无条件关掉弹窗**，校验失败时用户会觉得"点了没反应/白填了"。
         var dialog: Dialog? = null
+        var submitted = false
+        // 关弹窗（取消 / 点空白 / 返回键 / 试播）时留下草稿；提交成功那次不存（见 submitted）
+        val saveDraft = {
+            submitDraft = SubmitDraft(
+                key = draftKey,
+                start = startEt.text.toString(),
+                end = endEt.text.toString(),
+                category = category,
+                action = action,
+            )
+        }
         val footer = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             setPadding(0, dp(8), dp(PAD), dp(10))
-            addView(button(ctx, "取消") { dialog?.dismiss() })
-            addView(button(ctx, "提交") {
-                val start = parseTimeSec(startEt.text.toString())
-                val end = parseTimeSec(endEt.text.toString())
+            // 试播放最左：中间垫一条可伸缩空档，把"试播"顶到行首、取消/提交留在右侧。
+            // （不用按钮自身的 weight 去撑：那样文字右边会多出一大片看不见的点击区）
+            addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(button(ctx, "试播这段") {
+                val start = SponsorTime.parseSec(startEt.text.toString())
+                val end = SponsorTime.parseSec(endEt.text.toString())
                 when {
                     start == null || end == null ->
-                        toast(activity, "时间格式看不懂，用 mm:ss（如 01:30）或秒数")
+                        toast(activity, "时间格式看不懂，用 mm:ss.SSS（如 01:30.500）或秒数")
+                    end <= start ->
+                        toast(activity, "结束时间要大于开始时间")
+                    else -> {
+                        // 先存草稿再关弹窗：用户看完试播再打开，输入框还是刚才填的那段
+                        // （关弹窗本身也会存一次草稿，这里是幂等的，只为"先存"这个顺序）
+                        saveDraft()
+                        dialog?.dismiss()
+                        startTrial(player, (start * 1000).toLong(), (end * 1000).toLong())
+                    }
+                }
+            })
+            addView(button(ctx, "取消") { dialog?.dismiss() })
+            addView(button(ctx, "提交") {
+                val start = SponsorTime.parseSec(startEt.text.toString())
+                val end = SponsorTime.parseSec(endEt.text.toString())
+                when {
+                    start == null || end == null ->
+                        toast(activity, "时间格式看不懂，用 mm:ss.SSS（如 01:30.500）或秒数")
                     end <= start ->
                         toast(activity, "结束时间要大于开始时间")
                     else -> {
@@ -463,7 +518,13 @@ object SponsorBlockUi {
                                 if (ok) "提交成功，感谢你让社区更好用"
                                 else "提交失败：可能重复提交、片段太短或被限流"
                             )
-                            if (ok) dialog?.dismiss()
+                            if (ok) {
+                                // 提交成功：草稿作废（下次打开回到"当前进度"）；
+                                // submitted 置位让 dismiss 收尾别再把它写回草稿
+                                submitted = true
+                                submitDraft = null
+                                dialog?.dismiss()
+                            }
                         }
                     }
                 }
@@ -471,7 +532,7 @@ object SponsorBlockUi {
         }
         val scroll = CappedScrollView(ctx, 0.55f).apply { addView(form) }
 
-        // ★ 取消/提交放在**滚动区外面**的固定页脚：
+        // ★ 取消/提交（以及试播）放在**滚动区外面**的固定页脚：
         //   以前塞在 form 里，横屏时表单比屏幕还高 → 按钮被顶到可视区外，
         //   用户以为"点了没反应"，其实那位置根本没有按钮（截图里连取消都看不见）。
         val root = LinearLayout(ctx).apply {
@@ -486,8 +547,83 @@ object SponsorBlockUi {
         dialog = showOverlay(
             activity,
             cardOf(activity, "提交片段到空降助手", root, closeLabel = null) { dialog?.dismiss() },
-            onDismissExtra = { ClickGuard.leave(KEY_SUBMIT) },
+            onDismissExtra = {
+                ClickGuard.leave(KEY_SUBMIT)
+                // ★ 草稿挂在已有的 onDismissExtra 上，不动 OverlayDialog 自己的 onDismiss
+                //   （那里面还有"出栈"，覆盖了就破坏弹窗栈语义）
+                if (!submitted) saveDraft()
+            },
         )
+    }
+
+    // ───────────────────────── 试播这段 ─────────────────────────
+
+    /** 正在等待"到点暂停"的试播任务：同一时刻最多一个（连点两次先取消旧的），[dismissAll] 也会取消 */
+    private var trialJob: Job? = null
+
+    private const val TRIAL_POLL_MS = 50L
+
+    /**
+     * 1000ms 容差，两个用途都跟播放器自己的判据一致：
+     *  - 位置离 seek 目标 1s 以内 = seek 已经落地（`DanmakuVideoPlayer` 判 `lastSeekTargetMs` 退役用的是同一个 1s）；
+     *  - 位置掉回起点之前 1s 以上 = 用户自己跳走了，不是 seek 抖动。
+     */
+    private const val TRIAL_TOL_MS = 1_000L
+
+    /** seek 迟迟不落地（底层卡住）就别一直挂着轮询 */
+    private const val TRIAL_ARM_TIMEOUT_MS = 5_000L
+
+    private fun cancelTrial() {
+        trialJob?.cancel()
+        trialJob = null
+    }
+
+    /**
+     * 试播 `[startMs, endMs]` **一遍**：seek 到起点 → 需要时开始播放 → 播到终点**暂停**（绝不循环）。
+     *
+     * 为什么用 50ms 轮询而不是给播放器挂进度回调：本仓播放器的进度回调是进度条/弹幕层在用的，
+     * 再挂一个"到点暂停"要动播放器内部状态（越界，且容易和连播/续播记账打架）；
+     * 轮询只读 public 的 `currentPosition`，下面三条出口都会干净退出，不留任何回调或协程。
+     *
+     * 三条出口（都不会误暂停别人的播放）：
+     *  1. 位置 >= endMs → `onVideoPause()`（本次试播的全部目的，只生效一次）；
+     *  2. 位置掉回 start 之前 1s 以上 → 用户自己跳走了，放弃；
+     *  3. seek 5s 还没落地 → 放弃，不留死循环。
+     *
+     * ★ `seekTo` 是异步的（`GSYVideoBaseManager.getCurrentPosition()` 直接转发底层播放器，
+     *   seek 完成前可能还报旧位置），所以要先等位置落到起点附近，再判"到点/跳走" ——
+     *   否则用户从片段后面点试播会被旧位置立刻误暂停。
+     */
+    private fun startTrial(player: DanmakuVideoPlayer, startMs: Long, endMs: Long) {
+        cancelTrial()
+        player.seekTo(startMs)
+        if (player.currentState != GSYVideoPlayer.CURRENT_STATE_PLAYING) {
+            player.onVideoResume()
+        }
+        trialJob = scope.launch {
+            var seekLanded = false
+            var waitedMs = 0L
+            while (true) {
+                delay(TRIAL_POLL_MS)
+                waitedMs += TRIAL_POLL_MS
+                val pos = player.currentPosition
+                if (!seekLanded) {
+                    if (kotlin.math.abs(pos - startMs) > TRIAL_TOL_MS) {
+                        if (waitedMs >= TRIAL_ARM_TIMEOUT_MS) break
+                        continue
+                    }
+                    seekLanded = true
+                }
+                if (pos >= endMs) {
+                    player.onVideoPause()
+                    break
+                }
+                if (pos < startMs - TRIAL_TOL_MS) break
+            }
+            // 跑完就把引用放掉（顺带松开对 player/Activity 的强引用）；被 cancel 时走不到这里，
+            // 但 cancelTrial() 已经置空了，两条路都不会留下活着的轮询。
+            trialJob = null
+        }
     }
 
     // ───────────────────────── 小工具 ─────────────────────────
@@ -531,38 +667,6 @@ object SponsorBlockUi {
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             // 界面已销毁：忽略
-        }
-    }
-
-    /**
-     * 解析 `mm:ss` / `hh:mm:ss` / 纯秒数 → 秒；**解析失败或不是合法时间返回 null**。
-     *
-     * 校验要点（以前只挡住了"结束 <= 开始"，`-5` 和 `1:2:3:4` 都能溜进去）：
-     *  - 最多 3 段（时:分:秒），每段都必须是数字；
-     *  - 不允许负数、NaN、无穷大；
-     *  - 分/秒必须在 0..59（纯秒数那种没有这个限制）。
-     */
-    fun parseTimeSec(raw: String): Double? {
-        val text = raw.trim()
-        if (text.isEmpty()) return null
-        return try {
-            val sec = if (":" in text) {
-                val parts = text.split(":")
-                if (parts.size > 3) return null
-                if (parts.any { it.isBlank() || it.trim().toDoubleOrNull() == null }) return null
-                val nums = parts.map { it.trim().toDouble() }
-                if (nums.any { it < 0 || it.isNaN() || it.isInfinite() }) return null
-                // 除最高位（小时）外，分和秒都必须在 0..59
-                if (nums.drop(1).any { it >= 60 }) return null
-                nums.fold(0.0) { acc, v -> acc * 60 + v }
-            } else {
-                val v = text.toDoubleOrNull() ?: return null
-                if (v < 0 || v.isNaN() || v.isInfinite()) return null
-                v
-            }
-            if (sec < 0 || sec.isNaN() || sec.isInfinite()) null else sec
-        } catch (e: Exception) {
-            null
         }
     }
 }

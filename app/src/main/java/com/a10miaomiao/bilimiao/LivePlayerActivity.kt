@@ -772,9 +772,19 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          *   病根：这里的系数原来是 `0.9`，即"一屏就滑掉 110% 行程"；而点播是
          *   `增量 / (屏高 × 3)` 累加 ⇒ 3 屏才走完全程。绝对位移与增量写法是线性等价的，
          *   **差的就是这个系数**（1/0.9 ≈ 1.11 屏 vs 3 屏，灵敏度差约 3.3 倍）。
-         *   现在取 3f，与点播同一手感；音量那边（[handleDrag]）也同步改成 ×3。
+         *   现在取 3f，与点播同一手感；音量那边另有一套系数（见 [VOLUME_FULL_SWIPE_RATIO]）。
          */
         private const val BRIGHTNESS_FULL_SWIPE_RATIO = 3f
+
+        /**
+         * 音量手势的**整条行程** = 舞台（画面容器）高 × 这个比值
+         * （0.5 ⇒ 半个舞台高滑完整条音量；**调大 = 更迟钝**）。
+         *
+         * 数字与点播同源（`DanmakuVideoPlayer.kt` 文件头的 `VOLUME_FULL_SWIPE_RATIO`），
+         * 也对齐 PiliPlus `view.dart:1109` 的 `maxHeight * 0.5`（`maxHeight` = 播放器盒子高）。
+         * 亮度走自己的系数（[BRIGHTNESS_FULL_SWIPE_RATIO]）——那是另一条手感，本次未动。
+         */
+        private const val VOLUME_FULL_SWIPE_RATIO = 0.5f
 
         /**
          * ★第十三批：这里原来有一个 `VOLUME_WRITE_MIN_INTERVAL_MS = 16`（"同一帧最多写一次系统音量"）。
@@ -8324,8 +8334,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
         /**
          * 右半区：上下滑调**媒体音量**。
-         * 换算与点播同一套（`DanmakuVideoPlayer.kt:1743-1751`）：
-         * `Δ音量 = max × ΔY × 2 / 屏高`，即"半屏高度的滑动 = 满音量"。
+         * 换算与点播同一套（`DanmakuVideoPlayer.touchSurfaceMove`）：
+         * `Δ音量 = max × ΔY / (舞台高 × 0.5)`，即"**半个舞台高滑完整条行程**"——
+         * 与 PiliPlus `view.dart:1109` 的 `maxHeight * 0.5` 同源（`maxHeight` = 播放器盒子高）。
          *
          * ## ★★第十三批：UI 线程只做 UI（实测：手势 UI 没有实时跟进，要过一两秒才显示）
          *
@@ -8358,7 +8369,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * · `max` 只**按页面**读一次（比点播"每个事件读一次"更省），读到 0 才重读；
          * · `getStreamVolume` 仍只在手势开始时读一次（与点播一致；一次手势一次，不在 MOVE 里）；
          * · **不加** `FLAG_SHOW_UI`：那会弹出系统音量面板（用户明确不要）；
-         * · 换算公式与点播逐字一致（那段"太灵敏"的历史注释别再翻案）。
+         * · 换算公式与点播逐字一致（两处都是"半个盒子高 = 整条行程"，见上面的公式行）。
          * ★亮度分支（[handleBrightnessDrag]）**只换了两句的顺序**（气泡先刷、窗口属性后写），
          *   公式与显隐语义一个字没动 —— 用户说它是顺的，别动它。
          */
@@ -8371,7 +8382,6 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 cachedMaxVolume = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
             }
             val max = cachedMaxVolume
-            val pageHeight = pageHeightPx().coerceAtLeast(1)
             if (downVolume < 0) {
                 downVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                 // 手势开始时系统音量就是 downVolume：告诉写入器"现在就在这一档"，
@@ -8382,35 +8392,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 dragStartWriteMs = writer.writeTotalMs
             }
             val deltaY = downRawY - event.rawY // 向上滑 = 变大
-            // ★★2026-09-29（用户真机实测后拍板，**本行第二次定稿**）：音量与亮度统一为
-            //   **÷(屏高 × 3)** —— 整屏滑动 ≈ 改变 1/3 量程（3 屏走完整条行程）。
-            //
-            // 实测（vc197 = ×2 那版）：音量过于灵敏，且音量与亮度灵敏度完全一样；
-            // 期望回到上一版点播的手感。
-            // ⇒ 结论：**点播的 `×2` 也偏灵敏**（那是上游导入 GSY 时带的系数），
-            //   所以这一版把**点播与直播的音量一起改成 ÷3**，与两边**亮度**的既有系数完全一致：
-            //   ```
-            //   点播亮度：-deltaY / (curHeight * 3f)          （既有，未动）
-            //   直播亮度：ΔY / (pageHeight * 3)               （既有，未动）
-            //   点播音量：原 max*deltaYNeg*2/curHeight → max*deltaYNeg/(curHeight*3)
-            //   直播音量：原 max*deltaY*2/pageHeight   → max*deltaY/(pageHeight*3)
-            //   ```
-            //   即**四个滑动（点播/直播 × 音量/亮度）现在同一条手感**，且都落在用户习惯的那档。
-            //
-            // ★别再"照 GSY 反编译结果纠错"：v13.2.1 的 `GSYVideoControlView.touchSurfaceMove`
-            //   `mChangeVolume` 分支是 `×3.0f`（javap：`ldc_w float 3.0f` → `f2i`）、亮度是
-            //   `-deltaY / curHeight`；App 侧 `DanmakuVideoPlayer.touchSurfaceMove`（override）
-            //   才是真正生效的那份。两边音量现在都是"基准档位 + 按下点起的累计位移 / (屏高×3)"，
-            //   结构相同（`mDownY` 在音量分支不推进 —— GSY 字节码实证）⇒ 同一位移同一档位。
-            // ★历史：这一行被"灵敏度"来回改过三次（÷3 → ×2 → ÷3）。**要再动它之前，先看这条注释**
-            //   与手感口径：×2 那种"半屏走完"不接受，"比点亮更迟钝"也不接受。改就四个一起改。
-            //
-            // 其它已排查、不改变灵敏度的项：死区（点播 `mThreshold=80px` 才开始调；本页 `touchSlop`
-            // 约 8~24px 就进手势 ⇒ 本页更早响应）；除数（点播 `curHeight = 横屏 ? mScreenWidth :
-            // mScreenHeight`，本页 [pageHeightPx] = 播放页高度 ≈ 整屏，同一量级）。
-            val deltaV = (max * deltaY / (pageHeight * 3)).toInt()
+            // 音量行程基准 = **舞台（画面容器）高**：
+            //   · 竖屏手势只在画面带内起手（[isInsideVideoStage]），横屏容器铺满整页 ⇒ 它和 PiliPlus 的
+            //     "播放器盒子高"同义（`view.dart:1109` 的 `maxHeight * 0.5`，同文件 `:1348` 传入）；
+            //   · 几何还没就绪（未初始化 / 没量出宽高）才退回整页高；
+            //   · ★要回退：把下面两处分母一起换回 `pageHeightPx() * 3`（音量与气泡必须同一分母）。
+            val stageH = (if (::videoContainer.isInitialized) videoContainer.height else 0)
+                .takeIf { it > 0 } ?: pageHeightPx().coerceAtLeast(1)
+            val deltaV = (max * deltaY / (stageH * VOLUME_FULL_SWIPE_RATIO)).toInt()
             val volumePercent =
-                (downVolume * 100 / max + deltaY * 100 / (pageHeight * 3)).toInt()
+                (downVolume * 100 / max + deltaY * 100 / (stageH * VOLUME_FULL_SWIPE_RATIO)).toInt()
             val target = (downVolume + deltaV).coerceIn(0, max)
             // ① 气泡**先**刷（★第十三批的顺序）：用户看到的即时反馈优先 ——
             //    这条路上一个跨进程调用都没有，所以"每个 MOVE 都跟手"由它保证。
