@@ -311,6 +311,37 @@ object SettingPreferences {
     val PlayerAiSubtitleShow = booleanPreferencesKey("player_ai_subtitle_show")
     // 拖动进度条时在画面中央显示预览缩略图（默认开）
     val PlayerSeekPreviewShow = booleanPreferencesKey("player_seek_preview_show")
+    // 音量手势滑动距离：整条音量行程 = 画面高的百分之多少（30~200，步进 5，默认 50 = PiliPlus 的 0.5）
+    val PlayerVolumeSwipePercent = intPreferencesKey("player_volume_swipe_percent")
+
+    /** 音量手势滑动距离的默认值（%）：设置页滑块默认值、点播字段初值、直播起手读值三处共用同一个数 */
+    const val PLAYER_VOLUME_SWIPE_PERCENT_DEFAULT = 50
+
+    /**
+     * 音量手势的行程系数（Float）：`整条音量 = 画面高 × 本值`；调小更灵敏、调大更迟钝。
+     *
+     * 为什么这么读：直播手势的"起手"要在 UI 线程拿它，而 DataStore 只有挂起读 —— 这里只吃
+     * [cachedPreferencesOrNull] 的内存快照（O(1)、不阻塞、**不用 runBlocking**），快照还没就绪
+     * 就退回默认值。夹在 30..200 与设置页滑块的范围一致，防存量脏值。
+     */
+    fun playerVolumeSwipeRatio(): Float =
+        ((cachedPreferencesOrNull()?.get(PlayerVolumeSwipePercent) ?: PLAYER_VOLUME_SWIPE_PERCENT_DEFAULT)
+            .coerceIn(30, 200)) / 100f
+
+    // 亮度手势滑动距离：整条亮度行程 = 屏高（页高）的几倍，存"十分之一"（5..60 ⇒ 0.5×~6.0×，默认 30 = 3.0×）
+    val PlayerBrightnessSwipeTenths = intPreferencesKey("player_brightness_swipe_tenths")
+
+    /** 亮度手势滑动距离的默认值（十分之一倍）：默认 30 = 3.0×（= 历史上写死的那个 3，手感不变） */
+    const val PLAYER_BRIGHTNESS_SWIPE_TENTHS_DEFAULT = 30
+
+    /**
+     * 亮度手势的行程系数（Float）：`整条亮度 = 屏高（页高）× 本值`；调小更灵敏、调大更迟钝。
+     * 读法与 [playerVolumeSwipeRatio] 完全一致（内存快照、O(1)、不阻塞、不用 runBlocking），
+     * 夹在 5..60 与设置页滑块一致，防存量脏值。
+     */
+    fun playerBrightnessSwipeRatio(): Float =
+        ((cachedPreferencesOrNull()?.get(PlayerBrightnessSwipeTenths) ?: PLAYER_BRIGHTNESS_SWIPE_TENTHS_DEFAULT)
+            .coerceIn(5, 60)) / 10f
     // ── 空降助手（BilibiliSponsorBlock：跳过赞助/恰饭等片段）──
     // 总开关**默认开**（★有意与 PiliPlus 不同：PiliPlus 默认关。理由是要开箱即用；
     // 代价是首次安装就会向第三方 bsbsb.top 发查询——所以设置页里把开关和隐私说明都写清楚了）

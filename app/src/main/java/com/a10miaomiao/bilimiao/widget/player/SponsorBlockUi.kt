@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.text.InputFilter
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -20,12 +21,12 @@ import android.widget.Toast
 import com.a10miaomiao.bilimiao.comm.apis.SponsorBlockApi
 import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import com.a10miaomiao.bilimiao.comm.utils.OverlayDialog
+import com.a10miaomiao.bilimiao.comm.utils.SponsorDiag
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorActionType
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorCategory
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSegment
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSkipType
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
-import com.shuyu.gsyvideoplayer.utils.CommonUtil
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 「空降助手」的交互界面：片段列表（彩色圆点）、投票（赞成/反对/改类别）、提交新片段。
@@ -247,9 +249,9 @@ object SponsorBlockUi {
                         append("（整片标记）")
                     } else {
                         append("  ")
-                        append(CommonUtil.stringForTime(seg.startMs))
+                        append(SponsorTime.format(seg.startMs))
                         append(" - ")
-                        append(CommonUtil.stringForTime(seg.endMs))
+                        append(SponsorTime.format(seg.endMs))
                     }
                 }
                 textSize = 15f
@@ -295,7 +297,7 @@ object SponsorBlockUi {
         // 那个引用可能指向别的弹窗（父层片段列表），会把不该关的一起关掉。
         showOverlayList(
             activity,
-            "${SponsorCategory.labelOf(seg.category)} · ${CommonUtil.stringForTime(seg.startMs)}",
+            "${SponsorCategory.labelOf(seg.category)} · ${SponsorTime.format(seg.startMs)}",
             items,
         ) { which ->
             when (which) {
@@ -356,6 +358,25 @@ object SponsorBlockUi {
     private var submitDraft: SubmitDraft? = null
 
     /**
+     * 两个时间输入框的过滤器：只放行 `0-9`、`:`、`：`、`.`。
+     *
+     * 全角冒号也放行 —— [SponsorTime.parseSec] 认它（PiliPlus 也是 `[:：]`）；
+     * 粘贴 `01:11.250` 要能整段进；字母等非法字符只丢掉它们自己，**不会把已有内容清空**
+     * （返回过滤后的片段当替换文本，而不是返回空串）。
+     *
+     * ★ 为什么不换成数字/时间键盘（`TYPE_CLASS_NUMBER` / `TYPE_CLASS_DATETIME`）：
+     *   部分输入法的数字键盘**没有 `:` 和 `.` 键**，换过去用户连 `mm:ss` 都打不出来
+     *   （毫秒更不可能）。所以键盘保持 `TYPE_CLASS_TEXT`，只靠这个过滤器限字符。
+     */
+    private val TIME_INPUT_FILTER = InputFilter { source, _, _, _, _, _ ->
+        val kept = source.filter { it in '0'..'9' || it == ':' || it == '：' || it == '.' }
+        if (kept.length == source.length) null else kept
+    }
+
+    /** 提交时的最短片段：太短服务端也会拒，本地先拦一次省一趟往返（一行可改；试播**不**受此限） */
+    private const val MIN_SUBMIT_SEGMENT_MS = 500L
+
+    /**
      * 提交新片段。
      *
      * 表单：开始 / 结束（`mm:ss.SSS`，也可手输纯秒数）+「设为当前」+ 分类 + 动作。
@@ -387,11 +408,14 @@ object SponsorBlockUi {
         var action = draft?.action ?: SponsorActionType.Skip
 
         val startEt = EditText(ctx).apply {
+            // 键盘保持文本：数字/时间键盘在部分输入法上没有 `:` `.` 键（详见 TIME_INPUT_FILTER 注释）
             inputType = InputType.TYPE_CLASS_TEXT
+            filters = arrayOf(TIME_INPUT_FILTER)
             setText(draft?.start ?: SponsorTime.format(nowMs))
         }
         val endEt = EditText(ctx).apply {
             inputType = InputType.TYPE_CLASS_TEXT
+            filters = arrayOf(TIME_INPUT_FILTER)
             setText(draft?.end ?: SponsorTime.format(nowMs))
         }
         val categoryTv = TextView(ctx).apply {
@@ -452,6 +476,10 @@ object SponsorBlockUi {
         //   系统按钮点了会**无条件关掉弹窗**，校验失败时用户会觉得"点了没反应/白填了"。
         var dialog: Dialog? = null
         var submitted = false
+        // 提交中标志：防连点（协程跑在 Main，局部布尔就够；失败路径会恢复，成功会关弹窗）
+        var submitting = false
+        // 提交按钮的引用：pending 期间要置灰（声明在 footer 之前，点击回调里才能引用到它自己）
+        var submitBtn: TextView? = null
         // 关弹窗（取消 / 点空白 / 返回键 / 试播）时留下草稿；提交成功那次不存（见 submitted）
         val saveDraft = {
             submitDraft = SubmitDraft(
@@ -487,49 +515,103 @@ object SponsorBlockUi {
                 }
             })
             addView(button(ctx, "取消") { dialog?.dismiss() })
-            addView(button(ctx, "提交") {
+            val submitView = button(ctx, "提交") {
+                if (submitting) return@button
                 val start = SponsorTime.parseSec(startEt.text.toString())
                 val end = SponsorTime.parseSec(endEt.text.toString())
+                // 本地校验（只加在提交路径；试播仍只校验格式 + end>start）：
+                // 时长上限与"太短"都是服务端也会拒的，本地先拦一次省一趟往返
+                val startMs = ((start ?: 0.0) * 1000).toLong()
+                val endMs = ((end ?: 0.0) * 1000).toLong()
+                val durationMs = player.duration
                 when {
                     start == null || end == null ->
                         toast(activity, "时间格式看不懂，用 mm:ss.SSS（如 01:30.500）或秒数")
                     end <= start ->
                         toast(activity, "结束时间要大于开始时间")
+                    durationMs > 0L && endMs > durationMs ->
+                        toast(activity, "结束时间超出视频时长（${SponsorTime.format(durationMs)}）")
+                    endMs - startMs < MIN_SUBMIT_SEGMENT_MS ->
+                        toast(activity, "片段太短（不足 0.5 秒）")
                     else -> {
+                        submitting = true
+                        submitBtn?.isEnabled = false
+                        submitBtn?.alpha = 0.5f
                         toast(activity, "正在提交…")
                         scope.launch {
-                            val ok = try {
-                                BiliApiService.sponsorBlockAPI.postSegments(
-                                    bvid = bvid,
-                                    cid = cid,
-                                    videoDurationSec = durationSec,
-                                    segments = listOf(
-                                        SponsorBlockApi.PostSegment(
-                                            segment = listOf(start, end),
-                                            category = category.id,
-                                            actionType = action.id,
-                                        )
-                                    ),
-                                )
-                            } catch (e: Exception) {
-                                false
+                            // postSegments 是"全函数"：任何失败都落在 code 里（-1 = 网络）；只原样抛取消
+                            val result = BiliApiService.sponsorBlockAPI.postSegments(
+                                bvid = bvid,
+                                cid = cid,
+                                videoDurationSec = durationSec,
+                                segments = listOf(
+                                    SponsorBlockApi.PostSegment(
+                                        segment = listOf(start, end),
+                                        category = category.id,
+                                        actionType = action.id,
+                                    )
+                                ),
+                            )
+                            if (result.code != 200) {
+                                toast(activity, submitFailMessage(result.code))
+                                // 失败：恢复可点（成功路径不需要，弹窗已经关了）
+                                submitting = false
+                                submitBtn?.isEnabled = true
+                                submitBtn?.alpha = 1f
+                                return@launch
                             }
+                            // ★ 请求之后的这段（合并 / 兜底拉取 / 赋值 / 关弹窗）整段包住：
+                            //   setter 万一抛异常，也不能让 Main 未捕获崩溃、更不能把按钮永久卡灰。
+                            //   （不用 runCatching：它会把 CancellationException 一起吞掉，本仓明令不许。）
+                            var mergedOk = false
+                            try {
+                                // ★A1：200 回给我们的就是**刚新建的片段**，并进本地列表 → 立刻生效。
+                                val merged: List<SponsorSegment>? = if (result.created.isNotEmpty()) {
+                                    mergeSponsorSegments(player.sponsorSegments, result.created)
+                                } else {
+                                    // 兜底：body 里没带片段就再拉一次。网络 + 解析放 IO（赋值仍在 Main）；
+                                    // ★拉空（网络/解析失败都是空列表）就**保持现状**，绝不把已有片段与色块清空
+                                    withContext(Dispatchers.IO) {
+                                        BiliApiService.sponsorBlockAPI.getSegments(bvid, cid)
+                                    }.takeIf { it.isNotEmpty() }
+                                }
+                                mergedOk = merged != null
+                                // 上面两条路径（created 非空合并 / created 为空兜底拉取）都汇到这一处赋值。
+                                // 走 mergeSubmittedSegments：带一次性抑制 —— 不越界补偿、也不重置"上一位置"，
+                                // 连"本地列表本来是空（[] → [新片段]）"和"暂停在起点提交"都不会被自己的片段弹走。
+                                merged?.let { player.mergeSubmittedSegments(it) }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                // 请求已经成功（200），只是本地刷新这一步炸了：下面按"已提交，稍后刷新"告知
+                                SponsorDiag.log("submit-merge", "${e.javaClass.simpleName}: ${e.message}")
+                            } finally {
+                                // 弹窗还开着（走了异常分支 / 还没走到 dismiss）才需要恢复可点
+                                if (dialog?.isShowing == true) {
+                                    submitting = false
+                                    submitBtn?.isEnabled = true
+                                    submitBtn?.alpha = 1f
+                                }
+                            }
+                            // ★ 只要 HTTP 200，这次提交就算完成（本地列表只是"能不能立刻显示"）：
+                            //   无论合并成没成都要关弹窗 + 作废草稿 —— 否则用户再点一次会拿到 409「已有人提交过」。
+                            //   取消路径上面已原样抛出、走不到这里，弹窗与草稿保持原样。
+                            // 提交成功：草稿作废（下次打开回到"当前进度"）；
+                            // submitted 置位让 dismiss 收尾别再把它写回草稿
+                            submitted = true
+                            submitDraft = null
+                            dialog?.dismiss()
+                            // 合并成功才说"已加入"；"200 但没片段、兜底也空"或本地刷新失败时说"稍后刷新"
                             toast(
                                 activity,
-                                if (ok) "提交成功，感谢你让社区更好用"
-                                else "提交失败：可能重复提交、片段太短或被限流"
+                                if (mergedOk) "提交成功，已加入本视频片段" else "已提交，列表稍后刷新"
                             )
-                            if (ok) {
-                                // 提交成功：草稿作废（下次打开回到"当前进度"）；
-                                // submitted 置位让 dismiss 收尾别再把它写回草稿
-                                submitted = true
-                                submitDraft = null
-                                dialog?.dismiss()
-                            }
                         }
                     }
                 }
-            })
+            }
+            submitBtn = submitView
+            addView(submitView)
         }
         val scroll = CappedScrollView(ctx, 0.55f).apply { addView(form) }
 
@@ -555,6 +637,31 @@ object SponsorBlockUi {
                 if (!submitted) saveDraft()
             },
         )
+    }
+
+    /**
+     * 把服务端刚回的新片段并进本地列表：**按 UUID 去重**（已在列表里的以本地那份为准）、
+     * 丢掉无效片段、按起点升序 —— 色块/列表/跳过引擎都假设"有序 + 无重复 + 有效"。
+     */
+    private fun mergeSponsorSegments(
+        current: List<SponsorSegment>,
+        created: List<SponsorSegment>,
+    ): List<SponsorSegment> = (current + created)
+        .filter { it.isValid }
+        .distinctBy { it.UUID }
+        .sortedBy { it.startMs }
+
+    /**
+     * 提交失败时按服务端状态码给准确提示（比"可能重复提交/太短/被限流"这种一锅炖强）。
+     * 语义照服务端文档：400 参数错 / 403 被自动审核拒 / 409 重复 / 429 太频繁；-1 是我们自己的网络异常。
+     */
+    private fun submitFailMessage(code: Int): String = when (code) {
+        409 -> "这段已经有人提交过了"
+        403 -> "被服务端自动审核拒绝"
+        429 -> "提交太快，过一会儿再试"
+        400 -> "时间或片段不合法，被服务端拒了"
+        -1 -> "网络异常，没提交上去"
+        else -> "提交失败：可能重复提交、片段太短或被限流"
     }
 
     // ───────────────────────── 试播这段 ─────────────────────────

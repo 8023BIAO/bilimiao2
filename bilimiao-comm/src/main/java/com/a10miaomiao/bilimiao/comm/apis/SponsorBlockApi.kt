@@ -328,6 +328,11 @@ class SponsorBlockApi {
      *
      * 注意与取片段的一个关键差别：**提交侧的视频标识哈希是 `SHA256(bvid+cid)`**，
      * 但 body 里的 `videoID` 仍然是裸 BVID（哈希只用于服务端生成 hashedVideoID）。
+     *
+     * ★ 返回体不是空壳：**HTTP 200 + JSON 数组 = 刚新建的片段**（字段与 GET 一致）。
+     *   PiliPlus 就是拿这个数组直接刷本地列表的（`lib/http/sponsor_block.dart:165-170` →
+     *   `SegmentItemModel.fromJson`；`post_panel/view.dart:370` → `handleSBData(response)`），
+     *   所以调用方拿到 [PostResult.created] 就能"提交完立刻生效"，不用再拉一次。
      */
     suspend fun postSegments(
         bvid: String,
@@ -335,8 +340,9 @@ class SponsorBlockApi {
         videoDurationSec: Double,
         segments: List<PostSegment>,
         userId: String = localUserId(),
-    ): Boolean {
-        if (bvid.isBlank() || cid.isBlank() || segments.isEmpty()) return false
+    ): PostResult {
+        // 防御性分支：调用方（提交弹窗）已经拦过，这里只是别把非法请求发出去
+        if (bvid.isBlank() || cid.isBlank() || segments.isEmpty()) return PostResult(-1, emptyList())
         return try {
             val body = SponsorPostBody(
                 videoID = bvid,
@@ -354,13 +360,29 @@ class SponsorBlockApi {
                 method = MiaoHttp.POST
                 this.body = MiaoJson.toJson(body).toRequestBody("application/json".toMediaType())
             }.awaitCall()
-            res.use { it.code == 200 }
+            res.use { response ->
+                val text = response.body?.string().orEmpty()
+                SponsorDiag.log("api-post", "POST $baseUrl/api/skipSegments -> http=${response.code} len=${text.length}")
+                if (response.code != 200) {
+                    SponsorDiag.log("api-post-body", text.take(200))
+                    return@use PostResult(response.code, emptyList())
+                }
+                val created = try {
+                    MiaoJson.fromJson<List<SponsorSegment>>(text)
+                } catch (e: Exception) {
+                    // 200 但 body 不是片段数组（镜像站差异/空体）：code 照样如实返回，只是没有可用的片段
+                    SponsorDiag.log("api-post-parse", "${e.javaClass.simpleName}: ${e.message}")
+                    emptyList()
+                }
+                PostResult(200, created)
+            }
         } catch (e: java.util.concurrent.CancellationException) {
             // 协程被取消（例如退出播放页）时必须原样抛出：吞掉它会让"已取消"的请求
             // 继续跑完并返回一个没人要的结果，也会破坏结构化并发
             throw e
         } catch (e: Exception) {
-            false
+            SponsorDiag.log("api-post-error", "${e.javaClass.simpleName}: ${e.message}")
+            PostResult(-1, emptyList())
         }
     }
 
@@ -523,5 +545,17 @@ class SponsorBlockApi {
         val segment: List<Double>,
         val category: String,
         val actionType: String,
+    )
+
+    /**
+     * 提交结果。
+     *
+     * @param code HTTP 状态码；**-1 = 网络/解析异常**（没拿到服务端应答）；其它非 200 见服务端语义：
+     *   400 参数非法 / 403 被自动审核拒绝 / 404 未找到 / 409 重复提交 / 429 提交太频繁。
+     * @param created 服务端在 200 时回给的新建片段（**可能为空**：body 不是数组、或镜像站差异）。
+     */
+    data class PostResult(
+        val code: Int,
+        val created: List<SponsorSegment>,
     )
 }

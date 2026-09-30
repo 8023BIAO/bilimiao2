@@ -286,6 +286,40 @@ private fun VideoSettingPageContent(
                     Text("播放控制设置")
                 }
             )
+            // 音量手势滑动距离：整条音量 = 画面高的百分之多少（30~200%，步进 5，默认 50%）。
+            // 调小更灵敏、调大更迟钝；点播与直播共用同一个键；亮度不接这个设置。
+            sliderIntPreference(
+                key = SettingPreferences.PlayerVolumeSwipePercent.name,
+                title = {
+                    Text("音量手势滑动距离")
+                },
+                defaultValue = SettingPreferences.PLAYER_VOLUME_SWIPE_PERCENT_DEFAULT,
+                valueRange = 30..200,
+                valueSteps = 33,
+                valueText = {
+                    Text("$it%")
+                },
+                summary = {
+                    Text("整条音量需要的上下滑动距离 = 画面高的这个百分比；调小更灵敏、调大更迟钝；点播与直播共用")
+                },
+            )
+            // 亮度手势滑动距离：整条亮度 = 屏高的几倍（0.5×~6.0×，步进 0.5×，默认 3.0× = 今天的手感）。
+            // 调小更灵敏、调大更迟钝；点播与直播共用同一个键。
+            sliderIntPreference(
+                key = SettingPreferences.PlayerBrightnessSwipeTenths.name,
+                title = {
+                    Text("亮度手势滑动距离")
+                },
+                defaultValue = SettingPreferences.PLAYER_BRIGHTNESS_SWIPE_TENTHS_DEFAULT,
+                valueRange = 5..60,
+                valueSteps = 10,
+                valueText = {
+                    Text("${it / 10f}×")
+                },
+                summary = {
+                    Text("整条亮度需要的上下滑动距离 = 屏高的这个倍数；调小更灵敏、调大更迟钝；点播与直播共用")
+                },
+            )
             // 定时关闭：原来只在设置首页一级挂着，用户在播放器点齿轮进来找不到它（用户反馈）
             preference(
                 key = "auto_stop_timer",

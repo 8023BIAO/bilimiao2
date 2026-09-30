@@ -598,6 +598,11 @@ class PlayerController(
         }
         // 拖动进度条预览图（默认开）。关掉后连数据都不再拉，省流量
         player.showSeekPreview = preferences[SettingPreferences.PlayerSeekPreviewShow] ?: true
+        // 音量手势滑动距离：整条音量 = 画面高 × 本值（设置页「音量手势滑动距离」，默认 50%）。
+        // 读法走 SettingPreferences 的统一入口（快照 O(1)、默认值/夹取都在那一处）
+        player.volumeSwipeFullRatio = SettingPreferences.playerVolumeSwipeRatio()
+        // 亮度手势滑动距离：整条亮度 = 屏高 × 本值（「亮度手势滑动距离」，默认 3.0× = 历史手感）
+        player.brightnessSwipeFullRatio = SettingPreferences.playerBrightnessSwipeRatio()
         // 空降助手：总开关 + 每类别策略（默认档 = 11 个类别全部"跳过一次"，见 DEFAULT_SKIP_TYPES）
         // ★ 默认**开**（这里是故意与 PiliPlus 不同：用户要开箱即用；PiliPlus 默认关是隐私考虑）
         val sponsorEnabled = preferences[SettingPreferences.SponsorBlockEnable] ?: true

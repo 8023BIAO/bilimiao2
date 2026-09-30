@@ -772,19 +772,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          *   病根：这里的系数原来是 `0.9`，即"一屏就滑掉 110% 行程"；而点播是
          *   `增量 / (屏高 × 3)` 累加 ⇒ 3 屏才走完全程。绝对位移与增量写法是线性等价的，
          *   **差的就是这个系数**（1/0.9 ≈ 1.11 屏 vs 3 屏，灵敏度差约 3.3 倍）。
-         *   现在取 3f，与点播同一手感；音量那边另有一套系数（见 [VOLUME_FULL_SWIPE_RATIO]）。
+         *   这个 3 现在由设置页「亮度手势滑动距离」（默认 3.0×）承担，**起手读一次**存进
+         *   [brightnessSwipeFullRatio]（见 [handleBrightnessDrag]）；音量走它自己那套系数
+         *   （设置页「音量手势滑动距离」，默认 50%）。
          */
-        private const val BRIGHTNESS_FULL_SWIPE_RATIO = 3f
-
-        /**
-         * 音量手势的**整条行程** = 舞台（画面容器）高 × 这个比值
-         * （0.5 ⇒ 半个舞台高滑完整条音量；**调大 = 更迟钝**）。
-         *
-         * 数字与点播同源（`DanmakuVideoPlayer.kt` 文件头的 `VOLUME_FULL_SWIPE_RATIO`），
-         * 也对齐 PiliPlus `view.dart:1109` 的 `maxHeight * 0.5`（`maxHeight` = 播放器盒子高）。
-         * 亮度走自己的系数（[BRIGHTNESS_FULL_SWIPE_RATIO]）——那是另一条手感，本次未动。
-         */
-        private const val VOLUME_FULL_SWIPE_RATIO = 0.5f
 
         /**
          * ★第十三批：这里原来有一个 `VOLUME_WRITE_MIN_INTERVAL_MS = 16`（"同一帧最多写一次系统音量"）。
@@ -8120,6 +8111,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          *   （蓝牙/耳机）才会变，没必要每个手势都去 binder 问一次；只读到 0 时才重读。
          */
         private var cachedMaxVolume = 0
+        /**
+         * 本次手势的音量行程系数（= 整条音量 = 舞台高的这个比例，来自设置页「音量手势滑动距离」）：
+         * **起手读一次**（见 [handleVolumeDrag] 的 `downVolume < 0` 分支），MOVE 热路径只读这个字段，
+         * 不碰 DataStore/快照。初值用设置里的同一个默认值，防"设置还没读就起手"出现 0（除零）。
+         */
+        private var volumeSwipeFullRatio =
+            SettingPreferences.PLAYER_VOLUME_SWIPE_PERCENT_DEFAULT / 100f
+        /**
+         * 本次手势的亮度行程系数（= 整条亮度 = 页高的几倍，来自设置页「亮度手势滑动距离」）：
+         * **起手读一次**（见 [handleBrightnessDrag] 的 `downBrightness < 0f` 分支），拖动过程中只读这个
+         * 字段，不碰 DataStore/快照。初值 = 3.0×（历史上的写死值），保证起手前/读到非法值时手感不变。
+         */
+        private var brightnessSwipeFullRatio =
+            SettingPreferences.PLAYER_BRIGHTNESS_SWIPE_TENTHS_DEFAULT / 10f
         /** 本次手势提交给后台写入器的**最后一档**（-1 = 没提交过）；只用于诊断日志 */
         private var lastVolumeTarget = -1
 
@@ -8384,6 +8389,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val max = cachedMaxVolume
             if (downVolume < 0) {
                 downVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                // ★手势起手读一次设置（「音量手势滑动距离」，默认 50%）：MOVE 热路径只读字段
+                volumeSwipeFullRatio = SettingPreferences.playerVolumeSwipeRatio()
                 // 手势开始时系统音量就是 downVolume：告诉写入器"现在就在这一档"，
                 // 于是第一档位移不会白白写一次同样的值（真正的第一档变化照样会写）
                 writer.noteCurrent(downVolume)
@@ -8396,12 +8403,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   · 竖屏手势只在画面带内起手（[isInsideVideoStage]），横屏容器铺满整页 ⇒ 它和 PiliPlus 的
             //     "播放器盒子高"同义（`view.dart:1109` 的 `maxHeight * 0.5`，同文件 `:1348` 传入）；
             //   · 几何还没就绪（未初始化 / 没量出宽高）才退回整页高；
-            //   · ★要回退：把下面两处分母一起换回 `pageHeightPx() * 3`（音量与气泡必须同一分母）。
+            //   · 比例来自设置（起手读一次），**调大 = 更迟钝**；两处分母必须同一个（音量与气泡）。
             val stageH = (if (::videoContainer.isInitialized) videoContainer.height else 0)
                 .takeIf { it > 0 } ?: pageHeightPx().coerceAtLeast(1)
-            val deltaV = (max * deltaY / (stageH * VOLUME_FULL_SWIPE_RATIO)).toInt()
+            val ratio = volumeSwipeFullRatio.takeIf { it > 0f } ?: 0.5f
+            val deltaV = (max * deltaY / (stageH * ratio)).toInt()
             val volumePercent =
-                (downVolume * 100 / max + deltaY * 100 / (stageH * VOLUME_FULL_SWIPE_RATIO)).toInt()
+                (downVolume * 100 / max + deltaY * 100 / (stageH * ratio)).toInt()
             val target = (downVolume + deltaV).coerceIn(0, max)
             // ① 气泡**先**刷（★第十三批的顺序）：用户看到的即时反馈优先 ——
             //    这条路上一个跨进程调用都没有，所以"每个 MOVE 都跟手"由它保证。
@@ -8424,8 +8432,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val pageHeight = pageHeightPx().coerceAtLeast(1)
             if (downBrightness < 0f) {
                 downBrightness = currentWindowBrightness()
+                // ★手势起手读一次设置（「亮度手势滑动距离」，默认 3.0×）；拖动热路径只读字段
+                brightnessSwipeFullRatio = SettingPreferences.playerBrightnessSwipeRatio()
             }
-            val percent = (downRawY - event.rawY) / (pageHeight * BRIGHTNESS_FULL_SWIPE_RATIO)
+            val ratio = brightnessSwipeFullRatio.takeIf { it > 0f } ?: 3f
+            val percent = (downRawY - event.rawY) / (pageHeight * ratio)
             val target = (downBrightness + percent).coerceIn(MIN_BRIGHTNESS, 1f)
             // ★第十三批：**先刷气泡、再写窗口属性**（和音量那边同一条原则）。
             //   气泡这一句是纯 UI；后面那句 `window.attributes = lp` 是**同步的窗口事务**

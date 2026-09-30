@@ -80,15 +80,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.min
 
-/**
- * 音量手势的**整条行程** = 播放器盒子高 × 这个比值（0.5 ⇒ 半个盒子高滑完整条音量）。
- *
- * 数字对齐 PiliPlus：`view.dart:1109` 的 `level = maxHeight * 0.5`，其中 `maxHeight`
- * 就是播放器盒子高（同文件 `:1348` 从 widget 传入）。**调大 = 更迟钝**。
- * 亮度**不走**这个系数（它是另一条手感，本次未动）。
- */
-private const val VOLUME_FULL_SWIPE_RATIO = 0.5f
-
 
 class DanmakuVideoPlayer : StandardGSYVideoPlayer {
 
@@ -1164,6 +1155,25 @@ initDanmakuTouchListener()
     /** 拖动时是否显示预览图（PlayerController 下发；设置页可关） */
     var showSeekPreview = true
 
+    /**
+     * 音量手势的**整条行程** = 播放器盒子高 × 本值（`0.5f` ⇒ 半个盒子高滑完整条音量）。
+     *
+     * 由 `PlayerController.initVideoSetting` 从设置（「音量手势滑动距离」，默认 50%）写入；
+     * 这里给一个同源初值，避免设置还没下发时出现 0（除零）。
+     * 参照出处：PiliPlus `view.dart:1109` 的 `level = maxHeight * 0.5`（`maxHeight` = 播放器盒子高）。
+     * **调大 = 更迟钝**；亮度**不走**这个系数（那是另一条手感）。
+     */
+    var volumeSwipeFullRatio: Float = SettingPreferences.PLAYER_VOLUME_SWIPE_PERCENT_DEFAULT / 100f
+
+    /**
+     * 亮度手势的**整条行程** = 基准高 × 本值（默认 `3f` = 划满 3 个屏高走完整条亮度，历史手感）。
+     *
+     * 由 `PlayerController.initVideoSetting` 从设置（「亮度手势滑动距离」，0.5×~6.0×，默认 3.0×）写入。
+     * 基准高在横屏取 `mScreenWidth`、竖屏取 `mScreenHeight`（沿用原公式，未动）。
+     * **调大 = 更迟钝**；音量走它自己的系数（[volumeSwipeFullRatio]）。
+     */
+    var brightnessSwipeFullRatio: Float = 3f
+
     /** 本视频的缩略图数据；null = 这个视频没有预览图（拖动只显示时间气泡） */
     var videoShotData: PlayerAPI.VideoShotData? = null
         set(value) {
@@ -1736,18 +1746,23 @@ initDanmakuTouchListener()
                 mGestureDownVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             }
             // ★音量行程基准 = **播放器盒子高**（对齐 PiliPlus `view.dart:1109` 的 `maxHeight * 0.5`）：
-            //   半个盒子高滑完整条音量，不再受"屏幕长边 / 过期 metrics"影响（见文件头常量）。
+            //   比例由设置「音量手势滑动距离」决定（`volumeSwipeFullRatio`，默认 0.5 = 半个盒子高
+            //   滑完整条音量），不再受"屏幕长边 / 过期 metrics"影响。
             //   盒子还没量出来（measuredHeight <= 0）才退回原来的屏幕长边。
-            //   ★要回退：把下面两处分母一起换回 `curHeight * 3`（音量与气泡必须同一分母）。
+            //   ★要回退：把下面两处分母一起换（音量与气泡必须同一分母）。
             val boxH = measuredHeight.takeIf { it > 0 } ?: curHeight
-            val deltaV = (max * deltaYNeg / (boxH * VOLUME_FULL_SWIPE_RATIO)).toInt()
+            val ratio = volumeSwipeFullRatio.takeIf { it > 0f } ?: 0.5f
+            val deltaV = (max * deltaYNeg / (boxH * ratio)).toInt()
             am.setStreamVolume(AudioManager.STREAM_MUSIC, mGestureDownVolume + deltaV, 0)
             val volumePercent =
-                (mGestureDownVolume * 100 / max + deltaYNeg * 100 / (boxH * VOLUME_FULL_SWIPE_RATIO)).toInt()
+                (mGestureDownVolume * 100 / max + deltaYNeg * 100 / (boxH * ratio)).toInt()
             showVolumeDialog(-deltaY, volumePercent)
         } else if (mBrightness) {
             if (Math.abs(deltaY) > mThreshold) {
-                val percent = -deltaY / (curHeight * 3f)
+                // 亮度行程 = 基准高 × 设置里的「亮度手势滑动距离」（默认 3 = 历史值）；
+                // 死区（mThreshold）/ 累加语义（onBrightnessSlide 里 mDownY = y 推进）都没动
+                val ratio = brightnessSwipeFullRatio.takeIf { it > 0f } ?: 3f
+                val percent = -deltaY / (curHeight * ratio)
                 onBrightnessSlide(percent)
                 mDownY = y
             }
@@ -1906,11 +1921,41 @@ initDanmakuTouchListener()
     /** 打开"提交片段"界面 */
     var onSubmitSponsorSegment: (() -> Unit)? = null
 
+    /**
+     * 一次性抑制标志：**提交片段后合并本地列表**时不走"越界补偿"那一路。
+     *
+     * 为什么需要它：补偿收窄成"首次拿到数据"（见 [sponsorSegments] setter 的 firstData）之后还剩一个洞：
+     * 那个视频**本地列表本来是空的**（`[] → [刚提交的片段]`，即"这视频还没人提交过、我第一次提交"，
+     * 很常见）也会被判成首次数据 ⇒ 刚提交就被自己的片段 seek 到片段末尾。
+     * 正常加载 / 切分P / 换清晰度重建（PlayerDelegate2 先置空再赋值）仍然要补偿，所以只能由提交路径
+     * 显式抑制一次，不能把补偿整个关掉。见 [mergeSubmittedSegments]。
+     *
+     * ★ 注意范围：这个标志只管**补偿**这一路。`checkSponsorSkip()` 里"离片段起点不到 1 秒就跳"
+     *   那一路（`shouldSkipAt` 的第二个析取项，**不看 prev**）是另一个问题、也挡不住，改
+     *   `lastSponsorPosMs` 只会把窗口放大 —— 那条由按 UUID 的"提交免跳名单"承接（task-19）。
+     */
+    private var suppressSponsorCompensationOnce = false
+
     /** 本视频的片段（按起点升序）；空 = 没数据或没启用 */
     var sponsorSegments: List<SponsorSegment> = emptyList()
         set(value) {
+            // ★ 两件事都必须在 `field = value` **之前**做：
+            //   ① 取旧值：赋值之后 field 就是新值了，把 `field.isEmpty()` 写在下面会永远等于
+            //      `value.isEmpty()`（写反）；
+            //   ② 消费抑制标志：**读一次就无条件清零** —— 只在 firstData 为真时才清的话，
+            //      "设了标志但这次 firstData=false"（如 `[X] → [X,Y]`）会把标志泄漏给下一次
+            //      真正的首次加载 ⇒ 续播/空降少跳一次。
+            val firstData = field.isEmpty() && value.isNotEmpty()
+            val suppress = suppressSponsorCompensationOnce
+            suppressSponsorCompensationOnce = false
             field = value
             skippedSponsorUuids.clear()
+            // ★ 正常加载/刷新把"提交免跳名单"清空（换视频、切分P、换清晰度重建都算）；
+            //   提交合并（suppress=true）不清 —— 名单要在用户停留本视频期间一直生效。
+            if (!suppress) submittedHoldUuids.clear()
+            // ★ 这里保持**无条件**归 −1：它是"起播/空降后第一拍别拿旧位置当 prev"的账本。
+            //   提交合并那一路（checkSponsorSkip 的 1 秒窗口）改这里只会把窗口放大，不归本任务管
+            //   —— 那条由按 UUID 的"提交免跳名单"解决（见 submittedHoldUuids）。
             lastSponsorPosMs = -1L
             sponsorCompensationTries = 0
             SponsorDiag.log(
@@ -1927,8 +1972,20 @@ initDanmakuTouchListener()
             if (value.isNotEmpty() && sponsorSkipEnabled) {
                 removeCallbacks(sponsorTask)
                 postDelayed(sponsorTask, 300)
-                // ★ 越界补偿：数据是起播后才到的，此时可能已经站在片段里了（续播/空降/切分P）
-                compensateSponsorEntry()
+                // ★ 越界补偿**只在首次拿到片段数据**时做：数据是起播后才到的，此时可能已经站在
+                //   片段里了（续播/空降/切分P），需要补一刀跳出去。
+                //   ① 为什么加这个条件：中途重新赋值列表不该动播放位置 —— 提交成功后把新片段并进
+                //      本地列表（SponsorBlockUi 的 A1）也走这个 setter，无条件补偿会把"刚提交完、
+                //      位置正好落在自己新片段内"的用户立刻 seek 到片段终点（用户最讨厌东西自己动）；
+                //      PiliPlus 同样只在首次装跳过监听时补偿（block_mixin.dart 的 handleSBData → initSkip）。
+                //   ② 首次数据仍然补偿：续播 / 空降 / 切分P 重建后第一次拿到列表，行为与以前完全一致
+                //      （PlayerDelegate2.loadSponsorSegments 每次都先置空再赋值，所以每条加载路径都算首次）。
+                //   ③ 手动把进度拖到片段**中段**（离起点 ≥1 秒）不会被自动弹出去，要跳请用画面上的
+                //      "跳过"提示；但落点若在起点后 1 秒内仍会跳 —— `shouldSkipAt` 第二项本就不看 prev，
+                //      这是既有行为（本节只改文字，不改行为）。自然播放跨过片段起点仍由周期跑的 sponsorTask 处理。
+                //   ④ 提交片段走 [mergeSubmittedSegments] 时会带一次性抑制：连"本地本来是空
+                //      （[] → [新片段]）"这种看着像首次数据的情况也不补偿 —— 用户刚提交，别动播放位置。
+                if (firstData && !suppress) compensateSponsorEntry()
             }
             // 整片标记（如"赞助/恰饭"）：本视频整体属于某类别时提示一次（对齐 PiliPlus 的 videoLabel）
             removeCallbacks(sponsorVideoLabelToast)
@@ -1936,6 +1993,26 @@ initDanmakuTouchListener()
                 postDelayed(sponsorVideoLabelToast, 600)
             }
         }
+
+    /**
+     * 提交片段成功后把新片段并入本视频列表：**不触发越界补偿**（否则用户刚提交、位置又恰好在
+     * 新片段内时会被自己的片段 seek 到片段末尾），但色块 / ADS 按钮 / 周期跳过判定照常刷新
+     * —— 下面就是普通赋值，走 [sponsorSegments] 的 setter，抑制标志在 setter 里"读一次就清零"。
+     *
+     * 同时把"用户此刻确实站在里面"的**新**片段收进 [submittedHoldUuids]：周期判定那条路
+     * （`checkSponsorSkip` → `shouldSkipAt` 的"离起点不到 1 秒"）不看抑制标志，只有这层过滤能挡住。
+     */
+    fun mergeSubmittedSegments(list: List<SponsorSegment>) {
+        // 赋值前的 UUID 集合：下面只把"这次新出现的片段"收进名单（老片段不是这次提交的对象）
+        val oldUuids = sponsorSegments.mapTo(HashSet()) { it.UUID }
+        suppressSponsorCompensationOnce = true
+        sponsorSegments = list
+        // 位置要用 currentPositionWhenPlaying：视频还没 prepare 时 currentPosition 可能读到 0，
+        // 那种情况下退回 currentPosition（兜底），保证最坏也只是"名单空"，不会误判成"站在片段里"
+        val pos = currentPositionWhenPlaying.takeIf { it > 0L } ?: currentPosition.coerceAtLeast(0L)
+        list.filter { it.UUID !in oldUuids && it.UUID.isNotBlank() && pos >= it.startMs && pos < it.endMs }
+            .forEach { submittedHoldUuids.add(it.UUID) }
+    }
 
     /** 当前视频的标识（提交片段要用）；番剧/本地视频为空 → 不支持提交 */
     var sponsorVideoId = ""
@@ -1946,6 +2023,18 @@ initDanmakuTouchListener()
         private set
 
     private val skippedSponsorUuids = HashSet<String>()
+
+    /**
+     * 提交片段后的"免跳"名单（UUID）：只挡住"用户此刻正站在这个刚提交的片段上"的自动跳过，
+     * 位置一离开该片段（到终点之后 / 回到起点之前）就自动移出名单，之后的自然跨入照跳。
+     *
+     * 为什么需要它：`shouldSkipAt()` 的第二个析取项 `pos - seg.startMs < 1000L` **不看 prev**，
+     * 所以"暂停在新片段起点 → 提交 → 恢复播放"第一拍 `pos≈起点` 就命中 —— 改 `lastSponsorPosMs`
+     * 取任何值都挡不住（保持旧值还会让第一个析取项也变真、窗口更大）。
+     * 为什么不直接改 `shouldSkipAt` 的判据：那个判据同时服务"自然跨入 / 倍速采样间隔"等多条路径，
+     * 改它风险大；这里只是"该不该处理某条片段"的外面加一层过滤，跳过逻辑零改动。
+     */
+    private val submittedHoldUuids = HashSet<String>()
 
     /** 上一次判定的播放位置（ms）：用来识别"自然播放跨过了片段起点"，而不是靠秒桶 */
     private var lastSponsorPosMs = -1L
@@ -2074,17 +2163,29 @@ initDanmakuTouchListener()
         if (mCurrentState != CURRENT_STATE_PLAYING) return
         val pos = currentPositionWhenPlaying
         if (pos <= 0L) return
+        // ★ 提交免跳名单：先按"当前位置还在不在该片段里"瘦身（离开即移出，之后的自然跨入照跳），
+        //   再在挑片段时把名单里的排除掉 —— 放在这里而不是改 shouldSkipAt 的判据，跳过逻辑零改动。
+        if (submittedHoldUuids.isNotEmpty()) {
+            submittedHoldUuids.retainAll { uuid ->
+                sponsorSegments.any { it.UUID == uuid && pos >= it.startMs && pos < it.endMs }
+            }
+        }
         val prev = lastSponsorPosMs
         // 位置没动（暂停/缓冲/卡住）就没什么可判的，省掉一次遍历
         if (pos == prev) return
         lastSponsorPosMs = pos
-        handleSponsorHit(sponsorSegments.firstOrNull { shouldSkipAt(it, pos, prev) } ?: return)
+        handleSponsorHit(
+            sponsorSegments.firstOrNull {
+                it.UUID !in submittedHoldUuids && shouldSkipAt(it, pos, prev)
+            } ?: return
+        )
     }
 
     /**
      * 越界补偿：片段数据到达时已经站在片段内部。
      * PiliPlus 也只在"首次拿到数据"时做（`handleSBData` 里 `_blockListener == null` 分支），
-     * 我们等价地在 `sponsorSegments` 赋值时调一次 —— 之后不再补，避免和用户手动拖拽打架。
+     * 我们等价地在 `sponsorSegments` **首次从空变非空**时调一次（见该 setter 的 firstData）
+     * —— 之后不再补，避免和用户手动拖拽打架，也不会在"提交片段后合并列表"时把用户弹走。
      */
     private fun compensateSponsorEntry() {
         // ★ 起播瞬间状态还是 PREPARING/缓冲中：这时不能放弃，挂起重试

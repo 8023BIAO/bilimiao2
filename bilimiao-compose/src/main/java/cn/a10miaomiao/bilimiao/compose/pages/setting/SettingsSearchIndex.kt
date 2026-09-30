@@ -3,6 +3,7 @@ package cn.a10miaomiao.bilimiao.compose.pages.setting
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
+import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorCategory
 import com.a10miaomiao.bilimiao.comm.entity.sponsor.SponsorSkipType
 import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
@@ -12,8 +13,8 @@ import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
  * 数据源：各设置页里真实存在的 switchPreference / sliderIntPreference / sliderPreference /
  * textIntPreference 调用点（`components/preference/` 下的 DSL 定义本身不算），外加 listPreference /
  * multiSelectIntPreference / listStylePreference / customSetsPreference 这类**搜索页改不了、
- * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 95 个调用点，
- * 收录 136 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
+ * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 97 个调用点，
+ * 收录 138 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
  * （注释掉的调用、`key = item.prefKey` 这类动态渲染、`preference(...)+onClick` 动作项等）。
  *
  * ★搜索结果必须用**与原设置页同款控件**：Kind 与控件一一对应 —— [SettingSearchItem.Kind.SWITCH]
@@ -102,7 +103,7 @@ data class SettingSearchItem(
      * 为什么 [valueText] 存的是 lambda 而不是"格式化字符串"：各设置页的数值文案
      * （"24行" / "1.0倍" / 0 档显示"无限制" / 直播速度的 "1.5x"）都是各页自己写的
      * Composable lambda，索引里存二手描述既会漏也会漂；原样拷贝才能保证搜索页
-     * 显示的数值文案与原页面逐字一致 —— 原来是什么，搜索页就显示什么。
+     * 显示的数值文案与原页面逐字一致 —— 用户要的就是"原来是什么，现在就是什么"。
      */
     sealed interface SliderSpec {
         /** `sliderIntPreference`：整数拖动条 */
@@ -125,7 +126,7 @@ data class SettingSearchItem(
 
 object SettingsSearchIndex {
 
-    /** 136 条；由 gen_settings_index.py 生成（覆盖 95 个调用点） */
+    /** 138 条；由 gen_settings_index.py 生成（覆盖 97 个调用点） */
     val items: List<SettingSearchItem> = listOf(
         SettingSearchItem(prefName = "PlayerBackground", prefKey = "player_background", title = "后台播放", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "后台播放 ① 播放 播放器设置 PlayerBackground player_background"),
@@ -133,6 +134,16 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "小窗播放 ① 播放 播放器设置 PlayerPipOnBackground player_pip_on_background"),
         SettingSearchItem(prefName = "PlayerAudioFocus", prefKey = "player_audio_focus", title = "占用音频焦点", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "占用音频焦点 ① 播放 播放器设置 PlayerAudioFocus player_audio_focus"),
+        SettingSearchItem(prefName = "PlayerVolumeSwipePercent", prefKey = "player_volume_swipe_percent", title = "音量手势滑动距离", category = "① 播放", page = "播放器设置", section = "播放控制设置",
+            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingPreferences.PLAYER_VOLUME_SWIPE_PERCENT_DEFAULT, keywords = "音量手势滑动距离 ① 播放 播放器设置 播放控制设置 PlayerVolumeSwipePercent player_volume_swipe_percent",
+            slider = SettingSearchItem.SliderSpec.IntSlider(range = 30..200, steps = 33, valueText = {
+                    Text("$it%")
+                })),
+        SettingSearchItem(prefName = "PlayerBrightnessSwipeTenths", prefKey = "player_brightness_swipe_tenths", title = "亮度手势滑动距离", category = "① 播放", page = "播放器设置", section = "播放控制设置",
+            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingPreferences.PLAYER_BRIGHTNESS_SWIPE_TENTHS_DEFAULT, keywords = "亮度手势滑动距离 ① 播放 播放器设置 播放控制设置 PlayerBrightnessSwipeTenths player_brightness_swipe_tenths",
+            slider = SettingSearchItem.SliderSpec.IntSlider(range = 5..60, steps = 10, valueText = {
+                    Text("${it / 10f}×")
+                })),
         SettingSearchItem(prefName = "PlayerNotification", prefKey = "player_notification", title = "显示通知栏播放器控制器", category = "① 播放", page = "播放器设置", section = "播放控制设置",
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "显示通知栏播放器控制器 ① 播放 播放器设置 播放控制设置 PlayerNotification player_notification"),
         SettingSearchItem(prefName = "PlayerOrderRandom", prefKey = "player_order_random", title = "随机播放", category = "① 播放", page = "播放器设置", section = "播放控制设置",
