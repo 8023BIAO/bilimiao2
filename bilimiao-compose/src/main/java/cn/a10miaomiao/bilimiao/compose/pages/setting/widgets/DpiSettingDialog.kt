@@ -33,9 +33,9 @@ import com.a10miaomiao.bilimiao.comm.toast
 @Composable
 fun DpiSettingDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    // 「系统默认」= applicationContext 那份 configuration：MainActivity 只在 **Activity 自己**的
-    // configuration 上套自定义值（attachBaseContext → createConfigurationContext），
-    // application 这份不会被改，所以这两个数始终是系统原始值。
+    // 「系统默认」用 applicationContext：Activity 那份 resources 已被
+    // attachBaseContext 套上自定义 DPI（MainActivity.kt:773-777），不能拿来当系统值。
+    // 没保存过自定义值时（prefs 为空）这里的两个数就是系统原始值。
     val sysDpi = context.applicationContext.resources.configuration.densityDpi
     val sysFontScale = context.applicationContext.resources.configuration.fontScale
     // 输入框初值必须是**已经保存过的**值：以前无论存过什么，都拿系统默认填，

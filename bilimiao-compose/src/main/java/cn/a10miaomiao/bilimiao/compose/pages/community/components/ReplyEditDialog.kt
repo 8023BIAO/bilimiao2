@@ -389,7 +389,8 @@ class ReplyEditDialogState(
             // ★楼中楼（root != null）**一律**带"回复 @某人 :"前缀。
             //   以前只在"回复楼中楼里的某条"（parent != root）时加；回复楼主时 parent == root，
             //   前缀被吞掉 —— 同一个楼中楼里两种回复长得不一样（用户 2026-10-01：楼主没有冒号）。
-            val finalMessage = if (params.root != null) {
+            //   name 为空时（member 缺失的条目）不加，避免发出"回复 @ :内容"这种空名字。
+            val finalMessage = if (params.root != null && params.name.isNotBlank()) {
                 "回复 @${params.name} :$message"
             } else {
                 message

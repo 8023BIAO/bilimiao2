@@ -596,9 +596,14 @@ private fun FlagsSettingPageContent(
                 } else if (BilimiaoCommApp.commApp.loginInfo != null) {
                     // 真的有登录数据（Cookie/Token）且无备份 → 才显示"游客模式" category
                     // ★2026-10-01 修：这里原先是 `loginInfoState != null`，而它是 UserStore.State
-                    //   （一个**永不为 null** 的数据类）⇒ 条件恒真，没登录也会显示"开启游客模式"，
-                    //   点下去只弹"未登录，无需启用游客模式"、返回后照旧在，用户会以为按钮坏了。
-                    //   判据与 toggleGuestMode 保持一致：只看有没有真正的登录数据。
+                    //   （一个**永不为 null** 的数据类，见 UserStore.kt:43）⇒ 条件恒真，
+                    //   没登录也会显示"开启游客模式"。
+                    //   旧行为（没登录时点它）：toggleGuestMode 里
+                    //   `if (enabled == isCurrentlyGuest) return`（:193）直接静默返回，
+                    //   连 :208 那句"未登录，无需启用游客模式"的 toast 都走不到；
+                    //   紧接着 :1198 无条件 `hasBackup = true` 会把卡片换成「返回登录」，
+                    //   可备份文件其实没写 → 返回设置页重读 prefs 又变回「开启游客模式」。
+                    //   判据现在与 toggleGuestMode 一致：只看有没有真正的登录数据。
                     preferenceCategory(
                         key = "guest_mode_category",
                         title = { Text("游客模式") }
