@@ -2590,8 +2590,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // ★第十四批：**进小窗必须把直播设置弹窗收掉** —— 小窗里不弹。
             //   主路径（点底栏「画中画」/ 退后台自动进）走 [enterPipMode] → [dismissDialogs]（已含它），
             //   但系统也可能**不经那条路**直接把本页缩成小窗（ROM/系统手势），所以这里再兜一次。
-            //   幂等（[LiveSettingSheetHost.dismiss] 里有判断），没开着时零开销。
+            //   幂等（两个 Host 的 dismiss 里都有判断），没开着时零开销。
             dismissLiveSettingSheet()
+            // ★2026-10-01 对称补齐：「画质 · 线路」弹窗也是**独立窗口**，小窗里同样不弹。
+            //   主路径（[enterPipMode] → [dismissDialogs]）已含它，这一行补的是"系统直接把本页
+            //   缩成小窗、不走主路径"的那条兜底 —— 与上面那行同一个理由、同一处遗漏。
+            dismissLiveQualitySheet()
             // ★第七批：小窗里**输入条必须收掉**（同时把键盘收掉、焦点清掉：PiP 窗口里输入法根本没法用，
             //   留着焦点只会在退出小窗时突然弹一次键盘）。
             //   ★本轮修正：这里改成**无条件把整条控制条收掉**（[hideControlsForPip] = 撤计时 + 不可见），
@@ -7615,19 +7619,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         updatePlayPauseButton()
     }
 
-    /**
-     * 弹窗正文颜色：跟着**弹窗自己的主题**取 `colorOnSurface`（Material 3 的正文色）。
-     * ★为什么不写死白色：`Theme.Bilimiao` 是 DayNight，浅色主题下白字白底 = 什么都看不见。
-     * 取不到就退回系统主文字色，再取不到才用黑色。
-     */
-    private fun dialogTextColor(): Int = runCatching {
-        val attrs = theme.obtainStyledAttributes(intArrayOf(com.google.android.material.R.attr.colorOnSurface))
-        try {
-            attrs.getColor(0, Color.BLACK)
-        } finally {
-            attrs.recycle()
-        }
-    }.getOrDefault(Color.BLACK)
+    // ★2026-10-01 删掉了 `dialogTextColor()`（**原来在这里**）：它唯一的调用者是被删掉的
+    //   「画质·线路」原生弹窗（`LiveListDialog` 里那几行 `setTextColor(...)`）——
+    //   那个弹窗改成 Compose 覆盖层（`LiveQualityLineSheet`）之后，正文色由 Compose 的
+    //   `MaterialTheme.colorScheme.onSurface/onSurfaceVariant` 自己给，这个函数全仓零调用。
+    //   （"弹窗正文色跟主题走、不写死白色"这条经验仍然成立，只是现在由 Compose 主题负责。）
 
     /**
      * 输入条失败提示行（[danmakuInputError]）的文字颜色 —— ★第七批新增。
