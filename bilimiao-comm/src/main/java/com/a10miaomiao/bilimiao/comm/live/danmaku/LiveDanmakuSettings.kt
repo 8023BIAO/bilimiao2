@@ -103,6 +103,17 @@ data class LiveDanmakuSettings(
      * ★只乘**颜色**、不乘 `Modifier.alpha`：后者的会把行内**黑阴影**一起变淡（30% 时描边只剩 ≈2.1:1 ≈ 失效）。
      */
     val chatOpacity: Float,
+    /**
+     * **弹幕纯白**（直播自己的键 `live_danmaku_white_only`，**默认 true**）。
+     *
+     * 开着时：滚动弹幕（含顶部/底部固定弹幕）与竖屏列表的**正文/内容**一律**纯白**
+     * （忽略弹幕自带色）；**不透明度照旧各乘各的**。关掉时恢复原样。
+     * ★**只作用于"内容"**：竖屏列表的**用户名仍取 `MaterialTheme.colorScheme.primary`**（跟随主题色，
+     *   用户 2026-10-01 纠正："用户名干嘛还要白？它不是跟随我们的主题吗？我说的是内容啊。"）。
+     * ★2026-10-01 用户要求（"有一些弹幕比较特殊，是有颜色的，我想让它统一一点…开关默认开"）。
+     * ★它是**跨两组**的开关（滚动弹幕 + 竖屏列表），设置页放在两个子组之前。
+     */
+    val whiteOnly: Boolean,
     /** 不透明度 0f~1f（直播自己的键 `live_danmaku_opacity` 的百分比 ÷ 100）。渲染时乘到每条弹幕的颜色 alpha 上 */
     val opacity: Float,
     /** 速度倍率（直播自己的键 `live_danmaku_speed`，0.5~2.0，越大越快）。穿越时长见 [travelDurationMs] */
@@ -269,6 +280,9 @@ data class LiveDanmakuSettings(
             val chatFontSizeSp = (live?.danmakuChatFontSize
                 ?: SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT)
                 .coerceIn(CHAT_FONT_SIZE_SP_MIN, CHAT_FONT_SIZE_SP_MAX)
+            //    弹幕纯白：Boolean，**不 coerce**（没有值域）——落盘的 false 必须原样读出（不能写成 == true）
+            //    默认 true 来自 SettingConstants 真值（唯一的默认值出处）。
+            val whiteOnly = live?.danmakuWhiteOnly ?: SettingConstants.LIVE_DANMAKU_WHITE_ONLY_DEFAULT
             //    竖屏列表不透明度：Int，百分比 0~100 → 0f~1f（**唯一归一化点**；与滚动弹幕那一个分开取键）
             val chatOpacity = ((live?.danmakuChatOpacity
                 ?: SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT)
@@ -291,6 +305,7 @@ data class LiveDanmakuSettings(
                 fontSizeSp = fontSizeSp,
                 chatFontSizeSp = chatFontSizeSp,
                 chatOpacity = chatOpacity,
+                whiteOnly = whiteOnly,
                 opacity = opacity,
                 speedScale = speedScale,
                 areaPercent = areaPercent,

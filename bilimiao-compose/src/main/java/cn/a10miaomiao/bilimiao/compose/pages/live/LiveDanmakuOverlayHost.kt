@@ -526,7 +526,7 @@ class LiveDanmakuOverlayHost(
             //   WS 连接不受影响（它的门是 active/settings.visible，在这段之外）。
             if (on && settings.visible && !roomDanmakuClosed.value) {
                 // ★2026-10-01 用户拍板：**滚动弹幕不跟随 App 内 DPI/字体缩放**，用系统密度/字体缩放
-                //   （直播页的顶栏/底栏/输入框仍跟随；「弹幕字号」设置**照旧**作用在这里）。
+                //   （直播页的顶栏/底栏/输入框仍跟随；「滚动弹幕字号」设置**照旧**作用在这里）。
                 //   只包这一层的**渲染**：宿主的几何计算（列表矩形、96dp 门限、车道）都不受影响。
                 CompositionLocalProvider(LocalDensity provides remember { systemDanmakuDensity() }) {
                     LiveDanmakuOverlay(
@@ -1056,6 +1056,9 @@ class LiveDanmakuOverlayHost(
                             //   面板当场重画，不用重进直播间。
                             //   ★只传这一个 Float（照 `chatFontSizeSp` 的同款写法），不塞整个 settings 对象。
                             danmakuAlpha = settings.chatOpacity,
+                            // ★★2026-10-01「弹幕纯白」（默认开）：**只把列表正文刷白**，用户名仍跟随主题色。
+                            //   与字号/透明度同一条链路（这份组合本来就订阅 settings）⇒ 切开关当场生效。
+                            whiteOnly = settings.whiteOnly,
                             visible = listShown.value,
                             // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
                             //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。

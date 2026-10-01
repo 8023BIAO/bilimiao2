@@ -440,6 +440,12 @@ object SettingPreferences {
      */
     val LiveDanmakuChatOpacity = intPreferencesKey("live_danmaku_chat_opacity")
     /**
+     * **弹幕纯白**（Boolean，默认 **true**）。2026-10-01 新增，用户要求"所有弹幕纯白色…默认开"。
+     * ★**跨两组**：滚动弹幕（`live_danmaku_font_size` 那组）与竖屏列表（上面那两个键）都受它管。
+     * ★**只作用于"内容"**：列表的**用户名仍跟随主题色**（用户当场纠正："我说的是内容啊"）。
+     */
+    val LiveDanmakuWhiteOnly = booleanPreferencesKey("live_danmaku_white_only")
+    /**
      * 直播弹幕不透明度（%）。默认 100 = 完全不透明。
      * ★直播**自己那套**样式之一（点播那边存的是 0f~1f，量纲不同，所以各用各的键）。
      * ★只作用于**画面上的滚动弹幕**；竖屏列表用 [LiveDanmakuChatOpacity]。
@@ -568,6 +574,11 @@ object SettingPreferences {
              * ★与 [danmakuOpacity]（滚动弹幕那一个）**各调各的**：两个键、两条读取路径。
              */
             val danmakuChatOpacity: Int = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
+            /**
+             * **弹幕纯白**（默认 true）：滚动弹幕与竖屏列表都用它，见
+             * [SettingConstants.LIVE_DANMAKU_WHITE_ONLY_DEFAULT]。
+             */
+            val danmakuWhiteOnly: Boolean = SettingConstants.LIVE_DANMAKU_WHITE_ONLY_DEFAULT,
             val danmakuOpacity: Int = SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
             /**
              * 弹幕速度倍率（0.5~2.0，越大越快）。默认 1.0。
@@ -651,6 +662,10 @@ object SettingPreferences {
             danmakuChatOpacity = prefs?.get(LiveDanmakuChatOpacity)
                 ?: prefs?.get(LiveDanmakuOpacity)
                 ?: SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
+            // 弹幕纯白：Boolean 键。★不能写成 `prefs?.get(...) == true`——那会把"没落盘"和"落盘 false"
+            //   都算成 false；这里的 `?: 默认值` 只在**键不存在**时兜底，落盘的 false 原样读出。
+            danmakuWhiteOnly = prefs?.get(LiveDanmakuWhiteOnly)
+                ?: SettingConstants.LIVE_DANMAKU_WHITE_ONLY_DEFAULT,
             danmakuOpacity = prefs?.get(LiveDanmakuOpacity)
                 ?: SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
             // ★这里原来读的是"跟随点播弹幕设置"（`LiveDanmakuFollowVod`）：本轮该开关已删除，

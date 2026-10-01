@@ -13,8 +13,8 @@ import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
  * 数据源：各设置页里真实存在的 switchPreference / sliderIntPreference / sliderPreference /
  * textIntPreference 调用点（`components/preference/` 下的 DSL 定义本身不算），外加 listPreference /
  * multiSelectIntPreference / listStylePreference / customSetsPreference 这类**搜索页改不了、
- * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 99 个调用点，
- * 收录 140 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
+ * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 100 个调用点，
+ * 收录 141 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
  * （注释掉的调用、`key = item.prefKey` 这类动态渲染、`preference(...)+onClick` 动作项等）。
  *
  * ★搜索结果必须用**与原设置页同款控件**：Kind 与控件一一对应 —— [SettingSearchItem.Kind.SWITCH]
@@ -126,7 +126,7 @@ data class SettingSearchItem(
 
 object SettingsSearchIndex {
 
-    /** 140 条；由 gen_settings_index.py 生成（覆盖 99 个调用点） */
+    /** 141 条；由 gen_settings_index.py 生成（覆盖 100 个调用点） */
     val items: List<SettingSearchItem> = listOf(
         SettingSearchItem(prefName = "PlayerBackground", prefKey = "player_background", title = "后台播放", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "后台播放 ① 播放 播放器设置 PlayerBackground player_background"),
@@ -397,28 +397,30 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.SWITCH, default = SettingConstants.LIVE_AUTO_RECONNECT_DEFAULT, keywords = "自动重连 ① 播放 直播设置 直播播放 LiveAutoReconnect live_auto_reconnect reconnect 断流"),
         SettingSearchItem(prefName = "LiveAutoRotate", prefKey = "live_auto_rotate", title = "自动旋转", category = "① 播放", page = "直播设置", section = "直播播放",
             kind = SettingSearchItem.Kind.SWITCH, default = SettingConstants.LIVE_AUTO_ROTATE_DEFAULT, keywords = "自动旋转 ① 播放 直播设置 直播播放 LiveAutoRotate live_auto_rotate 横屏 竖屏 重力"),
-        SettingSearchItem(prefName = "LiveDanmakuFontSize", prefKey = "live_danmaku_font_size", title = "弹幕字号", category = "① 播放", page = "直播设置", section = "直播弹幕",
-            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT, keywords = "弹幕字号 ① 播放 直播设置 直播弹幕 LiveDanmakuFontSize live_danmaku_font_size danmaku 弹屏 font size 大小",
-            slider = SettingSearchItem.SliderSpec.IntSlider(range = 10..30, steps = 19, valueText = {
-            Text("${it}sp")
-        })),
-        SettingSearchItem(prefName = "LiveDanmakuChatFontSize", prefKey = "live_danmaku_chat_font_size", title = "竖屏列表字号", category = "① 播放", page = "直播设置", section = "直播弹幕",
-            kind = SettingSearchItem.Kind.SLIDER_FLOAT, default = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT, keywords = "竖屏列表字号 ① 播放 直播设置 直播弹幕 LiveDanmakuChatFontSize live_danmaku_chat_font_size danmaku 弹屏 font size 大小",
+        SettingSearchItem(prefName = "LiveDanmakuWhiteOnly", prefKey = "live_danmaku_white_only", title = "弹幕纯白", category = "① 播放", page = "直播设置", section = "直播弹幕",
+            kind = SettingSearchItem.Kind.SWITCH, default = SettingConstants.LIVE_DANMAKU_WHITE_ONLY_DEFAULT, keywords = "弹幕纯白 ① 播放 直播设置 直播弹幕 LiveDanmakuWhiteOnly live_danmaku_white_only danmaku 弹屏"),
+        SettingSearchItem(prefName = "LiveDanmakuChatFontSize", prefKey = "live_danmaku_chat_font_size", title = "竖屏列表字号", category = "① 播放", page = "直播设置", section = "竖屏列表弹幕",
+            kind = SettingSearchItem.Kind.SLIDER_FLOAT, default = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT, keywords = "竖屏列表字号 ① 播放 直播设置 竖屏列表弹幕 LiveDanmakuChatFontSize live_danmaku_chat_font_size danmaku 弹屏 font size 大小",
             slider = SettingSearchItem.SliderSpec.FloatSlider(range = LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MIN..LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MAX, steps = 19, valueText = {
             Text(LiveDanmakuSettings.chatFontSizeText(it))
         })),
-        SettingSearchItem(prefName = "LiveDanmakuChatOpacity", prefKey = "live_danmaku_chat_opacity", title = "竖屏弹幕透明度", category = "① 播放", page = "直播设置", section = "直播弹幕",
-            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT, keywords = "竖屏弹幕透明度 ① 播放 直播设置 直播弹幕 LiveDanmakuChatOpacity live_danmaku_chat_opacity danmaku 弹屏 alpha 透明",
+        SettingSearchItem(prefName = "LiveDanmakuChatOpacity", prefKey = "live_danmaku_chat_opacity", title = "竖屏弹幕透明度", category = "① 播放", page = "直播设置", section = "竖屏列表弹幕",
+            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT, keywords = "竖屏弹幕透明度 ① 播放 直播设置 竖屏列表弹幕 LiveDanmakuChatOpacity live_danmaku_chat_opacity danmaku 弹屏 alpha 透明",
             slider = SettingSearchItem.SliderSpec.IntSlider(range = 10..100, steps = 89, valueText = {
             Text("$it%")
         })),
-        SettingSearchItem(prefName = "LiveDanmakuOpacity", prefKey = "live_danmaku_opacity", title = "弹幕不透明度", category = "① 播放", page = "直播设置", section = "直播弹幕",
-            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT, keywords = "弹幕不透明度 ① 播放 直播设置 直播弹幕 LiveDanmakuOpacity live_danmaku_opacity danmaku 弹屏 alpha 透明",
+        SettingSearchItem(prefName = "LiveDanmakuFontSize", prefKey = "live_danmaku_font_size", title = "滚动弹幕字号", category = "① 播放", page = "直播设置", section = "滚动弹幕",
+            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT, keywords = "滚动弹幕字号 ① 播放 直播设置 滚动弹幕 LiveDanmakuFontSize live_danmaku_font_size danmaku 弹屏 font size 大小",
+            slider = SettingSearchItem.SliderSpec.IntSlider(range = 10..30, steps = 19, valueText = {
+            Text("${it}sp")
+        })),
+        SettingSearchItem(prefName = "LiveDanmakuOpacity", prefKey = "live_danmaku_opacity", title = "滚动弹幕不透明度", category = "① 播放", page = "直播设置", section = "滚动弹幕",
+            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT, keywords = "滚动弹幕不透明度 ① 播放 直播设置 滚动弹幕 LiveDanmakuOpacity live_danmaku_opacity danmaku 弹屏 alpha 透明",
             slider = SettingSearchItem.SliderSpec.IntSlider(range = 10..100, steps = 89, valueText = {
             Text("$it%")
         })),
-        SettingSearchItem(prefName = "LiveDanmakuSpeed", prefKey = "live_danmaku_speed", title = "弹幕速度", category = "① 播放", page = "直播设置", section = "直播弹幕",
-            kind = SettingSearchItem.Kind.SLIDER_FLOAT, default = SettingConstants.LIVE_DANMAKU_SPEED_DEFAULT, keywords = "弹幕速度 ① 播放 直播设置 直播弹幕 LiveDanmakuSpeed live_danmaku_speed danmaku 弹屏",
+        SettingSearchItem(prefName = "LiveDanmakuSpeed", prefKey = "live_danmaku_speed", title = "滚动弹幕速度", category = "① 播放", page = "直播设置", section = "滚动弹幕",
+            kind = SettingSearchItem.Kind.SLIDER_FLOAT, default = SettingConstants.LIVE_DANMAKU_SPEED_DEFAULT, keywords = "滚动弹幕速度 ① 播放 直播设置 滚动弹幕 LiveDanmakuSpeed live_danmaku_speed danmaku 弹屏",
             slider = SettingSearchItem.SliderSpec.FloatSlider(range = LiveDanmakuSettings.LIVE_SPEED_MIN..LiveDanmakuSettings.LIVE_SPEED_MAX, steps = LiveDanmakuSettings.LIVE_SPEED_STEPS, valueText = {
             Text(LiveDanmakuSettings.speedText(it))
         })),
@@ -536,8 +538,8 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.LINK, default = SettingConstants.LIVE_DEFAULT_QUALITY_DEFAULT, keywords = "默认画质 ① 播放 直播设置 直播播放 LiveDefaultQuality live_default_quality 清晰度 原画 高清 流畅 点开对应页面改 不能在搜索页改 link 去设置页"),
         SettingSearchItem(prefName = "LiveLinePolicy", prefKey = "live_line_policy", title = "默认线路策略", category = "① 播放", page = "直播设置", section = "直播播放",
             kind = SettingSearchItem.Kind.LINK, default = SettingConstants.LIVE_LINE_POLICY_DEFAULT, keywords = "默认线路策略 ① 播放 直播设置 直播播放 LiveLinePolicy live_line_policy cdn 节点 换线 点开对应页面改 不能在搜索页改 link 去设置页"),
-        SettingSearchItem(prefName = "LiveDanmakuAreaPercent", prefKey = "live_danmaku_area_percent", title = "弹幕显示区域", category = "① 播放", page = "直播设置", section = "直播弹幕",
-            kind = SettingSearchItem.Kind.LINK, default = SettingConstants.LIVE_DANMAKU_AREA_PERCENT_DEFAULT, keywords = "弹幕显示区域 ① 播放 直播设置 直播弹幕 LiveDanmakuAreaPercent live_danmaku_area_percent danmaku 弹屏 点开对应页面改 不能在搜索页改 link 去设置页"),
+        SettingSearchItem(prefName = "LiveDanmakuAreaPercent", prefKey = "live_danmaku_area_percent", title = "滚动弹幕显示区域", category = "① 播放", page = "直播设置", section = "滚动弹幕",
+            kind = SettingSearchItem.Kind.LINK, default = SettingConstants.LIVE_DANMAKU_AREA_PERCENT_DEFAULT, keywords = "滚动弹幕显示区域 ① 播放 直播设置 滚动弹幕 LiveDanmakuAreaPercent live_danmaku_area_percent danmaku 弹屏 点开对应页面改 不能在搜索页改 link 去设置页"),
         SettingSearchItem(prefName = "HomeEntryView", prefKey = "home_entry_view", title = "首页入口", category = "② 界面", page = "首页设置", section = "首页顶部设置",
             kind = SettingSearchItem.Kind.LINK, default = SettingConstants.HOME_ENTRY_VIEW_DEFAULT, keywords = "首页入口 ② 界面 首页设置 首页顶部设置 HomeEntryView home_entry_view 主页 home 点开对应页面改 不能在搜索页改 link 去设置页"),
         SettingSearchItem(prefName = "HomeRecommendListStyle", prefKey = "home_recommend_list_style", title = "列表样式", category = "② 界面", page = "首页设置", section = "推荐设置",

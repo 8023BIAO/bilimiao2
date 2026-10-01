@@ -195,7 +195,7 @@ fun LiveDanmakuOverlay(
      */
     /**
      * ★车道高必须**大于字号行高**：接线前字号写死 15sp、车道 22dp 正好不叠；
-     * 现在字号可被**直播自己的**「弹幕字号」放到 48sp（`LiveDanmakuSettings.FONT_SIZE_SP_MAX`），
+     * 现在字号可被**直播自己的**「滚动弹幕字号」放到 48sp（`LiveDanmakuSettings.FONT_SIZE_SP_MAX`），
      * 再用固定 22dp 就会"上下两行字压在一起"。所以按字号给一个下限（1.4 倍 ≈ Compose 默认行高），
      * 调用方传的 [laneHeight] 只作为更大的那一档 —— 默认字号下 21dp < 22dp，行为与接线前完全一致。
      */
@@ -242,6 +242,8 @@ fun LiveDanmakuOverlay(
             fontSizePx = fontSizePx,
             travelDurationMs = travelDurationMs,
             textAlpha = textAlpha,
+            // ★★2026-10-01「弹幕纯白」（默认开）：**只作用于正文**（见 DanmakuStage.whiteOnly）
+            whiteOnly = settings.whiteOnly,
         )
     }
     val wakeUp = remember { Channel<Unit>(Channel.CONFLATED) }
@@ -444,6 +446,11 @@ private class DanmakuStage(
     private val travelDurationMs: Float,
     /** 弹幕整体不透明度（0~1，来自 `settings.opacity`）：**入队时就乘进颜色**，见 [enqueue] */
     private val textAlpha: Float,
+    /**
+     * ★★2026-10-01「弹幕纯白」（`settings.whiteOnly`，默认开）：滚动弹幕的**正文**用纯白
+     * （忽略弹幕自带色），[textAlpha] 照旧乘。★用户名不在这里 —— 滚动弹幕本来就只有正文。
+     */
+    private val whiteOnly: Boolean,
 ) {
     /** 屏上**滚动**的弹幕（顺序即绘制顺序；每帧只增删少量元素） */
     val active = mutableStateListOf<LiveDanmakuItem>()
@@ -474,7 +481,11 @@ private class DanmakuStage(
         // 透明度是"画上去的样式"，在生成 item 时定好就只算一次（渲染处直接用 item.color，
         // 不再重复乘 —— 乘两遍会变成 alpha²，用户会看到"调 50% 实际只有 25%"）。
         // 设置在组合层是 stage 的重建 key：改了不透明度 → 新 stage → 之后入队的弹幕都用新值。
-        val color = Color(0xFF000000.toInt() or (msg.color and 0xFFFFFF)).copy(alpha = textAlpha)
+        //   ★★2026-10-01「弹幕纯白」（默认开）：开着时正文取**纯白**（忽略弹幕自带色），alpha 照旧乘。
+        //     与不透明度同一条口径：**入队时定色** ⇒ 改开关从"之后入队"的弹幕起生效
+        //     （在屏的 ≤7s 自然走完 —— stage 会因 settings 变化重建，见上面 remember 的 key）。
+        val rgb = if (whiteOnly) 0xFFFFFF else (msg.color and 0xFFFFFF)
+        val color = Color(0xFF000000.toInt() or rgb).copy(alpha = textAlpha)
         if (msg.mode == LiveMessage.MODE_TOP || msg.mode == LiveMessage.MODE_BOTTOM) {
             // 滚动弹幕才需要"排队等车道"；固定弹幕不占车道，直接上屏（上限 [MAX_FIXED] 条）
             val list = if (msg.mode == LiveMessage.MODE_TOP) fixedTop else fixedBottom
@@ -720,7 +731,7 @@ private val LANE_GAP = 16.dp
 /** 显示区高度占比的下限：再怎么调也不能小到一条车道都放不下 */
 private const val MIN_AREA_FRACTION = 0.1f
 
-// 注：弹幕字号基准（15sp）与"穿越时长"基准（7000ms）的**唯一真值**在
+// 注：滚动弹幕字号基准（15sp）与"穿越时长"基准（7000ms）的**唯一真值**在
 //     `LiveDanmakuSettings.BASE_FONT_SIZE_SP` / `LiveDanmakuSettings.BASE_TRAVEL_DURATION_MS`，
 //     浮层不再各自留一份（避免两处真值漂移）；这里是派生值，不参与"设置从哪来"的判断。
 
@@ -1230,6 +1241,15 @@ fun LiveDanmakuChatPanel(
      *   （30% 时阴影只剩 30%，亮画面上直接糊）；乘颜色则阴影保持不透明 ⇒ 字淡了但轮廓还在。
      */
     danmakuAlpha: Float = 1f,
+    /**
+     * ★★2026-10-01「弹幕纯白」（直播设置项 `live_danmaku_white_only`，默认开；见
+     * [LiveDanmakuSettings.whiteOnly]）：开着时**列表正文**用纯白（忽略弹幕自带色）。
+     *
+     * ★**只作用于正文/内容**：用户名仍取 `MaterialTheme.colorScheme.primary`（跟随主题色）——
+     *   用户当场纠正过："用户名干嘛还要白？它不是跟随我们的主题吗？**我说的是内容啊**。"
+     * ★面板 UI（空态提示 /「回到底部」/ 底栏渐变）与状态条都不受它影响。
+     */
+    whiteOnly: Boolean = false,
     visible: Boolean,
     modifier: Modifier = Modifier,
     fadingOut: Boolean = false,
@@ -1443,6 +1463,8 @@ fun LiveDanmakuChatPanel(
                         // ★★2026-10-01：列表文字用**自己的**「竖屏弹幕透明度」设置（`chatOpacity`；
                         //   不是滚动弹幕那个「弹幕不透明度」）。乘在颜色 alpha 上，阴影不变淡。
                         danmakuAlpha = danmakuAlpha,
+                        // ★★2026-10-01「弹幕纯白」：只把**正文**刷白，用户名照旧跟随主题色
+                        whiteOnly = whiteOnly,
                         // ★本轮（task-6）：列表正文字号来自直播设置项「竖屏列表字号」
                         //   （宿主从 settings 里取这一个值传进来；滚动弹幕那套不受影响）。
                         chatFontSizeSp = chatFontSizeSp,
@@ -1547,7 +1569,7 @@ fun LiveDanmakuChatPanel(
  *
  * 只换了**颜色的来源**：内边距/最多 4 行/省略号、列表的滚动与去重逻辑，一个字没动。
  * ★字号/行高（task-6 起）：来自直播设置项「竖屏列表字号」（键 `live_danmaku_chat_font_size`，
- *   默认 13sp ⇒ 与改前**逐像素一致**）；仍然**不**跟随直播「弹幕字号」设置（那个只作用于画面上的
+ *   默认 13sp ⇒ 与改前**逐像素一致**）；仍然**不**跟随直播「滚动弹幕字号」设置（那个只作用于画面上的
  *   滚动弹幕）；行距按字号等比（[LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR] = 17/13）。
  *   「弹幕那几块不跟随 App 内 DPI/字体缩放」这条没变 —— 渲染密度见 [systemDanmakuDensity]。
  */
@@ -1555,8 +1577,13 @@ fun LiveDanmakuChatPanel(
 private fun LiveDanmakuChatRow(
     line: LiveDanmakuChatLine,
     chatFontSizeSp: Float,
-    /** ★★2026-10-01：弹幕行不透明度（= 直播设置「不透明度」，与滚动弹幕同值）；1f = 完全不透明 */
+    /** ★★2026-10-01：弹幕行不透明度（= 直播设置「竖屏弹幕透明度」）；1f = 完全不透明 */
     danmakuAlpha: Float = 1f,
+    /**
+     * ★★2026-10-01「弹幕纯白」：true ⇒ **正文**（[line] 的 `color`）用纯白，用户名**不变**
+     * （仍 `MaterialTheme.colorScheme.primary`，跟随主题色）。见 [LiveDanmakuChatPanel] 的同名参数。
+     */
+    whiteOnly: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // 用户名色 = 当前主题色（★不要写死颜色：用户换主题后这里要跟着变）
@@ -1573,8 +1600,12 @@ private fun LiveDanmakuChatRow(
     //   阴影本身不走这里（`style` 里的 Shadow 是独立颜色，不受 span 颜色 alpha 影响）。
     val alpha = danmakuAlpha.coerceIn(0f, 1f)
     val unameShown = unameColor.copy(alpha = unameColor.alpha * alpha)
-    val bodyShown = line.color.copy(alpha = line.color.alpha * alpha)
-    val text = remember(line.key, line.uname, line.text, line.color, unameColor, alpha) {
+    // ★★2026-10-01「弹幕纯白」：**只换正文的颜色**（开关开 → 纯白），alpha 照旧乘。
+    //   ★用户名那一行不动：它继续跟随主题色（用户当场纠正："我说的是内容啊"）。
+    val bodyBase = if (whiteOnly) Color.White else line.color
+    val bodyShown = bodyBase.copy(alpha = bodyBase.alpha * alpha)
+    //   key 里必须带 `whiteOnly`：正文颜色由它决定，不带的话切开关**这一行不会重排**（旧色粘住）。
+    val text = remember(line.key, line.uname, line.text, line.color, unameColor, alpha, whiteOnly) {
         buildAnnotatedString {
             withStyle(SpanStyle(color = unameShown)) {
                 append(line.uname)
@@ -1721,7 +1752,7 @@ internal val CHAT_DOCKED_MIN_HEIGHT = 96.dp
  *
  * 为什么需要：直播页 `attachBaseContext` 会把 App 内「显示与字号」的 DPI / 字体缩放套到整页
  * （顶栏 / 底栏 / 输入框要跟随，那是用户明确要的），但**弹幕文字不能跟着放大** ——
- * 竖屏聊天列表只有半屏宽，画面上的滚动弹幕本来就有自己的「弹幕字号」设置，再叠上
+ * 竖屏聊天列表只有半屏宽，画面上的滚动弹幕本来就有自己的「滚动弹幕字号」设置，再叠上
  * `app_font_scale × app_dpi ÷ 160` 就会"一行只剩十几个字"（用户实测"雷霆大"）。
  * ⇒ 弹幕那两块（[LiveDanmakuOverlay] 与 [LiveDanmakuChatPanel]）在宿主里被这层包住，
  *   只换**渲染**用的密度：`sp`/`dp` 一律按系统算，字号回到用户熟悉的观感。

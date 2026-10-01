@@ -33,15 +33,32 @@ import org.kodein.di.compose.rememberInstance
  *
  * ## ★直播弹幕 = 自己一套（本轮定稿）
  * 直播弹幕**单独成一套** —— 不再有"跟随点播 / 不跟随"两种状态并存的局面：
- * 于是「直播弹幕」这一组就是**直播唯一的弹幕样式入口**，六项各管一件事、都只对直播生效：
+ * 于是「直播弹幕」这一组就是**直播唯一的弹幕样式入口**：**七项**各管一件事、都只对直播生效，
+ * ★★2026-10-01（用户："直播间弹幕设置的全部选项设置，前面应该写竖屏的什么叉叉玩意设置，
+ * 然后再写横屏的什么叉叉玩意。这个写不清楚，有点很混乱。"）起，按**作用对象**分成两个子组、
+ * **竖屏那组在前**（页面上就是两个 `preferenceCategory`：竖屏列表弹幕 / 滚动弹幕）：
+ *
+ * **跨两组的开关**（排在最前，两组都受它管）：
  * | 设置项 | 键 | 默认值 | 谁读取 |
  * |---|---|---|---|
- * | 弹幕字号 | `live_danmaku_font_size` | 15sp | `LiveDanmakuSettings.from()` → 浮层 `settings.fontSizeSp` |
- * | 竖屏列表字号（本轮新增） | `live_danmaku_chat_font_size` | 13sp | 同上 → `settings.chatFontSizeSp`（竖屏列表每行的 Text；与上一行各调各的） |
- * | 竖屏弹幕透明度（2026-10-01 新增） | `live_danmaku_chat_opacity` | 100% | 同上 → `settings.chatOpacity`（÷100 成 0f~1f；**只作用于竖屏列表**，与下一行**各管各的**） |
- * | 弹幕不透明度 | `live_danmaku_opacity` | 100% | 同上 → `settings.opacity`（÷100 成 0f~1f；**只作用于画面上的滚动弹幕**） |
- * | **弹幕速度**（本轮新增） | **`live_danmaku_speed`** | **1.0x** | 同上 → `settings.speedScale` → `travelDurationMs = 7000ms ÷ 倍率` |
- * | 弹幕显示区域 | `live_danmaku_area_percent` | 100（全屏） | 同上 → `settings.areaPercent` / `areaFraction` |
+ * | 弹幕纯白 | `live_danmaku_white_only` | **true** | `LiveDanmakuSettings.from()` → `settings.whiteOnly`（滚动弹幕正文 + 竖屏列表正文刷纯白；**用户名仍跟随主题色**） |
+ *
+ * **子组 ① 竖屏列表弹幕**（只管竖屏画面下方那个聊天列表）：
+ * | 设置项 | 键 | 默认值 | 谁读取 |
+ * |---|---|---|---|
+ * | 竖屏列表字号 | `live_danmaku_chat_font_size` | 13sp | `LiveDanmakuSettings.from()` → `settings.chatFontSizeSp`（竖屏列表每行的 Text） |
+ * | 竖屏弹幕透明度 | `live_danmaku_chat_opacity` | 100% | 同上 → `settings.chatOpacity`（÷100 成 0f~1f） |
+ *
+ * **子组 ② 滚动弹幕**（画面上飘过去的那套；**竖屏、横屏都用它**，所以组名不叫"横屏"）：
+ * | 设置项 | 键 | 默认值 | 谁读取 |
+ * |---|---|---|---|
+ * | 滚动弹幕字号 | `live_danmaku_font_size` | 15sp | 同上 → 浮层 `settings.fontSizeSp` |
+ * | 滚动弹幕不透明度 | `live_danmaku_opacity` | 100% | 同上 → `settings.opacity`（÷100 成 0f~1f） |
+ * | 滚动弹幕速度 | `live_danmaku_speed` | 1.0x | 同上 → `settings.speedScale` → `travelDurationMs = 7000ms ÷ 倍率` |
+ * | 滚动弹幕显示区域 | `live_danmaku_area_percent` | 100（全屏） | 同上 → `settings.areaPercent` / `areaFraction` |
+ *
+ * ★两个子组**各有各的键**：列表那两项与滚动那四项互不影响（改一个不动另一个）。★标题带上对象是**故意**的
+ * （搜索结果里只显示标题、看不到组名），组名与标题因此有一点重复。
  *
  * 速度给用户看的是 **0.5x ~ 2.0x**（0.1 一档，越大越快），文案里同时写"慢/正常/快"和秒数：
  * 0.5x = 慢（14.0 秒跑完全程）/ 1.0x = 正常（默认，7.0 秒）/ 2.0x = 快（3.5 秒）。
@@ -64,14 +81,14 @@ import org.kodein.di.compose.rememberInstance
  * 判据只有一条：**这一项在播放页/首页有没有更顺手的入口**。有，就从设置里删掉显示：
  * | 删掉的项 | 键（★保留，一个字没动） | 为什么删 | 现在去哪儿改 |
  * |---|---|---|---|
- * | 双击暂停 | `live_double_tap_pause`（默认 true） | 默认行为不需要一个开关 | 默认就是开。★本轮更正：播放页弹窗起只放弹幕 6 项，所以这一项**当前没有 UI 入口**（值仍被播放页读取，见 `LivePlayerActivity.onDoubleTapPauseEnabled`） |
+ * | 双击暂停 | `live_double_tap_pause`（默认 true） | 默认行为不需要一个开关 | 默认就是开。★本轮更正：播放页弹窗起只放弹幕 7 项，所以这一项**当前没有 UI 入口**（值仍被播放页读取，见 `LivePlayerActivity.onDoubleTapPauseEnabled`） |
  * | 退后台自动进小窗 | `live_pip_on_background`（默认 true） | 需要小窗时播放页底栏就有 PIP 按钮，点一下即可 | 默认开 + 播放页底栏的 PIP 按钮（A 路） |
- * | 后台继续直播 | `live_background_play`（默认 false） | 同上：属于极少数人才要的逃生门，不该占设置页一行 | ★本轮更正：播放页弹窗起只放弹幕 6 项，所以这一项**当前没有 UI 入口**（值仍被播放页读取，见 `LivePlayerActivity.shouldKeepPlayingInBackground`） |
+ * | 后台继续直播 | `live_background_play`（默认 false） | 同上：属于极少数人才要的逃生门，不该占设置页一行 | ★本轮更正：播放页弹窗起只放弹幕 7 项，所以这一项**当前没有 UI 入口**（值仍被播放页读取，见 `LivePlayerActivity.shouldKeepPlayingInBackground`） |
  * | 显示弹幕 | `live_danmaku_enable`（默认 true） | 与播放页底栏已有的「弹幕」按钮功能重复 | 播放页底栏「弹幕」按钮。★它当前是**会话级**的（只改本页状态、不落盘，见 `app/.../LivePlayerActivity.applyDanmakuEnabled`），所以这个键目前**全工程没有写入方**——本轮起它又是直播可见性的**唯一**来源，建议 A 路把按钮状态按需落盘到它（详见交付报告 §4.7） |
  * | 默认排序 | `live_sort_type`（默认 "online"） | 挪到首页直播 Tab 的底栏筛选弹窗里（在列表上调比在设置里调顺手） | 首页「直播」Tab → 底栏「筛选」（B 路） |
  *
  * ★★本轮（2026-09-26 晚，弹窗瘦身）：**本页仍然是全部 11 项**
- *   （播放 4 + 弹幕 6 + 直播列表 1 = 11，见 [liveSettingPreferenceItems] 的 KDoc 与交付报告里的 grep 证据）。
+ *   （播放 4 + 弹幕 7 + 直播列表 1 = 12，见 [liveSettingPreferenceItems] 的 KDoc 与交付报告里的 grep 证据）。
  *   播放页底栏「设置」弹窗改用 [liveDanmakuSettingPreferenceItems]，**只出弹幕那一组 6 项**；
  *   播放类 4 项（默认画质 / 默认线路策略 / 自动重连 / 自动旋转）与「每行卡片数」**只在本页出现**，
  *   一个都没少。

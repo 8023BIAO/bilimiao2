@@ -3,6 +3,8 @@ package com.a10miaomiao.bilimiao.comm.live.danmaku
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -66,6 +68,32 @@ class LiveDanmakuSettingsTest {
         assertEquals(17f / 13f, LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR, 1e-6f)
         // 默认 13sp 时行距 = 13 × 17/13 = 17sp = 改前那两行写死的值（13.sp / 17.sp）
         assertEquals(17f, 13f * LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR, 1e-4f)
+    }
+
+    // ── 「弹幕纯白」（2026-10-01 新增，默认开）─────────────────────────────
+
+    /**
+     * 三条断言各对着一个**能失败**的变异：
+     * ①/② 默认必须是 **true**（变异：把默认值写成 false、或忘了映射 → 失败）；
+     * ③ 用户**关掉**（落盘 false）之后必须读到 **false**（变异：`from()` 里恒 true、
+     *   或读取写成 `prefs.get(...) == true` 之外的"真值判空"写法把 false 吃掉 → 失败）。
+     */
+    @Test
+    fun whiteOnly_defaultIsTrue_andStoredFalse_readsFalse() {
+        // ① 快照还没就绪（进程刚起，from(null)）
+        assertTrue(LiveDanmakuSettings.from(null).whiteOnly)
+        // ② 快照就绪但键没落盘（Values 的字段默认值）
+        assertTrue(LiveDanmakuSettings.from(SettingPreferences.Live.Values()).whiteOnly)
+        // ②b 默认值真值只有 SettingConstants 一处，且必须是 true
+        assertEquals(true, SettingConstants.LIVE_DANMAKU_WHITE_ONLY_DEFAULT)
+        // ③ 用户关掉之后读到的就是 false（不是"默认值兜底"把它盖回去）
+        val off = LiveDanmakuSettings.from(
+            SettingPreferences.Live.Values(danmakuWhiteOnly = false),
+        )
+        assertFalse(off.whiteOnly)
+        // ④ 这个开关**不影响**别的字段（尤其不透明度：纯白不改透明度）
+        assertEquals(1f, off.opacity, 0f)
+        assertEquals(1f, off.chatOpacity, 0f)
     }
 
     @Test

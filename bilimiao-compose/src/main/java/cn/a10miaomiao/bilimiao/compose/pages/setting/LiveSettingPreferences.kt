@@ -32,8 +32,8 @@ import me.zhanghai.compose.preference.switchPreference
  * ★★本轮（2026-09-26 弹窗瘦身）：两个入口不再展示**同一批**项，而是同一份定义的
  *   **两个子集**（见 [liveDanmakuSettingPreferenceItems] 的 KDoc）：
  * ```
- * liveSettingPreferenceItems()        设置页：播放 4 + 弹幕 6 + 直播列表 1 = 11 项（一个不少）
- * liveDanmakuSettingPreferenceItems() 播放页弹窗：只有弹幕 6 项
+ * liveSettingPreferenceItems()        设置页：播放 4 + 弹幕 7 + 直播列表 1 = 12 项（一个不少）
+ * liveDanmakuSettingPreferenceItems() 播放页弹窗：只有弹幕 7 项（弹幕纯白 1 + 竖屏列表弹幕 2 + 滚动弹幕 4）
  * ```
  *   ★弹幕那一组仍然**只有一份实现**（[liveDanmakuPreferenceItems]），两个入口都调它；
  *     播放类 4 项**没删**，只是不在弹窗里出现 —— 设置页照旧全部展示。
@@ -63,13 +63,14 @@ internal fun LazyListScope.liveSettingPreferenceItems() {
  *
  * 于是两个入口是**同一份项定义的两个子集**（不是两份拷贝）：
  * ```
- * liveSettingPreferenceItems()          → 设置页：播放 4 + 弹幕 6 + 直播列表 1（= 11 项，一个不少）
- * liveDanmakuSettingPreferenceItems()   → 播放页弹窗：弹幕 6 项（唯一实现 [liveDanmakuPreferenceItems]）
+ * liveSettingPreferenceItems()          → 设置页：播放 4 + 弹幕 7 + 直播列表 1（= 12 项，一个不少）
+ * liveDanmakuSettingPreferenceItems()   → 播放页弹窗：弹幕 7 项（唯一实现 [liveDanmakuPreferenceItems]）
  * ```
  * ★为什么播放类 4 项从弹窗移除：它们都是"**进房前/播放策略**"类的设置（默认画质、默认线路策略、
  *   自动重连、自动旋转），在弹窗里改完当场也只对**下一次**起播/恢复生效，放在"直播间里随手调"的
- *   弹窗里既占地方又容易让人以为"改了没反应"；而弹幕那 6 项是**看直播时随时想调**的东西
- *   （字号/竖屏列表字号/不透明度/速度/显示区域），改完当场生效 —— 这正是弹窗该干的事。
+ *   弹窗里既占地方又容易让人以为"改了没反应"；而弹幕那 7 项是**看直播时随时想调**的东西
+ *   （弹幕纯白 1 + 竖屏列表弹幕 2 + 滚动弹幕 4，见 [liveDanmakuPreferenceItems]），改完当场生效 ——
+ *   这正是弹窗该干的事。
  * ★播放类 4 项**一个都没少**：它们仍在设置页（[livePlayPreferenceItems]），播放页也照旧读同一批键。
  */
 internal fun LazyListScope.liveDanmakuSettingPreferenceItems() {
@@ -81,7 +82,7 @@ internal fun LazyListScope.liveDanmakuSettingPreferenceItems() {
  * 「直播播放」那一组（4 项：默认画质 / 默认线路策略 / 自动重连 / 自动旋转）。
  *
  * ★★本轮起它**只在「设置 → 直播设置」页出现**：播放页底栏「设置」弹窗按用户要求瘦身成
- *   只剩弹幕 6 项（见 [liveDanmakuSettingPreferenceItems]），但这四项**没有删**。
+ *   只剩弹幕 7 项（见 [liveDanmakuSettingPreferenceItems]），但这四项**没有删**。
  */
 private fun LazyListScope.livePlayPreferenceItems() {
 
@@ -89,7 +90,7 @@ private fun LazyListScope.livePlayPreferenceItems() {
     //   「后台继续直播」(`live_background_play`)、「退后台自动进小窗」(`live_pip_on_background`)、
     //   「双击暂停」(`live_double_tap_pause`) —— 三个键与默认值、读取逻辑一个字没动，
     //   本页只是不再显示（详见 LiveSettingPage 文件头 KDoc）。
-    //   ★本轮更正一句旧注释：它们**不在**播放页底栏「设置」弹窗里（那个弹窗现在只有弹幕 6 项），
+    //   ★本轮更正一句旧注释：它们**不在**播放页底栏「设置」弹窗里（那个弹窗现在只有弹幕 7 项），
     //     当前全工程**没有**这三项的 UI 入口 —— 值仍被播放页读取（后台继续直播 / 退后台进小窗 /
     //     双击暂停），要改只能改默认值常量或另开入口。
     preferenceCategory(
@@ -161,7 +162,10 @@ private fun LazyListScope.livePlayPreferenceItems() {
 
 // ===== 弹幕 =====
 /**
- * 「直播弹幕」那一组（6 项：弹幕字号 / 竖屏列表字号 / 竖屏弹幕透明度 / 弹幕不透明度 / 弹幕速度 / 弹幕显示区域）。
+ * 「直播弹幕」那一组（**7 项**，**2026-10-01 起按作用对象分成"1 + 2 + 4"**）：
+ *   · 通用（1 项，跨两组）：弹幕纯白；
+ *   · 竖屏列表弹幕（2 项）：竖屏列表字号 / 竖屏弹幕透明度；
+ *   · 滚动弹幕（4 项）：滚动弹幕字号 / 滚动弹幕不透明度 / 滚动弹幕速度 / 滚动弹幕显示区域。
  *
  * ★★这一组是**两个入口共用**的那一份：设置页（[liveSettingPreferenceItems]）与
  *   播放页底栏「设置」弹窗（[liveDanmakuSettingPreferenceItems]）都调它 ——
@@ -169,10 +173,17 @@ private fun LazyListScope.livePlayPreferenceItems() {
  */
 private fun LazyListScope.liveDanmakuPreferenceItems() {
     // ★这一组就是**直播自己的那一套**：
-    //   字号、竖屏列表字号、竖屏弹幕透明度、不透明度、速度、显示区域六项全部写 `live_danmaku_*` 键，只对直播生效，
-    //   读取方都是 `LiveDanmakuSettings.from()`（→ 直播弹幕浮层）。
+    //   六项全部写 `live_danmaku_*` 键，只对直播生效，读取方都是 `LiveDanmakuSettings.from()`（→ 直播弹幕浮层）。
     //   ★组内**没有任何点播项**：屏蔽词共用的那行跳转本轮已删（直播不做关键词过滤），
-    //   字号/竖屏列表字号/竖屏弹幕透明度/不透明度/速度/显示区域六项全部只写、只读 `live_danmaku_*`（详见 LiveSettingPage 文件头 KDoc）。
+    //   六项全部只写、只读 `live_danmaku_*`（详见 LiveSettingPage 文件头 KDoc）。
+    //   ★★2026-10-01（用户："直播间弹幕设置的全部选项设置，前面应该写竖屏的什么叉叉玩意设置，
+    //     然后再写横屏的什么叉叉玩意。这个写不清楚，有点很混乱。"）：
+    //     ⇒ 六项按**作用对象**拆成两个子组，**竖屏那组在前**；组名用「竖屏列表弹幕 / 滚动弹幕」——
+    //       用户口语里的"横屏"那组其实是**画面上的滚动弹幕**，它在竖屏也照样飘，
+    //       组名写成"横屏"会把竖屏用户带偏，所以按"列表 / 滚动"这两个真实对象命名。
+    //     ⇒ 每项标题自己也带上对象（「滚动弹幕字号」…）：**搜索结果里只显示标题、看不到组名**
+    //       （`SettingsSearchIndex`），标题不点明对象的话，搜出来仍然分不清管哪块。
+    //       ★所以组名与标题会有一点重复，那是故意的（两处各自成立）。
     //   组内原先第一项是「显示弹幕」(`live_danmaku_enable`)，上一轮已整项删显示：
     //   播放页底栏那颗「弹幕」按钮当场开关并且写回同一个键，能力一点没少。
     preferenceCategory(
@@ -181,10 +192,92 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text("直播弹幕")
         }
     )
+
+    // ★★2026-10-01 新增：**弹幕纯白**（键 `live_danmaku_white_only`，Boolean，**默认开**）。
+    //   用户原话："我还想加一个设置，就是所有弹幕纯白色。因为有一些弹幕比较特殊，是有颜色的，
+    //   我想让它统一一点，这个开关默认开吧。"
+    //   ⇒ 它是**跨两组**的开关（滚动弹幕 4 项 + 竖屏列表 2 项都管）⇒ 放在「直播弹幕」分类下、
+    //     两个子组**之前**的第一项（不属于任何一个子组）。
+    //   ⇒ 只作用于**正文/内容**：竖屏列表的**用户名仍跟随主题色**（用户当场纠正："我说的是内容啊"）。
+    switchPreference(
+        key = SettingPreferences.LiveDanmakuWhiteOnly.name,
+        title = {
+            Text("弹幕纯白")
+        },
+        summary = {
+            Text("把弹幕内容统一成纯白；用户名仍跟随主题色（滚动弹幕与竖屏列表都生效，默认开）")
+        },
+        defaultValue = SettingConstants.LIVE_DANMAKU_WHITE_ONLY_DEFAULT,
+    )
+
+    // ── 子组 ①：竖屏列表弹幕（2 项）────────────────────────────────────
+    //   只管**竖屏下画面下方的那个聊天列表**（`LiveDanmakuOverlay` 的列表行）；
+    //   画面上的滚动弹幕归下面那组，两边各有各的键，互不影响。
+    preferenceCategory(
+        key = "live_danmaku_chat",
+        title = {
+            Text("竖屏列表弹幕")
+        }
+    )
+    // ★本轮新增：**竖屏列表字号**（键 `live_danmaku_chat_font_size`，Float，默认 13sp）。
+    //   竖屏聊天列表的正文原来写死 13sp/17sp（`LiveDanmakuOverlay` 的 `LiveDanmakuChatRow`），
+    //   现在独立可调；与「滚动弹幕字号」（画面上的滚动弹幕）**各调各的**，改一个不影响另一个。
+    //   档位与「滚动弹幕字号」完全一致（10~30sp、1sp 一档），只是键、默认值和读取方都不同。
+    //   默认 13sp ⇒ 老用户升级后列表渲染与改前一致，只有主动调才变。
+    sliderPreference(
+        key = SettingPreferences.LiveDanmakuChatFontSize.name,
+        title = {
+            Text("竖屏列表字号")
+        },
+        // 10..30 共 21 个整数，中间还有 19 个 → steps 必须写 19（与「滚动弹幕字号」同一档位）
+        defaultValue = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT,
+        valueRange = LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MIN..LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MAX,
+        valueSteps = 19,
+        valueText = {
+            Text(LiveDanmakuSettings.chatFontSizeText(it))
+        },
+        summary = {
+            // ★标题/组名已点明"竖屏列表"⇒ summary 改说**不重复的补充**（默认值与行距联动）
+            Text("默认 ${SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT}sp；行距按字号等比（13sp → 17sp）")
+        },
+    )
+    // ★★2026-10-01 新增：**竖屏弹幕透明度**（键 `live_danmaku_chat_opacity`，Int %，默认 100）。
+    //   用户原话："我想让竖屏状态下的弹幕透明度**不再跟随**那个弹幕透明度，**单独设置**一个竖屏弹幕透明度"
+    //   ⇒ 与「滚动弹幕不透明度」（画面上的滚动弹幕）**各管各的**：两个键、两条读取路径。
+    //   档位/下限/文案与「滚动弹幕不透明度」完全一致（10..100%、steps 89、`$it%`），只是键与读取方不同。
+    //   默认 100% ⇒ 老用户升级后竖屏列表观感与之前**零变化**，只有主动调才变。
+    sliderIntPreference(
+        key = SettingPreferences.LiveDanmakuChatOpacity.name,
+        title = {
+            Text("竖屏弹幕透明度")
+        },
+        // 10..100 共 91 个整数 → steps = 89。下限不给 0，理由同「滚动弹幕不透明度」那项
+        valueRange = 10..100,
+        valueSteps = 89,
+        defaultValue = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
+        valueText = {
+            Text("$it%")
+        },
+        summary = {
+            // ★写明默认值（新键，"没调过 = 100%"要一眼看到）；"只影响竖屏列表"由标题+组名表达，不重复
+            Text("默认 ${SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT}%；" +
+                "与「滚动弹幕不透明度」各调各的")
+        },
+    )
+
+    // ── 子组 ②：滚动弹幕（4 项）────────────────────────────────────────
+    //   "在画面上飘过去"的那套：**竖屏、横屏都用它**（所以组名不叫"横屏"）；
+    //   字号/不透明度/速度/显示区域四项各管一件事，与上面「竖屏列表弹幕」各管各的。
+    preferenceCategory(
+        key = "live_danmaku_rolling",
+        title = {
+            Text("滚动弹幕")
+        }
+    )
     sliderIntPreference(
         key = SettingPreferences.LiveDanmakuFontSize.name,
         title = {
-            Text("弹幕字号")
+            Text("滚动弹幕字号")
         },
         // 10..30 共 21 个整数，中间还有 19 个 → steps 必须写 19（写错会取不到档/重复档）
         valueRange = 10..30,
@@ -194,57 +287,14 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text("${it}sp")
         },
         summary = {
-            Text("只对直播生效，默认 ${SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT}sp")
-        },
-    )
-    // ★本轮新增：**竖屏列表字号**（键 `live_danmaku_chat_font_size`，Float，默认 13sp）。
-    //   竖屏聊天列表的正文原来写死 13sp/17sp（`LiveDanmakuOverlay` 的 `LiveDanmakuChatRow`），
-    //   现在独立可调；与上面「弹幕字号」（画面上的滚动弹幕）**各调各的**，改一个不影响另一个。
-    //   档位与「弹幕字号」完全一致（10~30sp、1sp 一档），只是键、默认值和读取方都不同。
-    //   默认 13sp ⇒ 老用户升级后列表渲染与改前一致，只有主动调才变。
-    sliderPreference(
-        key = SettingPreferences.LiveDanmakuChatFontSize.name,
-        title = {
-            Text("竖屏列表字号")
-        },
-        // 10..30 共 21 个整数，中间还有 19 个 → steps 必须写 19（与「弹幕字号」同一档位）
-        defaultValue = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT,
-        valueRange = LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MIN..LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MAX,
-        valueSteps = 19,
-        valueText = {
-            Text(LiveDanmakuSettings.chatFontSizeText(it))
-        },
-        summary = {
-            Text("当前 ${LiveDanmakuSettings.chatFontSizeText(it)}，只影响竖屏的弹幕列表")
-        },
-    )
-    // ★★2026-10-01 新增：**竖屏弹幕透明度**（键 `live_danmaku_chat_opacity`，Int %，默认 100）。
-    //   用户原话："我想让竖屏状态下的弹幕透明度**不再跟随**那个弹幕透明度，**单独设置**一个竖屏弹幕透明度"
-    //   ⇒ 与下面那项「弹幕不透明度」（画面上的滚动弹幕）**各管各的**：两个键、两条读取路径。
-    //   档位/下限/文案与「弹幕不透明度」完全一致（10..100%、steps 89、`$it%`），只是键与读取方不同。
-    //   默认 100% ⇒ 老用户升级后竖屏列表观感与之前**零变化**，只有主动调才变。
-    sliderIntPreference(
-        key = SettingPreferences.LiveDanmakuChatOpacity.name,
-        title = {
-            Text("竖屏弹幕透明度")
-        },
-        // 10..100 共 91 个整数 → steps = 89。下限不给 0，理由同下面那项（全透明 = "弹幕开了但看不见"）
-        valueRange = 10..100,
-        valueSteps = 89,
-        defaultValue = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
-        valueText = {
-            Text("$it%")
-        },
-        summary = {
-            // ★写明默认值：这个键是 2026-10-01 新加的，"没调过 = 100%"要让人一眼看到
-            Text("只影响竖屏的弹幕列表（默认 ${SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT}%），" +
-                "与上面「弹幕不透明度」各调各的")
+            // ★标题已点明"滚动弹幕"⇒ summary 不再重复"只对直播生效"，改说**它管哪块/竖屏也用它**
+            Text("默认 ${SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT}sp；竖屏、横屏都飘这一套")
         },
     )
     sliderIntPreference(
         key = SettingPreferences.LiveDanmakuOpacity.name,
         title = {
-            Text("弹幕不透明度")
+            Text("滚动弹幕不透明度")
         },
         // 10..100 共 91 个整数 → steps = 89。下限不给 0：全透明等于"弹幕开了但看不见"，
         // 那种情况应该直接关掉播放页底栏那颗「弹幕」按钮，而不是让用户以为弹幕坏了
@@ -255,10 +305,11 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text("$it%")
         },
         summary = {
-            Text("只对直播生效")
+            // ★标题已点明"滚动弹幕"⇒ 说清它**只动画面上的字**，别让人以为列表也跟着变
+            Text("默认 ${SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT}%；只动画面上的滚动弹幕")
         },
     )
-    // ★本轮新增：弹幕速度（键 `live_danmaku_speed`，Float 倍率 0.5~2.0，默认 1.0）。
+    // ★本轮新增：**滚动弹幕速度**（键 `live_danmaku_speed`，Float 倍率 0.5~2.0，默认 1.0）。
     // 为什么用倍率滑杆而不是"慢/正常/快"三选一：三档之间差得太远（0.5 / 1.0 / 2.0），
     //   热门房想"稍微慢一点"就没有档位了；倍率滑杆 + 文案里写清"慢/正常/快"和秒数，
     //   既可微调又一眼能懂。档位/文案全取 `LiveDanmakuSettings` 里的真值，不在这儿复述数字。
@@ -267,7 +318,7 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
     sliderPreference(
         key = SettingPreferences.LiveDanmakuSpeed.name,
         title = {
-            Text("弹幕速度")
+            Text("滚动弹幕速度")
         },
         defaultValue = SettingConstants.LIVE_DANMAKU_SPEED_DEFAULT,
         valueRange = LiveDanmakuSettings.LIVE_SPEED_MIN..LiveDanmakuSettings.LIVE_SPEED_MAX,
@@ -276,19 +327,20 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text(LiveDanmakuSettings.speedText(it))
         },
         summary = {
-            Text(LiveDanmakuSettings.speedSummaryText(it) + "，只对直播生效")
+            // ★"只对直播生效"由组名表达，去重；速度文案本身已含"慢/正常/快 + 秒数"
+            Text(LiveDanmakuSettings.speedSummaryText(it))
         },
     )
-    // 显示区域：同样是直播自己那套（点播那边只有"最大行数"这个行数模型，没有区域比例语义）。
+    // **滚动弹幕显示区域**：同样是直播自己那套（点播那边只有"最大行数"这个行数模型，没有区域比例语义）。
     // 档位与文案直接用弹幕链路的 LiveDanmakuSettings，免得设置页写的档位和浮层支持的对不上
     listPreference(
         key = SettingPreferences.LiveDanmakuAreaPercent.name,
         type = ListPreferenceType.DROPDOWN_MENU,
         title = {
-            Text("弹幕显示区域")
+            Text("滚动弹幕显示区域")
         },
         summary = { value ->
-            Text("当前：${LiveDanmakuSettings.areaPercentText(value)}，只对直播生效")
+            Text("当前：${LiveDanmakuSettings.areaPercentText(value)}（滚动弹幕的活动范围）")
         },
         defaultValue = SettingConstants.LIVE_DANMAKU_AREA_PERCENT_DEFAULT,
         values = LiveDanmakuSettings.AREA_PERCENT_OPTIONS,
@@ -306,7 +358,7 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
 // ===== 浏览页 =====
 /**
  * 「直播列表」那一组（1 项：每行卡片数）—— **只在「设置 → 直播设置」页出现**
- * （播放页弹窗按用户要求只剩弹幕 6 项）。
+ * （播放页弹窗按用户要求只剩弹幕 7 项）。
  */
 private fun LazyListScope.liveBrowsePreferenceItems() {
     // ★本组原来的「默认排序」(`live_sort_type`) 上一轮整项移出设置页：用户要求挪到首页
