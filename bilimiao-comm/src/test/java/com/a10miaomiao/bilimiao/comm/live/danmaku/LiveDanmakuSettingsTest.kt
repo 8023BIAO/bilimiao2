@@ -1,5 +1,6 @@
 package com.a10miaomiao.bilimiao.comm.live.danmaku
 
+import androidx.datastore.preferences.core.mutablePreferencesOf
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import org.junit.Assert.assertEquals
@@ -94,6 +95,33 @@ class LiveDanmakuSettingsTest {
         // ④ 这个开关**不影响**别的字段（尤其不透明度：纯白不改透明度）
         assertEquals(1f, off.opacity, 0f)
         assertEquals(1f, off.chatOpacity, 0f)
+    }
+
+    /**
+     * ★走**真正的读取口** `SettingPreferences.Live.of(Preferences)`（不是直接构造 `Values`）。
+     *
+     * 为什么必须有这一条：`of()` 里布尔是 `prefs?.get(键) ?: 默认值`；
+     * 一旦有人"顺手"改成 `prefs?.get(键) == true`，**落盘的 false 会被吃掉** ——
+     * 现象是"设置页开关显示关、浮层却按开渲染"。只构造 `Values` 的断言**抓不到**这个变异。
+     */
+    @Test
+    fun whiteOnly_of_readsStoredFalse_andStoredTrue() {
+        // ① 落盘 false（用户关掉）⇒ 必须读到 false（变异：`== true` / 恒 true ⇒ 这条失败）
+        val off = LiveDanmakuSettings.from(
+            SettingPreferences.Live.of(
+                mutablePreferencesOf(SettingPreferences.LiveDanmakuWhiteOnly to false),
+            ),
+        )
+        assertFalse(off.whiteOnly)
+        // ② 落盘 true（用户明确打开）⇒ true
+        val on = LiveDanmakuSettings.from(
+            SettingPreferences.Live.of(
+                mutablePreferencesOf(SettingPreferences.LiveDanmakuWhiteOnly to true),
+            ),
+        )
+        assertTrue(on.whiteOnly)
+        // ③ 对照组：空快照（键不存在）⇒ 走默认值 true
+        assertTrue(LiveDanmakuSettings.from(SettingPreferences.Live.of(mutablePreferencesOf())).whiteOnly)
     }
 
     @Test

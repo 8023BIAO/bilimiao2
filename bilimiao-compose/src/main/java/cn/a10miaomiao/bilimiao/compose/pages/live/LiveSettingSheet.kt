@@ -56,8 +56,8 @@ private const val SHEET_THEME_FALLBACK_COLOR = 0xFF2196F3.toInt()
  * 落点（本文件三处 + `LiveSettingPreferences.kt` 一处）：
  * ```
  * 标题        「直播设置」 → 「弹幕设置」
- * 说明文案     与设置页"同一批设置" → 明说弹窗只有弹幕六项、播放类四项在设置页
- * 内容项       liveSettingPreferenceItems()        （全量 11 项）
+ * 说明文案     与设置页"同一批设置" → 明说弹窗只有弹幕七项（1 通用 + 2 竖屏 + 4 滚动）、播放类四项在设置页
+ * 内容项       liveSettingPreferenceItems()        （全量 12 项）
  *          →  liveDanmakuSettingPreferenceItems()  （只有弹幕 7 项）
  * ```
  * ★**底栏那颗「设置」按钮保留**（用户明确要求）；设置页**一个项都不少**（仍是播放 4 + 弹幕 7 +

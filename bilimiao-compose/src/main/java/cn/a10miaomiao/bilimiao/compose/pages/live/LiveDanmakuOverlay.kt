@@ -482,8 +482,11 @@ private class DanmakuStage(
         // 不再重复乘 —— 乘两遍会变成 alpha²，用户会看到"调 50% 实际只有 25%"）。
         // 设置在组合层是 stage 的重建 key：改了不透明度 → 新 stage → 之后入队的弹幕都用新值。
         //   ★★2026-10-01「弹幕纯白」（默认开）：开着时正文取**纯白**（忽略弹幕自带色），alpha 照旧乘。
-        //     与不透明度同一条口径：**入队时定色** ⇒ 改开关从"之后入队"的弹幕起生效
-        //     （在屏的 ≤7s 自然走完 —— stage 会因 settings 变化重建，见上面 remember 的 key）。
+        //     ★切开关的**实际表现**与改字号/速度/不透明度**完全同款**（见上面 remember 的 key 那段）：
+        //       `stage` 因 settings 变化**重建** ⇒ **在屏的滚动弹幕当帧被清空**，之后按新色飘出；
+        //       不是"在屏的等它自己走完"（那样写是错的）。
+        //   豁免：命中「弹幕纯白」开关时压在画面上的**正文色**（写死纯白），rules/02 §6「画面上的文字」
+        //         那一档；开关关掉就完全不走这个常量（用弹幕自带色）。
         val rgb = if (whiteOnly) 0xFFFFFF else (msg.color and 0xFFFFFF)
         val color = Color(0xFF000000.toInt() or rgb).copy(alpha = textAlpha)
         if (msg.mode == LiveMessage.MODE_TOP || msg.mode == LiveMessage.MODE_BOTTOM) {
@@ -829,7 +832,7 @@ class LiveDanmakuChatLine(
     val uname: String,
     val text: String,
     /**
-     * 已补 alpha 的内容色（**存储层不乘**弹幕不透明度，见 [LiveDanmakuChatLog.add] 第 4 条）。
+     * 已补 alpha 的内容色（**存储层不乘**任何不透明度设置，见 [LiveDanmakuChatLog.add] 第 4 条）。
      *
      * ★2026-10-01：不透明度改在**渲染层**乘 —— 列表行会把 `settings.opacity` 乘进
      *   用户名色与这个内容色的 alpha（见 [LiveDanmakuChatRow]）；这样"改设置立刻生效"不需要重建缓冲，
@@ -852,7 +855,7 @@ class LiveDanmakuChatLine(
  *    按 120ms 一拍算是 ~13KB/s，比"每条都裁"低一个数量级。
  * 3. **只在主线程读写**（宿主的组合、面板的滑动回调都在主线程），所以不需要锁、不用 @Volatile。
  *    对比点播 `DanmakuTextFilter` 当年"主线程 clear + 缓存线程遍历"崩过进程那一类问题。
- * 4. **存储层不乘弹幕不透明度**：这里只补 alpha=FF，**不**乘 `settings.opacity`（旧理由：用户把透明度
+ * 4. **存储层不乘不透明度设置**：这里只补 alpha=FF，**不**乘 `settings.opacity` / `settings.chatOpacity`（旧理由：用户把透明度
  *    调低是为了不挡画面，不是为了读不清聊天）。
  *    ★★2026-10-01 用户改口径（原话："这个竖屏弹幕字体透明度跟随，直播弹幕透明度"）：
  *    **列表文字也要跟随同一个设置** —— 但乘的位置放在**渲染层**（[LiveDanmakuChatRow]），
@@ -1232,7 +1235,7 @@ fun LiveDanmakuChatPanel(
      * （键 `live_danmaku_chat_opacity`，见 [LiveDanmakuSettings.chatOpacity]，默认 100%）。
      * 宿主从 settings 取这一个值传进来（同 `chatFontSizeSp` 的写法）。
      *
-     * ★与**滚动弹幕**的「弹幕不透明度」（`live_danmaku_opacity` → [LiveDanmakuSettings.opacity]）
+     * ★与**滚动弹幕**的「滚动弹幕不透明度」（键 `live_danmaku_opacity` → [LiveDanmakuSettings.opacity]）
      *   **各管各的**：2026-10-01 用户要求"竖屏状态下的弹幕透明度不再跟随那个弹幕透明度，单独设置一个"
      *   ⇒ 两个键、两个设置项、两条读取路径（本条历史上曾短暂"跟随"过，已被该要求取代）。
      * ★只乘在**弹幕行**上（用户名 + 正文的颜色 alpha，见 [LiveDanmakuChatRow]）：
@@ -1461,7 +1464,7 @@ fun LiveDanmakuChatPanel(
                     LiveDanmakuChatRow(
                         line = line,
                         // ★★2026-10-01：列表文字用**自己的**「竖屏弹幕透明度」设置（`chatOpacity`；
-                        //   不是滚动弹幕那个「弹幕不透明度」）。乘在颜色 alpha 上，阴影不变淡。
+                        //   不是滚动弹幕那个「滚动弹幕不透明度」）。乘在颜色 alpha 上，阴影不变淡。
                         danmakuAlpha = danmakuAlpha,
                         // ★★2026-10-01「弹幕纯白」：只把**正文**刷白，用户名照旧跟随主题色
                         whiteOnly = whiteOnly,
@@ -1602,6 +1605,8 @@ private fun LiveDanmakuChatRow(
     val unameShown = unameColor.copy(alpha = unameColor.alpha * alpha)
     // ★★2026-10-01「弹幕纯白」：**只换正文的颜色**（开关开 → 纯白），alpha 照旧乘。
     //   ★用户名那一行不动：它继续跟随主题色（用户当场纠正："我说的是内容啊"）。
+    //   豁免：命中开关时压在画面上的**正文色**（写死纯白），rules/02 §6「画面上的文字」那一档；
+    //         开关关掉就完全不走这个常量（用弹幕自带色 `line.color`）。
     val bodyBase = if (whiteOnly) Color.White else line.color
     val bodyShown = bodyBase.copy(alpha = bodyBase.alpha * alpha)
     //   key 里必须带 `whiteOnly`：正文颜色由它决定，不带的话切开关**这一行不会重排**（旧色粘住）。

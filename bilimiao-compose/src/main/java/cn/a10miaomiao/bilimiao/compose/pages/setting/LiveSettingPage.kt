@@ -87,9 +87,10 @@ import org.kodein.di.compose.rememberInstance
  * | 显示弹幕 | `live_danmaku_enable`（默认 true） | 与播放页底栏已有的「弹幕」按钮功能重复 | 播放页底栏「弹幕」按钮。★它当前是**会话级**的（只改本页状态、不落盘，见 `app/.../LivePlayerActivity.applyDanmakuEnabled`），所以这个键目前**全工程没有写入方**——本轮起它又是直播可见性的**唯一**来源，建议 A 路把按钮状态按需落盘到它（详见交付报告 §4.7） |
  * | 默认排序 | `live_sort_type`（默认 "online"） | 挪到首页直播 Tab 的底栏筛选弹窗里（在列表上调比在设置里调顺手） | 首页「直播」Tab → 底栏「筛选」（B 路） |
  *
- * ★★本轮（2026-09-26 晚，弹窗瘦身）：**本页仍然是全部 11 项**
+ * ★★本轮（2026-09-26 晚，弹窗瘦身）：**本页仍然是全部 12 项**
  *   （播放 4 + 弹幕 7 + 直播列表 1 = 12，见 [liveSettingPreferenceItems] 的 KDoc 与交付报告里的 grep 证据）。
- *   播放页底栏「设置」弹窗改用 [liveDanmakuSettingPreferenceItems]，**只出弹幕那一组 6 项**；
+ *   播放页底栏「设置」弹窗改用 [liveDanmakuSettingPreferenceItems]，**只出弹幕那一组 7 项**
+ *   （弹幕纯白 1 + 竖屏列表弹幕 2 + 滚动弹幕 4）；
  *   播放类 4 项（默认画质 / 默认线路策略 / 自动重连 / 自动旋转）与「每行卡片数」**只在本页出现**，
  *   一个都没少。
  *
