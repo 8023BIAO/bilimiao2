@@ -45,6 +45,7 @@ import cn.a10miaomiao.bilimiao.compose.components.preference.sliderIntPreference
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
+import com.a10miaomiao.bilimiao.comm.utils.AppUpdateChecker
 import com.a10miaomiao.bilimiao.comm.utils.CdnHosts
 import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
 import cn.a10miaomiao.bilimiao.compose.pages.setting.widgets.CdnSelectDialog
@@ -292,6 +293,28 @@ private fun FlagsSettingPageContent(
     LaunchedEffect(Unit) {
         currentCdnKey = SettingPreferences.mapData(context) {
             it[SettingPreferences.SelectedCdnHost] ?: "default"
+        }
+    }
+
+    // ── 检查更新（GitHub Release；用户 2026-10-01 拍板：只按日期比版本）──
+    // 原始 versionName（v2026.10.01）用于比版本；appVersionLabel 只是"给人看"的那一份。
+    // 只在点「检查更新」时才发请求 —— 不自动检查、不后台常驻、不自动下载。
+    val currentVersionTag = remember(context) {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull().orEmpty()
+    }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    // 点行 / 失败后「重试」走同一个入口（全工程只有这一处发起检查）
+    val startUpdateCheck: () -> Unit = {
+        showUpdateDialog = true
+        updateState = UpdateUiState.Checking
+        scope.launch {
+            updateState = when (val outcome = AppUpdateChecker.checkForUpdate(currentVersionTag)) {
+                is AppUpdateChecker.Outcome.Done -> UpdateUiState.Done(outcome.result)
+                is AppUpdateChecker.Outcome.Failed -> UpdateUiState.Failed(outcome.reason)
+            }
         }
     }
 
@@ -1214,6 +1237,13 @@ private fun FlagsSettingPageContent(
                         title = { Text("当前版本") },
                         summary = { Text(appVersionLabel) },
                     )
+            // 检查更新：只查 GitHub Release（新版看日期，versionCode 固定 210 不参与）
+            preference(
+                key = "check_update",
+                title = { Text("检查更新") },
+                summary = { Text(updateSummaryText(updateState)) },
+                onClick = { startUpdateCheck() },
+            )
             preference(
                 key = "github_repo",
                 title = { Text("我的 GitHub 仓库") },
@@ -1336,7 +1366,125 @@ private fun FlagsSettingPageContent(
             )
         }
 
+        if (showUpdateDialog) {
+            UpdateDialog(
+                state = updateState,
+                onRetry = { startUpdateCheck() },
+                onOpenUrl = { url ->
+                    // 系统浏览器：APK 附件直链优先，没有附件就开该 Release 页面（不是仓库首页）
+                    runCatching {
+                        context.startActivity(
+                            android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(url)
+                            )
+                        )
+                    }
+                },
+                onDismiss = { showUpdateDialog = false },
+            )
+        }
+
     }
+}
+
+/** 「检查更新」四态（Idle 只在首帧出现） */
+private sealed interface UpdateUiState {
+    data object Idle : UpdateUiState
+    data object Checking : UpdateUiState
+    data class Done(val result: AppUpdateChecker.UpdateResult) : UpdateUiState
+    data class Failed(val reason: AppUpdateChecker.FailReason) : UpdateUiState
+}
+
+/** 「检查更新」这一行的小字：平时写入口说明，检查后写本次结果（短句，不出现 tag/API 这类词） */
+private fun updateSummaryText(state: UpdateUiState): String = when (state) {
+    UpdateUiState.Idle -> "从 GitHub 检查是否有新版本"
+    UpdateUiState.Checking -> "正在检查…"
+    is UpdateUiState.Done -> when (val result = state.result) {
+        is AppUpdateChecker.UpdateResult.UpToDate -> "已是最新（${result.currentTag}）"
+        is AppUpdateChecker.UpdateResult.Available -> "发现新版本 ${result.newTag}"
+        is AppUpdateChecker.UpdateResult.RemoteOlder -> "GitHub 上没有更新的版本"
+    }
+    is UpdateUiState.Failed -> "检查失败，点此重试"
+}
+
+/** 日期整数（20261002）→ `2026-10-02` */
+private fun formatReleaseDate(date: Int): String =
+    "%04d-%02d-%02d".format(date / 10000, (date / 100) % 100, date % 100)
+
+/**
+ * 失败分型 → 人话（短句、无技术词）。
+ * ★错误弹窗里**不放**"去 GitHub 仓库"按钮：关于页下面已经有「我的 GitHub 仓库」入口了。
+ */
+private fun updateFailText(reason: AppUpdateChecker.FailReason): String = when (reason) {
+    AppUpdateChecker.FailReason.TIMEOUT -> "网络不太好，没连上 GitHub，稍后再试"
+    AppUpdateChecker.FailReason.RATE_LIMITED -> "请求太频繁了，过一会儿再试"
+    AppUpdateChecker.FailReason.NO_RELEASES -> "远端还没有发布任何版本"
+    AppUpdateChecker.FailReason.UNRECOGNIZED_TAGS -> "远端版本的格式无法识别（可能是发布格式不对）"
+    AppUpdateChecker.FailReason.UNPARSABLE -> "GitHub 返回的内容看不懂（可能改动过），稍后再试"
+}
+
+/**
+ * 检查更新弹窗（四态）：
+ * · 检查中 → "正在检查…" + 关闭；
+ * · 有新版 → 标题带新版本号 + 发布日期 + **可滚动的更新说明**（正文原样展示，不加工）；
+ *   「前往下载」优先 APK 附件直链，没有附件就开该 Release 页面；
+ * · 已最新 / 远端更旧 → 「知道了」；
+ * · 失败 → 分型人话 + 「重试」/「关闭」。
+ *
+ * 一律走项目自己的 [OverlayAlertDialog]（吃 M3 主题色、深色模式一致；不用 DialogX）。
+ */
+@Composable
+private fun UpdateDialog(
+    state: UpdateUiState,
+    onRetry: () -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val result = (state as? UpdateUiState.Done)?.result
+    OverlayAlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                when {
+                    result is AppUpdateChecker.UpdateResult.Available -> "发现新版本 ${result.newTag}"
+                    state is UpdateUiState.Failed -> "检查更新失败"
+                    else -> "检查更新"
+                }
+            )
+        },
+        text = {
+            Text(
+                when {
+                    state is UpdateUiState.Checking -> "正在检查…"
+                    result is AppUpdateChecker.UpdateResult.Available ->
+                        "发布日期：${formatReleaseDate(result.newDate)}\n\n" +
+                            result.notes.ifBlank { "（这次没有写更新说明）" }
+                    state is UpdateUiState.Failed -> updateFailText(state.reason)
+                    result is AppUpdateChecker.UpdateResult.UpToDate -> "已是最新版本（${result.currentTag}）"
+                    result is AppUpdateChecker.UpdateResult.RemoteOlder ->
+                        "GitHub 上最新的 ${result.latestTag} 比本机 ${result.currentTag} 旧，可能还在测试"
+                    else -> "还没检查"
+                }
+            )
+        },
+        confirmButton = {
+            when {
+                result is AppUpdateChecker.UpdateResult.Available -> TextButton(
+                    onClick = { onOpenUrl(result.apkUrl ?: result.pageUrl) }
+                ) { Text("前往下载") }
+                state is UpdateUiState.Failed -> TextButton(onClick = onRetry) { Text("重试") }
+                state is UpdateUiState.Checking -> TextButton(onClick = onDismiss) { Text("关闭") }
+                else -> TextButton(onClick = onDismiss) { Text("知道了") }
+            }
+        },
+        dismissButton = {
+            // 取消在左（外壳保证）：只有"有结果且还能操作"的两态才给关闭
+            if (result is AppUpdateChecker.UpdateResult.Available || state is UpdateUiState.Failed) {
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            }
+        },
+    )
 }
 
 /** 把毫秒格式化成"1 分 05 秒" / "12 秒"，给监控进度显示用 */
