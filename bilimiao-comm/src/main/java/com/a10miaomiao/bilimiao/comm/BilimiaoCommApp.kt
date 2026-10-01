@@ -128,8 +128,14 @@ class BilimiaoCommApp(
         return MiaoEncryptDecrypt(key)
     }
 
+    /**
+     * 落盘身份并灌 Cookie。
+     *
+     * ★顺序：**先写盘成功，再改内存 + 灌 Cookie**。以前是先 `this.loginInfo = loginInfo` 再写盘，
+     *   写盘一抛异常就"内存说有、磁盘没有"（调用方还会以为成功了），且没有回滚点。
+     *   现在 writeBytes 抛异常时，内存里的 loginInfo 仍是旧值 ⇒ 失败可回退。
+     */
     fun saveAuthInfo(loginInfo: LoginInfo) {
-        this.loginInfo = loginInfo
         val miaoED = getMiaoEncryptDecrypt()
         val jsonStr = MiaoJson.toJson(loginInfo)
         val jsonByteArray = jsonStr.toByteArray()
@@ -137,6 +143,8 @@ class BilimiaoCommApp(
         val cipher = AESUtil.encrypt(miaoED.encrypt(jsonByteArray), secretKey)
         val file = File(authFilePath)
         file.writeBytes(cipher)
+        // 磁盘已就位，内存与 CookieManager 再跟上
+        this.loginInfo = loginInfo
         loginInfo.cookie_info?.let { setCookie(it) }
     }
 

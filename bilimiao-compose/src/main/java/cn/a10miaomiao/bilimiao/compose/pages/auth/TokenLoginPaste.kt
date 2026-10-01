@@ -52,6 +52,9 @@ private val IDENTITY_COOKIE_NAMES = listOf("SESSDATA", "bili_jct", "DedeUserID")
  */
 private val SESSDATA_VALUE_PREFIX = Regex("^[0-9a-fA-F]{8}%2C\\d{9,}%2C")
 
+/** 请求头里的 `Cookie:` 标签（**排除** `Set-Cookie:`）：整段 dump 时优先从它之后取值 */
+private val REQUEST_COOKIE_LABEL = Regex("(?i)(?<!set-)cookie\\s*:")
+
 private const val SESSDATA_VALUE_MIN_LEN = 40
 
 /**
@@ -175,8 +178,13 @@ object AuthPasteParser {
      */
     private fun extractIdentityCookies(raw: String): String? {
         val text = raw.stripInvisible()
+        // 整段 dump 可能同时含响应的 `set-cookie:` 与请求的 `Cookie:`：
+        // 有请求标签时**只从它之后找**，免得挑到响应里那条（比如 `set-cookie: SESSDATA=deleted`）。
+        val scope = REQUEST_COOKIE_LABEL.find(text)
+            ?.let { text.substring(it.range.last + 1) }
+            ?: text
         val pairs = IDENTITY_COOKIE_NAMES.mapNotNull { name ->
-            identityValueRegex(name).find(text)
+            identityValueRegex(name).find(scope)
                 ?.groupValues?.get(1)
                 ?.takeIf { it.isNotBlank() }
                 ?.let { "$name=$it" }
@@ -185,12 +193,19 @@ object AuthPasteParser {
     }
 
     /**
-     * `<名字>=<值>`：名字前允许行首/`;`/空白/引号，值到 `;`、空白或**任一引号**为止（名字大小写不敏感）。
-     * ★值里必须同时排除 `'` 和 `"`：`-H 'cookie: SESSDATA=v; bili_jct=t'` 这种整段是单引号包的，
-     *   只排双引号会把结尾那个 `'` 一起吞进值里（`bili_jct=t'`）⇒ 拿着坏值去请求，用户看到"Cookie 无效"。
+     * `<名字>=<值>`（名字大小写不敏感）。四种窄口径容错，都是有实测形态的：
+     * · 名字前允许：行首 / `;` / `:`（`cookie:SESSDATA=` 冒号后没空格）/ 空白 / 引号；
+     * · 名字与 `=` 之间、`=` 与值之间允许空白（`SESSDATA = v`）；
+     * · 值的终止符除 `;`/空白/引号外，还包含**全角分号 `；`**、**全角空格 U+3000**、**NBSP U+00A0**
+     *   （`\s` 在 Java 正则里不含这两个 Unicode 空白，从聊天软件/网页复制过来很常见）；
+     * · 值里同时排除 `'` 和 `"`：`-H 'cookie: SESSDATA=v; bili_jct=t'` 是单引号包的，
+     *   只排双引号会把结尾那个 `'` 吞进值里（`bili_jct=t'`）。
      */
     private fun identityValueRegex(name: String): Regex =
-        Regex("(?i)(?:^|[;\\s'\"])" + Regex.escape(name) + "=\"?([^;\\s'\"]+)\"?")
+        Regex(
+            "(?i)(?:^|[;:；\\s\\u00A0\\u3000'\"])" + Regex.escape(name) +
+                "\\s*=\\s*\"?([^;；\\s\\u00A0\\u3000'\"]+)\"?"
+        )
 
     /** 干净的 `k=v; k=v` 串里是否含身份 cookie（**JSON 那条路**用；文本粘贴走 [extractIdentityCookies]） */
     private fun hasIdentityCookie(cookie: String): Boolean =

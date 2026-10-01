@@ -391,23 +391,6 @@ private fun FlagsSettingPageContent(
                         )
                     }
 
-                    // 恢复 WBI 缓存（兼容旧版本导出的 mix_key/last_fetch_day 键名）
-                    jsonObj["wbi"]?.jsonObject?.let { wbiObj ->
-                        WbiSigner.restoreWbiCache(mapOf(
-                            "mixKey" to (wbiObj["mixKey"] ?: wbiObj["mix_key"])?.jsonPrimitive?.contentOrNull,
-                            "lastFetchDay" to (wbiObj["lastFetchDay"] ?: wbiObj["last_fetch_day"])?.jsonPrimitive?.intOrNull,
-                        ))
-                    }
-
-                    // 保存设备指纹：必须走 setBilibiliBuvid（同步失效内存缓存），
-                    // 否则 auth 文件会用"旧 buvid 的密钥"加密 → 重启后解不开 → 静默登出（审查发现的 S2）
-                    if (buvid.isNotBlank()) {
-                        if (buvid.length < 12) {
-                            throw Exception("buvid 长度不足（至少 12 位），导入会解不开登录信息")
-                        }
-                        BilimiaoCommApp.commApp.setBilibiliBuvid(buvid)
-                    }
-
                     val cookieInfo = LoginInfo.CookieInfo(
                         cookies = cookies,
                         domains = listOf(".bilibili.com", "bilibili.com")
@@ -437,6 +420,26 @@ private fun FlagsSettingPageContent(
                             Toast.LENGTH_LONG
                         ).show()
                         return@launch
+                    }
+                    // ★buvid 必须**验真通过之后**才落盘：它是 auth_hd 的 AES+XOR 密钥来源
+                    //   （密钥取 buvid 第 0/5/8/11 字符），先改 buvid 再验真失败的话，
+                    //   toast 说"未改动你原来的登录状态"，可下次冷启动 readAuthInfo() 会用新 buvid
+                    //   去解旧 auth_hd ⇒ **原账号被静默登出**（复核第二轮的数据丢失级问题）。
+                    //   换句话说：任何失败分支（验真不过 / 网络异常 / 解析失败）都不许改 sp 里的 buvid。
+                    if (buvid.isNotBlank()) {
+                        if (buvid.length < 12) {
+                            throw Exception("buvid 长度不足（至少 12 位），导入会解不开登录信息")
+                        }
+                        BilimiaoCommApp.commApp.setBilibiliBuvid(buvid)
+                    }
+                    // 恢复 WBI 缓存（兼容旧版本导出的 mix_key/last_fetch_day 键名）。
+                    // 同样放在验真之后：它只改内存，但 `lastFetchDay` 一旦被坏文件填成"今天"，
+                    // 当天就不会再刷新 mix_key ⇒ 整天的 WBI 签名请求都可能失败（同类问题，一并收掉）。
+                    jsonObj["wbi"]?.jsonObject?.let { wbiObj ->
+                        WbiSigner.restoreWbiCache(mapOf(
+                            "mixKey" to (wbiObj["mixKey"] ?: wbiObj["mix_key"])?.jsonPrimitive?.contentOrNull,
+                            "lastFetchDay" to (wbiObj["lastFetchDay"] ?: wbiObj["last_fetch_day"])?.jsonPrimitive?.intOrNull,
+                        ))
                     }
                     // 验真通过才落盘 + 把 Cookie 真正写进 WebView（写不进去 = 发弹幕/评论读不到 bili_jct）
                     BilimiaoCommApp.commApp.saveAuthInfo(loginInfo)

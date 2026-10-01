@@ -187,6 +187,53 @@ class AuthPasteParserTest {
     }
 
     @Test
+    fun cookieHeaderLine_withoutSpaceAfterColon_keepsSessData() {
+        // F12 "Copy value" 或手打时冒号后没空格
+        val r = AuthPasteParser.parse("cookie:SESSDATA=v1;bili_jct=t1")
+        assertNotNull(r)
+        assertEquals(PastedKind.COOKIE, r!!.kind)
+        assertEquals("SESSDATA=v1; bili_jct=t1", r.cookie)
+    }
+
+    @Test
+    fun spacesAroundEquals_keepSessData() {
+        val r = AuthPasteParser.parse("SESSDATA = v1 ; bili_jct = t1")
+        assertNotNull(r)
+        assertEquals(PastedKind.COOKIE, r!!.kind)
+        assertEquals("SESSDATA=v1; bili_jct=t1", r.cookie)
+    }
+
+    @Test
+    fun fullWidthAndNbspSeparators_keepSessData() {
+        // 全角分号
+        val r1 = AuthPasteParser.parse("SESSDATA=v1；bili_jct=t1")
+        assertNotNull(r1)
+        assertEquals("SESSDATA=v1; bili_jct=t1", r1!!.cookie)
+        // 全角空格（U+3000）
+        val r2 = AuthPasteParser.parse("SESSDATA=v1\u3000bili_jct=t1")
+        assertNotNull(r2)
+        assertEquals("SESSDATA=v1; bili_jct=t1", r2!!.cookie)
+        // 不换行空格（NBSP, U+00A0）
+        val r3 = AuthPasteParser.parse("SESSDATA=v1\u00A0bili_jct=t1")
+        assertNotNull(r3)
+        assertEquals("SESSDATA=v1; bili_jct=t1", r3!!.cookie)
+    }
+
+    @Test
+    fun responseSetCookieBeforeRequestCookie_prefersRequestValue() {
+        // 整段 dump 里响应 set-cookie 在请求 Cookie 之前：必须取请求头那条
+        val raw = listOf(
+            "HTTP/1.1 200 OK",
+            "set-cookie: SESSDATA=response-value; Path=/",
+            "Cookie: SESSDATA=request-value; bili_jct=t1",
+        ).joinToString("\n")
+        val r = AuthPasteParser.parse(raw)
+        assertNotNull(r)
+        assertEquals(PastedKind.COOKIE, r!!.kind)
+        assertEquals("SESSDATA=request-value; bili_jct=t1", r.cookie)
+    }
+
+    @Test
     fun cookieHeaderLine_onlySessData_keepsIt() {
         val raw = "GET /x HTTP/1.1\nHost: api.bilibili.com\nCookie: SESSDATA=abc"
         val r = AuthPasteParser.parse(raw)
