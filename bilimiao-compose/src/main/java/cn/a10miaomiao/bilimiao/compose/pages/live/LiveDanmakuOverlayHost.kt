@@ -153,18 +153,21 @@ import kotlin.math.roundToInt
  * 3. **找不到贴底那一条就铺到底**：只有真找不到（比如底栏被 GONE 且从未 layout 过）才退回"列表到屏幕底"，
  *    此时不存在会被压住的按钮，是安全的降级。
  *
- * ★为什么仍然注入到 `android.R.id.content`（而不是塞进 `danmakuLayer`）：播放页的图层顺序被
- *   `buildUi()` 末尾的 `bringToFront()` 序列钉死，`tapCatcher`（全屏手势层，`isClickable = true` +
- *   `GestureDetector`）压在 `danmakuLayer` **上面**；放进弹幕层的任何东西都收不到触摸 ——
- *   列表会"看得见、滑不动"。注入 content 让它落在手势层之上，且**只占自己那块矩形**：
- *   矩形之外的触摸照旧落回手势层（亮度/音量手势、单击显隐控制条不受影响）。
+ * ★★2026-10-01（用户拍板："底栏按钮悬浮在弹幕上面"）：注入目标 = 播放页给的 [panelLayer]
+ *   （`LivePlayerActivity.danmakuPanelLayer`，由 `buildUi()` 末尾的 `bringToFront()` 序列钉死在
+ *   `hudLayer` 与 `topBar` 之间）：
+ * ```
+ * 视频 < danmakuLayer < tapCatcher < hudLayer < **面板层** < topBar < bottomBar < progressBar
+ * ```
+ *   · 面板**高于** `tapCatcher`（全屏手势层）⇒ 面板矩形内的触摸归面板：**列表能滑**；
+ *     矩形之外照旧落回手势层（亮度/音量手势、单击显隐控制条不受影响）；
+ *   · 面板**低于** topBar / bottomBar ⇒ 底栏按钮画在面板之上、也更早拿到触摸：**按钮能点**；
+ *   · 于是面板矩形可以一直铺到**窗口底**：弹幕区"把底栏铺满"，底栏只是浮在它上面的一条渐变。
+ *   ★为什么**不能**注入 `danmakuLayer`（老结论，仍然成立）：`tapCatcher` 压在它上面，
+ *     放进弹幕层的任何东西都收不到触摸 ⇒ 列表"看得见、滑不动"。
+ *   ★拿不到 [panelLayer] 时退回 `android.R.id.content`（老结构：面板在最上层），
+ *     那时 [computeDockedRect] 会按老口径把背景扣到内容可见底边为止，行为与改动前一致。
  *   注入的 View 在页面销毁时由 [release] 摘掉，不会在 activity 的视图树上留垃圾。
- *
- * ★为什么不像播放页底栏那样"贴屏幕最底"：注入的 View 是 content 的**后加子 View**，
- *   天然压在 `rootLayout`（连同底栏按钮）**之上**。所以矩形必须**扣掉底栏与导航栏 insets**，
- *   否则又会变成"面板盖住按钮"——只是这次连点击都会被吃掉（比上一版更糟）。
- *   扣掉之后底栏自动隐藏时那段会露出 `rootLayout` 的黑底（与视频黑边同色，不跳动）——
- *   这是刻意的取舍：**宁可留一条稳定的黑边，也不要列表每 4 秒长高缩短一次**。
  *
  * ### 什么时候能用（[isDanmakuListAvailable]）
  * 竖屏（宿主自身"高 > 宽"，宿主铺满播放页，所以这就是屏幕方向）
@@ -383,6 +386,17 @@ class LiveDanmakuOverlayHost(
     private var dockedRect = DockedRect(0, 0)
 
     /**
+     * ★★2026-10-01（复核员必守第 1 条 · 键盘）：面板**底部内容内边距**（px）
+     * = 背景底边 − 内容可见底边 = `窗口底 − 底栏顶边`（键盘弹起时就是"键盘顶边到底"那一段 1189px）。
+     *
+     * 为什么要有它：面板的黑底要铺到窗口最底（用户要的"把底栏铺满"），但**弹幕内容**不能跟着沉下去 ——
+     * 否则 IME 弹起时最新一条停在键盘后面（1611..2800 全被键盘盖住）。
+     * 面板把这个值当 `LazyColumn(contentPadding.bottom)`：视觉上列表背景/占位铺满，内容止于底栏上沿。
+     * 它是 Compose state：面板那份组合要跟着它重组（与 [listShown] 同一套驱动方式）。
+     */
+    private val panelBottomInset = mutableStateOf(0)
+
+    /**
      * 上一次算出来的**几何签名**（[layoutSignature]）。
      * 只在主线程读写（布局回调 / 组合），所以普通字段就够，不需要 @Volatile。
      */
@@ -418,6 +432,17 @@ class LiveDanmakuOverlayHost(
     private var slotView: View? = null
     private var videoAnchor: View? = null
     private var bottomAnchor: View? = null
+
+    /**
+     * ★★2026-10-01（用户拍板：**底栏按钮悬浮在弹幕之上**）：面板的**注入层**。
+     *
+     * 播放页给的是 rootLayout 里"夹在 hudLayer 与 topBar 之间"的那一层
+     * （`LivePlayerActivity.danmakuPanelLayer`）⇒ 面板天然
+     * **高于手势层 [TapCatcher]（列表能滑）、低于顶栏/底栏（按钮能点）**。
+     * 为 null（老播放页 / 层还没建）时退回 `android.R.id.content`（老行为：面板在最上层，
+     * 那时矩形必须自己扣掉底栏 —— 见 [computeDockedRect] 的"背景底边"那段）。
+     */
+    private var panelLayer: ViewGroup? = null
 
     /**
      * 锚点自己 layout 一变（转屏 / 换清晰度改了视频比例 / 底栏 1↔2 行 / 导航栏 insets 变化）→
@@ -613,11 +638,13 @@ class LiveDanmakuOverlayHost(
         slot: View? = null,
         videoView: View? = null,
         bottomBound: View? = null,
+        panelLayer: ViewGroup? = null,
     ) {
         clearAnchors()
         slotView = slot
         videoAnchor = videoView
         bottomAnchor = bottomBound
+        this.panelLayer = panelLayer
         listOfNotNull(slot, videoView, bottomBound).forEach { it.addOnLayoutChangeListener(anchorLayoutListener) }
         // 触发一次重算：也覆盖"播放页是在注入/布局之后才接线"的情况
         chromeGeneration.value += 1
@@ -712,7 +739,7 @@ class LiveDanmakuOverlayHost(
      * 顶边是不是视频画面底边"时用它，比截图量像素靠谱；`[1] <= [0]` 表示当前没有可用区域
      * （此时 [isDanmakuListShown] 必为 false，画面保持滚动弹幕）。
      */
-    fun dockedListRectPx(): IntArray = intArrayOf(dockedRect.top, dockedRect.bottom)
+    fun dockedListRectPx(): IntArray = intArrayOf(dockedRect.top, dockedRect.contentBottom)
 
     /**
      * 当前形态能不能用弹幕列表（竖屏 + 可见 + 非 PiP + 注入目标已就绪）。
@@ -884,6 +911,13 @@ class LiveDanmakuOverlayHost(
      * 见类注释"为什么仍然注入到 android.R.id.content"：必须在手势层之上，且只占自己那块矩形。
      */
     private fun resolveChromeHost(): ViewGroup? {
+        // ★★2026-10-01：优先用播放页给的**列表面板层**（它夹在手势层与顶栏之间）——
+        //   这是"底栏按钮悬浮在弹幕之上"的落点：面板与底栏同属 rootLayout、但排在底栏**之前**，
+        //   于是底栏画在面板之上、也更早拿到触摸（按钮能点），而面板仍高于手势层（列表能滑）。
+        //   拿不到那一层（老播放页 / 层已掉出窗口）才退回 content：那时是"面板在最上层"的老结构，
+        //   [computeDockedRect] 的"背景底边"那一支会按老口径扣掉底栏，行为与改动前一致。
+        val layer = panelLayer
+        if (layer != null && layer.isAttachedToWindow) return layer
         val activity = context.findActivity() ?: return null
         return activity.findViewById<ViewGroup>(android.R.id.content)
     }
@@ -997,6 +1031,9 @@ class LiveDanmakuOverlayHost(
                     CompositionLocalProvider(LocalDensity provides remember { systemDanmakuDensity() }) {
                         LiveDanmakuChatPanel(
                             chat = chat,
+                            // ★★2026-10-01：面板黑底铺到窗口底，但**内容**止于底栏顶边（键盘弹起=键盘顶边）
+                            //   —— 复核员必守第 1 条，值由 [refreshDockedPanel] 每帧下发。
+                            bottomInsetPx = panelBottomInset.value,
                             // ★本轮（task-6）：竖屏列表正文字号（默认 13sp = 改前写死的值）。
                             //   只传这一个值：面板用不到 settings 里别的字段。
                             chatFontSizeSp = settings.chatFontSizeSp,
@@ -1027,15 +1064,20 @@ class LiveDanmakuOverlayHost(
     /**
      * 把"该不该显示 + 显示在哪"落到注入的面板 View 上（主线程；状态由组合侧驱动）。
      *
-     * 这是**唯一**算矩形的地方：
+     * 这是**唯一**算矩形的地方（★2026-10-01 起有**两条底边**，见 [DockedRect]）：
      * ```
-     * 顶边 = 画面底边（videoView 锚点 > 结构找到的画面）> 槽顶边 > 宿主高÷2
-     * 底边 = 底栏顶边（bottomBound 锚点 > 自己找到的贴底那一条）> 槽底边 > 宿主底边
-     *        ★本轮：只要有"活"的底栏锚点就只认它 —— 不再与槽底边取 min（理由见 [computeDockedRect]）
+     * 顶边          = 画面底边（videoView 锚点 > 结构找到的画面）> 槽顶边 > 宿主高÷2
+     *                 ★画面铺满到容器底时（cover）画面底边刻意取 null ⇒ 落到槽顶边（播放页算好的列表顶）
+     * 背景底边      = **内容区底边**（容器底 = 窗口底）—— 面板黑底/占位铺到这里 ⇒ 弹幕区"把底栏铺满"
+     * 内容可见底边  = 底栏顶边（bottomBound 锚点 > 自己找到的贴底那一条）> 宿主底边
+     *                 ⇒ 面板的 contentPadding.bottom = 背景底边 − 内容可见底边（键盘弹起时=键盘那一段）
      * ```
-     * ★顶边这一行的**优先级是本轮改的**（原来"槽顶边"第一）：槽只是"视频带底边"的镜像、会过期，
-     *   而画面底边是活的几何。两个症状（转屏后列表不回来 / 视频与列表之间的黑缝）都是"镜像当真值"
+     * ★顶边优先级是"槽 vs 画面"这轮的既有结论（原来"槽顶边"第一）：槽只是"视频带底边"的镜像、
+     *   会过期，而画面底边是活的几何。两个症状（转屏后列表不回来 / 视频与列表之间的黑缝）都是"镜像当真值"
      *   造成的，见类注释"根因与修法"。
+     * ★底边这一行是 2026-10-01 用户拍板改的：原来"底边 = 底栏顶边"（面板必须给底栏让位，因为面板
+     *   压在底栏**之上**）；现在面板注进 [panelLayer]（在底栏**之下**）⇒ 可以铺到窗口底，
+     *   而**内容**仍然止于底栏顶边 / 键盘顶边（复核员必守第 1 条：IME 弹起时最新一条不能停在键盘后）。
      */
     private fun refreshDockedPanel(supported: Boolean) {
         val panel = listPanel
@@ -1052,9 +1094,13 @@ class LiveDanmakuOverlayHost(
         val p = ensureListPanel() ?: return
         val rect = computeDockedRect()
         dockedRect = rect
-        // 地方太小（比如视频几乎占满、或底栏特别高）：宁可保留滚动弹幕，也不挤出一条读不了的列表
+        // ★★2026-10-01：把"背景底边 − 内容可见底边"这一段交给面板做底部内容内边距
+        //   （面板黑底照旧铺到窗口底，弹幕内容止于底栏顶边 / 键盘顶边 —— 见 [panelBottomInset]）。
+        panelBottomInset.value = (rect.bottom - rect.contentBottom).coerceAtLeast(0)
+        // 地方太小（比如视频几乎占满、或底栏特别高）：宁可保留滚动弹幕，也不挤出一条读不了的列表。
+        // ★按**内容**高判（`contentHeight`）：背景那 212px（底栏那一条）不算"能读的地方"。
         val minPx = (CHAT_DOCKED_MIN_HEIGHT.value * resources.displayMetrics.density).roundToInt()
-        val shown = listWanted.value && rect.height >= minPx
+        val shown = listWanted.value && rect.contentHeight >= minPx
         listShown.value = shown
         // ★本轮：显隐都走呈现层（淡入淡出 + 轻微位移；只动 alpha/translationY，不动布局）
         presentPanel(p, shown)
@@ -1173,8 +1219,8 @@ class LiveDanmakuOverlayHost(
      * 换算基准：宿主与锚点都在**同一个窗口**里，各自 `getLocationInWindow()` 的 y 相减，
      * 就得到容器坐标系里的位置（沉浸式下宿主铺满播放页，所以这套换算对 insets 也不敏感）。
      * ★为什么以"注入容器"而不是"宿主自己"为基准：矩形最终写给**注入 View 的 layoutParams**，
-     *   而它的父容器就是 content。当前布局里两者重合（danmakuLayer/rootLayout 都铺满 content），
-     *   以父容器为基准的话，播放页以后给 rootLayout 加内边距也不会让面板错位。
+     *   而它的父容器 = [chromeHost]（2026-10-01 起 = 播放页给的 [panelLayer]，早先是 `content`）。
+     *   两者都铺满 rootLayout、原点相同，以父容器为基准的话，播放页以后给 rootLayout 加内边距也不会让面板错位。
      * ★本轮再扣掉**父容器自己的 `paddingTop`**（FrameLayout 摆子 View 用的是 `paddingTop + topMargin`）：
      *   不扣的话面板会整体下移整整一个 paddingTop —— 在内容视图被系统/主题塞了 padding 的机型上，
      *   那就是视频与列表之间一条**凭空多出来的黑缝**。padding 为 0 时这一步是恒等变换。
@@ -1188,10 +1234,13 @@ class LiveDanmakuOverlayHost(
         // 子 View 实际可用的高（FrameLayout 不会把子 View 摆进父容器的 padding 里）
         val contentHeight = (parentHeight - parentPaddingTop - (parent?.paddingBottom ?: 0)).coerceAtLeast(0)
         if (contentHeight <= 0) return DockedRect(0, 0)
-        // 下边界：底栏顶边（不给锚点就自己找"贴底那一条"；找不到 = 不存在会被压住的按钮，铺到底）
-        // ★★本轮：读一次就同时拿到"有没有活锚点"与它的值 —— 底边要不要认它，见下面那段。
-        val bottomBoundTop = bottomBoundTopInWindow()
-        val bottomLimit = ((bottomBoundTop ?: (parentTop + parentHeight)) - parentTop - parentPaddingTop)
+        // ★★2026-10-01：**内容可见底边** = 底栏顶边
+        //   （不给锚点就自己找"贴底那一条"；找不到 = 不存在会被压住的按钮，退到容器底）。
+        //   键盘弹起时底栏被 insets 抬到键盘之上 ⇒ 这个值就是键盘顶边。
+        //   弹幕内容不许沉到它下面 —— 否则"底边铺到内容区底边"之后，IME 弹起时 1611..2800 全在键盘后面，
+        //   最新一条会看不见（复核员必守第 1 条）。
+        val contentBottomTop = bottomBoundTopInWindow()
+        val contentBottom = ((contentBottomTop ?: (parentTop + parentHeight)) - parentTop - parentPaddingTop)
             .coerceIn(0, contentHeight)
         val slot = slotView
         // 顶边第一优先：**画面底边**（= 列表要贴的"视频带底边"，也是唯一"活"的那个真值）
@@ -1207,38 +1256,29 @@ class LiveDanmakuOverlayHost(
             ?.let { it - parentTop - parentPaddingTop }
             ?.takeIf { it < contentHeight }
         val rawTop: Int
-        val rawBottom: Int
         if (slot != null && slot.height > 0) {
-            // 播放页已经留好一个矩形：铺满它，但仍然不许越过底栏。
+            // 播放页已经留好一个矩形：顶边照它。
             // ★顶边仍以画面为准（画面拿不到才用槽顶边）：槽是"量过就不再变"的镜像，
             //   视频换比例/转屏之后它可能还停在旧值上，那时按槽摆就会压住画面或留下黑缝。
-            //   ★唯一例外见上：画面**铺满到容器底**时（铺满模式）`pictureTop` 刻意取成 null，
+            //   ★唯一例外见上：画面**铺满到容器底**时（cover）`pictureTop` 刻意取成 null，
             //     于是这一支正好落到"槽顶边"——那正是播放页算好的列表顶（不是旧值镜像：
-            //     铺满模式下列表顶只由底栏顶边与列表目标决定，播放页每次布局都会重算）。
+            //     cover 下列表顶只由底栏顶边与列表目标决定，播放页每次布局都会重算）。
             rawTop = pictureTop ?: (slot.yInWindow() - parentTop - parentPaddingTop)
-            // ★★底边：有底栏锚点时**只认它**，不再与"槽的底边"取 min（本轮键盘/转屏适配的核心一行）。
-            //   槽的底边只是"底栏顶边"的镜像，而且它是**播放页量过就不再变**的那一份：
-            //   键盘抬起底栏（IME insets）/ 转屏换页高时，只要有一次重量没赶上，槽就停在旧值上，
-            //   而 min() 在这两种残留下都会把**错的那个**留下 —— 这正是用户实测的三条现象：
-            //   · 槽停在旧位置（更靠下，键盘抬起前）→ 面板底边越过底栏顶边 → 面板那层 90% 底色
-            //     把底栏压成"半透明的按钮/输入条残影"（截图像素：底栏按钮的文字只剩 ~10% 亮度）；
-            //   · 槽停在中间态（更靠上）→ 面板底边离底栏一大截 → "竖屏弹幕区域离底栏一大块空白"。
-            //   底栏锚点是**活**的（每次都读它的当前坐标），拿它当唯一真值，两种残留都不可能出现。
-            //   槽的底边仍然在"没接 bottomBound 且找不到贴底那一条"时兜底（如下）。
-            rawBottom = if (bottomBoundTop != null) {
-                bottomLimit
-            } else {
-                minOf(slot.bottomInWindow() - parentTop - parentPaddingTop, bottomLimit)
-            }
         } else {
             // ★槽"没就绪"（没布局 / 被量成 0 高）**不等于**列表不该显示 —— 那正是转回竖屏时的现场。
             //   顶边退到画面底边；连画面都找不到才用"上半屏是视频"这条最老的兜底。
             rawTop = pictureTop ?: (contentHeight / 2)
-            rawBottom = bottomLimit
         }
-        val bottom = rawBottom.coerceIn(0, contentHeight)
-        val top = rawTop.coerceIn(0, bottom)
-        return DockedRect(top, bottom)
+        val top = rawTop.coerceIn(0, contentHeight)
+        // ★★背景底边 = **内容区底边**（容器底 = 窗口底），不再是"底栏顶边"（2026-10-01 用户拍板）：
+        //   面板连黑底一起铺到窗口最底 ⇒ 底栏那一条也被弹幕区填满（用户："我想让弹幕区域把底栏铺满"），
+        //   而底栏本身浮在面板**之上**（[panelLayer] 的 z 序保证），按钮照旧能点。
+        //   内容可见底边另算（上面的 `contentBottom`），由 [refreshDockedPanel] 交给面板做底部内容内边距。
+        return DockedRect(
+            top = top,
+            bottom = contentHeight,
+            contentBottom = contentBottom.coerceIn(top, contentHeight),
+        )
     }
 
     /**
@@ -1273,7 +1313,17 @@ class LiveDanmakuOverlayHost(
      * ★为什么不去读播放页的字段：两个模块的依赖方向是 app → compose，compose 看不见 app 的类。
      */
     private fun findBottomBarTopInWindow(): Int? {
-        val root = chromeHost ?: return null
+        // ★★2026-10-01：注入目标可能是播放页给的**列表面板层**（它只有一个面板子 View）——
+        //   在那一层里找"贴底那一条"只会找到面板自己（它的底边也在容器底）⇒ 内容可见底边会被算成
+        //   面板顶边 ⇒ 内容高 0 ⇒ 面板被门限挡掉。所以**这种情况要往上走一层**（播放页 rootLayout）：
+        //   底栏是那里的子 View（WRAP_CONTENT + 贴底 ⇒ 命中），而面板层自己是 MATCH_PARENT ⇒ 被结构判据排除。
+        //   （正常路径根本走不到这里：播放页一定接了 bottomBound 锚点 ⇒ [bottomBoundTopInWindow] 直接返回。）
+        val injected = chromeHost
+        val root = (if (injected != null && injected === panelLayer) {
+            injected.parent as? ViewGroup
+        } else {
+            injected
+        }) ?: return null
         if (root.height <= 0) return null
         val containerBottom = root.yInWindow() + root.height
         // 容差取"1px 取整差"和"容器高的 5%"里更大的那个：
@@ -1415,6 +1465,8 @@ class LiveDanmakuOverlayHost(
         listPanel = null
         chromeHost = null
         chromeInjecting = false
+        // ★★2026-10-01：注入层引用一并清掉（播放页那棵树已经不在屏上；下次 [bindPortraitListArea] 会重设）
+        panelLayer = null
         pictureFallback = null
         dockedRect = DockedRect(0, 0)
         listShown.value = false
@@ -1430,14 +1482,28 @@ class LiveDanmakuOverlayHost(
         slotView = null
         videoAnchor = null
         bottomAnchor = null
+        // ★★2026-10-01：注入层与锚点同寿命 —— 重新接线前先丢掉，[bindPortraitListArea] 紧接着会重设
+        //   （丢了也不会"面板塞进旧树"：[ensureChromeHost] 下一帧会按新目标重新解析 + 重新 addView）。
+        panelLayer = null
         // 重新接线意味着"画面的定义可能变了"：结构兜底那份缓存一并作废（下一帧会重新解析）
         pictureFallback = null
     }
 }
 
-/** 停靠矩形（宿主坐标 px）。用一个小类而不是 `IntArray`/`Pair`：多一处读起来要猜的地方 */
-private class DockedRect(val top: Int, val bottom: Int) {
+/**
+ * 停靠矩形（宿主坐标 px）。用一个小类而不是 `IntArray`/`Pair`：多一处读起来要猜的地方。
+ *
+ * ★★2026-10-01 起它带**两条底边**（用户拍板："弹幕区把底栏铺满" + 复核员的键盘必守条）：
+ * ```
+ * bottom        = 背景底边 = 内容区底边（= 窗口底）：面板的黑底/占位铺到这里 ⇒ 底栏那一条也被弹幕区填满
+ * contentBottom = 内容可见底边 = 底栏顶边（键盘弹起时 = 键盘顶边）：**弹幕内容**不许沉到它下面
+ *                 ⇒ 最新一条始终看得见（面板里靠 contentPadding(bottom = bottom − contentBottom) 实现）
+ * ```
+ */
+private class DockedRect(val top: Int, val bottom: Int, val contentBottom: Int = 0) {
     val height: Int get() = bottom - top
+    /** **内容**高（可视部分）：列表"够不够高"按它判，不按 [height]（背景含底栏那一条）*/
+    val contentHeight: Int get() = (contentBottom - top).coerceAtLeast(0)
 }
 
 /** View 顶边在**窗口坐标**里的 y（px）；宿主与锚点在同一个窗口里，相减即宿主坐标系 */

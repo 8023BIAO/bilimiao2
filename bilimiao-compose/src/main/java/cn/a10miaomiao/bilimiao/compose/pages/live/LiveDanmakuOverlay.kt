@@ -10,6 +10,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -1207,6 +1208,15 @@ fun LiveDanmakuChatPanel(
     visible: Boolean,
     modifier: Modifier = Modifier,
     fadingOut: Boolean = false,
+    /**
+     * ★★2026-10-01（复核员必守第 1 条 · 键盘）：**底部内容内边距**（px）= `窗口底 − 底栏顶边`
+     * （键盘弹起时就是"键盘顶到底"那一段）。由宿主每帧下发（`LiveDanmakuOverlayHost.panelBottomInset`）。
+     *
+     * 面板 View 的地盘铺到**窗口最底**（用户要的"弹幕区把底栏铺满"），但**弹幕内容**不能跟着沉下去 ——
+     * IME 弹起时底栏被 insets 抬到键盘之上，内容若铺到底就会停在键盘后面（最新一条看不见）。
+     * 这个值只作用在**列表内容**上（`LazyColumn` 的 `contentPadding`），**不碰**底色/分隔线/任何渲染逻辑。
+     */
+    bottomInsetPx: Int = 0,
 ) {
     // ★注意这个早退的判据：只看"判定"是不够的 —— 退场动画期间还要留着内容给它淡（见 fadingOut）
     if (!visible && !fadingOut) return
@@ -1393,6 +1403,12 @@ fun LiveDanmakuChatPanel(
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
+                // ★★2026-10-01：底部留出"面板背景铺到窗口底、内容止于底栏顶边"的那一段
+                //   （键盘弹起时它自动变成键盘的高度 ⇒ 最新一条始终在底栏/键盘之上）。
+                //   reverseLayout 下 `contentPadding.bottom` = **最新一条**那一侧的留白，正是要的位置。
+                contentPadding = PaddingValues(
+                    bottom = with(density) { bottomInsetPx.coerceAtLeast(0).toDp() },
+                ),
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 4.dp, vertical = 2.dp),

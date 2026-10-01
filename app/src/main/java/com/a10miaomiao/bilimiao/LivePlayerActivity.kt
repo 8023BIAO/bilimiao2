@@ -140,14 +140,20 @@ import kotlin.math.roundToInt
  * ├─ danmakuLayer（FrameLayout）              弹幕层容器 → LiveDanmakuOverlayHost（compose 模块的桥接 View）
  * ├─ TapCatcher                                手势层：单击显隐控制条 / 双击播放暂停 / 左右半区上下滑
  * ├─ hudLayer（FrameLayout）                   手势气泡层：音量/亮度（★第三批：从 Dialog 窗口搬进来的）
+ * ├─ danmakuPanelLayer（FrameLayout）          ★★2026-10-01 新增：**列表面板层** —— 宿主注入的竖屏
+ * │        弹幕列表面板放这一层（[bindPortraitListArea] 把层交给宿主）。位置由末尾的 bringToFront()
+ * │        钉死在 hudLayer 与顶栏之间 ⇒ 层级 `视频 < 弹幕 < 手势 < 气泡 < **面板** < 顶栏 < 底栏`：
+ * │        面板**高于手势层**（列表能滑）、**低于底栏**（按钮能点、底栏浮在弹幕之上），
+ * │        于是面板矩形可以铺到**窗口底**——用户要的"弹幕区把底栏铺满"。
  * ├─ 顶栏：返回**图标** + 标题（`直播间 房间号（x.x万人在线）`）+ 状态文字
  * │        ★状态文字**只在异常/过渡时显示**（正常播放时 `GONE`，顶栏只剩返回 + 标题）——
  * │          见 [renderStatus]；在线人数跟着房间号写在同一个括号里，见 [renderRoomTitle]。
  * ├─ 底栏（bottomBar）：**输入条 + 五颗按钮（同一行）**（弹幕 / 画质 / **设置** / 画中画 / 旋转）
- * │        ★2026-10-01（用户拍板②）：**悬浮** —— 渐变半透明底（[floatingBarBackground]）、
+ * │        ★2026-10-01（用户拍板②）：**悬浮在弹幕之上** —— 渐变半透明底（[floatingBarBackground]）、
  * │          不参与任何"占位"计算：竖屏流铺满时它压住的是**画面**，控制条自动隐藏后露出来的也是画面。
- * │          列表底边仍取"底栏顶边"（宿主面板注入在 `android.R.id.content`、在底栏**之上**，
- * │          面板一旦盖住底栏就会既挡住按钮又吃掉触摸 —— 见 [measurePortraitStage] 的 KDoc）。
+ * │          ★面板改注入 [danmakuPanelLayer]（在底栏**之下**）之后，**背景底边**可以铺到窗口底，
+ * │          但**内容可见底边**仍是"底栏顶边"（键盘弹起时 = 键盘顶边）——
+ * │          见 [measurePortraitStage] 与宿主 `LiveDanmakuOverlayHost.panelBottomInset`。
  * │        ★第八批：竖屏与横屏**同一套一行版式**（需求：把控件与相邻按钮并排）；
  * │          输入条**与五颗按钮同一套显隐**（点画面唤出、[CONTROLS_AUTO_HIDE_MS] 后一起消失，
  * │          用 INVISIBLE 保住占位；"正在输入"不收、PiP 里 GONE —— 见 [applyControlsVisibility]）。
@@ -1037,6 +1043,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private lateinit var videoContainer: AspectRatioFrameLayout
     private lateinit var videoView: TextureView
     private lateinit var danmakuLayer: FrameLayout
+
+    /**
+     * ★★2026-10-01（用户拍板：底栏按钮悬浮在弹幕之上）：**列表面板层** ——
+     * 宿主注入的竖屏弹幕列表面板放进这一层（[bindPortraitListArea] 把本层交给它）。
+     * z 序由 `buildUi()` 末尾的 `bringToFront()` 序列钉死在 `hudLayer` 与 `topBar` 之间：
+     * 高于手势层（列表能滑）、低于顶栏/底栏（按钮能点）、矩形可铺到窗口底。
+     */
+    private lateinit var danmakuPanelLayer: FrameLayout
     private lateinit var tapCatcher: View
 
     /**
@@ -5520,6 +5534,29 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             ),
         )
 
+        // ③‴ ★★2026-10-01（用户拍板：底栏按钮悬浮在弹幕之上）**列表面板层**：
+        //     host 注入的竖屏弹幕列表面板往**这一层**里放（[bindPortraitListArea] 把层交给宿主），
+        //     它在 z 序里的位置由末尾那段 `bringToFront()` 钉死 —— **夹在 ③′ hudLayer 与 ④ topBar 之间**：
+        //     ```
+        //     视频(0) < danmakuLayer < tapCatcher < hudLayer < **面板层** < topBar < bottomBar < progressBar
+        //     ```
+        //     ⇒ ① 面板高于 [tapCatcher]：[danmakuLayer] 收不到触摸那条老坑不会重演，**列表能滑**；
+        //        ② 面板低于 topBar/bottomBar：**按钮能点**、底栏的渐变浮在弹幕之上；
+        //        ③ 面板矩形因此可以一直铺到**窗口底**（含底栏那一条）——这正是用户要的"弹幕区把底栏铺满"。
+        //     ★本层自己不画、不吃触摸、不聚焦（只是"摆面板的位置"）：层内没有子 View 的地方
+        //       触摸照旧穿透到下面的手势层（[hudLayer]/[tapCatcher]），亮度/音量手势一格没动。
+        danmakuPanelLayer = FrameLayout(this).apply {
+            isClickable = false
+            isFocusable = false
+        }
+        rootLayout.addView(
+            danmakuPanelLayer,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
         // ③″ 竖屏"弹幕列表槽"（INVISIBLE 的占位 View）：位置 = 播放页留给列表的那块矩形，
         //     由 [measurePortraitStage] 每次量完写进它的 LayoutParams。
         //     它自己不画、不吃触摸，作用只有一个：把矩形**以 View 的形式**交给弹幕宿主
@@ -5814,14 +5851,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         )
 
         // ⑧ ★把图层顺序**钉死**（这一段就是"弹幕看不见"的结构性修复）：
-        //    视频 → 弹幕 → 手势 → 气泡 → 顶栏 → 底栏 → 缓冲圈。
+        //    视频 → 弹幕 → 手势 → 气泡 → **列表面板层** → 顶栏 → 底栏 → 缓冲圈。
         //    用 bringToFront() 逐个提到最前，顺序只由这一行决定 —— 不再依赖
         //    "谁在什么时候 addView"，也就不会再出现"弹幕宿主是后来才建出来的，
         //    结果掉到某一层下面"这种事。
         //    ★气泡层夹在 [tapCatcher] 与顶栏之间：看得见（压着视频/弹幕）、
         //      挡不住手势（不吃触摸）、也不会盖住控制条上的按钮。
+        //    ★[danmakuPanelLayer] 夹在 [hudLayer] 与 [topBar] 之间（2026-10-01 用户拍板）：宿主注入的
+        //      竖屏列表面板放这一层 ⇒ **高于手势层（能滑）、低于顶栏/底栏（按钮能点）**，
+        //      于是面板矩形可以铺到窗口底（弹幕区"把底栏铺满"），底栏按钮浮在弹幕之上。
         //    ★第五批删掉了原来夹在手势层与顶栏之间的"音频舞台"（[audioScroll]）。
-        listOf<View>(danmakuLayer, tapCatcher, hudLayer, topBar, bottomBar, progressBar)
+        listOf<View>(danmakuLayer, tapCatcher, hudLayer, danmakuPanelLayer, topBar, bottomBar, progressBar)
             .forEach { it.bringToFront() }
 
         setContentView(rootLayout)
@@ -8913,24 +8953,23 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ★★第八批：PiP 里"哪种形态"不再是问题 —— 画面必须铺满小窗（见上面那段 KDoc 的 ①~④）
         val pipFill = isInPictureInPictureMode
         val portrait = !isPageLandscape(orientationOverride) && !pipFill
-        // ★★2026-10-01（用户拍板①"竖屏流铺满"）：竖屏手机 + 竖屏流（解码高 > 宽）⇒ 关掉带子、
-        //   容器铺满整块可用区、画面按 **cover** 等比放大（[AspectRatioFrameLayout.coverChild]）：
-        //   填满、不拉伸，超出容器的部分由容器裁掉（用户这块屏 9:19.9 装 9:16 的流 ⇒ 左右各裁一点，
-        //   这是 B 站/PiliPlus 同款预期行为）。横屏流、以及**比例还没到的起播瞬间**一个字节都不动 ——
-        //   用户："竖屏状态下，那些横屏的流就不用动，那个非常好"。
+        // ★★2026-10-01 用户最终拍板（在"不裁切但弹幕区只剩 ~233px"与"裁切但铺满"之间选了后者，
+        //   理由"跟 B站/PiliPlus 一致"）：竖屏手机 + **竖屏流**（解码高 > 宽）⇒ 关掉带子、容器铺满
+        //   整块可用区、画面按 **cover** 等比放大（[AspectRatioFrameLayout.coverChild]）：
+        //   填满、不拉伸，超出容器的部分由容器裁掉（这块屏 9:19.9 装 9:16 的流 ⇒ 左右各裁 ~9.4%）。
+        //   横屏流、以及**比例还没到的起播瞬间**一个字节都不动 —— 用户："那些横屏的流就不用动，那个非常好"。
         val cover = portrait && isPortraitStream()
-        // ① 视频：竖屏 = 顶栏之下的一条带（高度由 [AspectRatioFrameLayout] 按比例量）；
+        // ① 视频：竖屏 + 横屏流 = 顶栏之下的一条带（高度由 [AspectRatioFrameLayout] 按比例量）；
         //          横屏 / PiP = 0f = 关掉带子，容器铺满整页（横屏与改动前逐字一致）；
         //          竖屏流 = 0f + cover = 容器同样铺满可用区，只是画面按"填满"量（不再留黑边）。
         val band = if (portrait && !cover) PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION else 0f
         // ★第四批第 3 条：带子模式下顶边 = 顶栏底边（横屏/听音频/PiP 保持 0 = 铺满/贴顶）
-        //   ★铺满模式用**同一个**顶边（画面从顶栏之下开始，沉浸式/挖孔/状态栏安全区照旧）；
-        //     只有"横屏 / PiP"才是 0 —— 那是第八批钉死的口径，这里一格没动。
+        //   ★用户 2026-10-01 明确："顶栏就不要管它……视频流距离顶栏（状态栏）刚好有一段黑色区域，
+        //     那个就不要动它" ⇒ cover 也用**同一个**顶边、不往顶栏后面铺（`topMargin` 保持 bandTop）。
         val bandTop = if (portrait) videoBandTopPx() else 0
-        // ★2026-10-01：带子的高度上限 = 可用高 − reserve（reserve = 列表目标高 + 底栏占位），
-        //   只有竖屏带子模式才需要它；量不到底栏（reserve = 0）时**不猜** —— 由
-        //   [AspectRatioFrameLayout] 退回旧的 0.62 口径摆一帧，宁可先按旧版摆，
-        //   也不要拿一个猜出来的 reserve 去定版式。
+        // ★带子的高度上限 = 可用高 − reserve（reserve = 列表目标高 + 底栏占位），只有**横屏流的带子模式**
+        //   才需要它（竖屏流 cover 时 band = 0，压根不问）；量不到底栏（reserve = 0）时**不猜** ——
+        //   由 [AspectRatioFrameLayout] 退回 0.62 下限口径摆一帧，宁可先按旧版摆，也不拿猜的值定版式。
         val bandReserve = if (band > 0f) portraitBandReservePx(bandTop) else 0
         val lp = videoContainer.layoutParams
         if (lp is FrameLayout.LayoutParams &&
@@ -8940,8 +8979,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // 就是"贴顶"，显式写出来只是把这条不变量固定住 —— 横向因为宽度是 MATCH_PARENT 而不受影响。
             // ★topMargin 不只是"挪一下"：FrameLayout 给 MATCH_PARENT 子 View 的高度测量里会**扣掉
             //   margin**（`getChildMeasureSpec(parentHeight, padding + margins, MATCH_PARENT)`），
-            //   所以 [AspectRatioFrameLayout] 算带子高度时用的可用高度天然就是"页高 - 顶栏"——
-            //   带子高度上限（reserve 口径）也落在剩下的这块里，带子不会被顶出屏幕。
+            //   所以 [AspectRatioFrameLayout] 算带子高度时用的可用高度天然就是"页高 − 顶栏"
+            //   （= 类 KDoc 里那个 `containerHeight`；cover 的容器高低也是它）。
             lp.gravity = Gravity.TOP
             lp.topMargin = bandTop
             videoContainer.layoutParams = lp
@@ -8951,7 +8990,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             videoContainer.bandMinHeightFraction != band ||
             videoContainer.bandReserveBottomPx != bandReserve
         ) {
-            // ★铺满开关与带子那两个参数是**同一件事的三个面**（容器铺满 + 画面按什么比例量），
+            // ★cover 开关与带子那两个参数是**同一件事的三个面**（容器铺满 + 画面按什么比例量），
             //   一起写、一起 requestLayout —— 分开写会出现"容器已铺满、画面还按带子量"的中间帧。
             videoContainer.coverChild = cover
             videoContainer.bandMinHeightFraction = band
@@ -8962,7 +9001,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         LivePageTrace.noteIfChanged(
             "stage.video",
             "pip=$pipFill|portrait=$portrait|cover=$cover|band=$band|bandTop=$bandTop|reserve=$bandReserve" +
-                // 横屏/PiP（band=0）不适用 ⇒ 显式打 0，免得看到上一帧竖屏的残留值
+                // 竖屏流 cover（band=0）不适用 ⇒ 显式打 0，免得看到上一帧竖屏带子的残留值
                 "|listTarget=${if (band > 0f) lastBandListTargetPx else 0}" +
                 "|top=${videoContainer.top}|h=${videoContainer.height}|w=${videoContainer.width}" +
                 "|page=${if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"}",
@@ -9224,6 +9263,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         danmakuHost?.bindPortraitListArea(
             slot = danmakuListSlot,
             bottomBound = bottomBar,
+            // ★★2026-10-01：面板的**注入层**改由播放页给（原来宿主硬编码 android.R.id.content
+            //   ⇒ 面板是 rootLayout 的后加兄弟、永远压在底栏上 ⇒ 既挡按钮又吃触摸）。
+            //   现在交给夹在 hudLayer 与 topBar 之间的 [danmakuPanelLayer]：
+            //   层级 = 视频 < 弹幕 < 手势 < 气泡 < **面板** < 顶栏 < 底栏。
+            panelLayer = danmakuPanelLayer,
         )
     }
 
@@ -9237,30 +9281,23 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 不按比例摆放就会变形。这里在 measure 阶段把子 View 量成"贴比例"的尺寸，
      * 再由 FrameLayout 的 CENTER gravity 居中（黑边留在两侧/上下）——**恒等比，从不拉伸**。
      *
-     * ★[bandMinHeightFraction]（竖屏"贴顶视频带"）：>0 时**容器自己**也按比例缩成一条带，
-     *   而不是铺满整页 —— 这是"上面视频、下面弹幕列表"这块版式的落地处。横屏传 0，行为与改动前逐字一致。
-     *
-     * ★★2026-10-01 带高口径（用户："竖屏直播尽量全屏铺满、千万不要拉伸"）：
+     * ## 两种口径（★2026-10-01 用户最终拍板）
      * ```
-     * 带高 = min(画面自然高 = 容器宽 ÷ 视频比例,  可用高 − bandReserveBottomPx)
-     *                                                      ↑ 且不低于 可用高 × bandMinHeightFraction
+     * 横屏流（宽 ≥ 高）/ 比例未知：带高 = min(自然高, max(可用高 − bandReserveBottomPx, 可用高 × bandMinHeightFraction))
+     *                              ↑ **与改动前逐字一致**（用户："那些横屏的流就不用动，那个非常好"）
+     * 竖屏流（高 > 宽）：band = 0 + [coverChild] ⇒ 容器铺满可用区、画面 **cover**（放大填满、左右各裁一点）
      * ```
-     * ★两句话把量纲说死（这条被独立复核质疑过，别再按错的模型调参）：
-     *   · `可用高` 是 **containerHeight**（= 页高 − 带子顶边），**不是整页高**（`topMargin` 已被扣掉）；
-     *   · [bandReserveBottomPx] 是"带子**下方**要预留的总高（列表目标 + 底栏占位）"，减在 `可用高`
-     *     上得到带高 —— 列表实得 = `底栏顶边 − 带子底边` = **列表目标**（`bandTop` 自动抵消，
-     *     推导见 [portraitBandReservePx]）。
-     * ★画面宽怎么来：**容器宽恒 = 页宽**（本页从不写 [videoContainer] 的 `lp.width`），
-     *   画面宽 = `min(页宽, 带高 × 视频比例)` —— 带高 < 自然高时等比缩窄 + 左右黑边，带高 = 自然高时满宽。
-     *   ⇒ reserve 变大 ⇒ 带高变小 ⇒ 画面变窄（单调，上限 100%）。旧口径 `0.62 × 可用高` 时 9:16 只有
-     *   **69.5%** 屏宽，新口径 **82.7%**（真机 1264×2800@3.5：bandTop=280 / 底栏占位=158 / 可用高 2520）。
-     * ★画面**底边恒等于带子底边**（子 View 被量成带高、且与容器同高，`Gravity.CENTER` 不产生竖向余量）
-     *   ⇒ 宿主"列表顶 = **画面**底边"（`LiveDanmakuOverlayHost` 的 `computeDockedRect`）与播放页
-     *   "列表顶 = 带底"（[measurePortraitStage]）**永远是同一条边**，视频与列表之间不会留黑缝。
-     * ★列表那一份**不能给太少也不能给太多**：96dp 只剩约 4 行（vc209 用户实测嫌小）、180dp 会把画面
-     *   打到 77%（逼近改动前的 69.5%）—— 折中与理由见 [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION]。
-     * 而 [bandMinHeightFraction] 退化成**下限**：只有"让完 reserve 后比旧口径还矮"（分屏/折叠屏/
-     * 极矮窗口）或 reserve 还没量到（0）时才生效 —— 保证不会为了塞列表把画面压得比改动前更小。
+     * ★竖屏流为什么是 cover（用户在有"不裁切但弹幕区只剩 ~233px"与"裁切但铺满"的取舍后选了后者，
+     *   理由："跟 B站/PiliPlus 一致"）：9:16 的流装进 9:19.9 的可用区 ⇒ 按高放大、**左右各裁 ~9.4%**，
+     *   画面**不变形**、无黑边；裁掉的部分由容器裁（`clipChildren` 默认 true，且画面是 [TextureView]，
+     *   走窗口绘制 ⇒ 真的吃父容器裁剪）。
+     * ★横屏流那一支**保持 reserve 口径**（不是省事，是验收要求）：真机 1264×2800 下 16:9 带高 711
+     *   = 自然高、reserve 够不到；而在"极矮窗口"（如 1264×1000）里 reserve/下限才真正生效、
+     *   把画面压小给列表让位 —— 复核员的 10 窗口 × 4 比例网格就是按这一支逐字段比的，
+     *   换口径会让那张表整体飘掉，所以**一个字不改**。
+     * ★"可用高"是 **containerHeight**（= 页高 − 带子顶边，`topMargin` 已被 FrameLayout 扣掉），
+     *   不是整页高 —— 量纲说死，别再按"整页高"的模型调参。
+     * ★画面宽怎么来：**容器宽恒 = 页宽**（本页从不写 [videoContainer] 的 `lp.width`）。
      */
     private class AspectRatioFrameLayout(context: Context) : FrameLayout(context) {
 
@@ -9273,7 +9310,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         var videoAspectRatio: Float = 0f
 
         /**
-         * ★竖屏"贴顶视频带"的高度**下限**（占"可用高"的比例），0 = 关闭带子（横屏 / PiP）。
+         * ★竖屏"贴顶视频带"的高度**下限**（占"可用高"的比例），0 = 关闭带子（竖屏流 cover / 横屏 / PiP）。
          *
          * 为什么高度算法放在 onMeasure 里、而不是在外面算好了 setLayoutParams：
          * "页面有多高"要等这一帧量完才知道，在外面算就得跟布局时机赛跑（转屏/分屏/折叠屏展开
@@ -9287,19 +9324,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * 由 [portraitBandReservePx] 算好推进来；**从 `containerHeight`（带子局部可用高）里减**，
          * 结果的列表区恰好等于"列表目标"（两处的 `bandTop` 互相抵消，推导与真机算例都在那边的 KDoc 里）。
          * 名字里的 "Bottom" 指**带子下方**（列表 + 底栏），不是"底栏那一块"。
-         * "为什么不在 onMeasure 里自己算"：容器看不见底栏，这个值只能由播放页给。
-         * 为 0 时**不参与**上限计算（退回 [bandMinHeightFraction] 的旧口径），绝不猜。
+         * ★只对**横屏流**生效；竖屏流走 [coverChild]（容器铺满、画面 cover），压根不问 reserve。
          */
         var bandReserveBottomPx: Int = 0
 
         /**
-         * ★★2026-10-01（用户拍板①"竖屏流铺满"）：把画面按 **cover** 量 —— 等比放大到**填满容器**，
-         * 超出容器的部分由容器裁掉（`clipChildren` 默认 true），不拉伸、不留黑边。
+         * ★★2026-10-01（用户拍板：**裁切铺满** + 弹幕浮在画面上）：把画面按 **cover** 量 ——
+         * 等比放大到**填满容器**，超出容器的部分由容器裁掉，不拉伸、不留黑边。
          *
-         * 只由播放页在"竖屏手机 + 竖屏流"时置位（[isPortraitStream]），与带子模式互斥
-         * （带子模式下 [bandMinHeightFraction] > 0，这里一律不生效）。用户这块屏 9:19.9 装 9:16 的流
-         * ⇒ 按高放大、**左右各裁一点**；容器是[TextureView]（普通 View，走窗口绘制），
-         * 所以裁剪是**真的裁在容器边界上**（SurfaceView 那种独立图层才不吃父容器裁剪）。
+         * 只由播放页在"竖屏手机 + 竖屏流"（[isPortraitStream]）时置位；与 [bandMinHeightFraction] > 0
+         * 互斥（cover 时 band = 0，容器 = 整块可用区）。9:19.9 的屏装 9:16 的流 ⇒ 按高放大、
+         * **左右各裁一点**（预期行为）。
          */
         var coverChild: Boolean = false
 
@@ -9315,10 +9350,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val containerHeight = View.MeasureSpec.getSize(heightMeasureSpec)
             if (containerWidth <= 0 || containerHeight <= 0) return
             val effectiveRatio = if (ratio > 0f) ratio else DEFAULT_ASPECT_RATIO
-            // 带子模式：上限 = 可用高 − reserve（把带子**下方**的列表 + 底栏先让出来）；
+            // 带子模式（横屏流）：上限 = 可用高 − reserve（把带子**下方**的列表 + 底栏先让出来）；
             // reserve 没量到（0）或让完比下限还矮 ⇒ 退回下限口径（= 改动前的 62% 行为）。
-            // ★reserve 是"带子下方的总高"，可用高是"带子局部的可用高" —— 两处 bandTop 互相抵消，
-            //   列表实得恰好 = 列表目标（推导 + 真机算例见 [portraitBandReservePx]）。
             val height = if (band) {
                 val floorCap = (containerHeight * bandMinHeightFraction).roundToInt()
                 val reserveCap = if (bandReserveBottomPx > 0) {
@@ -9335,8 +9368,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val containerRatio = containerWidth.toFloat() / height.toFloat()
             val childWidth: Int
             val childHeight: Int
-            // ★★铺满（cover）：与下面"留黑边"的 contain 恰好相反 —— 哪一边不够，就把另一边
-            //   放大到**超出**容器（多出来的部分被容器裁掉）。两处都按同一比例算 ⇒ 不会变形。
+            // ★★cover（竖屏流）：与下面"留黑边"的 contain 恰好相反 —— 哪一边不够，就把另一边
+            //   放大到**超出**容器（多出来的部分被容器裁掉）。两个方向都按同一比例算 ⇒ 不会变形。
             val fill = coverChild && !band && ratio > 0f
             if (fill && containerRatio > effectiveRatio) {
                 // 容器比画面"宽" → 宽度顶满，高度溢出（裁上下）
@@ -9347,10 +9380,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 childHeight = height
                 childWidth = (height * effectiveRatio).roundToInt()
             } else if (containerRatio > effectiveRatio) {
-                // 容器更宽 → 高度顶满，左右留黑边
+                // 容器比画面"宽" → 高度顶满、左右留黑边（横屏流让完 reserve 后比自然高更矮时走这里）
                 childHeight = height
                 childWidth = (height * effectiveRatio).roundToInt()
             } else {
+                // 容器比画面"窄高" → **宽度顶满**（横屏流常规路径：满宽、无黑边、不变形）
                 childWidth = containerWidth
                 childHeight = (containerWidth / effectiveRatio).roundToInt()
             }
@@ -9359,7 +9393,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 View.MeasureSpec.makeMeasureSpec(childHeight, View.MeasureSpec.EXACTLY),
             )
             // ★带子：容器自己的高度也要跟着改小（super.onMeasure 量出来的是"铺满整页"）
-            //   ★铺满模式不走这一支：容器就是要"铺满可用区"（super 量出来的那个），画面才是溢出的那一个。
+            //   ★cover 模式不走这一支：容器就是要"铺满可用区"（super 量出来的那个），画面才是溢出的那一个。
             if (band) setMeasuredDimension(containerWidth, height)
         }
     }
