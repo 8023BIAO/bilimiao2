@@ -1270,13 +1270,18 @@ class LiveDanmakuOverlayHost(
             rawTop = pictureTop ?: (contentHeight / 2)
         }
         val top = rawTop.coerceIn(0, contentHeight)
-        // ★★背景底边 = **内容区底边**（容器底 = 窗口底），不再是"底栏顶边"（2026-10-01 用户拍板）：
-        //   面板连黑底一起铺到窗口最底 ⇒ 底栏那一条也被弹幕区填满（用户："我想让弹幕区域把底栏铺满"），
-        //   而底栏本身浮在面板**之上**（[panelLayer] 的 z 序保证），按钮照旧能点。
+        // ★★背景底边：**看注入目标是谁**（2026-10-01 用户拍板 + 复核必改 M2）：
+        //   · 注入到 [panelLayer]（正常路径）：铺到**内容区底边**（容器底 = 窗口底）——
+        //     面板连黑底一起铺到窗口最底 ⇒ 底栏那一条也被弹幕区填满（用户："把底栏铺满"），
+        //     而底栏浮在面板**之上**（z 序保证），按钮照旧能点；
+        //   · 退回 `android.R.id.content`（老播放页 / 层没就绪）：面板在底栏**之上**，
+        //     这时必须按老口径把背景**扣到内容可见底边**（= 底栏顶边），否则会盖住底栏、连按钮触摸一起吃掉，
+        //     而且不会自愈（[ensureChromeHost] 对已 attach 的缓存目标直接 return）。
         //   内容可见底边另算（上面的 `contentBottom`），由 [refreshDockedPanel] 交给面板做底部内容内边距。
+        val injectedIntoPanelLayer = parent != null && parent === panelLayer
         return DockedRect(
             top = top,
-            bottom = contentHeight,
+            bottom = if (injectedIntoPanelLayer) contentHeight else contentBottom,
             contentBottom = contentBottom.coerceIn(top, contentHeight),
         )
     }
@@ -1419,11 +1424,20 @@ class LiveDanmakuOverlayHost(
      *   `attachSurfaceView()` 那条回退路径现在也没人调）。所以"树里最大的那个 TextureView/SurfaceView"
      *   就是画面，判据唯一、不会误伤。真找不到就返回 null，退回槽顶边/上半屏，绝不给错值。
      * ★只在"没接 videoView 锚点、且缓存失效"时才会走到这里（正常路径一次都不搜）；
-     *   搜到就缓存，后续只读坐标。下钻深度与底栏兜底同一个上限（[MAX_CHROME_SCAN_DEPTH]），
-     *   当前树是 content → rootLayout → videoContainer → TextureView，3 层正好够。
+     *   搜到就缓存，后续只读坐标。下钻深度与底栏兜底同一个上限（[MAX_CHROME_SCAN_DEPTH]）。
+     * ★★2026-10-01：**搜索根要看注入目标** —— 面板层（[panelLayer]）里只有一个面板 ComposeView，
+     *   从它往下搜**永远搜不到画面**（v3 改注入目标时踩到的真回归；正常路径已由播放页接上 `videoView`
+     *   锚点兜住，这里是"锚点缺席"时的兜底）。注入目标是面板层时**往上走一层**（播放页 rootLayout，
+     *   树是 rootLayout → videoContainer → TextureView，3 层正好够）；与
+     *   [findBottomBarTopInWindow] 处理同一个"层太窄"问题的做法完全同款。
      */
     private fun findPictureView(): View? {
-        val root = chromeHost ?: return null
+        val injected = chromeHost
+        val root = (if (injected != null && injected === panelLayer) {
+            injected.parent as? ViewGroup
+        } else {
+            injected
+        }) ?: return null
         var best: View? = null
         var bestArea = 0L
 

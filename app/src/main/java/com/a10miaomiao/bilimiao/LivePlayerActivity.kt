@@ -9262,6 +9262,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private fun bindPortraitListArea() {
         danmakuHost?.bindPortraitListArea(
             slot = danmakuListSlot,
+            // ★★2026-10-01（复核必改 M1）：**必须把画面锚点接上**。宿主"顶边第一优先 = 画面底边"这条
+            //   防历史 bug 的保障链，靠的是这个锚点或它的结构兜底；而 v3 把注入目标换成 [danmakuPanelLayer]
+            //   之后，那个层里只有一个面板 ComposeView ⇒ 宿主的**结构**兜底再也搜不到画面（我同时给
+            //   `findPictureView()` 补了"往上走一层"，这里再按宿主 KDoc 的"建议一定接上"接死锚点）。
+            //   不接的后果：槽未就绪/转屏量成 0 高的降级帧里，顶边会掉到"容器高÷2"= 半屏 ⇒ 列表面板闪一下变大。
+            videoView = videoContainer,
             bottomBound = bottomBar,
             // ★★2026-10-01：面板的**注入层**改由播放页给（原来宿主硬编码 android.R.id.content
             //   ⇒ 面板是 rootLayout 的后加兄弟、永远压在底栏上 ⇒ 既挡按钮又吃触摸）。
