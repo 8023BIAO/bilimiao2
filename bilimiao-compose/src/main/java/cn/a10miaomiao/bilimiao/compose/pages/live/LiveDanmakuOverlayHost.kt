@@ -1195,13 +1195,26 @@ class LiveDanmakuOverlayHost(
             .coerceIn(0, contentHeight)
         val slot = slotView
         // 顶边第一优先：**画面底边**（= 列表要贴的"视频带底边"，也是唯一"活"的那个真值）
-        val pictureTop = videoPictureBottomInWindow()?.let { it - parentTop - parentPaddingTop }
+        // ★★2026-10-01（用户拍板"竖屏流铺满"）：**画面铺满到容器底**时这条不再是列表顶 ——
+        //   铺满模式（`LivePlayerActivity` 的 cover）下画面一直铺到页底，`pictureBottom` 会等于
+        //   （甚至大于：画面溢出、被容器裁掉）容器底边，拿它当顶边只能得到 0 高的面板
+        //   （宿主随即把列表整个收起 ⇒ 现场就是"竖屏流铺满之后弹幕列表没了"）。
+        //   ⇒ 这时顶边改由**播放页发布的槽**给出（槽顶 = 列表顶的唯一真值，见
+        //     `LivePlayerActivity.measurePortraitStage` 的 cover 分支）。
+        //   ★判据是**纯几何**的（画面贴到/越过容器底），宿主这里**不认识**"视频方向"这个概念；
+        //     带子模式（画面底边 < 容器底）因此**一个字都不变**。
+        val pictureTop = videoPictureBottomInWindow()
+            ?.let { it - parentTop - parentPaddingTop }
+            ?.takeIf { it < contentHeight }
         val rawTop: Int
         val rawBottom: Int
         if (slot != null && slot.height > 0) {
             // 播放页已经留好一个矩形：铺满它，但仍然不许越过底栏。
             // ★顶边仍以画面为准（画面拿不到才用槽顶边）：槽是"量过就不再变"的镜像，
             //   视频换比例/转屏之后它可能还停在旧值上，那时按槽摆就会压住画面或留下黑缝。
+            //   ★唯一例外见上：画面**铺满到容器底**时（铺满模式）`pictureTop` 刻意取成 null，
+            //     于是这一支正好落到"槽顶边"——那正是播放页算好的列表顶（不是旧值镜像：
+            //     铺满模式下列表顶只由底栏顶边与列表目标决定，播放页每次布局都会重算）。
             rawTop = pictureTop ?: (slot.yInWindow() - parentTop - parentPaddingTop)
             // ★★底边：有底栏锚点时**只认它**，不再与"槽的底边"取 min（本轮键盘/转屏适配的核心一行）。
             //   槽的底边只是"底栏顶边"的镜像，而且它是**播放页量过就不再变**的那一份：

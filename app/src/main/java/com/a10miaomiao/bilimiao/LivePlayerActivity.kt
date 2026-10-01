@@ -96,6 +96,7 @@ import com.a10miaomiao.bilimiao.comm.toast
 //   本页顶栏「在线人数」已于 2026-09-26 撤掉，首页直播卡片与直播搜索卡片上的数字角标也已删除
 //   —— 前者的 `online`／`text_large` 有两种口径，显示哪种都会有一半房间是错的）。
 //   所以"1.2万"这个口径全 App 只有一份实现。
+import com.a10miaomiao.bilimiao.comm.utils.NightModeUtil
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.ScreenDpiUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
@@ -127,8 +128,12 @@ import kotlin.math.roundToInt
  * ```
  * FrameLayout（rootLayout = 用户看到的那一页）
  * ├─ AspectRatioFrameLayout ── TextureView     视频（按视频比例等比，不变形）
- * │     ★竖屏：缩成"顶栏之下的那条带"（宽 ÷ 比例，且不高于 `可用高 − 列表 reserve`），顶边 = [videoBandTopPx]
+ * │     ★竖屏 + 横屏流：缩成"顶栏之下的那条带"（宽 ÷ 比例，且不高于 `可用高 − 列表 reserve`），顶边 = [videoBandTopPx]
  * │           （状态栏内边距 + 顶栏高度），**底边永远等于列表槽 [danmakuListSlot] 的顶边**
+ * │     ★竖屏 + **竖屏流**（解码高 > 宽）：容器**铺满可用区** + 画面按 **cover** 等比放大
+ * │           （超出容器的左右两条被裁掉、不留黑边；2026-10-01 用户拍板①）——此时"画面底边"
+ * │           不再是列表顶，列表改由"底栏顶边往上要一块"给出，见 [isPortraitStream] /
+ * │           [measurePortraitStage] 的 cover 分支
  * │     ★横屏：铺满整页、画面居中（与改动前逐字一致）
  * │     ★PiP：**一律铺满小窗**（关掉带子、顶边归零）—— 小窗里的黑边就是这么没的，
  * │           见 [applyVideoStageLayout] 的第八批那段
@@ -139,6 +144,10 @@ import kotlin.math.roundToInt
  * │        ★状态文字**只在异常/过渡时显示**（正常播放时 `GONE`，顶栏只剩返回 + 标题）——
  * │          见 [renderStatus]；在线人数跟着房间号写在同一个括号里，见 [renderRoomTitle]。
  * ├─ 底栏（bottomBar）：**输入条 + 五颗按钮（同一行）**（弹幕 / 画质 / **设置** / 画中画 / 旋转）
+ * │        ★2026-10-01（用户拍板②）：**悬浮** —— 渐变半透明底（[floatingBarBackground]）、
+ * │          不参与任何"占位"计算：竖屏流铺满时它压住的是**画面**，控制条自动隐藏后露出来的也是画面。
+ * │          列表底边仍取"底栏顶边"（宿主面板注入在 `android.R.id.content`、在底栏**之上**，
+ * │          面板一旦盖住底栏就会既挡住按钮又吃掉触摸 —— 见 [measurePortraitStage] 的 KDoc）。
  * │        ★第八批：竖屏与横屏**同一套一行版式**（需求：把控件与相邻按钮并排）；
  * │          输入条**与五颗按钮同一套显隐**（点画面唤出、[CONTROLS_AUTO_HIDE_MS] 后一起消失，
  * │          用 INVISIBLE 保住占位；"正在输入"不收、PiP 里 GONE —— 见 [applyControlsVisibility]）。
@@ -3586,6 +3595,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             )
             videoContainer.videoAspectRatio = width.toFloat() / height.toFloat()
             videoContainer.requestLayout()
+            // ★★2026-10-01（用户拍板①）：**流方向是"后到"的** —— 起播那一帧这里还是 0×0，
+            //   页面按老版式（带子 + contain）摆；真实尺寸一到，这里再排一次版式，
+            //   [applyVideoStageLayout] 会把"竖屏流"切到**铺满**（幂等：值没变一个字节不写）。
+            //   整个过程只改布局参数，**不重建播放器、不换 surface** ⇒ 不会白屏、不会闪黑，
+            //   画面只是当场换一次摆法（用户看到的是"竖屏流铺开"）。
+            applyVideoStageLayout()
             // 比例变了 → PiP 的宽高比与源矩形提示跟着变，不然 PiP 窗口会留黑边/动画起点错位
             updatePipParams()
         }
@@ -5759,7 +5774,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
         bottomBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(scrimColor())
+            // ★★2026-10-01（用户拍板②）：底栏改**悬浮** —— 上淡下浓的渐变蒙层（见 [floatingBarBackground]）
+            background = floatingBarBackground()
             // ★内边距走常量：格宽 = (底栏宽 - 这里的内边距 - 每格左右外边距) / 每行格数，
             //   [applyBottomBarTextSizes] 要用同一批数字算字号档位（见那三个常量）
             val pad = dpToPx(BOTTOM_BAR_PADDING_DP)
@@ -7455,19 +7471,48 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (isAppDarkTheme()) Color.argb(150, 0, 0, 0) else Color.argb(120, 0, 0, 0)
 
     /**
-     * 当前是不是深色主题：与 `MainActivity.applyAppBarTheme()` 的判定逐字一致
-     * （`darkMode`：0=跟随系统、1=浅色、2=深色）。
+     * ★★2026-10-01（用户拍板②）：**悬浮底栏**的底 —— 上淡下浓的竖向渐变（同一套 scrim 色）。
+     *
+     * 为什么不再是纯色块：底栏从"占位的一条"改成"浮在画面上"之后，它压住的是**画面**
+     *   （竖屏流铺满时，画面一直铺到页底）或**列表的底色**。纯色块看起来仍然像"又占了一条"；
+     *   换成"约六成 alpha → scrim 本色"的渐变，一眼看得出是浮层，而文字（输入条/五颗按钮）
+     *   压在最浓的那一段上，可读性不掉 —— 这正是用户说的"把底栏悬浮在它上面"。
+     *
+     * ★颜色仍然只有 [scrimColor] 这一个来源（深浅色两档）、不新增配色常量、不改主题策略；
+     *   与顶栏的纯色 scrim 同色同源，只是底栏多了一段渐隐。
+     * ★底栏**几何一个字节没动**：它本来就是 rootLayout 里 `Gravity.BOTTOM` 的浮层
+     *   （FrameLayout 子 View 之间互不影响布局），变的只是"它压住谁"——
+     *   列表区的底边仍取"底栏顶边"（见 [measurePortraitStage]）：宿主的列表面板注入在底栏**之上**，
+     *   面板一旦盖到底栏上，就会既挡住按钮、又吃掉按钮的触摸。
      */
-    private fun isAppDarkTheme(): Boolean {
-        val mode = SettingPreferences.cachedPreferencesOrNull()
-            ?.get(SettingPreferences.ThemeDarkMode) ?: 0
-        return when (mode) {
-            1 -> false
-            2 -> true
-            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-                Configuration.UI_MODE_NIGHT_YES
-        }
+    private fun floatingBarBackground(): GradientDrawable {
+        val scrim = scrimColor()
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(ColorUtils.setAlphaComponent(scrim, Color.alpha(scrim) * 3 / 5), scrim),
+        )
     }
+
+    /**
+     * 当前是不是深色主题（`darkMode`：0=跟随系统、1=浅色、2=深色）。
+     *
+     * ★★2026-10-01 修复（与 P0 旋转 bug **同一个病根**）：`darkMode = 0`（跟随系统）那一支
+     *   原来读的是 `resources.configuration.uiMode` —— 而本页的 `resources` 是被
+     *   [attachBaseContext] 换成 `createConfigurationContext(...)` 的那一份，它是**建页那一刻的
+     *   快照**，不随系统深浅色切换更新 ⇒ 用户看到的是"**在直播间里切系统深浅色不生效，要重进房间**"。
+     *
+     * ★真源**统一**到 [NightModeUtil.isAppInDark]（本 App 深浅色判据的唯一落点，`1c25489f` 抽出）：
+     *   · "跟随系统"那一档 → `Resources.getSystem()`（**系统**配置，不吃 app 的 override）；
+     *   · "始终浅 / 始终深"两档 → `AppCompatDelegate.getDefaultNightMode()`，
+     *     而设置（`ThemeDarkMode`）写的就是它 ⇒ 与 `MainActivity.applyAppBarTheme()`、
+     *     `ThemeDelegate`、点播页**同一口径**，不再各读各的（原来这里自己读 `ThemeDarkMode` 快照，
+     *     虽然结论相同，但"几处各读一份"正是这类快照 bug 的温床）。
+     *   ⇒ 与 [LiveDanmakuOverlay.systemDanmakuDensity]（同样用 `Resources.getSystem()`）口径一致。
+     * ★没有缓存要清：本函数没有任何字段/Compose state 缓存，唯一调用方 [scrimColor] 每次现算；
+     *   重新求值的时机本来就有 —— `onConfigurationChanged`（`uiMode` 在 configChanges 名单里）
+     *   → `resolveThemeColors()` + `applyThemeColors()` → [scrimColor]。
+     */
+    private fun isAppDarkTheme(): Boolean = NightModeUtil.isAppInDark()
 
     /**
      * 把主题色刷到**已经建好的控件**上（转屏/深浅色切换后重算一次就够了，不重建页面）。
@@ -7483,7 +7528,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     private fun applyThemeColors() {
         if (!::rootLayout.isInitialized) return
         topBar.setBackgroundColor(scrimColor())
-        bottomBar.setBackgroundColor(scrimColor())
+        // ★★2026-10-01：底栏是**悬浮**的（渐变底，不是纯色）—— 这里也要按同一个口重刷，
+        //   否则深浅色一切换，底栏就退回老版纯色底（与顶栏不一致）。
+        bottomBar.background = floatingBarBackground()
         statusText.setTextColor(secondaryColor())
         titleText.setTextColor(Color.WHITE)
         // ★顶栏返回改成"只有图标"（复用点播播放器的 `ic_arrow_back_white_24dp`）——
@@ -8767,16 +8814,67 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         val barTop = bottomBar.top
         if (pageHeight <= 0 || bottomBar.height <= 0 || barTop <= 0) return 0
         val bottomOccupied = (pageHeight - barTop).coerceAtLeast(0)
-        val available = (pageHeight - bandTop).coerceAtLeast(0)
-        val listTarget = maxOf(
-            (available * PORTRAIT_LIST_TARGET_HEIGHT_FRACTION).roundToInt(),
-            dpToPx(PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP),
-        )
+        val listTarget = portraitListTargetPx(bandTop)
         // ★诊断（只读）：把"本帧打算给列表多少"记下来，供 stage.video 日志对账 ——
         //   真机上 `列表实得`（stage.measure 的 slotH / listRect）应等于它（reserve 上限生效时）。
         lastBandListTargetPx = listTarget
+        // ★★2026-10-01：底栏改**悬浮**之后这一份 `bottomOccupied` 为什么**保留** ——
+        //   它只在"带子真的被 reserve 顶到上限"时才起作用，而那种比例的流（高 > 宽）现在走
+        //   **铺满**那一支（band = 0，压根不问 reserve）；宽 ≥ 高的流，带高 = 自然高
+        //   （宽÷比例 ≤ 页宽），永远够不到这个上限 ⇒ 留着它**不会**动到"横屏流不动"那条要求。
         return bottomOccupied + listTarget
     }
+
+    /**
+     * 竖屏列表的**目标高**（px）= max(可用高 × [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION],
+     * [PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP])，其中可用高 = 页高 − 视频带顶边（= 顶栏底边）。
+     *
+     * ★抽出来只有一个理由：**这个数现在有两个用法** —— 带子模式下它是 reserve 里的那一份
+     *   （[portraitBandReservePx]）；铺满模式下它是"列表从底栏顶边往上要多少"
+     *   （[measurePortraitStage]）。两处必须是同一个数，所以只留一个实现（与原实现逐字等价）。
+     */
+    private fun portraitListTargetPx(bandTop: Int): Int {
+        val available = (rootLayout.height - bandTop).coerceAtLeast(0)
+        return maxOf(
+            (available * PORTRAIT_LIST_TARGET_HEIGHT_FRACTION).roundToInt(),
+            dpToPx(PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP),
+        )
+    }
+
+    /**
+     * 悬浮底栏**看得见的那一条**的高度（px）：按钮行 + 底栏自己的上下内边距。
+     *
+     * ★为什么不用 `页高 − bottomBar.top`（[portraitBandReservePx] 里那个"底栏占位"的口径）：
+     *   键盘弹出时底栏会被自己的 IME 内边距**撑高**（真机实测 `top=1611 / height=1189`，
+     *   顶边抬到键盘之上、下面那截垫在键盘底下），`页高 − 顶边` 把键盘那 1000 多 px 也算进"底栏"，
+     *   拿它当"列表要从底栏顶边往上让多少"会把列表顶挤到 0（列表反倒盖满画面）。
+     *   这里要的是"底栏**露在外面**的那一条"，所以按内容量 —— 与 IME 无关，键盘弹出时也不变。
+     * ★首帧按钮行还没量出来时返回 2×内边距（≈ 0）：列表顶先按"没有这一条"算，底栏一落定
+     *   [installPageLayoutWatchers] 里那只监听器就会重排一次（幂等），用户看不见这一帧。
+     */
+    private fun floatingBarStripPx(): Int {
+        // 底栏那一行 = max(输入条行, 五颗按钮行)（[rebuildBottomBar] 把两者摆进同一行）
+        val rowHeight = maxOf(
+            if (::bottomButtons.isInitialized) bottomButtons.height else 0,
+            if (::danmakuInputRow.isInitialized) danmakuInputRow.height else 0,
+        )
+        return (rowHeight + dpToPx(BOTTOM_BAR_PADDING_DP) * 2).coerceAtLeast(0)
+    }
+
+    /**
+     * ★★2026-10-01（用户拍板①"竖屏流铺满"）：这一路流是不是**竖屏流**（解码高 > 宽）。
+     *
+     * 这是"铺满（cover）"**唯一**的判据，用在两处、必须是同一个值：[applyVideoStageLayout]
+     * （画面按 cover 量）与 [measurePortraitStage]（列表顶改由"底栏顶边往上算"给出）。
+     *
+     * ★判据用**真实解码尺寸**（[videoWidth] / [videoHeight]，由 `onVideoSizeChanged` 写入）——
+     *   **不许**用 `resources.configuration`：本页那份是被 [attachBaseContext] 覆盖过的
+     *   **冻结快照**（P0 旋转 bug 的同一个病根，见 [toggleOrientation] 的注释），拿它判方向必错。
+     * ★起播瞬间尺寸还是 0×0 ⇒ 这里 false ⇒ 仍按老版式（带子 + contain）摆；真实尺寸一到，
+     *   `onVideoSizeChanged` 会再排一次 [applyVideoStageLayout] 切到铺满 —— 只改布局、
+     *   不重建播放器、不换 surface，所以不会白屏或闪黑（画面只是当场换一次摆法）。
+     */
+    private fun isPortraitStream(): Boolean = videoWidth > 0 && videoHeight > videoWidth
 
     /**
      * 按当前形态排一次版式（[buildUi] 末尾、[syncPageLayoutToRealSize]、进出小窗各调一次）。
@@ -8784,7 +8882,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ## ★★第八批：**PiP 里必须"画面铺满窗口"**（用户实测第 4 条的修法，根因证据在这段里）
      *
      * ```
-     * 不在 PiP：竖屏 = 顶栏之下的一条带（高 = min(宽÷比例, 可用高 − 列表 reserve)，顶边 = 顶栏底边）
+     * 不在 PiP：竖屏 + **横屏流** = 顶栏之下的一条带（高 = min(宽÷比例, 可用高 − 列表 reserve)，顶边 = 顶栏底边）
+     *          竖屏 + **竖屏流** = 容器铺满可用区 + 画面 **cover**（2026-10-01 用户拍板①：填满、不留黑边）
      *          横屏 = 容器铺满整页、画面按比例居中
      * 在  PiP：**一律走"铺满"这一支**（band = 0、topMargin = 0）—— 与小窗的形状无关
      * ```
@@ -8814,11 +8913,20 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ★★第八批：PiP 里"哪种形态"不再是问题 —— 画面必须铺满小窗（见上面那段 KDoc 的 ①~④）
         val pipFill = isInPictureInPictureMode
         val portrait = !isPageLandscape(orientationOverride) && !pipFill
+        // ★★2026-10-01（用户拍板①"竖屏流铺满"）：竖屏手机 + 竖屏流（解码高 > 宽）⇒ 关掉带子、
+        //   容器铺满整块可用区、画面按 **cover** 等比放大（[AspectRatioFrameLayout.coverChild]）：
+        //   填满、不拉伸，超出容器的部分由容器裁掉（用户这块屏 9:19.9 装 9:16 的流 ⇒ 左右各裁一点，
+        //   这是 B 站/PiliPlus 同款预期行为）。横屏流、以及**比例还没到的起播瞬间**一个字节都不动 ——
+        //   用户："竖屏状态下，那些横屏的流就不用动，那个非常好"。
+        val cover = portrait && isPortraitStream()
         // ① 视频：竖屏 = 顶栏之下的一条带（高度由 [AspectRatioFrameLayout] 按比例量）；
-        //          横屏 / PiP = 0f = 关掉带子，容器铺满整页（横屏与改动前逐字一致）
-        val band = if (portrait) PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION else 0f
+        //          横屏 / PiP = 0f = 关掉带子，容器铺满整页（横屏与改动前逐字一致）；
+        //          竖屏流 = 0f + cover = 容器同样铺满可用区，只是画面按"填满"量（不再留黑边）。
+        val band = if (portrait && !cover) PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION else 0f
         // ★第四批第 3 条：带子模式下顶边 = 顶栏底边（横屏/听音频/PiP 保持 0 = 铺满/贴顶）
-        val bandTop = if (band > 0f) videoBandTopPx() else 0
+        //   ★铺满模式用**同一个**顶边（画面从顶栏之下开始，沉浸式/挖孔/状态栏安全区照旧）；
+        //     只有"横屏 / PiP"才是 0 —— 那是第八批钉死的口径，这里一格没动。
+        val bandTop = if (portrait) videoBandTopPx() else 0
         // ★2026-10-01：带子的高度上限 = 可用高 − reserve（reserve = 列表目标高 + 底栏占位），
         //   只有竖屏带子模式才需要它；量不到底栏（reserve = 0）时**不猜** —— 由
         //   [AspectRatioFrameLayout] 退回旧的 0.62 口径摆一帧，宁可先按旧版摆，
@@ -8839,9 +8947,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             videoContainer.layoutParams = lp
         }
         appliedVideoBandTop = bandTop
-        if (videoContainer.bandMinHeightFraction != band ||
+        if (videoContainer.coverChild != cover ||
+            videoContainer.bandMinHeightFraction != band ||
             videoContainer.bandReserveBottomPx != bandReserve
         ) {
+            // ★铺满开关与带子那两个参数是**同一件事的三个面**（容器铺满 + 画面按什么比例量），
+            //   一起写、一起 requestLayout —— 分开写会出现"容器已铺满、画面还按带子量"的中间帧。
+            videoContainer.coverChild = cover
             videoContainer.bandMinHeightFraction = band
             videoContainer.bandReserveBottomPx = bandReserve
             videoContainer.requestLayout()
@@ -8849,7 +8961,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ★诊断日志（只读；签名没变就不写）：视频带版式（top/height、是否 PiP 全幅、reserve）
         LivePageTrace.noteIfChanged(
             "stage.video",
-            "pip=$pipFill|portrait=$portrait|band=$band|bandTop=$bandTop|reserve=$bandReserve" +
+            "pip=$pipFill|portrait=$portrait|cover=$cover|band=$band|bandTop=$bandTop|reserve=$bandReserve" +
                 // 横屏/PiP（band=0）不适用 ⇒ 显式打 0，免得看到上一帧竖屏的残留值
                 "|listTarget=${if (band > 0f) lastBandListTargetPx else 0}" +
                 "|top=${videoContainer.top}|h=${videoContainer.height}|w=${videoContainer.width}" +
@@ -8857,6 +8969,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "stage.video",
             "pipFill" to pipFill,
             "portrait" to portrait,
+            "cover" to cover,
             "bandFraction" to band,
             "bandTop" to bandTop,
             "bandReservePx" to bandReserve,
@@ -8930,8 +9043,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   （宿主 `bindPortraitListArea(slot = …)` 就是照这块矩形摆面板）。
      *   为了让它在**任何时刻**都成立，[installPageLayoutWatchers] 还给 [videoContainer]
      *   挂了一只"矩形一变就重新量"的监听器（比例到达、顶栏高度变化、底栏换行都会走到）。
+     *   ★★2026-10-01（用户拍板①）**唯一例外**：**竖屏流铺满**时画面铺到页底，那条"底边"不存在了 ⇒
+     *   列表顶改由"底栏顶边往上要一块"给出（列表目标 + 底栏占位，见下面的 `cover` 分支）。
+     *   除这一支外，整块逻辑与坐标契约**一个字没变**。
      * ★列表区底边取"底栏顶"而不是"页底"，是"不挡底栏"这条要求的落点；而底栏被 GONE（控制条自动隐藏）
      *   之后它的 `top` 仍然是最后一次显示时的位置 —— 正是我们要的：**列表区不随控制条显隐跳动**。
+     *   ★底栏改成**悬浮**（半透明渐变、浮在列表底色之上）之后这条**依然成立**、也必须成立：
+     *     宿主面板注入在 `android.R.id.content`（**在底栏之上**，见 `LiveDanmakuOverlayHost` 的
+     *     `resolveChromeHost`），面板一旦压到底栏顶上就会既挡住按钮、又吃掉按钮的触摸 ——
+     *     所以"列表底边 = 底栏顶边"这条契约**不能**为了"铺到屏幕最底"而破；
+     *     用户要的"列表更大"改由**抬高列表顶**（多吃一份底栏占位）实现，效果相同、且不遮按钮。
      * ★量不出可信矩形时（横屏 / 听音频 / 首帧之前 / 页面矮到放不下）两个字段一律置 null、列表槽量成 0 高，
      *   宿主与气泡各自退回"老版式"，绝不拿一个 0 矩形去摆。
      */
@@ -8964,16 +9085,30 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 videoContainer.bottom,
             )
             portraitVideoRect = video
-            val listTop = video.bottom.coerceIn(0, pageHeight)
             // 底栏还没量过（理论上不会：buildUi 里就排好了）→ 退到页底
             val barTop = if (::bottomBar.isInitialized && bottomBar.height > 0) {
                 bottomBar.top
             } else {
                 pageHeight
             }
+            // ★★2026-10-01（用户拍板①）：**铺满模式下列表顶不再等于画面底边** ——
+            //   铺满时画面一直铺到页底（`video.bottom == pageHeight`），再拿它当列表顶只会得到
+            //   一个 0 高的矩形、宿主随即把面板整个收起。所以铺满模式下列表顶改由"底栏顶边往上要一块"给：
+            //     列表高 = 列表目标（与带子模式**同一个** [portraitListTargetPx]）
+            //            + 悬浮底栏**看得见的那一条**（[floatingBarStripPx]，按内容量、与 IME 无关）
+            //   —— 用户要的"弹幕区域更大一点"就落在加的这一份上：底栏改成**悬浮**（浮在列表底色之上，
+            //      不再占位）之后，它原来占的那一条整块让给列表（真机约 560 → 740px，多约 1/3 行）。
+            //   ★非铺满（横屏流 / 比例未知）**一行不动**：列表顶仍 = 画面带底边（用户："那个非常好"）。
+            val cover = portrait && isPortraitStream()
+            val listTop = if (cover) {
+                (barTop - portraitListTargetPx(videoBandTopPx()) - floatingBarStripPx()).coerceAtLeast(0)
+            } else {
+                video.bottom.coerceIn(0, pageHeight)
+            }
             // ★这里的 `coerceIn(listTop, pageHeight)` **不会**因为 `barTop < listTop` 抛异常：
-            //   Kotlin 的 `Int.coerceIn(min, max)` 只在 `min > max` 时抛，而上一行
-            //   `listTop = …coerceIn(0, pageHeight)` 已保证 `listTop ≤ pageHeight` ⇒ 区间恒合法。
+            //   Kotlin 的 `Int.coerceIn(min, max)` 只在 `min > max` 时抛，而两支的 `listTop`
+            //   都已经保证 `≤ pageHeight`（带子支靠 `coerceIn(0, pageHeight)`；铺满是 `barTop`
+            //   往下减出来的，恒 `< barTop ≤ pageHeight`）。
             //   `barTop < listTop`（带子被 0.62 下限顶到底栏顶边之上，例如键盘抬起时底栏被自己的
             //   内边距抬到 1611）会把 `listBottom` 夹成 `listTop` ⇒ 列表区 0 高 ⇒ 走下面
             //   "地方太小"那一支：槽量 0 高、面板按既有规则收起（滚动弹幕接管）。这是**有意的降级**。
@@ -8993,6 +9128,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         LivePageTrace.noteIfChanged(
             "stage.measure",
             "page=${pageWidth}x$pageHeight|portrait=$portrait|measurable=$measurable" +
+                "|cover=${portrait && isPortraitStream()}" +
                 "|video=${LivePageTrace.rect(portraitVideoRect)}|list=${LivePageTrace.rect(portraitListRect)}" +
                 "|barTop=${if (::bottomBar.isInitialized) bottomBar.top else -1}" +
                 "|slotTop=${if (::danmakuListSlot.isInitialized) danmakuListSlot.top else -1}" +
@@ -9002,6 +9138,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             "page" to "${pageWidth}x$pageHeight",
             "portrait" to portrait,
             "measurable" to measurable,
+            "cover" to (portrait && isPortraitStream()),
+            "videoSize" to "${videoWidth}x$videoHeight",
             "pip" to isInPictureInPictureMode,
             "videoRect" to LivePageTrace.rect(portraitVideoRect),
             "listRect" to LivePageTrace.rect(portraitListRect),
@@ -9154,6 +9292,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          */
         var bandReserveBottomPx: Int = 0
 
+        /**
+         * ★★2026-10-01（用户拍板①"竖屏流铺满"）：把画面按 **cover** 量 —— 等比放大到**填满容器**，
+         * 超出容器的部分由容器裁掉（`clipChildren` 默认 true），不拉伸、不留黑边。
+         *
+         * 只由播放页在"竖屏手机 + 竖屏流"时置位（[isPortraitStream]），与带子模式互斥
+         * （带子模式下 [bandMinHeightFraction] > 0，这里一律不生效）。用户这块屏 9:19.9 装 9:16 的流
+         * ⇒ 按高放大、**左右各裁一点**；容器是[TextureView]（普通 View，走窗口绘制），
+         * 所以裁剪是**真的裁在容器边界上**（SurfaceView 那种独立图层才不吃父容器裁剪）。
+         */
+        var coverChild: Boolean = false
+
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
             val child = getChildAt(0) ?: return
@@ -9186,7 +9335,18 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val containerRatio = containerWidth.toFloat() / height.toFloat()
             val childWidth: Int
             val childHeight: Int
-            if (containerRatio > effectiveRatio) {
+            // ★★铺满（cover）：与下面"留黑边"的 contain 恰好相反 —— 哪一边不够，就把另一边
+            //   放大到**超出**容器（多出来的部分被容器裁掉）。两处都按同一比例算 ⇒ 不会变形。
+            val fill = coverChild && !band && ratio > 0f
+            if (fill && containerRatio > effectiveRatio) {
+                // 容器比画面"宽" → 宽度顶满，高度溢出（裁上下）
+                childWidth = containerWidth
+                childHeight = (containerWidth / effectiveRatio).roundToInt()
+            } else if (fill) {
+                // 容器比画面"窄高" → 高度顶满，宽度溢出（裁左右；9:19.9 的屏装 9:16 的流走这一支）
+                childHeight = height
+                childWidth = (height * effectiveRatio).roundToInt()
+            } else if (containerRatio > effectiveRatio) {
                 // 容器更宽 → 高度顶满，左右留黑边
                 childHeight = height
                 childWidth = (height * effectiveRatio).roundToInt()
@@ -9199,6 +9359,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 View.MeasureSpec.makeMeasureSpec(childHeight, View.MeasureSpec.EXACTLY),
             )
             // ★带子：容器自己的高度也要跟着改小（super.onMeasure 量出来的是"铺满整页"）
+            //   ★铺满模式不走这一支：容器就是要"铺满可用区"（super 量出来的那个），画面才是溢出的那一个。
             if (band) setMeasuredDimension(containerWidth, height)
         }
     }
