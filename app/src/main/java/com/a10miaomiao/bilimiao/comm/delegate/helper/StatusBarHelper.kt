@@ -1,13 +1,13 @@
 package com.a10miaomiao.bilimiao.comm.delegate.helper
 
 import android.app.Activity
-import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.view.View
 import android.view.WindowManager
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import com.a10miaomiao.bilimiao.comm.utils.NightModeUtil
 
 class StatusBarHelper(
     val activity: Activity,
@@ -62,8 +62,14 @@ class StatusBarHelper(
         if (!isShowNavigation) {
             uiFlags = uiFlags or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
         }
-        val isNightMode = activity.resources.configuration.uiMode and
-            Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        // ★2026-10-01：深浅色判据改走 NightModeUtil（真源）。
+        //   这里要的是"**应用当前**是不是深色"：状态栏/导航栏图标明暗要跟 App 主题走
+        //   （设置里选「始终深色」时，系统是浅色也得出浅色图标）。
+        //   原来读 activity.resources.configuration.uiMode —— 本 Helper 服务的 Activity 都覆写了
+        //   attachBaseContext，那份是进页那一刻的冻结快照，切系统深浅色不重建 ⇒ 图标一直不跟。
+        //   重新求值时机本来就有：MainActivity/VideoPlayerActivity 的 onConfigurationChanged 每次都会
+        //   重新赋值 isLightStatusBar / isLightNavigationBar，其 setter 会调 update()。
+        val isNightMode = NightModeUtil.isAppInDark()
         // ★ 顺序要紧：先写老的 systemUiVisibility，再用 compat 接口设置图标明暗。
         //   WindowInsetsControllerCompat 在低版本就是往 systemUiVisibility 里塞 LIGHT_* 位，
         //   反过来写会把刚设好的明暗位清掉（表现为状态栏/导航栏图标颜色不跟主题）。

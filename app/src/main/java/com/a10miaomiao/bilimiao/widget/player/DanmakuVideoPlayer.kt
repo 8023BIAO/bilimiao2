@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.Dialog
 import android.app.Service
 import android.content.Context
-import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -1113,14 +1112,30 @@ initDanmakuTouchListener()
     }
 
     /**
-     * 竖屏全屏时，防止挖孔屏挡住弹幕
+     * 竖屏全屏时，防止挖孔屏挡住弹幕。
+     *
+     * ★2026-10-01：方向判据改用**真实窗口尺寸**（根布局 w>h），不再读
+     * `resources.configuration.orientation` —— `VideoPlayerActivity`/`MainActivity` 都覆写了
+     * `attachBaseContext`，那份 configuration 是进页那一刻的**冻结快照**（`configChanges` 含
+     * `orientation`，转屏不重建）⇒ 横屏全屏也会被当成"竖屏"、白加一条顶部边距。
+     * 这就是直播间「旋转」回不到竖屏的**同一个病根**，判据换成真实尺寸即与
+     * `PlayerController.hostIsLandscape` / `LivePlayerActivity.isPageLandscape` 同源。
+     *
+     * **只换源、不补重新求值**，因为三条重算路径本来就在：
+     * ① `mode` 变化 → `updateMode()`；
+     * ② 真实窗口尺寸变化 → `ScaffoldView.onSizeChanged` → `PlayerDelegate2.onHostSizeChanged`
+     *    → `applyPlayerMode` 给 `mode` 赋值（等值赋值也会跑 setter）→ `updateMode()`；
+     * ③ 刘海/系统栏 Insets 变化 → `setWindowInsets()`。
      */
     private fun updateDanmakuMargin() {
         val danmakuViewLP = mDanmakuView.layoutParams as MarginLayoutParams
+        // 未量出尺寸时（w/h 为 0）不算竖屏：宁可不加边距，等上面②③任意一次重算
+        val measured = rootView.width > 0 && rootView.height > 0
+        val isPortrait = measured && rootView.height >= rootView.width
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
             && mode == PlayerMode.FULL
-            && resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+            && isPortrait
         ) {
             danmakuViewLP.topMargin = mDisplayCutout?.safeInsetTop ?: 0
         } else {
