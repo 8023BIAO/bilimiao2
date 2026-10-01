@@ -950,6 +950,14 @@ class LiveDanmakuOverlayHost(
         }
         val panel = ComposeView(context).apply {
             setContent {
+                // ★本轮（task-6）：面板要拿到「竖屏列表字号」。这一份组合是**独立**的 ComposeView，
+                //   上面主 setContent（446-449 行）里的 `settings` 不在本作用域 —— 所以照同一套
+                //   （watch + loadCached 初值）订阅一次，只把面板真正用到的**那一个值**
+                //   （settings.chatFontSizeSp）传进面板签名，不把整个 settings 塞进去。
+                val settingsFlow = remember { LiveDanmakuSettings.watch(context) }
+                val settings by settingsFlow.collectAsStateWithLifecycle(
+                    initialValue = remember { LiveDanmakuSettings.loadCached() },
+                )
                 // ★本轮（2026-09-26）给面板套上**App 的主题**：这份组合是一棵**独立**的
                 //   ComposeView（不在 `ComposeFragment` 的 `BilimiaoTheme` 子树里），不套的话
                 //   列表里 `MaterialTheme.colorScheme.primary` 会落到 Material3 的**基线紫** ——
@@ -989,6 +997,9 @@ class LiveDanmakuOverlayHost(
                     CompositionLocalProvider(LocalDensity provides remember { systemDanmakuDensity() }) {
                         LiveDanmakuChatPanel(
                             chat = chat,
+                            // ★本轮（task-6）：竖屏列表正文字号（默认 13sp = 改前写死的值）。
+                            //   只传这一个值：面板用不到 settings 里别的字段。
+                            chatFontSizeSp = settings.chatFontSizeSp,
                             visible = listShown.value,
                             // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
                             //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。

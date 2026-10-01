@@ -427,6 +427,12 @@ object SettingPreferences {
      */
     val LiveDanmakuFontSize = intPreferencesKey("live_danmaku_font_size")
     /**
+     * **竖屏弹幕列表**的正文字号（sp）。默认 13 = `LiveDanmakuOverlay` 那处原来写死的字号。
+     * ★与 [LiveDanmakuFontSize]（画面上的滚动弹幕字号）**各调各的**：两处互不影响。
+     *   存 Float 是因为它只由 `sliderPreference`（Float 拖动条）写，读的时候不需要换算。
+     */
+    val LiveDanmakuChatFontSize = floatPreferencesKey("live_danmaku_chat_font_size")
+    /**
      * 直播弹幕不透明度（%）。默认 100 = 完全不透明。
      * ★直播**自己那套**样式之一（点播那边存的是 0f~1f，量纲不同，所以各用各的键）。
      */
@@ -544,6 +550,11 @@ object SettingPreferences {
             val doubleTapPause: Boolean = SettingConstants.LIVE_DOUBLE_TAP_PAUSE_DEFAULT,
             val danmakuEnable: Boolean = SettingConstants.LIVE_DANMAKU_ENABLE_DEFAULT,
             val danmakuFontSize: Int = SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT,
+            /**
+             * **竖屏弹幕列表**的正文字号（sp，10~30，默认 13）。
+             * ★与 [danmakuFontSize]（滚动弹幕字号）**各调各的**：两个键、两条读取路径。
+             */
+            val danmakuChatFontSize: Float = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT,
             val danmakuOpacity: Int = SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
             /**
              * 弹幕速度倍率（0.5~2.0，越大越快）。默认 1.0。
@@ -612,6 +623,12 @@ object SettingPreferences {
                 ?: SettingConstants.LIVE_DANMAKU_ENABLE_DEFAULT,
             danmakuFontSize = prefs?.get(LiveDanmakuFontSize)
                 ?: SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT,
+            // 竖屏列表字号：Float 键，走 floatOr（历史版本可能把它存成别的数值类型，
+            // 读崩了就是"竖屏列表整个画不出来"，代价太大 —— 与 danmakuSpeed 同一条兜底理由）。
+            danmakuChatFontSize = prefs.floatOr(
+                LiveDanmakuChatFontSize,
+                SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT,
+            ),
             danmakuOpacity = prefs?.get(LiveDanmakuOpacity)
                 ?: SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
             // ★这里原来读的是"跟随点播弹幕设置"（`LiveDanmakuFollowVod`）：本轮该开关已删除，

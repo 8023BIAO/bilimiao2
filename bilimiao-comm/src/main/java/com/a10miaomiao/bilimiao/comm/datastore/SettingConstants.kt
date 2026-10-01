@@ -178,6 +178,18 @@ object SettingConstants {
      */
     const val LIVE_DANMAKU_FONT_SIZE_DEFAULT = 15
     /**
+     * **竖屏弹幕列表**的正文字号（sp）：默认 **13** = `LiveDanmakuOverlay` 那一处原来写死的字号
+     * （原来是 `13.sp / 17.sp`，行距倍率见 `LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR`）。
+     *
+     * ★与 [LIVE_DANMAKU_FONT_SIZE_DEFAULT]（画面上**滚动弹幕**的字号）**各调各的**：
+     *   两个键、两个设置项、两条读取路径，改一个不影响另一个。默认 13 ⇒ 老用户升级后竖屏列表的
+     *   渲染结果与改前**逐像素一致**，只有主动去设置页调才变。
+     *
+     * 键 `live_danmaku_chat_font_size`，读取方是 `LiveDanmakuSettings.from()`
+     * （`Live.Values.danmakuChatFontSize` → `chatFontSizeSp` → 竖屏列表每行的 Text）。
+     */
+    const val LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT = 13f
+    /**
      * 直播弹幕不透明度（%）：默认 100 = 完全不透明（现状）。
      * 同 [LIVE_DANMAKU_FONT_SIZE_DEFAULT]：直播自己那套，只对直播生效。
      */

@@ -50,6 +50,7 @@ import kotlin.math.roundToInt
  * |---|---|---|---|---|
  * | 显示开关 | `live_danmaku_enable` | Boolean（默认 true） | `visible` | 直接用（**唯一**的可见性来源） |
  * | 字号 | `live_danmaku_font_size` | Int，sp 绝对值 10~30 | sp | 直接用（默认 15 = 浮层原来写死的字号） |
+ * | **竖屏列表字号** | `live_danmaku_chat_font_size` | Float，sp 绝对值 10~30 | sp | 直接用（默认 13 = 竖屏列表原来写死的字号；与上一行**各调各的**，行距随字号等比） |
  * | 不透明度 | `live_danmaku_opacity` | Int，% 10~100 | Compose alpha 0f~1f | `% ÷ 100` |
  * | 速度 | `live_danmaku_speed` | Float，**倍率** 0.5~2.0（越大越快） | 固定"穿越时长" | `travelDurationMs = 7000ms ÷ 倍率` |
  * | 显示区域 | `live_danmaku_area_percent` | Int，% 25/50/75/100 | 区域比例 + **车道数** | `% ÷ 100`（默认 100 = 全屏；车道数 = 区域高 ÷ 车道高） |
@@ -85,6 +86,14 @@ data class LiveDanmakuSettings(
     val visible: Boolean,
     /** 字号（sp）。来自直播自己的键 `live_danmaku_font_size`（默认 15sp = 浮层原来写死的字号） */
     val fontSizeSp: Float,
+    /**
+     * **竖屏弹幕列表**的正文字号（sp）。来自直播自己的键 `live_danmaku_chat_font_size`
+     * （默认 13sp = 竖屏列表原来写死的字号）。
+     *
+     * ★与 [fontSizeSp]（画面上的滚动弹幕字号）**各调各的**：设置页是两个独立项。
+     *   行距不在这里存 —— 按 [CHAT_LINE_HEIGHT_FACTOR] 与字号等比算（13sp → 17sp，与改前一致）。
+     */
+    val chatFontSizeSp: Float,
     /** 不透明度 0f~1f（直播自己的键 `live_danmaku_opacity` 的百分比 ÷ 100）。渲染时乘到每条弹幕的颜色 alpha 上 */
     val opacity: Float,
     /** 速度倍率（直播自己的键 `live_danmaku_speed`，0.5~2.0，越大越快）。穿越时长见 [travelDurationMs] */
@@ -120,6 +129,27 @@ data class LiveDanmakuSettings(
         /** 字号兜底范围：太小看不见、太大一屏放不下两条 */
         const val FONT_SIZE_SP_MIN = 8f
         const val FONT_SIZE_SP_MAX = 48f
+
+        // ── 竖屏列表字号（自己的档位；与滚动弹幕那套互不相干）──
+        /**
+         * **竖屏列表**字号的默认值（sp）= `LiveDanmakuOverlay` 那处原来写死的字号。
+         * ★真值只有 `SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT` 一处，
+         *   这里只是把它引过来给浮层/设置页用（不许在别处再写一个 13f）。
+         */
+        const val CHAT_FONT_SIZE_SP_DEFAULT = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT
+
+        /** 竖屏列表字号的取值域 = 设置页滑杆档位（10~30sp，1sp 一档）。该键只由这一处写。 */
+        const val CHAT_FONT_SIZE_SP_MIN = 10f
+        const val CHAT_FONT_SIZE_SP_MAX = 30f
+        /**
+         * 竖屏列表的**行距倍率** = 17 ÷ 13（原有写死的 `13.sp / 17.sp` 之比）。
+         * ★列表每行的 `lineHeight = 字号 × 本倍率`：字号不变时结果就是原来那 17sp
+         *   （13 × 17/13 = 17，逐像素一致）；字号变了行距等比跟，不会"字大了行距不动"。
+         */
+        const val CHAT_LINE_HEIGHT_FACTOR = 17f / 13f
+
+        /** 竖屏列表字号的展示文案（设置页 `valueText` / `summary` 用）：`13sp` */
+        fun chatFontSizeText(sp: Float): String = "${sp.roundToInt()}sp"
 
         // ── 直播自己的速度档位（设置页滑杆的 valueRange / valueSteps 与文案都引用这里，
         //    避免"设置页写的档位"和"链路支持的档位"两处各写一套、改一处忘一处）──
@@ -225,6 +255,11 @@ data class LiveDanmakuSettings(
             val fontSizeSp = (live?.danmakuFontSize ?: SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT)
                 .toFloat()
                 .coerceIn(FONT_SIZE_SP_MIN, FONT_SIZE_SP_MAX)
+            //    竖屏列表字号：Float，sp 绝对值（默认 13 = 竖屏列表原来写死的字号）。
+            //    ★与上面滚动弹幕字号是**两个键、两条路径**，互不影响（用户要求各调各的）。
+            val chatFontSizeSp = (live?.danmakuChatFontSize
+                ?: SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT)
+                .coerceIn(CHAT_FONT_SIZE_SP_MIN, CHAT_FONT_SIZE_SP_MAX)
             //    不透明度：Int，百分比 0~100 → Compose 的 0f~1f
             val opacity = ((live?.danmakuOpacity ?: SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT)
                 .coerceIn(0, 100)) / 100f
@@ -241,6 +276,7 @@ data class LiveDanmakuSettings(
             return LiveDanmakuSettings(
                 visible = visible,
                 fontSizeSp = fontSizeSp,
+                chatFontSizeSp = chatFontSizeSp,
                 opacity = opacity,
                 speedScale = speedScale,
                 areaPercent = areaPercent,

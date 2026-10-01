@@ -1187,6 +1187,12 @@ private class LiveChatBottomScroller(private val listState: LazyListState) {
  * - 条目位移动画：spring → `tween([CHAT_ITEM_PLACEMENT_MS])`（理由写在常量那里）。
  *   **判定（谁算贴着底）、布局（矩形、200 上限、index 0 = 最新）一个字没动。**
  *
+ * @param chatFontSizeSp ★本轮新增（task-6）：竖屏列表**正文**字号（sp），来自直播设置项
+ *   「竖屏列表字号」（键 `live_danmaku_chat_font_size`，默认 13sp = 原来这里写死的字号）。
+ *   ★只影响这一处列表正文：画面上的滚动弹幕仍走 `LiveDanmakuOverlay.settings.fontSizeSp`，
+ *   两者**各调各的**。行距按 `LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR`（17/13）等比跟。
+ *   ★调用点只有一个（宿主的面板组合），在那里从 settings 里取出**这一个值**传进来。
+ *
  * @param fadingOut ★本轮新增：面板**正在播退场动画**（宿主的判定已经是"不显示"，
  *   但画面上还要淡出 `PANEL_FADE_OUT_MS` 那一会儿）。true 时即使 [visible] 已经是 false，
  *   也把内容留在组合里 —— 不然 View 淡的是一个**空**面板（内容先没了，等于还是硬切）。
@@ -1197,6 +1203,7 @@ private class LiveChatBottomScroller(private val listState: LazyListState) {
 @Composable
 fun LiveDanmakuChatPanel(
     chat: LiveDanmakuChatLog,
+    chatFontSizeSp: Float,
     visible: Boolean,
     modifier: Modifier = Modifier,
     fadingOut: Boolean = false,
@@ -1393,6 +1400,9 @@ fun LiveDanmakuChatPanel(
                 items(items = chat.lines, key = { it.key }) { line ->
                     LiveDanmakuChatRow(
                         line = line,
+                        // ★本轮（task-6）：列表正文字号来自直播设置项「竖屏列表字号」
+                        //   （宿主从 settings 里取这一个值传进来；滚动弹幕那套不受影响）。
+                        chatFontSizeSp = chatFontSizeSp,
                         // ★本轮：条目增删/位移的动画（`Modifier.animateItem`，Compose 1.7+ 的 API；
                         //   本工程 foundation = 1.12.1，证据见报告 §1）。
                         //   三个参数按位置给（`animateItem(淡入, 位移, 淡出)`），不写参数名 ——
@@ -1490,12 +1500,18 @@ fun LiveDanmakuChatPanel(
  *   不在 `ComposeFragment` 的 `BilimiaoTheme` 子树里；不套主题的话这里会落回 Material3 基线色）。
  *   宿主那边用的是同一个 `appColorScheme()` + `liveSheetThemeState()`（与直播设置弹窗同一条路径）。
  *
- * 只换了**颜色的来源**：字号/行高/内边距/最多 4 行/省略号、列表的滚动与去重逻辑，一个字没动。
- * ★字号/行高保持**写死 13sp/17sp**（2026-10-01 用户拍板）：「弹幕那几块不跟随 App 内 DPI/字体缩放」，
- *   也**不**跟随直播「弹幕字号」设置（那个设置只作用于画面上的滚动弹幕）；渲染密度见 [systemDanmakuDensity]。
+ * 只换了**颜色的来源**：内边距/最多 4 行/省略号、列表的滚动与去重逻辑，一个字没动。
+ * ★字号/行高（task-6 起）：来自直播设置项「竖屏列表字号」（键 `live_danmaku_chat_font_size`，
+ *   默认 13sp ⇒ 与改前**逐像素一致**）；仍然**不**跟随直播「弹幕字号」设置（那个只作用于画面上的
+ *   滚动弹幕）；行距按字号等比（[LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR] = 17/13）。
+ *   「弹幕那几块不跟随 App 内 DPI/字体缩放」这条没变 —— 渲染密度见 [systemDanmakuDensity]。
  */
 @Composable
-private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine, modifier: Modifier = Modifier) {
+private fun LiveDanmakuChatRow(
+    line: LiveDanmakuChatLine,
+    chatFontSizeSp: Float,
+    modifier: Modifier = Modifier,
+) {
     // 用户名色 = 当前主题色（★不要写死颜色：用户换主题后这里要跟着变）
     val unameColor = MaterialTheme.colorScheme.primary
     // ★本轮：把这条 AnnotatedString **记住**（key = 这一行的三要素 + 用户名色）。
@@ -1517,8 +1533,10 @@ private fun LiveDanmakuChatRow(line: LiveDanmakuChatLine, modifier: Modifier = M
     }
     Text(
         text = text,
-        fontSize = 13.sp,
-        lineHeight = 17.sp,
+        // ★本轮（task-6）：字号来自「竖屏列表字号」设置项（默认 13sp = 改前写死的值）；
+        //   行距按同一个倍率等比（17/13）—— 字号 13sp 时算出来就是原来写死的 17sp（逐像素一致）。
+        fontSize = chatFontSizeSp.sp,
+        lineHeight = (chatFontSizeSp * LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR).sp,
         // 长弹幕最多 4 行（列表是拿来扫读的，一条占满屏就失去意义了）；超出省略
         maxLines = 4,
         overflow = TextOverflow.Ellipsis,

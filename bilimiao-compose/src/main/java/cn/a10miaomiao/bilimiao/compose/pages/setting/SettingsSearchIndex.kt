@@ -13,8 +13,8 @@ import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
  * 数据源：各设置页里真实存在的 switchPreference / sliderIntPreference / sliderPreference /
  * textIntPreference 调用点（`components/preference/` 下的 DSL 定义本身不算），外加 listPreference /
  * multiSelectIntPreference / listStylePreference / customSetsPreference 这类**搜索页改不了、
- * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 97 个调用点，
- * 收录 138 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
+ * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 98 个调用点，
+ * 收录 139 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
  * （注释掉的调用、`key = item.prefKey` 这类动态渲染、`preference(...)+onClick` 动作项等）。
  *
  * ★搜索结果必须用**与原设置页同款控件**：Kind 与控件一一对应 —— [SettingSearchItem.Kind.SWITCH]
@@ -62,7 +62,7 @@ data class SettingSearchItem(
     /**
      * 数值输入框的单位（原页面 `textIntPreference(label = " MB")` 的原样拷贝，含前导空格）。
      * 它是**输入弹窗里输入框的字段名**（TextIntPreference 把 label 渲染成字段标签），
-     * 不是 summary 文案 —— 丢了用户点开弹窗就看不到单位（实测发现 9/9 全丢）。
+     * 不是 summary 文案 —— 丢了用户点开弹窗就看不到单位（复核发现 9/9 全丢）。
      * 其它 Kind 恒为空串。
      */
     val label: String = "",
@@ -126,7 +126,7 @@ data class SettingSearchItem(
 
 object SettingsSearchIndex {
 
-    /** 138 条；由 gen_settings_index.py 生成（覆盖 97 个调用点） */
+    /** 139 条；由 gen_settings_index.py 生成（覆盖 98 个调用点） */
     val items: List<SettingSearchItem> = listOf(
         SettingSearchItem(prefName = "PlayerBackground", prefKey = "player_background", title = "后台播放", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "后台播放 ① 播放 播放器设置 PlayerBackground player_background"),
@@ -401,6 +401,11 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_FONT_SIZE_DEFAULT, keywords = "弹幕字号 ① 播放 直播设置 直播弹幕 LiveDanmakuFontSize live_danmaku_font_size danmaku 弹屏 font size 大小",
             slider = SettingSearchItem.SliderSpec.IntSlider(range = 10..30, steps = 19, valueText = {
             Text("${it}sp")
+        })),
+        SettingSearchItem(prefName = "LiveDanmakuChatFontSize", prefKey = "live_danmaku_chat_font_size", title = "竖屏列表字号", category = "① 播放", page = "直播设置", section = "直播弹幕",
+            kind = SettingSearchItem.Kind.SLIDER_FLOAT, default = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT, keywords = "竖屏列表字号 ① 播放 直播设置 直播弹幕 LiveDanmakuChatFontSize live_danmaku_chat_font_size danmaku 弹屏 font size 大小",
+            slider = SettingSearchItem.SliderSpec.FloatSlider(range = LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MIN..LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MAX, steps = 19, valueText = {
+            Text(LiveDanmakuSettings.chatFontSizeText(it))
         })),
         SettingSearchItem(prefName = "LiveDanmakuOpacity", prefKey = "live_danmaku_opacity", title = "弹幕不透明度", category = "① 播放", page = "直播设置", section = "直播弹幕",
             kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT, keywords = "弹幕不透明度 ① 播放 直播设置 直播弹幕 LiveDanmakuOpacity live_danmaku_opacity danmaku 弹屏 alpha 透明",
