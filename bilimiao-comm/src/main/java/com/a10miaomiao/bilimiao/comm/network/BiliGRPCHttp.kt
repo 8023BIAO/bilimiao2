@@ -183,19 +183,27 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
      *   现场（httpCode / grpc-status / grpc-message / details / trailers）全部进日志。
      */
     private fun emptyBodyError(res: Response): IOException {
-        val status = res.trailer(TRAILER_GRPC_STATUS)
-        val message = res.trailer(TRAILER_GRPC_MESSAGE)
-        val details = res.trailer(TRAILER_GRPC_STATUS_DETAILS)
+        // ★ OkHttp 5 的 Response 只有 **`trailers()`（复数，返回 Headers）**，没有单数的 `trailer(name)`；
+        //   取一次 Headers 再按名字查，避免每个字段都重建 Headers。
+        val trailers = res.trailers()
+        val status = trailers[TRAILER_GRPC_STATUS]
+        val message = trailers[TRAILER_GRPC_MESSAGE]
+        val details = trailers[TRAILER_GRPC_STATUS_DETAILS]
         // 业务码：优先从 grpc-message 里取（B 站给的是 "-404" 这种）；
         // 取不到再从 details-bin（base64 的 bilibili.rpc.Status protobuf）的原始字节里找一眼，
         // **不引 protobuf 解析**、失败就当没有。
         // ★写成"显式类型 + 分步赋值"而不是链式 `?.let{}`：PC 真编译在链式版本上
         //   报 `Cannot infer type for type parameter 'T'`（runCatching/let 嵌套 + 平台类型），
         //   这里宁可啰嗦也要让类型一眼可推。
-        val detailsRaw: String? = try {
-            details?.let { String(Base64.decode(it, Base64.DEFAULT), Charsets.ISO_8859_1) }
-        } catch (e: Exception) {
+        val detailsRaw: String? = if (details.isNullOrBlank()) {
             null
+        } else {
+            try {
+                val bytes: ByteArray = Base64.decode(details, Base64.DEFAULT)
+                String(bytes, Charsets.ISO_8859_1)
+            } catch (e: Exception) {
+                null
+            }
         }
         var codeDigits: Int? = NEGATIVE_CODE_REGEX.find(message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
         if (codeDigits == null) {
