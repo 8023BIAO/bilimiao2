@@ -56,6 +56,7 @@ import com.a10miaomiao.bilimiao.comm.utils.WbiSigner
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -306,11 +307,16 @@ private fun FlagsSettingPageContent(
     }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    // 在跑的检查 Job：新一轮先 cancel 旧的 —— 否则连点/「重试」会并发两个请求，
+    // 先发的旧结果后到会覆盖新结果（行内小字与最后一次操作对不上）。
+    // 协程被取消后不会再执行写状态的后续代码，所以旧结果不会回来捣乱。
+    var updateJob by remember { mutableStateOf<Job?>(null) }
     // 点行 / 失败后「重试」走同一个入口（全工程只有这一处发起检查）
     val startUpdateCheck: () -> Unit = {
+        updateJob?.cancel()
         showUpdateDialog = true
         updateState = UpdateUiState.Checking
-        scope.launch {
+        updateJob = scope.launch {
             updateState = when (val outcome = AppUpdateChecker.checkForUpdate(currentVersionTag)) {
                 is AppUpdateChecker.Outcome.Done -> UpdateUiState.Done(outcome.result)
                 is AppUpdateChecker.Outcome.Failed -> UpdateUiState.Failed(outcome.reason)
@@ -1372,13 +1378,22 @@ private fun FlagsSettingPageContent(
                 onRetry = { startUpdateCheck() },
                 onOpenUrl = { url ->
                     // 系统浏览器：APK 附件直链优先，没有附件就开该 Release 页面（不是仓库首页）
-                    runCatching {
+                    val opened = runCatching {
                         context.startActivity(
                             android.content.Intent(
                                 android.content.Intent.ACTION_VIEW,
                                 android.net.Uri.parse(url)
                             )
                         )
+                    }.isSuccess
+                    if (!opened) {
+                        // 设备没有浏览器 / 被拦：别让按钮像"点了没反应" —— 链接进剪贴板 + 一句人话
+                        runCatching {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("bilimiao_update", url))
+                        }
+                        toast("没能打开浏览器，链接已复制")
                     }
                 },
                 onDismiss = { showUpdateDialog = false },
@@ -1419,6 +1434,7 @@ private fun formatReleaseDate(date: Int): String =
 private fun updateFailText(reason: AppUpdateChecker.FailReason): String = when (reason) {
     AppUpdateChecker.FailReason.TIMEOUT -> "网络不太好，没连上 GitHub，稍后再试"
     AppUpdateChecker.FailReason.RATE_LIMITED -> "请求太频繁了，过一会儿再试"
+    AppUpdateChecker.FailReason.REQUEST_FAILED -> "GitHub 暂时查不了，稍后再试"
     AppUpdateChecker.FailReason.NO_RELEASES -> "远端还没有发布任何版本"
     AppUpdateChecker.FailReason.UNRECOGNIZED_TAGS -> "远端版本的格式无法识别（可能是发布格式不对）"
     AppUpdateChecker.FailReason.UNPARSABLE -> "GitHub 返回的内容看不懂（可能改动过），稍后再试"
