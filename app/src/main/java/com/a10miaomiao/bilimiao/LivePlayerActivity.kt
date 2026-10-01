@@ -4507,8 +4507,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // 于是：
     // · 外壳 = `AutoSheetDialog`（与首页直播 Tab 的「筛选」弹窗 `HomeLiveFilterSheet` **同一套**，
     //   转屏自适应是它自带的：`DialogFullScreen` 按宿主 decorView 尺寸重设 Dialog 窗口，见那个文件）；
-    // · 内容 = `liveDanmakuSettingPreferenceItems()`（★本轮起**只有弹幕 4 项**：字号 / 不透明度 /
-    //   速度 / 显示区域；这四项与「设置 → 直播设置」页的弹幕组是**同一份实现、同一批键与默认值**，
+    // · 内容 = `liveDanmakuSettingPreferenceItems()`（★本轮起**只有弹幕 5 项**：字号 / 竖屏列表字号 /
+    //   不透明度 / 速度 / 显示区域；这五项与「设置 → 直播设置」页的弹幕组是**同一份实现、同一批键与默认值**，
     //   读写口都是 `ProvidePreferenceLocals` + DataStore，所以改完立即生效、也立即落盘。
     //   ★播放类 4 项（默认画质 / 默认线路策略 / 自动重连 / 自动旋转）与「每行卡片数」按用户要求
     //     从弹窗移除 —— 它们仍在设置页，**一个项都没少**）；
@@ -4570,9 +4570,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /**
      * 弹窗关掉之后：把**可能被改过**的那几项设置再下发一次。
      *
-     * 弹窗里的项是"改一项立即写 DataStore"的，绝大多数（弹幕字号/不透明度/速度/显示区域）
+     * 弹窗里的项是"改一项立即写 DataStore"的，绝大多数（弹幕字号/竖屏列表字号/不透明度/速度/显示区域）
      * 本来就是**订阅式**的（直播弹幕浮层 `LiveDanmakuSettings.watch()`），不需要本页做任何事。
-     * ★本轮起弹窗里**只剩弹幕 4 项**（播放类 4 项按用户要求移除、仍在设置页），所以下面这两下
+     * ★本轮起弹窗里**只剩弹幕 5 项**（播放类 4 项按用户要求移除、仍在设置页），所以下面这两下
      *   在正常情况下已经是"什么都不用做"——**保留**它们是因为：① 两处都幂等、无 IO、无副作用；
      *   ② 万一以后播放类项回到弹窗里，"改完当场生效"这条保证不用再补一遍（与第二批那个原生弹窗
      *   "改动后立即生效的那份在设置弹窗里再下发一次"是同一个做法，只是那个弹窗已删）：
@@ -4635,6 +4635,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   「小窗」与方向无关，也没坏 —— 与用户"点小窗确实能点"的现场一致。
         //   ★没有更小的改法：`requestedOrientation` 的取值分支、`pinOrientationByUser()`、
         //     哨兵、沉浸式都不动，只换这一个判据。
+        //   ★已知边界（**系统行为，不是本修复的回归**）：分屏 / 自由窗口 / 桌面模式下点这个「旋转」，
+        //     系统会忽略 `setRequestedOrientation` ⇒ 仍然不生效。同一条结论在 [handleBack]
+        //     （约 2727-2736 行）已经为返回键写过一次（那边据此直接退页面），别再当成本次修复
+        //     没修好、重新查一遍。
         val landscape = isPageLandscape()
         // ★本轮：以前这里是 `orientationPinnedByUser = true`（**永久**置位、且全文件没有清除点），
         //   自动旋转=开时点一次就再也不跟随 —— 现在改走"按设置分两档"的那一个口。
@@ -4715,10 +4719,19 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // :347-348  fun onHostSizeChanged(...) { if (player?.isPicInPicMode == true) return ... }
         //           KDoc 里写明："画中画：窗口方向 ≠ 设备方向，别按它推导"
         // ```
-        // 本页下面那句 `resources.configuration.orientation` 读的正是**窗口**方向，而进/出小窗都会走
-        // [onConfigurationChanged]（进小窗时窗口先缩成小窗尺寸 → 配置回调 → PiP 回调）：16:9 房间在
-        // 竖屏手机上，小窗是**横的** ⇒ 这里会把"自动旋转关 = 锁进入房间时的方向"里的竖屏**改写成
-        // SENSOR_LANDSCAPE**，用户退出小窗后页面直接横过来 —— 而他要的是"竖屏它就竖屏"。
+        // ★★口径收口（2026-10-01，与上面 [toggleOrientation] 那段 P0 复盘同一口径）：
+        //   此处曾写"本页下面那句 `resources.configuration.orientation` 读的正是**窗口**方向"，
+        //   进而推出"进小窗时窗口先缩成小窗尺寸 ⇒ 会把竖屏改写成 SENSOR_LANDSCAPE"。
+        //   **这条前提已被证伪**：本页 [attachBaseContext]（:2361-2386）换过基座 Context
+        //   （`createConfigurationContext`），`resources.configuration` 是**建页那一刻的快照**、
+        //   转屏与进/出小窗都不更新（证据与推演见 :4628-4633）；读"真实尺寸"的唯一真源是 [isPageLandscape]。
+        //   所以下面那句读到的并不是"小窗此刻的方向"，旧推演**不能再用作理由**（证据留档，不删）。
+        //   ★[isInPictureInPictureMode] 这道守卫**照旧保留**，理由换成与点播同一条既有结论：
+        //     PiP 里窗口方向 ≠ 设备方向，一条方向都不推导（见本段开头引的
+        //     `PlayerController.kt:341-348`）。
+        //   ★别顺手把下面那句 `resources.configuration.orientation` 也换成 [isPageLandscape]：
+        //     那一支（自动旋转=**关**）要的正是"锁**进房那一刻**的方向"，冻结快照恰好 == 进房方向
+        //     （复核结论：非同类、意外正确），换掉反而变成"跟随当前尺寸"。
         // 小窗期间系统本来就不理会 requestedOrientation（小窗形状只由 PiP 参数里的比例决定），
         // 退出小窗时窗口恢复到原尺寸会再走一次 [onConfigurationChanged]，那时再断言方向即可
         // （窗口尺寸/方向与进小窗前完全一致、配置没变时，本页的 `requestedOrientation` 也一个字节没被动过，
