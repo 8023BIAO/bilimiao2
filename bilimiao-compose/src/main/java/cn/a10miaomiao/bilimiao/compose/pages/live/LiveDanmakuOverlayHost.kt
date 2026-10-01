@@ -13,12 +13,14 @@ import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.appColorScheme
@@ -497,18 +499,23 @@ class LiveDanmakuOverlayHost(
             // ★该直播间关闭了弹幕 → **整块滚动弹幕不组合**（横屏/竖屏都关），见 [roomDanmakuClosed] 的注释。
             //   WS 连接不受影响（它的门是 active/settings.visible，在这段之外）。
             if (on && settings.visible && !roomDanmakuClosed.value) {
-                LiveDanmakuOverlay(
-                    messages = client.messages,
-                    settings = settings,
-                    modifier = Modifier.fillMaxSize(),
-                    // 列表在屏上时滚动弹幕整体让位（不画、不入队、帧循环退出）——见类注释
-                    rollingVisible = !listShown.value,
-                    // ★本轮改动：**恒传同一份 chat** —— 横屏 / PiP / 听音频期间继续累积，只是不显示列表。
-                    //   上一版是 `if (listSupported) chat else null`，那正是用户实测
-                    //   "横屏收到的弹幕，转回竖屏一条都没有"的根因（横屏连存都没存）。
-                    //   `listSupported` 现在只喂给 refreshDockedPanel / rollingVisible（画不画）。
-                    chat = chat,
-                )
+                // ★2026-10-01 用户拍板：**滚动弹幕不跟随 App 内 DPI/字体缩放**，用系统密度/字体缩放
+                //   （直播页的顶栏/底栏/输入框仍跟随；「弹幕字号」设置**照旧**作用在这里）。
+                //   只包这一层的**渲染**：宿主的几何计算（列表矩形、96dp 门限、车道）都不受影响。
+                CompositionLocalProvider(LocalDensity provides remember { systemDanmakuDensity() }) {
+                    LiveDanmakuOverlay(
+                        messages = client.messages,
+                        settings = settings,
+                        modifier = Modifier.fillMaxSize(),
+                        // 列表在屏上时滚动弹幕整体让位（不画、不入队、帧循环退出）——见类注释
+                        rollingVisible = !listShown.value,
+                        // ★本轮改动：**恒传同一份 chat** —— 横屏 / PiP / 听音频期间继续累积，只是不显示列表。
+                        //   上一版是 `if (listSupported) chat else null`，那正是用户实测
+                        //   "横屏收到的弹幕，转回竖屏一条都没有"的根因（横屏连存都没存）。
+                        //   `listSupported` 现在只喂给 refreshDockedPanel / rollingVisible（画不画）。
+                        chat = chat,
+                    )
+                }
             }
         }
     }
@@ -972,34 +979,23 @@ class LiveDanmakuOverlayHost(
                 //     （`systemDark` 是无默认值的必填参数，不能直接删掉），
                 //     代价就是浅色档下名字偏暗、对比度掉回 ≈3.25:1。
                 val themeState = remember { liveSheetThemeState(context) }
-                // ★2026-10-01：列表**正文**字号跟着**直播自己的**「弹幕字号」走（`live_danmaku_font_size`，
-                //   与滚动弹幕同一个键 —— 两者都属于"直播弹幕"，不新增设置项）。
-                //   ★必须**订阅**、不能只 `loadCached()` 读一次：竖屏底栏那颗「设置」能在直播间里
-                //     当场改字号（`showLiveSettingSheet`），读一次的话要重进直播间才生效 ——
-                //     用户要的就是"改完列表立刻变"。
-                //   写法与上面滚动浮层那份订阅逐字同款（同一路 Flow、同一个初始值策略：
-                //   `loadCached()` 是主线程 O(1) 的内存快照，首帧就有正确的字号，不会先按默认画一帧再跳）。
-                //   ★与"不可见不干活"那条不变式不冲突：那是针对高频的 `chat.lines`，
-                //     而这里是低频的设置流（只有用户改直播弹幕设置才会推一次），且面板 View
-                //     本身要等列表**显示过一次**才会被 `ensureListPanel()` 建出来。
-                val chatSettingsFlow = remember { LiveDanmakuSettings.watch(context) }
-                val chatSettings by chatSettingsFlow.collectAsStateWithLifecycle(
-                    initialValue = remember { LiveDanmakuSettings.loadCached() },
-                )
                 MaterialTheme(colorScheme = appColorScheme(themeState.copy(darkMode = 2), systemDark = true)) {
                     // ★visible 用的是与 View 显隐**同一个信号**（listShown），不是裸的"竖屏"：
                     //   面板处于隐藏态时，这一份组合必须真的**不订阅** chat.lines
                     //   （只把 View 设成 GONE、组合还在跟着新弹幕重组，就不叫"不可见不干活"了）。
-                    LiveDanmakuChatPanel(
-                        chat = chat,
-                        visible = listShown.value,
-                        // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
-                        //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。
-                        fadingOut = panelFadingOut.value,
-                        // ★2026-10-01：正文吃直播「弹幕字号」（默认 15sp；提示语/按钮那几处 11sp 标签不吃）
-                        fontSizeSp = chatSettings.fontSizeSp,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    // ★2026-10-01 用户拍板：**弹幕那几块（这块列表 + 画面上的滚动弹幕）不跟随 App 内
+                    //   DPI/字体缩放**，一律用系统密度/字体缩放（直播页的顶栏/底栏/输入框仍跟随）。
+                    //   只包这一层的**渲染**：宿主的几何计算（矩形、96dp 门限）都在 View 侧、不受影响。
+                    CompositionLocalProvider(LocalDensity provides remember { systemDanmakuDensity() }) {
+                        LiveDanmakuChatPanel(
+                            chat = chat,
+                            visible = listShown.value,
+                            // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
+                            //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。
+                            fadingOut = panelFadingOut.value,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
             visibility = View.GONE
