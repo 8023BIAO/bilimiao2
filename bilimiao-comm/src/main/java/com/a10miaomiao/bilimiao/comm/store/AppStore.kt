@@ -3,7 +3,6 @@ package com.a10miaomiao.bilimiao.comm.store
 import android.content.Context
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
@@ -12,6 +11,7 @@ import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences.dataStore
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.entity.message.UnreadMessageInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
+import com.a10miaomiao.bilimiao.comm.platform.getMaterialYouColor
 import com.a10miaomiao.bilimiao.comm.store.base.BaseStore
 import com.kongzue.dialogx.DialogX
 import kotlinx.coroutines.Dispatchers
@@ -113,10 +113,16 @@ class AppStore(override val di: DI) :
         }
     }
 
-    val materialYouColor get() = ContextCompat.getColor(
-        context,
-        android.R.color.system_primary_light
-    )
+    /**
+     * 系统主色（Material You 动态取色）。
+     *
+     * ★2026-10-01：改走 [getMaterialYouColor] —— 带 Android 12 判断 + runCatching。
+     * 原实现直接 `ContextCompat.getColor(context, android.R.color.system_primary_light)`：
+     * 该资源是 Android 12 才有的，11 及以下会抛 `Resources.NotFoundException`；
+     * 而 [init] 的 collector 在"老用户 DataStore 里还留着 THEME_TYPE_DYNAMIC_COLOR"时**一定会读它**
+     * ⇒ 那些机器启动即崩。现在低版本回退默认主题色（少女粉），平滑退化。
+     */
+    val materialYouColor get() = getMaterialYouColor(context)
 
     fun setDarkMode(mode: Int) {
         // 同步更新 state，确保在 AppCompatDelegate.setDefaultNightMode 触发
@@ -143,6 +149,18 @@ class AppStore(override val di: DI) :
     }
 
     fun setThemeColor(color: Long, type: Int) {
+        // ★2026-10-01 移植上游 f9cc3474：Material You 的主题色取自系统主色，其余情况直接使用选中的颜色。
+        //   内存态存**真实色**（不再是 0x100000000 截断成的全透明黑），DataStore 仍写用户点的那个值
+        //   （持久化语义与上游一致；重启后 init 的 collector 按类型再翻成真实色）。
+        val themeColor = if (type == SettingConstants.THEME_TYPE_DYNAMIC_COLOR) {
+            materialYouColor
+        } else {
+            color.toInt()
+        }
+        // 与 setDarkMode / setCustomThemeColor 同一思路：内存态先改，避免 DataStore 异步回流那一两帧还是旧配色
+        setState {
+            theme = (theme ?: ThemeSettingState(color = themeColor)).copy(color = themeColor, type = type)
+        }
         viewModelScope.launch {
             SettingPreferences.edit(context) {
                 it[ThemeColor] = color

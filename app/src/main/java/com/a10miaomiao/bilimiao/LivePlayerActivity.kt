@@ -7378,10 +7378,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         }
     }
 
-    /** 动态取色（Material You）：与 `AppStore.materialYouColor` 用的是同一支系统色 */
-    private fun materialYouColor(): Int = runCatching {
-        ContextCompat.getColor(this, android.R.color.system_primary_light)
-    }.getOrDefault(themePrimaryFromResources())
+    /**
+     * 动态取色（Material You）：与 `AppStore.materialYouColor` 用的是同一支系统色。
+     *
+     * ★2026-10-01：改成调用公共实现（`comm/platform/ThemeHelper.kt` 的 `getMaterialYouColor`）——
+     * 这里原来自己抄了一份 `system_primary_light + runCatching`，两份实现迟早漂移；
+     * 公共实现额外带了 Android 12 判断（低版本该资源不存在，直接回退默认主题色）。
+     */
+    private fun materialYouColor(): Int =
+        com.a10miaomiao.bilimiao.comm.platform.getMaterialYouColor(this)
 
     /** 兜底主色：主题资源里的 `colorPrimary`（老写法就是取这个） */
     private fun themePrimaryFromResources(): Int = runCatching {

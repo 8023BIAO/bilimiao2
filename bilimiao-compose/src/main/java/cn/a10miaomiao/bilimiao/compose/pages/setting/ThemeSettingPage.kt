@@ -41,6 +41,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.setting.components.ThemeColorButton
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences.dataStore
+import com.a10miaomiao.bilimiao.comm.platform.isMaterialYouSupported
 import com.a10miaomiao.bilimiao.comm.store.AppStore
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.serialization.Serializable
@@ -57,6 +58,15 @@ import org.kodein.di.instance
  * 既不会和任何真实颜色撞车，也能继续用 `List<Pair<Long, String>>` 装这一列。
  */
 private const val CUSTOM_THEME_COLOR_KEY = 0x200000000L
+
+/**
+ * 「Material You」那一项的哨兵 key。
+ *
+ * 关键：它只用来**标记选项**，绝不能当颜色用 —— `Color(0x100000000L)` 取低 32 位是全透明黑。
+ * 真正的系统主色在点选后由 `AppStore.setThemeColor` / [AppStore.materialYouColor] 提供。
+ * 与自定义哨兵一样超出 32 位，所以判断必须用 `==`，不能用 `>`（会把两个哨兵互相误判）。
+ */
+private const val MATERIAL_YOU_COLOR = 0x100000000L
 
 @Serializable
 class ThemeSettingPage : ComposePage() {
@@ -88,9 +98,11 @@ private class ThemeSettingPageViewModel(
         1 to "纯色",
     )
     val appBarTypeListSize get() = appBarTypeList.size
+
+    /** 系统主色（Material You）：色块用它上色，取不到时由 AppStore 回退默认色 */
     val materialYouColor get() = appStore.materialYouColor
 
-    val colorList = listOf<Pair<Long, String>>(
+    private val defaultColorList = listOf<Pair<Long, String>>(
         0xFF2196F3 to "胖次蓝",
         0xFFFB7299 to "少女粉",
         0xFFFDD835 to "咸蛋黄",
@@ -100,10 +112,21 @@ private class ThemeSettingPageViewModel(
         0xFFF44336 to "麻衣红",
         0xFF39C5BB to "初音绿",
         0xFF66CCFF to "天依蓝",
-        0x100000000 to "Material You",
-        // 第 11 项：自定义（主色 / 副色 / 点缀色，点开弹窗自己调）
-        CUSTOM_THEME_COLOR_KEY to "自定义",
     )
+
+    /**
+     * 主题色候选：预设色 +（Android 12+ 才有）Material You + 自定义。
+     *
+     * ★Material You 仅 [isMaterialYouSupported] 时展示：低版本系统没有系统动态配色，
+     *   露一个选了不生效的选项等于骗用户（上游 f9cc3474 同款做法）。
+     *   写在 if/else 两支里（不用列表拼接）—— 分支类型一目了然，也避开 `emptyList()` 的推断问题。
+     */
+    val colorList: List<Pair<Long, String>> =
+        if (isMaterialYouSupported) {
+            defaultColorList + (MATERIAL_YOU_COLOR to "Material You") + (CUSTOM_THEME_COLOR_KEY to "自定义")
+        } else {
+            defaultColorList + (CUSTOM_THEME_COLOR_KEY to "自定义")
+        }
 
     val themeState = appStore.stateFlow.stateMap {
         it.theme ?: AppStore.ThemeSettingState(
@@ -127,7 +150,8 @@ private class ThemeSettingPageViewModel(
 
     fun setThemeColor(color: Long) {
         val type = when (color) {
-            0x100000000 -> SettingConstants.THEME_TYPE_DYNAMIC_COLOR
+            // ★哨兵用"等于"比较：自定义哨兵 0x200000000 也在 32 位之外，用 > 判会互相误判
+            MATERIAL_YOU_COLOR -> SettingConstants.THEME_TYPE_DYNAMIC_COLOR
             else -> SettingConstants.THEME_TYPE_DEFAULT
         }
         appStore.setThemeColor(color, type)
@@ -263,9 +287,9 @@ private fun ThemeSettingPageContent(
                     viewModel.colorList.forEach { color ->
                         val colorValue = color.first
                         val isCustomColor = colorValue == CUSTOM_THEME_COLOR_KEY
-                        // Material You 的老写法就是"大于 32 位"的哨兵（0x100000000）；
-                        // 自定义的哨兵同样在 32 位之外，所以要显式排掉它
-                        val isDynamicColor = colorValue > 0xFFFFFFFF && !isCustomColor
+                        // ★哨兵一律用"等于"判断（上游 f9cc3474）：Material You 与自定义的哨兵都在
+                        //   32 位之外，以前用 `> 0xFFFFFFFF` 只能靠"再排掉自定义"兜住，容易漏。
+                        val isDynamicColor = colorValue == MATERIAL_YOU_COLOR
                         ThemeColorButton(
                             onClick = {
                                 if (isCustomColor) {

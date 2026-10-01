@@ -9,7 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalContext
+import cn.a10miaomiao.bilimiao.compose.common.platform.rememberMaterialYouColorScheme
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.store.AppStore
 import com.materialkolor.rememberDynamicColorScheme
@@ -51,19 +51,31 @@ fun appColorScheme(
     systemDark: Boolean
 ): ColorScheme {
 
-    val themeColor = Color(themeState.color)
     val isDarkTheme = when(themeState.darkMode) {
         0 -> systemDark
         1 -> false
         else -> true
     }
-//    if (dynamicColor) {
-//        return if (isDarkTheme) {
-//            dynamicDarkColorScheme(LocalContext.current)
-//        } else {
-//            dynamicLightColorScheme(LocalContext.current)
-//        }
-//    }
+    // ★2026-10-01 移植上游 f9cc3474：Material You 直接使用**系统原生动态配色**。
+    //   在此之前无论什么类型都走下面的 rememberDynamicColorScheme(seedColor = Color(themeState.color))，
+    //   而 Material You 的哨兵值 0x100000000 取低 32 位 = 全透明黑 ⇒ 实际上只是"拿系统主色再推一条
+    //   调色板"，不是真·系统动态配色。
+    //   深色沿用 AMOLED 纯黑背景，与下面 isAmoled = true 的既有行为对齐。
+    //   注意：这一支在动态类型下**必须**直接返回，不能再走 materialkolor 那条路径。
+    if (themeState.type == SettingConstants.THEME_TYPE_DYNAMIC_COLOR) {
+        val youColorScheme = rememberMaterialYouColorScheme(isDarkTheme)
+        return if (isDarkTheme) {
+            youColorScheme.copy(
+                background = Color.Black,
+                onBackground = Color.White,
+                surface = Color.Black,
+                onSurface = Color.White,
+            )
+        } else {
+            youColorScheme
+        }
+    }
+    val themeColor = Color(themeState.color)
     // 自定义主题（设置页第 11 项）的副色 / 点缀色。
     // 非自定义类型、以及自定义里选了"跟随主色"时都是 null —— 此时这次调用与加本功能之前**逐位相同**。
     val customSecondary = customPaletteOverride(
