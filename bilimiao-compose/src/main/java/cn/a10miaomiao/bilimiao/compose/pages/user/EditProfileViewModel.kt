@@ -284,6 +284,17 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
         }
     }
 
+    /**
+     * 经验文案：`当前/下一级`；满级（>= [MAX_LEVEL]）取 `当前/当前`；缺当前、或未满级缺下一级
+     * → null（页面按"不显示这一行"处理）。**满级口径照旧**，见 [MAX_LEVEL]。
+     */
+    private fun formatExp(levelExp: LevelExp?): String? {
+        val level = levelExp?.level ?: return null
+        val current = levelExp.current ?: return null
+        val next = if (level >= MAX_LEVEL) current else (levelExp.next ?: return null)
+        return "$current/$next"
+    }
+
     // ──────────────────────────── 头像（第二阶段） ────────────────────────────
 
     /**
