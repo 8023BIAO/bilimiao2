@@ -1017,14 +1017,17 @@ class LiveDanmakuOverlayHost(
                 //     而"面板那份独立色板"只有这一处 —— 只借它的 isDark 分支，不碰公共路径
                 //     （同款 copy 写法见 `AppStore.kt:130` 的 `theme?.copy(darkMode = mode)`）。
                 //   · 影响面：面板里吃 `colorScheme` 的**只有用户名一处**
-                //     （`LiveDanmakuOverlay.kt:1499` `val unameColor = MaterialTheme.colorScheme.primary`），
+                //     （`LiveDanmakuOverlay.kt:1558` `val unameColor = MaterialTheme.colorScheme.primary`），
                 //     所以这次钉深色只动一个名字色，不牵连别的界面。
-                //   · 深色档下 `primary` 是亮色调（tone 80），压在纯黑面板上 ≈12.3:1；
-                //     **色相与彩度仍然完全来自用户主题色**，只是取了适配深底的明度。
+                //   · 深色档下 `primary` 是亮色调（tone 80）：亮字 + 不透明黑阴影在**任何画面**上都有轮廓
+                //     （面板已无底色 —— 见 `LiveDanmakuOverlay` 里"已删 CHAT_PANEL_BG"那条说明；
+                //      所以这里不再有"压在纯黑面板上多少 :1"这种可离线算死的数，可读性由阴影兜底）；
+                //     **色相与彩度仍然完全来自用户主题色**，只是取了"压在画面上"该有的明度。
                 //   ⇒ 想改成"严格跟随 App 深浅色"的话：把 `systemDark = true` 换成
                 //     `isSystemInDarkTheme()`，并去掉 `copy(darkMode = 2)`
                 //     （`systemDark` 是无默认值的必填参数，不能直接删掉），
-                //     代价就是浅色档下名字偏暗、对比度掉回 ≈3.25:1。
+                //     代价是浅色档下 `primary` 变成 tone 40 —— 那是给"**浅底**上的深字"用的色，
+                //     压在画面（尤其深色画面）上会直接糊掉，与"亮字 + 不透明黑阴影"这条策略正好相反。
                 val themeState = remember { liveSheetThemeState(context) }
                 MaterialTheme(colorScheme = appColorScheme(themeState.copy(darkMode = 2), systemDark = true)) {
                     // ★visible 用的是与 View 显隐**同一个信号**（listShown），不是裸的"竖屏"：
