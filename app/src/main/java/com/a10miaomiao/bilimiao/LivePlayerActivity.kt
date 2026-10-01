@@ -4620,7 +4620,22 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   退出直播间再进 = 按设置重新定方向。
      */
     private fun toggleOrientation() {
-        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        // ★★P0 修复（2026-10-01，用户实测"横屏按旋转回不去竖屏、点几次都没反应"）：
+        //   判据从 `resources.configuration.orientation` 换成 [isPageLandscape]（**真实尺寸**）——
+        //   与 [handleBack]、以及整页的版式/沉浸式判断**同一个真源**（本文件反复写过的那条规矩：
+        //   "尺寸是方向的最终真源，别用 Configuration.orientation"）。
+        //
+        //   为什么这里会坏：本页 [attachBaseContext] 会把基座 Context 换成
+        //   `createConfigurationContext(...)`（App 内 DPI / 字体缩放要靠它覆盖整页），
+        //   于是 `resources.configuration` 是**建页那一刻的快照**，不再随窗口转屏更新 ——
+        //   横屏时它读出来仍是 PORTRAIT ⇒ `landscape` 判成 false ⇒ 这一段反而**再请求一次
+        //   `SENSOR_LANDSCAPE`** ⇒ 窗口纹丝不动（用户看到的就是"按了没反应"，
+        //   而且因为判据是冻结的，**每一次点都走同一条错分支**，不是偶发）。
+        //   返回键那条路一直用的是真实尺寸（[handleBack] → [isPageLandscape]），所以它没坏；
+        //   「小窗」与方向无关，也没坏 —— 与用户"点小窗确实能点"的现场一致。
+        //   ★没有更小的改法：`requestedOrientation` 的取值分支、`pinOrientationByUser()`、
+        //     哨兵、沉浸式都不动，只换这一个判据。
+        val landscape = isPageLandscape()
         // ★本轮：以前这里是 `orientationPinnedByUser = true`（**永久**置位、且全文件没有清除点），
         //   自动旋转=开时点一次就再也不跟随 —— 现在改走"按设置分两档"的那一个口。
         pinOrientationByUser()
@@ -4629,10 +4644,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         } else {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
-        // ★诊断日志（只读）：手动「旋转」按钮的方向决策
+        // ★诊断日志（只读）：手动「旋转」按钮的方向决策。
+        //   ★两个判据都记：`pageLandscape` = 修复后真正参与决策的那个（真实尺寸）；
+        //   `configLandscape` 留作现场证据 —— 若它与 `pageLandscape` 不一致，
+        //   就证明"被 attachBaseContext 覆盖过的 configuration 不随转屏更新"（P0 的根因）。
         LivePageTrace.note(
             "orientation.toggle",
-            "configLandscape" to landscape,
+            "pageLandscape" to landscape,
+            "configLandscape" to (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE),
             "requestedOrientation" to requestedOrientation,
             "autoRotate" to autoRotateEnabled(),
             "page" to (if (::rootLayout.isInitialized) "${rootLayout.width}x${rootLayout.height}" else "-"),
