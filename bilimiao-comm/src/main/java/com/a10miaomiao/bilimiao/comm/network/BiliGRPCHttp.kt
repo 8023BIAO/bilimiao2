@@ -196,25 +196,23 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
                     String(Base64.decode(d, Base64.DEFAULT), Charsets.ISO_8859_1)
                 }.getOrNull()
             }?.let { raw -> NEGATIVE_CODE_REGEX.find(raw)?.groupValues?.get(1)?.toIntOrNull()?.unaryMinus() }
+        // 日志拼成**单个字符串**：`MiaoLogger.d(vararg Any?)` 在这条调用上对 `Pair` 的
+        // 类型推断不稳定（PC 编译报 "Cannot infer type for type parameter 'B'"），
+        // 单字符串既绕开推断、也少一次装箱。
         miaoLogger().d(
-            "grpc-empty-body" to method.name,
-            "httpCode" to res.code,
-            "grpcStatus" to status,
-            "grpcMessage" to message,
-            // details-bin 很长（base64），拼成单个字符串：省掉一次 Pair 的类型推断
-            "grpcStatusDetails=$details",
-            // ★ OkHttp 5 的 trailers 是**函数**（trailers(): Headers），不是属性
-            "trailers" to res.trailers().names().joinToString(","),
+            "grpc-empty-body method=${method.name} httpCode=${res.code} " +
+                "grpcStatus=$status grpcMessage=$message " +
+                "grpcStatusDetails=$details " +
+                "trailers=${res.trailers().names().joinToString(",")}",
         )
         return GrpcStatusException(
             grpcStatus = status,
             grpcMessage = message,
             bizCode = bizCode,
-            message = "服务端没有返回内容" + if (status.isNullOrBlank()) {
-                ""
-            } else {
-                "（grpc-status=$status${if (message.isNullOrBlank()) "" else " $message"}）"
-            },
+            // ★ message **只留人话**：grpc-status / grpc-message / details 已经在上面那行日志里。
+            //   评论列表两处 UI 会把 `e.message` 直接上屏（MainReplyViewModel / ReplyDetailContent），
+            //   技术术语写进 message 就会漏到用户面前（复核 P1-1）。
+            message = GrpcStatusException.humanMessage(bizCode == -404 || status == "5"),
         )
     }
 
@@ -260,8 +258,9 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
  * 为什么要单独一个类型（而不是继续抛一句 `IOException("gRPC header truncated")`）：
  *   ① 调用方需要判定"内容在**这个**接口里不存在"（[isNotFound]）→ 才能走换接口/换页面的兜底，
  *      而不是把"服务端明确说没有"当成网络故障；
- *   ② 用户不该看到开发者黑话 —— BiliFailBox 会把异常 message 逐字当整页文案。
- * 原始现场（httpCode / grpc-status / grpc-message / details / trailers）在抛出前已进日志。
+ *   ② 调用方还需要按**类型**过滤（评论列表会把 `e.message` 直接上屏，靠文案子串过滤一改文案就失效）；
+ *   ③ [message] **只放人话**（见 [humanMessage]）—— grpc-status / grpc-message / details / trailers
+ *      这些现场只在 `BiliGRPCHttp.emptyBodyError()` 的日志里，不进 message、不上屏。
  */
 class GrpcStatusException(
     val grpcStatus: String?,
@@ -273,4 +272,13 @@ class GrpcStatusException(
 
     /** true = 这条内容在当前接口里不存在（业务码 -404 或 grpc-status 5/NOT_FOUND） */
     val isNotFound: Boolean get() = bizCode == -404 || grpcStatus == "5"
+
+    companion object {
+        /** 给用户看的话：**不含任何 gRPC 术语**（现场只进日志） */
+        const val HUMAN_NOT_FOUND = "这条内容打不开（可能已下架，或是番剧/影视）"
+        const val HUMAN_NO_CONTENT = "服务端没有返回内容，请稍后重试"
+
+        fun humanMessage(notFound: Boolean) =
+            if (notFound) HUMAN_NOT_FOUND else HUMAN_NO_CONTENT
+    }
 }

@@ -27,6 +27,7 @@ import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.mypage.myMenu
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
+import com.a10miaomiao.bilimiao.comm.network.GrpcStatusException
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.toast
@@ -173,9 +174,12 @@ class MainReplyViewModel(
             if (e is CancellationException) throw e
             e.printStackTrace()
             // 过期批次（已经换目标/刷新过）的失败也不要写：否则新视频的列表上会挂着旧请求的报错
-            if (generation == loadGeneration &&
-                (e !is java.io.IOException || (e.message?.contains("gRPC") != true))
-            ) {
+            // gRPC 层失败不进评论列表：**按类型判**（旧写法靠 message 里有没有 "gRPC" 字样，
+            // 异常文案一改过滤就失效 —— 复核 P1-1）。非 2xx 那条目前仍是
+            // `IOException("gRPC HTTP …")`，保留文案判据兜着，等它也有了类型再一起换。
+            val grpcNoise = e is GrpcStatusException ||
+                (e is java.io.IOException && e.message?.contains("gRPC") == true)
+            if (generation == loadGeneration && !grpcNoise) {
                 list.fail.value = e.message ?: e.toString()
             }
         } finally {

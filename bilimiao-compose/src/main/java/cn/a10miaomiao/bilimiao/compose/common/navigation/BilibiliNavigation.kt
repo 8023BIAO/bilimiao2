@@ -156,29 +156,35 @@ object BilibiliNavigation {
     }
 
     /**
-     * 番剧兜底专用：把"站内跳转地址"（`x/web-interface/view` 的 `redirect_url`）解析成番剧页。
+     * 番剧兜底专用：把"站内跳转地址"（`x/web-interface/view` 的 `redirect_url`）解析成**番剧详情页**。
+     *
+     * ★ 目标必须是 [BangumiDetailPage]，**不能**用 [SeasonCheckPage]：
+     *   `SeasonCheckPage` 只拿到 `epId` 时会走 `detectPvSeason` 的 ep-only 分支 —— 那个分支不是 PV 检测，
+     *   而是"取本季第 1 集"，于是跳到 `VideoDetailPage(本季第 1 集的 bvid)`；这类稿件的 bvid 在 UGC 的
+     *   `View/View` 里同样是 -404 ⇒ 再兜底 ⇒ **成环**（复核员 2026-10-01 实测：`ep5578285` 属第 24 集，
+     *   第 1 集是 `BV1tYud6hEVF`，两者互为环）。直接进番剧页绕开这个启发式。
      *
      * 为什么单独一个**只解析、不导航**的函数：调用方（VideoDetailViewModel 的番剧兜底）要的是
      * "目标页 + `popUpTo(当前视频页){inclusive=true}`"这套**自替换**，而 [navigationTo] 只能把页面压上去 ——
      * 换成"先压栈、再弹自己"会把刚压上去的目标页一起弹掉（`popBackStack(route, inclusive)` 连上面的页一起弹）。
      *
      * 只认三类，其余一律 null（由调用方退回人话错误，不猜、不透传）：
-     *   · `/bangumi/play/ep123` → [SeasonCheckPage]（epId）
-     *   · `/bangumi/play/ss123` → [SeasonCheckPage]（id = 季）
-     *   · `…/media/md123`       → [SeasonCheckPage]（mediaId）
+     *   · `/bangumi/play/ep123` → [BangumiDetailPage]（epId）
+     *   · `/bangumi/play/ss123` → [BangumiDetailPage]（id = 季）
+     *   · `…/media/md123`       → [BangumiDetailPage]（mediaId）
      */
     fun pgcPageOf(url: String): ComposePage? {
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
         if (uri.scheme != "http" && uri.scheme != "https") return null
         val path = uri.path ?: return null
         Regex("(?i)^/bangumi/play/ep(\\d+)").find(path)?.let {
-            return SeasonCheckPage(epId = it.groupValues[1])
+            return BangumiDetailPage(epId = it.groupValues[1])
         }
         Regex("(?i)^/bangumi/play/ss(\\d+)").find(path)?.let {
-            return SeasonCheckPage(id = it.groupValues[1])
+            return BangumiDetailPage(id = it.groupValues[1])
         }
         Regex("(?i)^/bangumi/media/md(\\d+)").find(path)?.let {
-            return SeasonCheckPage(mediaId = it.groupValues[1])
+            return BangumiDetailPage(mediaId = it.groupValues[1])
         }
         return null
     }

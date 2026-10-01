@@ -196,25 +196,11 @@ class VideoDetailViewModel(
 
     private var loadJob: kotlinx.coroutines.Job? = null
 
-    /**
-     * 番剧兜底是否已经试过（见 [tryPgcFallback]）。
-     *
-     * ★ 不变量：**同一目标只打一次**。失败分支里绝不能再回头调 [loadData]（否则"打不开的番剧条目"
-     *   会变成 HTTP 请求循环），也绝不重试。
-     * ★ 唯一的重置点是 [changeVideo]（换视频 = 换了目标，重新给一次机会）；
-     *   **下拉刷新/重试不重置** —— 那正是"失败即停"要挡住的东西。
-     */
-    private var pgcFallbackTried = false
-
     /** 当前在途的 AI 总结请求：切视频/重复点按要取消旧的 */
     private var aiJob: kotlinx.coroutines.Job? = null
 
     fun changeVideo(id: String) {
         _id = id
-        // ★ 换目标 = 新的兜底机会：本 VM 会被"自动连播/切集"复用（见 changeVideoIfNeeded），
-        //   不重置的话"上一条兜底失败"会把后面所有视频的番剧兜底一起封死。
-        //   注意只在这里重置：同一目标内**兜底仍然只打一次**（失败即停，见 tryPgcFallback）。
-        pgcFallbackTried = false
         loadData()
     }
 
@@ -304,22 +290,30 @@ class VideoDetailViewModel(
      *     trailers `grpc-status:2 / grpc-message:-404`（以前的文案就是那句 "gRPC header truncated"）。
      *
      * ★★ 不变量（改动前先读）：
-     *   ① **同一目标只打一次**（[pgcFallbackTried]）：置位后永远返回 false —— 不递归、不重试、不回 [loadData]；
-     *      换视频（[changeVideo]）会把标志重置，刷新/重试不会；
+     *   ① **进程级只放行一次**（companion 的 [pgcFallbackUsed] CAS）：失败即返回 false ——
+     *      不递归、不重试、不回 [loadData]；跨页面/跨 VM 也最多一次 ⇒ 兜底链条最多两步，**不可能成环**；
      *   ② **失败即停**：HTTP 失败 / 没有 redirect_url / 解析不出番剧页 / 导航失败
      *      → 一律返回 false，由调用方退回人话错误（[com.a10miaomiao.bilimiao.comm.network.GrpcStatusException]
-     *      已被 BiliFailBox 翻译）；
+     *      的 message 本身就是人话）；
      *   ③ **只在"内容不存在"时被调用**（调用点判 `e.isNotFound`），网络错误/风控/取消都不触发；
      *   ④ **自替换**：`navigate(番剧页) { popUpTo(当前视频页){inclusive=true} }` ——
-     *      从番剧页返回不会回到这个打不开的视频页；SeasonCheckPage 没有 `navDedupeKey`，
-     *      PageNavigation 的 1 秒同指纹闸门不拦它；
-     *   ⑤ **用户已经离开就不拽人**：导航前比对 `currentDestination.route` 与发请求前的快照，
-     *      不一致说明用户在 HTTP 请求期间按了返回 → 放弃兜底。
+     *      返回键不会落回这个打不开的视频页（`BangumiDetailPage` 没有 `navDedupeKey`，
+     *      那道 1 秒同指纹闸门不会拦它）；
+     *   ⑤ **用户已经离开就不拽人**：用发起请求前抓的 **`NavBackStackEntry.id`** 比对 ——
+     *      **不能用 route**：route 是路由模板（`…VideoDetailPage/{id}`），同路由的第二个 entry
+     *      与第一个模板完全相同，用它判定会把用户所在的另一层视频页一起 `popUpTo` 弹掉（复核反例②）。
+     *
+     * ⚠️ 已知边界（**别据此以为"连点会被挡住"**）：列表入口走
+     * `PageNavigation.navigateToVideoInfo` → 直接 `hostController.navigate(defaultNavOptions)`，
+     * 既不过这道闸门、也没有 `launchSingleTop` ⇒ 连点两次会压两层同路由 entry（基线就如此，本轮不改）。
+     * 本兜底对这个情况的处理是：进程级护栏只放行一次 + entry id 校验 —— 第二层不会再兜底，只会显示人话错误。
      */
     private suspend fun tryPgcFallback(): Boolean {
-        if (pgcFallbackTried) return false
-        pgcFallbackTried = true
-        val savedRoute = pageNavigation.hostController.currentDestination?.route ?: return false
+        // ★★ 进程级 CAS：整个进程最多兜底一次（跨页面/跨 VM）。失败就直接走人话错误。
+        if (!pgcFallbackUsed.compareAndSet(false, true)) return false
+        val currentEntry = pageNavigation.hostController.currentBackStackEntry ?: return false
+        val savedEntryId = currentEntry.id
+        val savedRoute = currentEntry.destination.route ?: return false
         val redirectUrl = try {
             val param = if (_id.startsWith("BV")) "bvid" to _id else "aid" to _id
             val res = MiaoHttp.request {
@@ -334,11 +328,14 @@ class VideoDetailViewModel(
         if (redirectUrl.isBlank()) return false
         val target = BilibiliNavigation.pgcPageOf(redirectUrl)
         if (target == null) {
-            miaoLogger().d("pgc-fallback-unmatched" to redirectUrl)
+            miaoLogger() debug "pgc-fallback-unmatched $redirectUrl"
             return false
         }
         return withContext(Dispatchers.Main) {
-            if (pageNavigation.hostController.currentDestination?.route != savedRoute) return@withContext false
+            // 判据是 **entry 身份**（见不变量⑤），不是 route 字符串
+            if (pageNavigation.hostController.currentBackStackEntry?.id != savedEntryId) {
+                return@withContext false
+            }
             runCatching {
                 pageNavigation.navigate(target) {
                     popUpTo(savedRoute) { inclusive = true }
@@ -1024,6 +1021,17 @@ class VideoDetailViewModel(
     // ============ AI 视频总结 + WBI 签名（内联同步实现，避开协程嵌套） ============
 
     companion object {
+        /**
+         * ★★ **进程级**番剧兜底护栏：整个进程最多兜底一次（跨页面、跨 ViewModel 都算）。
+         *
+         * 为什么必须是进程级：兜底目标页自己也可能再落到一个 `VideoDetailPage`（番剧页在
+         * "全部 section type=2 的 PV 季"下会自动跳视频页），那个页面的 `View/View` 同样是 -404；
+         * 每个新 entry = 新 VM，VM 级标志挡不住，链条会无界（复核员 2026-10-01 实测成环：
+         * `ep5578285 → 本季第 1 集 BV1tYud6hEVF → ep5338296 → BV1tYud6hEVF …`）。
+         * 这里用 CAS 保证**全局只放行一次** ⇒ 链条最多两步，结构上不可能成环。
+         */
+        private val pgcFallbackUsed = java.util.concurrent.atomic.AtomicBoolean(false)
+
         private val MIXIN_TABLE = intArrayOf(
             46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
             27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13

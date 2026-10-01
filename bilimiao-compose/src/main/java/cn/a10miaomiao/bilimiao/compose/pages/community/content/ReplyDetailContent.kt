@@ -84,6 +84,7 @@ import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.mypage.myMenu
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.BiliGRPCHttp
+import com.a10miaomiao.bilimiao.comm.network.GrpcStatusException
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.utils.ClickGuard
@@ -186,7 +187,12 @@ private class ReplyDetailContentViewModel(
             //   列表会显示一个莫名其妙的失败提示
             if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
-            if (e !is java.io.IOException || (e.message?.contains("gRPC") != true)) {
+            // gRPC 层失败不进列表：**按类型判**（旧写法靠 message 里有没有 "gRPC" 字样，
+            // 异常文案一改过滤就失效 —— 复核 P1-1）。非 2xx 那条仍是
+            // `IOException("gRPC HTTP …")`，保留文案判据兜着，等它也有类型再换。
+            val grpcNoise = e is GrpcStatusException ||
+                (e is java.io.IOException && e.message?.contains("gRPC") == true)
+            if (!grpcNoise) {
                 list.fail.value = e.message ?: e.toString()
             }
         } finally {
