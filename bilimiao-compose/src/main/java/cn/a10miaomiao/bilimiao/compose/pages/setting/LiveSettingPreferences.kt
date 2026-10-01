@@ -32,8 +32,8 @@ import me.zhanghai.compose.preference.switchPreference
  * ★★本轮（2026-09-26 弹窗瘦身）：两个入口不再展示**同一批**项，而是同一份定义的
  *   **两个子集**（见 [liveDanmakuSettingPreferenceItems] 的 KDoc）：
  * ```
- * liveSettingPreferenceItems()        设置页：播放 4 + 弹幕 5 + 直播列表 1 = 10 项（一个不少）
- * liveDanmakuSettingPreferenceItems() 播放页弹窗：只有弹幕 5 项
+ * liveSettingPreferenceItems()        设置页：播放 4 + 弹幕 6 + 直播列表 1 = 11 项（一个不少）
+ * liveDanmakuSettingPreferenceItems() 播放页弹窗：只有弹幕 6 项
  * ```
  *   ★弹幕那一组仍然**只有一份实现**（[liveDanmakuPreferenceItems]），两个入口都调它；
  *     播放类 4 项**没删**，只是不在弹窗里出现 —— 设置页照旧全部展示。
@@ -63,12 +63,12 @@ internal fun LazyListScope.liveSettingPreferenceItems() {
  *
  * 于是两个入口是**同一份项定义的两个子集**（不是两份拷贝）：
  * ```
- * liveSettingPreferenceItems()          → 设置页：播放 4 + 弹幕 5 + 直播列表 1（= 10 项，一个不少）
- * liveDanmakuSettingPreferenceItems()   → 播放页弹窗：弹幕 5 项（唯一实现 [liveDanmakuPreferenceItems]）
+ * liveSettingPreferenceItems()          → 设置页：播放 4 + 弹幕 6 + 直播列表 1（= 11 项，一个不少）
+ * liveDanmakuSettingPreferenceItems()   → 播放页弹窗：弹幕 6 项（唯一实现 [liveDanmakuPreferenceItems]）
  * ```
  * ★为什么播放类 4 项从弹窗移除：它们都是"**进房前/播放策略**"类的设置（默认画质、默认线路策略、
  *   自动重连、自动旋转），在弹窗里改完当场也只对**下一次**起播/恢复生效，放在"直播间里随手调"的
- *   弹窗里既占地方又容易让人以为"改了没反应"；而弹幕那 5 项是**看直播时随时想调**的东西
+ *   弹窗里既占地方又容易让人以为"改了没反应"；而弹幕那 6 项是**看直播时随时想调**的东西
  *   （字号/竖屏列表字号/不透明度/速度/显示区域），改完当场生效 —— 这正是弹窗该干的事。
  * ★播放类 4 项**一个都没少**：它们仍在设置页（[livePlayPreferenceItems]），播放页也照旧读同一批键。
  */
@@ -81,7 +81,7 @@ internal fun LazyListScope.liveDanmakuSettingPreferenceItems() {
  * 「直播播放」那一组（4 项：默认画质 / 默认线路策略 / 自动重连 / 自动旋转）。
  *
  * ★★本轮起它**只在「设置 → 直播设置」页出现**：播放页底栏「设置」弹窗按用户要求瘦身成
- *   只剩弹幕 5 项（见 [liveDanmakuSettingPreferenceItems]），但这四项**没有删**。
+ *   只剩弹幕 6 项（见 [liveDanmakuSettingPreferenceItems]），但这四项**没有删**。
  */
 private fun LazyListScope.livePlayPreferenceItems() {
 
@@ -89,7 +89,7 @@ private fun LazyListScope.livePlayPreferenceItems() {
     //   「后台继续直播」(`live_background_play`)、「退后台自动进小窗」(`live_pip_on_background`)、
     //   「双击暂停」(`live_double_tap_pause`) —— 三个键与默认值、读取逻辑一个字没动，
     //   本页只是不再显示（详见 LiveSettingPage 文件头 KDoc）。
-    //   ★本轮更正一句旧注释：它们**不在**播放页底栏「设置」弹窗里（那个弹窗现在只有弹幕 5 项），
+    //   ★本轮更正一句旧注释：它们**不在**播放页底栏「设置」弹窗里（那个弹窗现在只有弹幕 6 项），
     //     当前全工程**没有**这三项的 UI 入口 —— 值仍被播放页读取（后台继续直播 / 退后台进小窗 /
     //     双击暂停），要改只能改默认值常量或另开入口。
     preferenceCategory(
@@ -161,7 +161,7 @@ private fun LazyListScope.livePlayPreferenceItems() {
 
 // ===== 弹幕 =====
 /**
- * 「直播弹幕」那一组（5 项：弹幕字号 / 竖屏列表字号 / 弹幕不透明度 / 弹幕速度 / 弹幕显示区域）。
+ * 「直播弹幕」那一组（6 项：弹幕字号 / 竖屏列表字号 / 竖屏弹幕透明度 / 弹幕不透明度 / 弹幕速度 / 弹幕显示区域）。
  *
  * ★★这一组是**两个入口共用**的那一份：设置页（[liveSettingPreferenceItems]）与
  *   播放页底栏「设置」弹窗（[liveDanmakuSettingPreferenceItems]）都调它 ——
@@ -169,10 +169,10 @@ private fun LazyListScope.livePlayPreferenceItems() {
  */
 private fun LazyListScope.liveDanmakuPreferenceItems() {
     // ★这一组就是**直播自己的那一套**：
-    //   字号、竖屏列表字号、不透明度、速度、显示区域五项全部写 `live_danmaku_*` 键，只对直播生效，
+    //   字号、竖屏列表字号、竖屏弹幕透明度、不透明度、速度、显示区域六项全部写 `live_danmaku_*` 键，只对直播生效，
     //   读取方都是 `LiveDanmakuSettings.from()`（→ 直播弹幕浮层）。
     //   ★组内**没有任何点播项**：屏蔽词共用的那行跳转本轮已删（直播不做关键词过滤），
-    //   字号/竖屏列表字号/不透明度/速度/显示区域五项全部只写、只读 `live_danmaku_*`（详见 LiveSettingPage 文件头 KDoc）。
+    //   字号/竖屏列表字号/竖屏弹幕透明度/不透明度/速度/显示区域六项全部只写、只读 `live_danmaku_*`（详见 LiveSettingPage 文件头 KDoc）。
     //   组内原先第一项是「显示弹幕」(`live_danmaku_enable`)，上一轮已整项删显示：
     //   播放页底栏那颗「弹幕」按钮当场开关并且写回同一个键，能力一点没少。
     preferenceCategory(
@@ -216,6 +216,27 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
         },
         summary = {
             Text("当前 ${LiveDanmakuSettings.chatFontSizeText(it)}，只影响竖屏的弹幕列表")
+        },
+    )
+    // ★★2026-10-01 新增：**竖屏弹幕透明度**（键 `live_danmaku_chat_opacity`，Int %，默认 100）。
+    //   用户原话："我想让竖屏状态下的弹幕透明度**不再跟随**那个弹幕透明度，**单独设置**一个竖屏弹幕透明度"
+    //   ⇒ 与下面那项「弹幕不透明度」（画面上的滚动弹幕）**各管各的**：两个键、两条读取路径。
+    //   档位/下限/文案与「弹幕不透明度」完全一致（10..100%、steps 89、`$it%`），只是键与读取方不同。
+    //   默认 100% ⇒ 老用户升级后竖屏列表观感与之前**零变化**，只有主动调才变。
+    sliderIntPreference(
+        key = SettingPreferences.LiveDanmakuChatOpacity.name,
+        title = {
+            Text("竖屏弹幕透明度")
+        },
+        // 10..100 共 91 个整数 → steps = 89。下限不给 0，理由同下面那项（全透明 = "弹幕开了但看不见"）
+        valueRange = 10..100,
+        valueSteps = 89,
+        defaultValue = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
+        valueText = {
+            Text("$it%")
+        },
+        summary = {
+            Text("只影响竖屏的弹幕列表，与上面「弹幕不透明度」各调各的")
         },
     )
     sliderIntPreference(
@@ -283,7 +304,7 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
 // ===== 浏览页 =====
 /**
  * 「直播列表」那一组（1 项：每行卡片数）—— **只在「设置 → 直播设置」页出现**
- * （播放页弹窗按用户要求只剩弹幕 5 项）。
+ * （播放页弹窗按用户要求只剩弹幕 6 项）。
  */
 private fun LazyListScope.liveBrowsePreferenceItems() {
     // ★本组原来的「默认排序」(`live_sort_type`) 上一轮整项移出设置页：用户要求挪到首页

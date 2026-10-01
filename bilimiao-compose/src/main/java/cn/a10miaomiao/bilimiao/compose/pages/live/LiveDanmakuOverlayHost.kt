@@ -1046,13 +1046,16 @@ class LiveDanmakuOverlayHost(
                             // ★本轮（task-6）：竖屏列表正文字号（默认 13sp = 改前写死的值）。
                             //   只传这一个值：面板用不到 settings 里别的字段。
                             chatFontSizeSp = settings.chatFontSizeSp,
-                            // ★★2026-10-01（用户："这个竖屏弹幕字体透明度跟随，直播弹幕透明度"）：
-                            //   列表**弹幕行**的不透明度也跟随同一个设置项（`live_danmaku_opacity`，
-                            //   与画面上的滚动弹幕**同一个值**）。这一份组合本来就订阅了 settings
-                            //   （`LiveDanmakuSettings.watch` + `collectAsStateWithLifecycle`）⇒
-                            //   用户在设置里拖动滑块，这一行立刻拿到新值、面板当场重画，不用重进直播间。
+                            // ★★2026-10-01（用户："竖屏状态下的弹幕透明度**不再跟随**那个弹幕透明度，
+                            //   **单独设置**一个竖屏弹幕透明度"）：列表**弹幕行**的不透明度取**自己的键**
+                            //   `live_danmaku_chat_opacity`（`settings.chatOpacity`，默认 100%）。
+                            //   ★与画面上的滚动弹幕**从此各管各的**：滚动弹幕继续用 `settings.opacity`
+                            //     （`live_danmaku_opacity`），口径一个字没改。
+                            //   这一份组合本来就订阅了 settings（`LiveDanmakuSettings.watch` +
+                            //   `collectAsStateWithLifecycle`）⇒ 用户拖动滑块时这一行立刻拿到新值、
+                            //   面板当场重画，不用重进直播间。
                             //   ★只传这一个 Float（照 `chatFontSizeSp` 的同款写法），不塞整个 settings 对象。
-                            danmakuAlpha = settings.opacity,
+                            danmakuAlpha = settings.chatOpacity,
                             visible = listShown.value,
                             // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
                             //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。

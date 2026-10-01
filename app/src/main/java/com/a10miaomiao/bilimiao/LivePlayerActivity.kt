@@ -128,8 +128,9 @@ import kotlin.math.roundToInt
  * ```
  * FrameLayout（rootLayout = 用户看到的那一页）
  * ├─ AspectRatioFrameLayout ── TextureView     视频（按视频比例等比，不变形）
- * │     ★竖屏 + 横屏流：缩成"顶栏之下的那条带"（宽 ÷ 比例，且不高于 `可用高 − 列表 reserve`），顶边 = [videoBandTopPx]
- * │           （状态栏内边距 + 顶栏高度），**底边永远等于列表槽 [danmakuListSlot] 的顶边**
+ * │     ★竖屏 + 横屏流：缩成"**状态栏之下**的那条带"（宽 ÷ 比例，且不高于 `可用高 − 列表 reserve`），顶边 = [portraitVideoTopPx]
+ * │           （= **状态栏内边距**，**不含顶栏** —— 2026-10-01 用户要求"画面铺到上面、不要顶着状态栏"），
+ * │           **底边永远等于列表槽 [danmakuListSlot] 的顶边**
  * │     ★竖屏 + **竖屏流**（解码高 > 宽）：容器**铺满可用区** + 画面按 **cover** 等比放大
  * │           （超出容器的左右两条被裁掉、不留黑边；2026-10-01 用户拍板①）——此时"画面底边"
  * │           不再是列表顶，列表改由"底栏顶边往上要一块"给出，见 [isPortraitStream] /
@@ -146,6 +147,8 @@ import kotlin.math.roundToInt
  * │        面板**高于手势层**（列表能滑）、**低于底栏**（按钮能点、底栏浮在弹幕之上），
  * │        于是面板矩形可以铺到**窗口底**——用户要的"弹幕区把底栏铺满"。
  * ├─ 顶栏：返回**图标** + 标题（`直播间 房间号（x.x万人在线）`）+ 状态文字
+ * │        ★★2026-10-01（用户拍板）：**悬浮在画面之上**（渐变底、上浓下淡 —— 见 [floatingTopBarBackground]）
+ * │          因为竖屏视频顶边已上移到状态栏之下（[portraitVideoTopPx]）；横屏本来就浮着，不变。
  * │        ★状态文字**只在异常/过渡时显示**（正常播放时 `GONE`，顶栏只剩返回 + 标题）——
  * │          见 [renderStatus]；在线人数跟着房间号写在同一个括号里，见 [renderRoomTitle]。
  * ├─ 底栏（bottomBar）：**输入条 + 五颗按钮（同一行）**（弹幕 / 画质 / **设置** / 画中画 / 旋转）
@@ -242,6 +245,8 @@ import kotlin.math.roundToInt
  *    见 [PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION] / [portraitBandReservePx]），
  *    横屏一个字不改（仍是整屏视频 + 沉浸式）；★第四批把这条带的**顶边**从"贴顶"改成
  *    "顶栏之下"（[videoBandTopPx]），理由见下面第四批第 3 条；
+ *    ★★2026-10-01 用户又把它上移到**状态栏之下**（[portraitVideoTopPx]）、顶栏改成浮在画面之上 ——
+ *      "顶栏之下"那半条**已被推翻**，别照旧注释改回去；
  * 3. **把留给列表的那块地方交给弹幕宿主**：
  *    · 版式上留出它 —— [measurePortraitStage] 量出"视频区底边 → 底栏顶边"这块矩形；
  *    · 交给宿主 —— [danmakuListSlot]（一块 INVISIBLE 的占位 View，矩形就是它）+
@@ -268,6 +273,8 @@ import kotlin.math.roundToInt
  *    ★该舞台与整个听音频模式已在第五批删除，这里只留记录。
  * 3. **竖屏视频带下移到「状态栏 + 顶栏」之下**（原来贴得太靠上）：
  *    顶边 = [videoBandTopPx]（顶栏底边，顶栏那份 insets 里已经含状态栏内边距）；
+ *    ★★2026-10-01 用户拍板**推翻了这一条的"顶边"**：竖屏顶边改挂**状态栏底边**
+ *      （[portraitVideoTopPx]）、顶栏改成浮在画面之上。"底边 = 列表槽顶边"那半条**没变**。
  *    同时**底边永远等于列表槽 [danmakuListSlot] 的顶边**（[measurePortraitStage] 的
  *    `listTop = videoContainer.bottom` + [installPageLayoutWatchers] 里那两只监听器），
  *    中间不留黑缝。底栏是浮层、4 秒自动隐藏，但**视频始终在它下面**（用顶栏最后一次布局的位置，
@@ -562,7 +569,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * 竖屏视频带的**高度下限**（占"带子局部可用高"的比例）—— ★2026-10-01 由"上限"改成"下限"。
          *
          * ★量纲先说死：本比例乘的是 [AspectRatioFrameLayout.onMeasure] 里的 `containerHeight`
-         *   = **页高 − 带子顶边（顶栏底边）**，不是整页高（`FrameLayout` 给 MATCH_PARENT 子 View
+         *   = **页高 − 带子顶边**（竖屏 = [portraitVideoTopPx] 状态栏底边，2026-10-01 前是顶栏底边；
+         *   横屏 / PiP 时顶边为 0），不是整页高（`FrameLayout` 给 MATCH_PARENT 子 View
          *   测量时会扣掉 `topMargin`，见 [applyVideoStageLayout] 的注释）。
          *
          * 竖屏版式 = "上面视频、下面弹幕列表"，画面自然高 = `页宽 ÷ 视频比例`：
@@ -699,7 +707,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * ★第七批那颗「画中画」顶栏图标（曾用同一组数）已整体删除（见 [buildUi] 顶栏那一段），
          *   这两个数现在只服务 [backButton]。
          * ★想调顶栏高度就动这两个数：顶栏高 = 点击区 + 顶栏自身 6dp×2 内边距，
-         *   而竖屏视频带的顶边由 [videoBandTopPx]（顶栏底边）说话，会跟着自动重排。
+         *   而竖屏视频带的顶边由 [portraitVideoTopPx]（**状态栏底边**，2026-10-01 起）说话 ——
+         *   ★所以调顶栏高度**不再**影响视频顶边了（顶栏只是浮在画面上的那一层；改它的高度只动它自己）。
          */
         private const val BACK_ICON_BOX_DP = 40
         private const val BACK_ICON_PADDING_DP = 8
@@ -4536,7 +4545,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // 于是：
     // · 外壳 = `AutoSheetDialog`（与首页直播 Tab 的「筛选」弹窗 `HomeLiveFilterSheet` **同一套**，
     //   转屏自适应是它自带的：`DialogFullScreen` 按宿主 decorView 尺寸重设 Dialog 窗口，见那个文件）；
-    // · 内容 = `liveDanmakuSettingPreferenceItems()`（★本轮起**只有弹幕 5 项**：字号 / 竖屏列表字号 /
+    // · 内容 = `liveDanmakuSettingPreferenceItems()`（★本轮起**只有弹幕 6 项**：字号 / 竖屏列表字号 /
     //   不透明度 / 速度 / 显示区域；这五项与「设置 → 直播设置」页的弹幕组是**同一份实现、同一批键与默认值**，
     //   读写口都是 `ProvidePreferenceLocals` + DataStore，所以改完立即生效、也立即落盘。
     //   ★播放类 4 项（默认画质 / 默认线路策略 / 自动重连 / 自动旋转）与「每行卡片数」按用户要求
@@ -4601,7 +4610,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * 弹窗里的项是"改一项立即写 DataStore"的，绝大多数（弹幕字号/竖屏列表字号/不透明度/速度/显示区域）
      * 本来就是**订阅式**的（直播弹幕浮层 `LiveDanmakuSettings.watch()`），不需要本页做任何事。
-     * ★本轮起弹窗里**只剩弹幕 5 项**（播放类 4 项按用户要求移除、仍在设置页），所以下面这两下
+     * ★本轮起弹窗里**只剩弹幕 6 项**（播放类 4 项按用户要求移除、仍在设置页），所以下面这两下
      *   在正常情况下已经是"什么都不用做"——**保留**它们是因为：① 两处都幂等、无 IO、无副作用；
      *   ② 万一以后播放类项回到弹窗里，"改完当场生效"这条保证不用再补一遍（与第二批那个原生弹窗
      *   "改动后立即生效的那份在设置弹窗里再下发一次"是同一个做法，只是那个弹窗已删）：
@@ -5576,8 +5585,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            // 蒙层色走 [scrimColor]（深浅色主题给不同透明度）；强调色部分在 [applyThemeColors] 里刷
-            setBackgroundColor(scrimColor())
+            // ★★2026-10-01（用户拍板）：顶栏改成**浮在画面之上** ⇒ 底色从上浓下淡的渐变
+            //   （页眉那套理由见 [floatingTopBarBackground]）；强调色部分仍在 [applyThemeColors] 里刷。
+            background = floatingTopBarBackground()
             setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(6))
         }
         // ★返回按钮本轮改成**只有图标**（复用点播播放器与其他页底栏那颗返回图标）：
@@ -5660,8 +5670,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             // ★第十五批：顺手记下状态栏内边距 —— 横屏"顶栏手势盾"的兜底高度要用它
             //   （顶栏自己量出来之前，也只能靠它知道"状态栏那一段"有多高）。
+            // ★★2026-10-01：竖屏视频顶边现在挂的就是它（[portraitVideoTopPx]）⇒ 它一变就要重排一次版式
+            //   （转屏 / 折叠屏展开 / 系统栏显隐 / 挖孔差异都会走到这里；[applyVideoStageLayout] 幂等，
+            //   值没变时一个字节不写）。
+            val topInsetChanged = systemBarTopInsetPx != bars.top
             systemBarTopInsetPx = bars.top
             view.setPadding(dpToPx(8), dpToPx(6) + bars.top, dpToPx(8), dpToPx(6))
+            if (topInsetChanged) applyVideoStageLayout()
             insets
         }
 
@@ -5921,7 +5936,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * | 监听对象 | 触发条件 | 动作 |
      * |---|---|---|
      * | [rootLayout] | 页面真实宽高变了（转屏/分屏/PiP/折叠屏） | [syncPageLayoutToRealSize]：底栏分行 + 视频带/列表槽版式 |
-     * | [topBar] | 顶栏底边变了（状态栏划出/标题换行/insets 变化） | [applyVideoStageLayout]：视频带顶边跟着顶栏走（★第 3 条） |
+     * | [topBar] | 顶栏自己布局变了（标题换行 / 它那份 insets 变化） | [applyVideoStageLayout]：收敛一次（幂等）。★2026-10-01 起**竖屏视频顶边不再跟顶栏走**（改挂状态栏 inset，见 [portraitVideoTopPx]），这条监听只是多一道保险 |
      * | [videoContainer] | 视频带矩形变了（比例到达/顶边变化/换清晰度） | [measurePortraitStage]：列表槽顶边立刻贴回视频带底边（★第 3 条） |
      *
      * ★为什么每只都要"变了才动"：`OnLayoutChangeListener` 在**每一次强制布局**都会被调用
@@ -5965,10 +5980,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   把宿主列表面板的底边钉回"底栏现在的顶边"（理由见 [scheduleLiveListGeometrySettle]）。
             scheduleLiveListGeometrySettle()
         }
-        // 顶栏底边 = 视频带该在的顶边（顶栏那份 insets 里已经含状态栏内边距，见 buildUi ④）
+        // 顶栏**自己**布局变了（内容换行 / 它那份 insets 变了）⇒ 收敛一次版式（幂等）。
+        // ★★2026-10-01：这里原来有一句 `if (bottom == appliedVideoBandTop) return`，理由是
+        //   "顶栏底边 = 视频带该在的顶边"。**该理由已随用户新要求失效** —— 竖屏视频顶边改挂
+        //   状态栏 inset（[portraitVideoTopPx]），与顶栏高度无关（顶栏现在是浮在画面之上的那一层）。
+        //   失效判据**删掉**（别让它继续"看起来像有约束"）；保留这只监听只是"任何布局变化都再收敛一次"
+        //   的多一道保险 —— [applyVideoStageLayout] 幂等，值没变时一个字节不写。
         topBar.addOnLayoutChangeListener { _, _, _, _, _, bottom, _, _, oldBottom ->
             if (bottom == oldBottom) return@addOnLayoutChangeListener
-            if (bottom == appliedVideoBandTop) return@addOnLayoutChangeListener
             if (!::videoContainer.isInitialized) return@addOnLayoutChangeListener
             applyVideoStageLayout()
         }
@@ -6553,7 +6572,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ## 为什么用 `GONE` 而不是"写空串"
      * 状态行是 [topBar]（LinearLayout）里唯一**没有 weight** 的文字：`GONE` 之后它彻底不参与
      * 测量，`weight=1` 的标题自动吃掉整行（顶栏高度不变 —— `maxLines=1` 本来也不会换行，
-     * 所以"顶栏底边 = 竖屏视频带顶边"那条不变式不受影响，见 [videoBandTopPx]）。
+     * 所以顶栏高度不变 —— ★2026-10-01 起竖屏视频顶边已与顶栏高度无关（[portraitVideoTopPx]），
+     *   这条理由现在只是"顶栏自己不抽动"的补充说明）。
      */
     private fun renderStatus() {
         val parts = buildList {
@@ -6660,8 +6680,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             bottomButtons.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         }
         // ★2026-09-26 实测：屏幕上下始终有一条半透明黑条遮挡画面（横屏底部/竖屏/PiP 里都有）：
-        //   根因是**只藏了按钮和输入条，没藏装它们的那层容器** —— 而 `bottomBar` 自己带
-        //   `setBackgroundColor(scrimColor())`（见 applyThemeColors），容器还在画，黑条就永远在。
+        //   根因是**只藏了按钮和输入条，没藏装它们的那层容器** —— 而 `bottomBar` 自己带一层底
+        //   （2026-10-01 起是 [floatingBarBackground] 的渐变、之前是 `setBackgroundColor(scrimColor())`，
+        //    两处都在 applyThemeColors 里刷），容器还在画，那条底就永远在。
         //   现在：容器跟着一起藏；`INVISIBLE`（不是 GONE）**保住占位**，所以用户有意留的上下留白不变，
         //   只是不再画那层黑；PiP 里连占位都不要（GONE），那点高度全留给画面。
         val pipLikeForBar = isInPictureInPictureMode || pipEntryPending
@@ -6746,8 +6767,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ★2026-09-26 定稿：竖屏下不隐藏系统状态栏（要能随时看到时间和电量），
      *   横屏照旧隐藏 —— 竖屏时系统状态栏本来就该在，
-     *   顶栏（返回/房间号/状态）排在它**下面**即可（顶栏的顶边本来就是按状态栏内边距算的，
-     *   见 [videoBandTopPx] 用的是 `topBar.bottom`，所以这里只要别把它藏掉）。
+     *   顶栏（返回/房间号/状态）排在它**下面**即可（顶栏自己的顶边就是按状态栏内边距算的，
+     *   见它那份 insets 监听；★2026-10-01 起竖屏视频顶边也改用同一个 inset，
+     *   所以"别把顶栏藏掉"这条已经是**历史理由**（现在只影响 [videoBandTopPx] 的兜底与列表目标基准））。
      *   横屏仍是全屏沉浸（隐藏系统栏 + 允许滑动临时唤出）。
      *
      * ## ★★第十一批第 1 条：只"更新进入那一刻"是不够的（复测结论）
@@ -6794,7 +6816,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *      res/values-night/themes.xml:15  同一属性 = false                     ← 深色主题（白色图标）
      * ② 同一个主题里 android:windowTranslucentStatus=true、android:statusBarColor=transparent，
      *    所以"状态栏底下是什么颜色"**由本页自己画**：窗口底 = onCreate 的 ColorDrawable(Color.BLACK)，
-     *    顶栏底 = 黑蒙层 [scrimColor]，底栏底 = 黑蒙层 [scrimColor]；
+     *    顶栏底 = 上浓下淡的渐变 [floatingTopBarBackground]、底栏底 = 上淡下浓的渐变 [floatingBarBackground]
+     *    （2026-10-01 起；此前两者都是纯色黑蒙层 [scrimColor]）；
      * ③ ⇒ 两件事**错配**：底色恒黑（本页画），图标明暗却听主题的 —— 浅色主题下就是
      *    "深色图标压在纯黑底上"，用户看到的就是"状态栏被隐藏了"（深色主题下白图标 → 正常）；
      * ④ 为什么"退出直播间再进一次"才复现：本页 configChanges 里含 uiMode，主题切换**不重建本页**，
@@ -7525,6 +7548,26 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   列表区的底边仍取"底栏顶边"（见 [measurePortraitStage]）：宿主的列表面板注入在底栏**之上**，
      *   面板一旦盖到底栏上，就会既挡住按钮、又吃掉按钮的触摸。
      */
+    /**
+     * ★★2026-10-01（用户拍板：顶栏悬浮在画面之上）**顶栏的底** —— 上浓下淡的竖向渐变。
+     *
+     * 方向为什么与底栏**相反**（底栏是上淡下浓）：两者遵循同一条规矩 ——
+     * **贴屏幕外沿的那一边最浓、朝画面中心的那一边渐隐**：
+     * · 顶栏：最上面是**状态栏那一段**（系统图标压在上面）⇒ 必须最浓；朝下渐隐 ⇒ 与画面接得没有硬边；
+     * · 底栏：最下面是页底/导航栏那一段 ⇒ 最浓；朝上渐隐。
+     * ★前 3/4 保持 scrim 本色：顶栏文字/返回图标大约落在 70% 高度处（**仍在最浓的一段里** ⇒ 可读性不掉），
+     *   最后 1/4 线性渐隐到全透明。用 5 个等距色标近似 —— `GradientDrawable` 的"带偏移"重载是 API 29+，
+     *   本工程 minSdk 24 用不了。
+     * ★颜色仍只有 [scrimColor] 一个来源（深浅色两档），不改主题策略、不新增配色常量。
+     */
+    private fun floatingTopBarBackground(): GradientDrawable {
+        val scrim = scrimColor()
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(scrim, scrim, scrim, scrim, ColorUtils.setAlphaComponent(scrim, 0)),
+        )
+    }
+
     private fun floatingBarBackground(): GradientDrawable {
         val scrim = scrimColor()
         return GradientDrawable(
@@ -7567,7 +7610,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private fun applyThemeColors() {
         if (!::rootLayout.isInitialized) return
-        topBar.setBackgroundColor(scrimColor())
+        // ★★2026-10-01：顶栏也是**悬浮**的（渐变底，不是纯色）—— 深浅色切换后要按同一个口重刷
+        topBar.background = floatingTopBarBackground()
         // ★★2026-10-01：底栏是**悬浮**的（渐变底，不是纯色）—— 这里也要按同一个口重刷，
         //   否则深浅色一切换，底栏就退回老版纯色底（与顶栏不一致）。
         bottomBar.background = floatingBarBackground()
@@ -8458,7 +8502,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             // （底栏 + 输入条 + 弹幕列表 + 视频带下方的留白 + 顶栏……），漏一个就漏一个洞；
             // 而"画面矩形"这一个正向判据天然把上面这些**全部**挡在外面：
             // ```
-            // 竖屏：画面 = 顶栏之下的那条视频带（[applyVideoStageLayout]，顶边 = [videoBandTopPx]）
+            // 竖屏：画面 = **状态栏之下**的那条视频带（[applyVideoStageLayout]，顶边 = [portraitVideoTopPx]；
+            //       2026-10-01 前是"顶栏之下"，见 [videoBandTopPx]）
             //       ├─ 带子以下 → 弹幕列表（宿主注入的面板）→ 不在矩形内 → 不响应 ✓
             //       ├─ 列表以下 → 底栏（含输入条）        → 不在矩形内 → 不响应 ✓
             //       └─ 带子以内的黑边/留白                → 在矩形内   → 响应（观感仍是"视频区"）
@@ -8786,7 +8831,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // ══════════════════════════════════════════════════════════════════════
 
     /**
-     * 竖屏视频带**该在的顶边**（页内 px）—— 第四批第 3 条的落点。
+     * 顶栏底边（页内 px）—— 第四批第 3 条的落点，**2026-10-01 起不再是竖屏视频的顶边**
+     * （见 [portraitVideoTopPx]）；现在它有两个用途：① [portraitVideoTopPx] 的兜底（inset 未下发时）；
+     * ② [measurePortraitStage] 里"列表目标"的可用高基准（**刻意保留老基准**，理由见那一行注释）。
      *
      * ```
      * = 顶栏底边（[topBar].bottom）
@@ -8803,6 +8850,25 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      */
     private fun videoBandTopPx(): Int =
         if (::topBar.isInitialized && topBar.height > 0) topBar.bottom.coerceAtLeast(0) else 0
+
+    /**
+     * ★★2026-10-01（用户拍板，**明确推翻第四批"视频始终在顶栏之下"那条要求**）：
+     * **竖屏**视频的顶边 = **状态栏底边**（`systemBarTopInsetPx`），不再是 [videoBandTopPx]（顶栏底边）。
+     *
+     * 用户原话："顶栏在竖屏状态下，也让直播画面全屏到上面，**不要顶着状态栏**就可以了。我说的是竖屏。
+     * 因为底部已经做的很好，我想把上面也给做一下。**让那个顶栏悬浮在画面之上**就可以了。"
+     * ⇒ 画面顶边上移到状态栏之下（**保留**状态栏那份 inset ⇒ 不钻到状态栏/挖孔下面），
+     *   顶栏那一行改成**浮在画面之上**（底色改渐变，见 [floatingTopBarBackground]）。
+     * ★谁改的、哪一轮：2026-10-01 按用户要求改；在此之前（第四批第 3 条）的约定是
+     *   "视频带顶边 = 顶栏底边、始终不被顶栏压住" —— 那条**已被本条取代**，别再照旧注释改回去。
+     *
+     * ★兜底：状态栏 inset 还没下发（首帧/极端时序）时退回 [videoBandTopPx]（老口径）——
+     *   宁可先按旧版摆一帧，也**不能**用 0（那会让画面钻到状态栏下面）。inset 一到，
+     *   顶栏那份 insets 监听会再排一次版式（[applyVideoStageLayout] 幂等）。
+     * ★只给竖屏用：横屏（全屏）模式版式一个字不动（那边本来就是 `topMargin = 0`、整页铺满）。
+     */
+    private fun portraitVideoTopPx(): Int =
+        systemBarTopInsetPx.takeIf { it > 0 } ?: videoBandTopPx()
 
     /**
      * 竖屏视频带**下方要预留的总高**（px）—— 新版带高的唯一输入。
@@ -8963,10 +9029,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //          横屏 / PiP = 0f = 关掉带子，容器铺满整页（横屏与改动前逐字一致）；
         //          竖屏流 = 0f + cover = 容器同样铺满可用区，只是画面按"填满"量（不再留黑边）。
         val band = if (portrait && !cover) PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION else 0f
-        // ★第四批第 3 条：带子模式下顶边 = 顶栏底边（横屏/听音频/PiP 保持 0 = 铺满/贴顶）
-        //   ★用户 2026-10-01 明确："顶栏就不要管它……视频流距离顶栏（状态栏）刚好有一段黑色区域，
-        //     那个就不要动它" ⇒ cover 也用**同一个**顶边、不往顶栏后面铺（`topMargin` 保持 bandTop）。
-        val bandTop = if (portrait) videoBandTopPx() else 0
+        // ★★2026-10-01（用户拍板，取代第四批第 3 条）：带子模式下顶边 = **状态栏底边**
+        //   （[portraitVideoTopPx]）—— 竖屏画面铺到顶上、但**不顶到状态栏**；顶栏改成**浮在画面之上**。
+        //   横屏 / 听音频 / PiP 仍保持 0（铺满/贴顶），那一路一个字没动。
+        val bandTop = if (portrait) portraitVideoTopPx() else 0
         // ★带子的高度上限 = 可用高 − reserve（reserve = 列表目标高 + 底栏占位），只有**横屏流的带子模式**
         //   才需要它（竖屏流 cover 时 band = 0，压根不问）；量不到底栏（reserve = 0）时**不猜** ——
         //   由 [AspectRatioFrameLayout] 退回 0.62 下限口径摆一帧，宁可先按旧版摆，也不拿猜的值定版式。
@@ -9140,6 +9206,12 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             //   ★非铺满（横屏流 / 比例未知）**一行不动**：列表顶仍 = 画面带底边（用户："那个非常好"）。
             val cover = portrait && isPortraitStream()
             val listTop = if (cover) {
+                // ★★2026-10-01：这里**刻意**仍用 [videoBandTopPx]（顶栏底边 = 2026-10-01 之前的视频顶边）
+                //   作为"列表目标"的可用高基准，而不是新的 [portraitVideoTopPx]（状态栏底边）：
+                //   用户这次只要求"顶栏悬浮 + 画面铺到上面"，**没有要求列表动** ⇒ 让列表矩形**逐像素不变**
+                //   （真机上 20% 那一支本来就不 binding、走的是 140dp 下限 ⇒ 换基准也不会变；
+                //    但在"20% > 140dp"的高屏上，换基准会让列表悄悄高一截）。
+                //   要跟着视频顶边走的话，把这里的实参换成 [portraitVideoTopPx] 即可（一处改动）。
                 (barTop - portraitListTargetPx(videoBandTopPx()) - floatingBarStripPx()).coerceAtLeast(0)
             } else {
                 video.bottom.coerceIn(0, pageHeight)

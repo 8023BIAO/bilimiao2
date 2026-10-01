@@ -94,6 +94,15 @@ data class LiveDanmakuSettings(
      *   行距不在这里存 —— 按 [CHAT_LINE_HEIGHT_FACTOR] 与字号等比算（13sp → 17sp，与改前一致）。
      */
     val chatFontSizeSp: Float,
+    /**
+     * **竖屏弹幕列表**的不透明度 0f~1f（直播自己的键 `live_danmaku_chat_opacity` 的百分比 ÷ 100，
+     * 默认 100% ⇒ 1f）。渲染时乘到**列表每行文字颜色**的 alpha 上（见 `LiveDanmakuChatRow`）。
+     *
+     * ★2026-10-01 用户要求与 [opacity]（画面上的滚动弹幕那一个）**分开**：
+     *   "竖屏状态下的弹幕透明度不再跟随那个弹幕透明度，单独设置一个竖屏弹幕透明度"。
+     * ★只乘**颜色**、不乘 `Modifier.alpha`：后者的会把行内**黑阴影**一起变淡（30% 时描边只剩 ≈2.1:1 ≈ 失效）。
+     */
+    val chatOpacity: Float,
     /** 不透明度 0f~1f（直播自己的键 `live_danmaku_opacity` 的百分比 ÷ 100）。渲染时乘到每条弹幕的颜色 alpha 上 */
     val opacity: Float,
     /** 速度倍率（直播自己的键 `live_danmaku_speed`，0.5~2.0，越大越快）。穿越时长见 [travelDurationMs] */
@@ -260,7 +269,11 @@ data class LiveDanmakuSettings(
             val chatFontSizeSp = (live?.danmakuChatFontSize
                 ?: SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT)
                 .coerceIn(CHAT_FONT_SIZE_SP_MIN, CHAT_FONT_SIZE_SP_MAX)
-            //    不透明度：Int，百分比 0~100 → Compose 的 0f~1f
+            //    竖屏列表不透明度：Int，百分比 0~100 → 0f~1f（**唯一归一化点**；与滚动弹幕那一个分开取键）
+            val chatOpacity = ((live?.danmakuChatOpacity
+                ?: SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT)
+                .coerceIn(0, 100)) / 100f
+            //    不透明度：Int，百分比 0~100 → Compose 的 0f~1f（**只作用于滚动弹幕**）
             val opacity = ((live?.danmakuOpacity ?: SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT)
                 .coerceIn(0, 100)) / 100f
             //    速度：Float，倍率 0.5~2.0（默认 1.0）→ 浮层 `travelDurationMs = 7000ms ÷ 倍率`
@@ -277,6 +290,7 @@ data class LiveDanmakuSettings(
                 visible = visible,
                 fontSizeSp = fontSizeSp,
                 chatFontSizeSp = chatFontSizeSp,
+                chatOpacity = chatOpacity,
                 opacity = opacity,
                 speedScale = speedScale,
                 areaPercent = areaPercent,

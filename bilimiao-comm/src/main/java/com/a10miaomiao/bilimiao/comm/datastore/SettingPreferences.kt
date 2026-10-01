@@ -433,8 +433,16 @@ object SettingPreferences {
      */
     val LiveDanmakuChatFontSize = floatPreferencesKey("live_danmaku_chat_font_size")
     /**
+     * **竖屏弹幕列表**的不透明度（%，10~100，默认 100）。
+     * ★2026-10-01 新增：与 [LiveDanmakuOpacity]（画面上的滚动弹幕那一个）**各调各的** ——
+     *   用户要求"竖屏状态下的弹幕透明度不再跟随那个弹幕透明度，单独设置一个"。
+     *   存 Int（百分比）与 [LiveDanmakuOpacity] 同量纲；÷100 的唯一归一化点在 `LiveDanmakuSettings.from()`。
+     */
+    val LiveDanmakuChatOpacity = intPreferencesKey("live_danmaku_chat_opacity")
+    /**
      * 直播弹幕不透明度（%）。默认 100 = 完全不透明。
      * ★直播**自己那套**样式之一（点播那边存的是 0f~1f，量纲不同，所以各用各的键）。
+     * ★只作用于**画面上的滚动弹幕**；竖屏列表用 [LiveDanmakuChatOpacity]。
      */
     val LiveDanmakuOpacity = intPreferencesKey("live_danmaku_opacity")
     /**
@@ -555,6 +563,11 @@ object SettingPreferences {
              * ★与 [danmakuFontSize]（滚动弹幕字号）**各调各的**：两个键、两条读取路径。
              */
             val danmakuChatFontSize: Float = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT,
+            /**
+             * **竖屏弹幕列表**的不透明度（%，10~100，默认 100）。
+             * ★与 [danmakuOpacity]（滚动弹幕那一个）**各调各的**：两个键、两条读取路径。
+             */
+            val danmakuChatOpacity: Int = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
             val danmakuOpacity: Int = SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
             /**
              * 弹幕速度倍率（0.5~2.0，越大越快）。默认 1.0。
@@ -629,6 +642,9 @@ object SettingPreferences {
                 LiveDanmakuChatFontSize,
                 SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT,
             ),
+            // 竖屏列表不透明度：Int 键（与 danmakuOpacity 同量纲），同样给默认值兜底。
+            danmakuChatOpacity = prefs?.get(LiveDanmakuChatOpacity)
+                ?: SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
             danmakuOpacity = prefs?.get(LiveDanmakuOpacity)
                 ?: SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,
             // ★这里原来读的是"跟随点播弹幕设置"（`LiveDanmakuFollowVod`）：本轮该开关已删除，

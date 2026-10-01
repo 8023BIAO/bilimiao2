@@ -402,6 +402,12 @@ object SettingsSearchIndex {
             slider = SettingSearchItem.SliderSpec.IntSlider(range = 10..30, steps = 19, valueText = {
             Text("${it}sp")
         })),
+        SettingSearchItem(prefName = "LiveDanmakuChatOpacity", prefKey = "live_danmaku_chat_opacity", title = "竖屏弹幕透明度", category = "① 播放", page = "直播设置", section = "直播弹幕",
+            kind = SettingSearchItem.Kind.SLIDER_INT, default = SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT, keywords = "竖屏弹幕透明度 ① 播放 直播设置 直播弹幕 LiveDanmakuChatOpacity live_danmaku_chat_opacity danmaku 弹屏 alpha 透明 竖屏列表",
+            slider = SettingSearchItem.SliderSpec.IntSlider(range = 10..100, steps = 89, valueText = {
+                Text("$it%")
+            }),
+        ),
         SettingSearchItem(prefName = "LiveDanmakuChatFontSize", prefKey = "live_danmaku_chat_font_size", title = "竖屏列表字号", category = "① 播放", page = "直播设置", section = "直播弹幕",
             kind = SettingSearchItem.Kind.SLIDER_FLOAT, default = SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT, keywords = "竖屏列表字号 ① 播放 直播设置 直播弹幕 LiveDanmakuChatFontSize live_danmaku_chat_font_size danmaku 弹屏 font size 大小",
             slider = SettingSearchItem.SliderSpec.FloatSlider(range = LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MIN..LiveDanmakuSettings.CHAT_FONT_SIZE_SP_MAX, steps = 19, valueText = {

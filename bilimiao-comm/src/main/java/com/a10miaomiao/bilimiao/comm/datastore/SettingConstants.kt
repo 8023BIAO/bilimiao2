@@ -190,8 +190,22 @@ object SettingConstants {
      */
     const val LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT = 13f
     /**
+     * **竖屏弹幕列表**的不透明度（%）：默认 **100** = 完全不透明。
+     *
+     * ★2026-10-01 用户要求（原话）："竖屏状态下的弹幕透明度**不再跟随**那个弹幕透明度，
+     *   **单独设置**一个竖屏弹幕透明度" ⇒ 与 [LIVE_DANMAKU_OPACITY_DEFAULT]（画面上的滚动弹幕那一个）
+     *   **各管各的**：两个键、两个设置项、两条读取路径，改一个不影响另一个。
+     * ★默认 100 与 [LIVE_DANMAKU_OPACITY_DEFAULT] 一致 ⇒ 老用户升级后竖屏列表观感**零变化**，
+     *   只有主动去设置页调才变（与 [LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT] 同一条理由）。
+     *
+     * 键 `live_danmaku_chat_opacity`，读取方是 `LiveDanmakuSettings.from()`
+     * （`Live.Values.danmakuChatOpacity` → `chatOpacity` → 竖屏列表每行文字颜色的 alpha）。
+     */
+    const val LIVE_DANMAKU_CHAT_OPACITY_DEFAULT = 100
+    /**
      * 直播弹幕不透明度（%）：默认 100 = 完全不透明（现状）。
      * 同 [LIVE_DANMAKU_FONT_SIZE_DEFAULT]：直播自己那套，只对直播生效。
+     * ★只作用于**画面上的滚动弹幕**；竖屏列表那一个是 [LIVE_DANMAKU_CHAT_OPACITY_DEFAULT]（2026-10-01 起分开）。
      */
     const val LIVE_DANMAKU_OPACITY_DEFAULT = 100
     /**
