@@ -287,12 +287,13 @@ object SettingsExporter {
 
             // 3. SharedPreferences (bilimiao)
             val sp = context.getSharedPreferences(BilimiaoCommApp.APP_NAME, Context.MODE_PRIVATE)
+            // ★commit：调用方（导入设置）紧接着就 System.exit 重启，apply() 的异步写可能来不及落盘
             sp.edit().apply {
                 putInt("timeType", export.spTimeType)
                 putString("timeFrom", export.spTimeFrom)
                 putString("timeTo", export.spTimeTo)
                 putString("proxy_upos", export.spProxyUpos)
-            }.apply()
+            }.commit()
             count += 4
 
             // 4. Default SharedPreferences (DPI)
@@ -301,7 +302,7 @@ object SettingsExporter {
                 putInt("app_dpi", export.spAppDpi)
                 putFloat("app_font_scale", export.spAppFontScale)
                 putInt("player_quality", export.spPlayerQuality)
-            }.apply()
+            }.commit()
             count += 3
 
             // 5. 代理服务器 JSON
@@ -355,13 +356,19 @@ object SettingsExporter {
         // "恢复默认设置"不该顺带踢人下线，所以先备份再还原。
         val sp = context.getSharedPreferences(BilimiaoCommApp.APP_NAME, Context.MODE_PRIVATE)
         val buvidBackup = sp.getString("buvid", null)
-        sp.edit().clear().apply()
-        if (buvidBackup != null) {
-            sp.edit().putString("buvid", buvidBackup).apply()
+        // ★清空 + 还原必须**一次 commit 落盘**：调用方紧接着就 System.exit 重启，
+        //   若用 apply()（异步）且进程在"已清空、还没还原 buvid"之间被杀，
+        //   buvid 就丢了 ⇒ 下次冷启动生成新 buvid ⇒ auth_hd 解不开 ⇒ 用户被静默登出。
+        runCatching {
+            sp.edit().clear().apply {
+                if (buvidBackup != null) putString("buvid", buvidBackup)
+            }.commit()
         }
-        // 3. 默认 SharedPreferences (DPI)
-        PreferenceManager.getDefaultSharedPreferences(context)
-            .edit().clear().apply()
+        // 3. 默认 SharedPreferences (DPI)：同样紧挨着重启，改同步写避免"恢复默认"没生效
+        runCatching {
+            PreferenceManager.getDefaultSharedPreferences(context)
+                .edit().clear().commit()
+        }
         // 4. 屏蔽词数据库
         FilterWordDB(context).deleteAll()
         FilterTagDB(context).deleteAll()

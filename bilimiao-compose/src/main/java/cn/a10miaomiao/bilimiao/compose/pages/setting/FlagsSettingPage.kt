@@ -430,7 +430,19 @@ private fun FlagsSettingPageContent(
                         if (buvid.length < 12) {
                             throw Exception("buvid 长度不足（至少 12 位），导入会解不开登录信息")
                         }
-                        BilimiaoCommApp.commApp.setBilibiliBuvid(buvid)
+                        // ★同步落盘 + 回读断言：紧接着 saveAuthInfo 要用这个 buvid 派生密钥写 auth 文件，
+                        //   写完还会立刻 System.exit 重启。写盘没成功就必须中止，
+                        //   否则冷启动用旧 buvid 解不开 auth 文件 ⇒ "提示登录成功、UI 却没登录态"。
+                        val buvidWritten = BilimiaoCommApp.commApp.setBilibiliBuvid(buvid)
+                        if (!buvidWritten || BilimiaoCommApp.commApp.getBilibiliBuvid() != buvid) {
+                            userStore.logAuthDiag("导入设备指纹写入失败", accessToken, probe)
+                            Toast.makeText(
+                                context,
+                                "设备指纹写入失败，未改动你的登录状态",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@launch
+                        }
                     }
                     // 恢复 WBI 缓存（兼容旧版本导出的 mix_key/last_fetch_day 键名）。
                     // 同样放在验真之后：它只改内存，但 `lastFetchDay` 一旦被坏文件填成"今天"，

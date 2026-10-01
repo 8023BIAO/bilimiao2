@@ -192,16 +192,36 @@ class BilimiaoCommApp(
      * 为什么：`getBilibiliBuvid()` 有内存缓存，而 auth 文件的 AES 密钥是用 buvid 派生的。
      * 导入时若只写 SharedPreferences、缓存不更新，就会"用旧 buvid 的密钥加密 + 重启后用新 buvid 解密"
      * → 解密失败 → **静默登出**，且原 auth 文件已被覆盖、登不回去（审查发现的 S2）。
+     *
+     * ★**必须 `commit()` 同步落盘**（原因见下面函数体注释），写完**回读校验**；
+     * 返回 false 时调用方必须中止，不许带不一致的密钥去写 auth 文件。
      */
-    fun setBilibiliBuvid(buvid: String) {
+    fun setBilibiliBuvid(buvid: String): Boolean {
+        val sp = app.getSharedPreferences(APP_NAME, Context.MODE_PRIVATE)
+        // ★必须 commit() 同步落盘（不能用 apply()）：
+        //   ① 调用方紧接着就要拿这个 buvid 派生密钥去写 auth 文件；
+        //   ② 导入流程写完还会立刻 System.exit(0) 重启 —— 异步写可能来不及落盘，
+        //      冷启动 getBilibiliBuvid() 读回**旧** buvid ⇒ readAuthInfo() 解不开 auth 文件
+        //      ⇒ UI 没登录态；而 CookieManager 是系统自己持久化的，Cookie 还在 ⇒ 弹幕照样能发。
+        //      （用户实测："提示登录成功、设置里没有「退出登录」，但直播间能发弹幕"。）
+        val committed = runCatching {
+            sp.edit().putString("buvid", buvid).commit()
+        }.getOrDefault(false)
+        val readBack = runCatching { sp.getString("buvid", "") }.getOrNull()
+        if (!committed || readBack != buvid) {
+            // 失败时**不动内存缓存**：内存与 sp 都保持旧值，调用方中止即可，不会留下不一致
+            miaoLogger().e("写buvid失败", "commit=$committed", "回读一致=${readBack == buvid}")
+            return false
+        }
         _bilibiliBuvid = buvid
-        app.getSharedPreferences(APP_NAME, Context.MODE_PRIVATE)
-            .edit().putString("buvid", buvid).apply()
+        miaoLogger().e("写buvid成功", "长度=${buvid.length}")
+        return true
     }
 
     fun getBilibiliBuvid(): String {
         if (_bilibiliBuvid.isNotBlank()) {
-            // 兜底：SharedPreferences 里的值被外部改过（导入）时以文件为准
+            // 兜底：以 sp 为准。setBilibiliBuvid() 现在是 commit+回读，正常情况下两者一致；
+            // 这条只在**外部直接改过 sp**（别的写入方/以后新增的代码）时纠正内存缓存。
             val spBuvid = app.getSharedPreferences(APP_NAME, Context.MODE_PRIVATE)
                 .getString("buvid", "")!!
             if (spBuvid.isNotBlank() && spBuvid != _bilibiliBuvid) {
@@ -213,7 +233,11 @@ class BilimiaoCommApp(
         var buvid = sp.getString("buvid", "")!!
         if (buvid.isBlank()) {
             buvid = ApiHelper.generateBuvid()
-            sp.edit().putString("buvid", buvid).apply()
+            // ★同样必须同步落盘：这个 buvid 会立刻被当作 auth 文件的派生密钥，
+            //   异步写没落盘 + 进程被杀 ⇒ 下次冷启动又生成一个新 buvid ⇒ 旧 auth 文件解不开（同一类）。
+            if (!setBilibiliBuvid(buvid)) {
+                miaoLogger().e("写buvid失败(生成路径)", "长度=${buvid.length}")
+            }
         }
         _bilibiliBuvid = buvid
         return buvid

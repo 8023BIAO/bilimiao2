@@ -641,17 +641,21 @@ private fun SubReplyPreviewRow(sub: SubReplyPreviewInfo) {
     // 名字与正文之间的分隔符（用户 2026-10-01 截图报障：回复楼主那一行没有冒号）：
     //   · 正文**自带**「回复 @某人:」前缀（服务端对"回复楼中楼里的别人"会拼）→ 维持「名字 + 空格」，
     //     再加冒号会变成两个冒号；
-    //   · 否则（= **直接回复楼主**，正文没有前缀）→ 补一个**半角冒号、后面不加空格**，
-    //     与另一行的观感一致。用户明确不要"@楼主"字样，只补冒号。
+    //   · 否则（= **直接回复楼主**，正文没有前缀）→ 补 **半角冒号 + 一个空格**（用户 2026-10-01 定的格式
+    //     `昵称: 内容`，与直播间竖屏弹幕列表一致）。用户明确不要"@楼主"字样，只补冒号。
     //   · 正文空白时不补（否则会出现「用户名:」后面空着）。
-    val separator = if (message.text.isBlank() || REPLY_PREFIX_REGEX.containsMatchIn(content.message)) " " else ":"
+    val separator = if (message.text.isBlank() || REPLY_PREFIX_REGEX.containsMatchIn(content.message)) " " else ": "
     // 用户名和正文要在同一段里连排（正文可能带表情/链接，所以先拿到 AnnotatedString 再拼）
     // remember 的 key 要带 [separator]：它变了而 message 没变时不能吃旧缓存
     val text = remember(sub.uname, message, separator, unameColor) {
         buildAnnotatedString {
             if (sub.uname.isNotBlank()) {
-                withStyle(SpanStyle(color = unameColor)) { append(sub.uname) }
-                append(separator)
+                // 分隔符放进昵称的 span **里面**：视觉上「昵称:」是一体的（用户 2026-10-01 拍板），
+                // 不会出现"半截颜色"；走空格分支时同样跟着昵称色（空格无色，观感不变）
+                withStyle(SpanStyle(color = unameColor)) {
+                    append(sub.uname)
+                    append(separator)
+                }
             }
             append(message)
         }
