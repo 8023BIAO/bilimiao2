@@ -55,7 +55,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -72,6 +71,11 @@ import androidx.media3.common.Player
 import cn.a10miaomiao.bilimiao.compose.pages.live.LiveDanmakuOverlayHost
 // ★第十四批：底栏「设置」按钮弹的那个直播设置弹窗（compose 模块的 View 桥 —— 本模块没有 Compose
 //   编译器插件，见那个类的 KDoc）。与「首页直播 Tab 底栏筛选弹窗」共用同一套外壳 `AutoSheetDialog`。
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveOptionEntry
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveOptionSegment
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveOptionSheetModel
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveOptionSheetRequest
+import cn.a10miaomiao.bilimiao.compose.pages.live.LiveQualityLineSheetHost
 import cn.a10miaomiao.bilimiao.compose.pages.live.LiveSettingSheetHost
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
@@ -102,7 +106,6 @@ import com.a10miaomiao.bilimiao.comm.utils.ScreenDpiUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.widget.player.PlayerViewDrawable
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.tabs.TabLayout
 import com.shuyu.gsyvideoplayer.R as GsyR
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -220,8 +223,10 @@ import kotlin.math.roundToInt
  *    直接读「主题设置」那一份键（含自定义主题的三色），[accentColor] 不再是写死的资源色；
  * 5. **新增「自动旋转」的消费端**：[applyAutoRotatePolicy] 读 `live_auto_rotate`（默认开）；
  * 6. **底栏不横滑**：[rebuildBottomBar] 竖屏 5 个/行最多两行、横屏一行，文字给到最短；
- * 7. **弹窗通用加固**：[dialogContentMaxHeightPx] 按**播放页真实高度**（并扣掉输入法高度）封顶，
- *    发弹幕弹窗也进可滚容器 —— 小屏/横屏/输入法遮挡下按钮都点得到。
+ * 7. **弹窗通用加固**：★★2026-10-01 起「画质·线路」弹窗改用**与直播间「设置」弹窗同一套
+ *    Compose 覆盖层**（`AutoSheetDialog` + `weight(1f)` 列表，见 compose 模块的
+ *    `LiveQualityLineSheet.kt`）：尺寸交给布局引擎，横屏也放得下；旧的
+ *    `dialogContentMaxHeightPx`（62% 屏幕 − 200dp chrome）与 `MaxHeightScrollView` 已删。
  *
  * ## 「听音频」模式（★第五批已整块删除，这里只留"删了什么、为什么"）
  * 这里曾经有一条完整的「听音频」链路（底栏第 2 颗按钮 → 摘渲染面 + 关视频轨 → 音频舞台 UI →
@@ -287,7 +292,7 @@ import kotlin.math.roundToInt
  *    当时那个发弹幕弹窗的 `submit()` 里成功分支补一次 `dismiss()`；失败仍然留着让用户改文本重发。
  *    ★第七批：那个弹窗已整块删除（改成常驻输入条），这一条只作为历史记录保留。
  * 6. **清晰度/线路弹窗里的文字居中**（原来行文字未居中、贴着弹窗边缘）：
- *    [LiveListDialog.show] 的行文案与副标题改成居中（弹窗标题仍是常规 `MaterialAlertDialog` 观感）。
+ *    `LiveQualityLineSheet` 里的行文案与副标题居中（标题走 `titleMedium` 的常规观感）。
  * 7. **底栏「重试」→ 第一个按钮「刷新」**（位置排到最前，文案改得更贴切，
  *    功能一行不改）：[orderedBottomButtons] 把它排到最前，文案改「刷新」，
  *    实现仍然是 [retryPlayback]（重新取流/追到最新直播进度，一行未改）。
@@ -352,9 +357,11 @@ import kotlin.math.roundToInt
  *    手动入口没丢：**「画质·线路」弹窗里的「重新取流」**（不占底栏）。
  *    防抖与预算见 [autoRetryLiveStream]（20s 最小间隔 + 5 分钟最多 3 次 + 每次都会告知原因）。
  * 4. **「画质」+「线路」合并成一颗**（两者本来就是"选用哪条流"）：底栏一颗
- *    [qualityButton]（文案「画质·原画」）→ [showStreamDialog]：一个弹窗、两段（TabLayout，
+ *    [qualityButton]（文案「画质·原画」）→ [showStreamDialog]：一个弹窗、两段（Compose `TabRow`，
  *    清晰度 / 线路），既有行为一条不少（当前档打勾 + 主题色高亮、已请求不可用标注、线路可点选），
- *    内容高度仍按 [dialogContentMaxHeightPx] 的 **62% 真机屏幕**封顶并可滚，**没有「取消」按钮**。
+ *    ★★2026-10-01 复核口径变更：**高度不再自己算** —— 改用与「设置」弹窗同一套 Compose
+ *    覆盖层（`AutoSheetDialog`），列表吃 `weight(1f)`，横竖屏都由布局引擎分高度；
+ *    **没有「取消」按钮**（点条目/点弹窗外/返回键都能关）。
  * 5. **「画中画」挪到顶栏**（★已回退，且死代码已删）：第七批曾把画中画做成**顶栏图标**
  *    （与顶栏返回同一套风格：白色 24dp 图标、[BACK_ICON_BOX_DP]dp 点击区、borderless ripple）。
  *    随后又改回底栏 —— 画中画**留在底栏**
@@ -754,15 +761,6 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          */
         private const val LIVE_LIST_SETTLE_MS = 48L
 
-        /**
-         * 「画质·线路」弹窗里那条 Tab 栏的**高度预留**（dp）。
-         *
-         * [dialogContentMaxHeightPx] 是按"整块内容区"算的 62% 屏幕高；这个弹窗的内容区 =
-         * Tab 栏 + 列表，所以列表的上限要再扣掉 Tab 栏这一条（宁可扣多一点，
-         * 也不要让"Tab + 列表 + 标题 + 按钮"整体超出屏幕 —— 那正是"按钮被顶出屏幕"的病根）。
-         */
-        private const val DIALOG_TAB_STRIP_DP = 52
-
         // ── 自动追流（★第七批：「刷新」按钮改自动）────────────────────────────
         /**
          * 两次**自动**追流之间至少隔这么久（ms）。
@@ -870,12 +868,6 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         /** 亮度下限：0 会让屏幕全黑，用户找不回画面（点播同样夹 0.01） */
         private const val MIN_BRIGHTNESS = 0.01f
 
-        /**
-         * 正常弹窗里"非内容部分"的高度预留（dp）：标题一行 + 按钮栏 + 上下内边距。
-         * 取值比 Material 弹窗的真实占用（约 120~140dp）留足余量 —— 宁可内容区矮一点，
-         * 也不要让总高顶出屏幕把按钮挤出去（见 [dialogContentMaxHeightPx]）。
-         */
-        private const val DIALOG_CHROME_DP = 200
 
         /** 手势模式：手指按下点落在页面的哪半区（见 [TapCatcher]） */
         private const val DRAG_NONE = 0
@@ -1315,14 +1307,17 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     // ── 弹窗 / 手势提示 ─────────────────────────────────────────────────────
     //
-    // ★弹窗全部是"正常弹窗"（用户实测：自建的全屏 Dialog 超出屏幕、点不到按钮）：
-    //   清晰度 + 线路 = **同一个** [LiveListDialog]（内部是 MaterialAlertDialog +
-    //   TabLayout 两段 + 定高可滚列表，见 [showStreamDialog]）。
+    // ★★★2026-10-01（用户："这个弹窗为什么不复用？直接用我那个同样的直播间里点击「设置」按钮
+    //   弹出的弹窗呢？…铺满全屏，好像算得很好。**我很喜欢用那个东西**"）：
+    //   清晰度 + 线路 = **同一个** [LiveQualityLineSheetHost] —— 与直播设置弹窗
+    //   （[liveSettingSheetHost]）**同一套 Compose 覆盖层**（`AutoSheetDialog`）：
+    //   两段 Tab + 可滚列表 + 可选中性按钮，尺寸全部由布局引擎算。
+    //   ★旧的原生 `LiveListDialog`（MaterialAlertDialog + TabLayout + 手算高度）连同
+    //     `dialogContentMaxHeightPx` / `MaxHeightScrollView` **一并删除**（横屏算成负数的病根就在那）。
     //   ★第七批：**发弹幕的弹窗已整块删除** —— 它被常驻输入条 [danmakuInput] 取代
-    //     （省掉那个弹窗按钮），所以这里只剩一个弹窗字段。
-    //   ★底栏「设置」与它弹的直播设置弹窗**已删**（底栏不再放设置入口）——
-    //     那些设置一个没少，入口只剩「设置 → 直播设置」页（Compose 的 `LiveSettingPage`）。
-    private var streamDialog: LiveListDialog? = null
+    //     （省掉那个弹窗按钮），所以这里只剩两个弹窗宿主字段（本字段 + 上面的
+    //     [liveSettingSheetHost]，两者是**同一个外壳**、同一套"懒创建 + 0×0 + 幂等开关"写法）。
+    private var liveQualitySheetHost: LiveQualityLineSheetHost? = null
 
     private val gestureHud by lazy { GestureHud() }
 
@@ -1634,7 +1629,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 两个消费端：
      * ① [refreshBottomBarInsets] —— 把键盘高度加到底栏的底部内边距上（★第七批的键盘避让，
      *    为什么不能只靠 `adjustResize` 见类注释"键盘避让"那一段）；
-     * ② [dialogContentMaxHeightPx]`(leaveRoomForIme = true)` —— 内容区封顶再扣掉键盘高度。
+     * ★原来还有一条 ②"给弹窗内容封顶时扣掉键盘高度"—— 那个弹窗 2026-10-01 改用 Compose
+     *   覆盖层后**没有调用方**了（发弹幕也早就不是弹窗），所以现在只剩 ① 这一条用途。
      */
     private var imeInsetPx = 0
 
@@ -2379,7 +2375,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ★本轮：方向释放哨兵的加速度计监听也要跟着页面一起收（同样一一对应）——
         //   加速度计是**系统服务**，不注销它就一直抓着本页实例，退出直播间也回收不掉。
         disarmDeviceOrientationSentinel()
-        streamDialog = null
+        // ★2026-10-01：画质·线路弹窗的宿主（ComposeView 一 detach 就 dispose 组合 ⇒ 窗口随之收掉）
+        liveQualitySheetHost?.release()
+        liveQualitySheetHost = null
         // ★本轮：「主播已下播」那个一次性提示随页面一起收（它是本页建的 AlertDialog 窗口）
         dismissLiveOfflineDialog()
         // ★第十四批：直播设置弹窗的宿主也要释放（ComposeView 一 detach 就会 dispose 那份组合，
@@ -2851,7 +2849,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *
      * ★为什么直接覆盖 `onBackPressed()`、而不是往 `onBackPressedDispatcher` 注册回调：
      *   与点播播放页 `VideoPlayerActivity.onBackPressed()`（:285-308）保持同一条写法 ——
-     *   本页是**独立 Activity**、没有 Fragment 返回栈，弹窗（[LiveListDialog] / 发弹幕）都是
+     *   本页是**独立 Activity**、没有 Fragment 返回栈，弹窗（[LiveQualityLineSheetHost] 等 / 发弹幕）都是
      *   **独立窗口**、自己先吃掉返回键，弹幕宿主 `LiveDanmakuOverlayHost` 里也没有 BackHandler。
      *   ★另一个方向的保险（已核对 androidx.activity 1.13.0 字节码）：`OnBackPressedDispatcher`
      *   只有在**存在已启用的回调**时才会往 `OnBackInvokedDispatcher` 注册平台回调
@@ -4177,7 +4175,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 底栏把「画质」与「线路」并成一颗（本质上都是'选用哪条流'）：一个按钮
      * （文案如「画质·原画」）打开一个弹窗，弹窗内分两段/两个 Tab —— 清晰度与线路。
      *
-     * ## 一个弹窗、两段（[LiveListDialog] 的 `segments`）
+     * ## 一个弹窗、两段（[LiveOptionSheetModel] 的 `segments`）
      * | 段 | 标题 | 内容 | 点一条做什么 |
      * |---|---|---|---|
      * | 0 | 清晰度 | `desc（qn N）` + 说明行（只列服务端本次下发的档位） | 换档 → `requestedQn = qn` + `delegate.switchQuality(qn)`；点**已请求但服务端没给**的那一档 → 只 toast 指向「重新取流」（**不重复取流**） |
@@ -4196,11 +4194,16 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   （清限流预算 + 重新取流追到最新），点完关弹窗，让用户直接看顶栏状态。
      * · 清晰度/线路本来的两级入口也都在这里 —— 底栏因此不再需要「更多」按钮。
      *
-     * ## 几何（不要再改回去的那条）
-     * 内容区高度仍由 [dialogContentMaxHeightPx] 按**真机屏幕的 62%** 封顶并可滚；
-     * 本弹窗比原来多了一条 Tab 栏，所以列表的上限再扣掉 [DIALOG_TAB_STRIP_DP]
-     * （不扣的话"Tab + 列表 + 标题 + 按钮"会比 62% 高一截，正是"按钮被顶出屏幕"的病根）。
-     * **没有「取消」按钮**：点条目即切换并关闭、点弹窗外/返回键关闭（用户明确要求过）。
+     * ## 尺寸（★★2026-10-01 换成"复用设置弹窗那套外壳"后，这里一个像素账都没有了）
+     * 外壳 = `AutoSheetDialog`（与「设置」弹窗、首页直播 Tab 筛选弹窗**同一个**）：
+     * 窗口 = 宿主 `decorView` 尺寸（横竖屏都铺满，转屏/分屏由外壳自己重设）；
+     * 内容 = `Column { 标题; 说明; Tab; LazyColumn(weight(1f)); 按钮行 }` ⇒
+     * **列表高度由布局引擎分**（`weight(1f)` 吃掉剩余），按钮行在权重列表**之后** ⇒ 永远可见可点。
+     * ★旧实现那套 `62% 屏幕 − 200dp chrome − Tab 52dp` 的估算已整块删除 ——
+     *   横屏屏高 1264px 时它算出**负数**（列表上限被压到 80px，一行都放不下），
+     *   用户实测："横屏下完全看不见弹窗里的内容"。
+     * **没有「取消」按钮**：点条目即切换并关闭、点弹窗外/返回键关闭
+     * （外壳默认两者都开，见 `AnyPopDialogProperties`；用户明确要求过不设取消按钮）。
      */
     private fun showStreamDialog() {
         dismissDialogs()
@@ -4216,7 +4219,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         }
         // 每一段的"点一条做什么"按**段的下标**排（某一段没数据时会被跳过，所以不能写死下标）
         val pickers = ArrayList<(Int) -> Unit>(2)
-        val segments = ArrayList<Segment>(2)
+        val segments = ArrayList<LiveOptionSegment>(2)
         if (qualities.isNotEmpty()) {
             // ★列表就是"服务端本次下发的档位"（`livePlayerDelegate.buildQualities()` 只收 accept_qn），
             //   服务端没给的档位不显示、也不需要任何"可能拿不到"的标注 —— 用户口径：
@@ -4224,7 +4227,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             val entries = qualities.map { option ->
                 val isPlayingNow = option.qn == actualQn
                 val requestedButUnavailable = option.qn == requestedQn && !isPlayingNow
-                Entry(
+                LiveOptionEntry(
                     label = "${option.desc}（qn ${option.qn}）",
                     note = when {
                         isPlayingNow -> "当前正在播放"
@@ -4235,7 +4238,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 )
             }
             segments.add(
-                Segment(
+                LiveOptionSegment(
                     title = "清晰度",
                     subheading = if (actualQnDesc.isNotBlank()) "当前：$actualQnDesc（qn $actualQn）" else null,
                     entries = entries,
@@ -4292,14 +4295,14 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (lines.isNotEmpty()) {
             val current = lines.firstOrNull { it.current }
             val entries = lines.map { line ->
-                Entry(
+                LiveOptionEntry(
                     label = "线路 ${line.index + 1}　${line.desc}",
                     note = if (line.current) "当前正在播放" else null,
                     current = line.current,
                 )
             }
             segments.add(
-                Segment(
+                LiveOptionSegment(
                     title = "线路",
                     subheading = current?.let { "当前：线路 ${it.index + 1}/${lines.size}" },
                     entries = entries,
@@ -4317,17 +4320,35 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
                 )
             }
         }
-        streamDialog = LiveListDialog(
-            heading = "画质 · 线路",
-            segments = segments,
-            onPick = { segmentIndex, index -> pickers.getOrNull(segmentIndex)?.invoke(index) },
-            neutralLabel = "重新取流",
-            onNeutral = {
-                // ★诊断日志（只读）：手动"重新取流"入口（不受防抖与预算限制）
-                LivePageTrace.note("switch.retry.manual", "source" to "streamDialog")
-                retryPlayback()
-            },
-        ).also { it.show() }
+        // ★宿主懒创建（与 [showLiveSettingSheet] 同一套写法）：第一次点「画质」才建 + addView(0×0)，
+        //   没点过的人零开销；建好之后一直复用（开关弹窗只是 Compose 状态翻转）。
+        //   ★为什么是 0×0：弹窗是**独立窗口**，宿主占多大地方完全不影响播放页版式；
+        //     它必须进窗口树只是因为 `Dialog` 需要一个已 attach 的 View。
+        val host = liveQualitySheetHost
+            ?: LiveQualityLineSheetHost(this).also { created ->
+                rootLayout.addView(
+                    created,
+                    FrameLayout.LayoutParams(0, 0),
+                )
+                liveQualitySheetHost = created
+            }
+        host.show(
+            LiveOptionSheetRequest(
+                model = LiveOptionSheetModel(
+                    heading = "画质 · 线路",
+                    segments = segments,
+                    neutralLabel = "重新取流",
+                ),
+                // 点条目：宿主先落"关"状态、再回调（旧实现是 `dismiss(); onPick(...)`，语义一致）
+                onPick = { segmentIndex, index -> pickers.getOrNull(segmentIndex)?.invoke(index) },
+                onNeutral = {
+                    // ★诊断日志（只读）：手动"重新取流"入口（不受防抖与预算限制）
+                    //   ★`source` 仍是 "streamDialog"：函数名与诊断键都没变（只有实现换了外壳）
+                    LivePageTrace.note("switch.retry.manual", "source" to "streamDialog")
+                    retryPlayback()
+                },
+            ),
+        )
         holdControls()
     }
 
@@ -4611,6 +4632,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     /** 收起直播设置弹窗（幂等）。没建过宿主 / 本来就没弹时什么都不做 */
     private fun dismissLiveSettingSheet() {
         liveSettingSheetHost?.dismiss()
+    }
+
+    /** 收起「画质 · 线路」弹窗（幂等）。没建过宿主 / 本来就没弹时什么都不做 */
+    private fun dismissLiveQualitySheet() {
+        liveQualitySheetHost?.dismiss()
     }
 
     /**
@@ -5894,7 +5920,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         // ⑨ 根布局的 insets 监听：记下**输入法当前占用的高度**并抬底栏。
         //
         // ★★第七批在这里改了语义（原来是"只记一个值，给弹窗封顶用"）：
-        //   · `imeInsetPx` 仍然记（[dialogContentMaxHeightPx] 的 `leaveRoomForIme` 还要用它）；
+        //   · `imeInsetPx` 仍然记（输入条避让 [refreshBottomBarInsets] 要用它，见它的 KDoc）；
         //   · 新增 [refreshBottomBarInsets]：**把键盘高度加到底栏的底部内边距上**。
         //     为什么不能只靠 `ADJUST_RESIZE` 让窗口自己变矮（老注释就是这么假设的）：
         //     本页 `targetSdk = 36`，而 Android 15 起"目标 35+ 的 App 被强制 edge-to-edge"，
@@ -6934,13 +6960,13 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // ══════════════════════════════════════════════════════════════════════
 
     private fun isAnyDialogShowing(): Boolean =
-        streamDialog?.isShowing == true || liveSettingSheetHost?.isShowing() == true
+        liveQualitySheetHost?.isShowing() == true || liveSettingSheetHost?.isShowing() == true
 
     /**
      * 收掉本页所有"浮层式"弹窗（幂等）。
      *
      * ★第十四批把**直播设置弹窗**也纳进来了：它是 Compose 的 `Dialog`（独立窗口），
-     *   与 [LiveListDialog] 同属"压在播放页上面的弹窗"，所以"同一时刻只留一个弹窗"
+     *   与 [LiveQualityLineSheetHost] 同属"压在播放页上面的弹窗"，所以"同一时刻只留一个弹窗"
      *   这条规矩必须由**同一个函数**保证 —— 两个方向都要对称：
      *   · 点底栏「设置」→ [showLiveSettingSheet] 先调这里（收掉可能开着的「画质·线路」）；
      *   · 点底栏「画质」→ [showStreamDialog] 也调这里（收掉可能开着的设置弹窗）。
@@ -6948,7 +6974,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ★本轮：「主播已下播」那个一次性提示也归这里管（同一条规矩，纯加法）。
      */
     private fun dismissDialogs() {
-        streamDialog?.dismiss()
+        dismissLiveQualitySheet()
         dismissLiveSettingSheet()
         dismissLiveOfflineDialog()
     }
@@ -7160,74 +7186,6 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         finish()
     }
 
-    /**
-     * 弹窗内容区的**高度上限**（px）：正常弹窗不许顶出屏幕。
-     *
-     * 为什么要有这个数（实测：弹窗会超出屏幕，按钮点不到）：
-     * 一个 wrap_content 的弹窗，内容（长列表 / 长文本）比屏幕还高时，
-     * 系统的做法是把窗口裁到屏幕大小 —— **底部的按钮就被裁到屏幕外了**，怎么点都点不到。
-     * 所以这里把"内容区"的高度封顶，弹窗总高 = 标题 + 内容 + 按钮栏 ≤ 可用高度，
-     * 内容超高就在内容区内部滚动（[MaxHeightScrollView]），按钮永远留在屏幕里。
-     *
-     * 算账（保守取整，宁可小一点）：
-     * ```
-     * 可用高度 = 播放页真实高度 - 输入法高度(仅发弹幕弹窗) - 2 × 24dp（上下留白）
-     * 内容上限 = 可用高度 - [DIALOG_CHROME_DP]（标题一行 + 按钮栏 + 内边距，比真实值留足余量）
-     * ```
-     * 竖屏（≥ 640dp 高）→ 内容上限 ≈ 470dp 以上，足够看 5~6 个选项；
-     * 横屏小屏（360dp 高）→ 内容上限 ≈ 110dp，列表变矮但**能滚、按钮一定在屏内**。
-     * ★下限 72dp：屏幕矮到 320dp 以下（极罕见）时给内容区留一点保底高度 ——
-     *   那种尺寸下弹窗本来就挤，但内容区绝不能量成 0（那就成了"空白弹窗"）。
-     *
-     * ★★本轮的两处加固（第 7 项"弹窗覆盖/显示不全"）：
-     * ① 基准从 `resources.displayMetrics.heightPixels` 换成**播放页自己的高度**（[pageHeightPx]）——
-     *    displayMetrics 给的是"整块屏幕"，分屏/小窗/折叠屏展开时它比本页真实可用高度大得多，
-     *    按它算出来的上限会把弹窗顶到可视区之外（用户看到的就是"弹窗显示不全"）；
-     * ② 发弹幕弹窗（[leaveRoomForIme] = true）再扣掉**输入法当前占用的高度**：
-     *    横屏下软键盘能占掉 40% 屏高，不扣的话输入框那一行正好被键盘盖住，"看不见自己打的字"。
-     */
-    private fun dialogContentMaxHeightPx(leaveRoomForIme: Boolean = false): Int {
-        val ime = if (leaveRoomForIme) imeInsetPx else 0
-        // ★2026-09-26 实测反馈：线路弹窗的取消按钮会被挡住 —— 根因就在这里：
-        //   原来按 **pageHeightPx()（播放页高度≈整屏）** 减一点算上限，于是"内容 + 标题 + 按钮栏"
-        //   必然超过屏幕，按钮栏被挤到屏幕外（不是按钮没放对位置）。
-        //   现在按**真实屏幕高度**取一个保守百分比（62%），再加上对话框自身的 chrome 预留，
-        //   保证"内容 + 标题 + 按钮栏"永远装得下；内容超了就滚动。
-        val screen = resources.displayMetrics.heightPixels
-        val base = minOf(pageHeightPx(), screen)
-        val available = (base * 0.62f).toInt() - ime
-        return (available - dpToPx(DIALOG_CHROME_DP)).coerceAtLeast(dpToPx(72))
-    }
-
-    /**
-     * 内容区高度封顶的 ScrollView。
-     *
-     * 用自定义 onMeasure（AT_MOST 上限）而不是"show 之后再改 layoutParams"：
-     * 后者会先按内容高度铺一次、再被夹回来，用户能看见弹窗**跳一下**；
-     * 这里第一帧量出来就已经是夹过的尺寸。
-     *
-     * ★上限取"**框架给的**"和"**我们算的**"里更小的那个：
-     *   `AlertDialogLayout.tryOnMeasure()`（appcompat 1.8.0 字节码 offset 184-275）是
-     *   **先量按钮栏**，再用 `makeMeasureSpec(Math.max(0, heightSize - usedHeight), heightMode)`
-     *   去量内容面板 —— 也就是框架自己就会给内容一个"扣掉标题和按钮之后"的上限，
-     *   那个值比我们的经验值更准。我们只负责把"-1/-2 之外的真实像素"再夹一道，
-     *   绝不能反过来把它放大（放大了就可能把按钮栏挤出屏幕）。
-     */
-    private class MaxHeightScrollView(context: Context, private val maxHeightPx: Int) : ScrollView(context) {
-        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            val incomingMode = MeasureSpec.getMode(heightMeasureSpec)
-            val incomingSize = MeasureSpec.getSize(heightMeasureSpec)
-            val cap = if (incomingMode == MeasureSpec.UNSPECIFIED) {
-                maxHeightPx
-            } else {
-                minOf(maxHeightPx, incomingSize)
-            }
-            super.onMeasure(
-                widthMeasureSpec,
-                MeasureSpec.makeMeasureSpec(cap, MeasureSpec.AT_MOST),
-            )
-        }
-    }
 
     /**
      * 正常弹窗的统一构建口（清晰度 / 线路 / 发弹幕都用它 —— 直播设置弹窗本轮已删）。
@@ -7238,7 +7196,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   要的是系统自带那类 Material 弹窗；
      * · 窗口几何由主题 + 系统算（居中、左右留白、最大宽度），**不再由我们按像素钉死**，
      *   于是竖屏/横屏/小屏/分屏都不会越界，也不需要转屏后重算（本轮删掉的那段全屏几何代码）；
-     * · 长内容靠我们自己的 [MaxHeightScrollView] 封顶滚动，按钮在弹窗外面的按钮栏里，永远点得到。
+     * · 本页现在只剩"主播已下播"这种**短内容**弹窗用它（长列表/多段那类已改用 Compose
+     *   覆盖层，见 [LiveQualityLineSheetHost]）—— 短内容不需要任何高度封顶。
      */
     private fun normalDialog(): MaterialAlertDialogBuilder = MaterialAlertDialogBuilder(this)
 
@@ -7613,7 +7572,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 覆盖范围 = 几个指定位置（弹窗强调色、按钮态、状态条、图标）：
      * · 按钮态 → 底栏每一颗按钮的底色（[applyBottomButtonStyle]）；
      * · 状态条 → 顶栏那行状态文字（副色）+ 缓冲圈（主色）；
-     * · 弹窗强调色 → [LiveListDialog] 每次 show 时现取 [accentColor]，
+     * · 弹窗强调色 → Compose 覆盖层（`LiveQualityLineSheet`）直接取 `MaterialTheme.colorScheme.primary`，
      *   本来就是主题色（把 accentColor 的数据源修对了之后，它们自动跟着变）。
      * ★第五批删掉了原来"图标 → 音频舞台封面占位/说明文字（点缀色）"那一档：音频舞台没了。
      *   [tertiaryColor] 仍然保留（设置里的自定义主题三色语义未变，只是本页不再有消费点）。
@@ -7654,255 +7613,6 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   在窄格子里会闪一下省略号）
         applyBottomBarTextSizes(bottomBarAvailableWidthPx())
         updatePlayPauseButton()
-    }
-
-    /**
-     * 选择列表弹窗（清晰度 / 线路共用）—— **正常尺寸的居中弹窗**。
-     *
-     * ★这一版和上一版的区别（用户实测反馈驱动的返工）：
-     *   上一版按需求"全屏弹窗 + 旋转适配"做成了**自建全屏 Dialog**（自己 setContentView、
-     *   自己按像素 `setLayout(播放页宽, 播放页高)`、转屏后在 [onConfigurationChanged] 里重算）。
-     *   实测结果是"**弹窗超出了我的屏幕，我点不了**"—— 自建几何那条路只要有一处没算对
-     *   （内容比屏幕高、旋转与重算之间有时间差、沉浸式下坐标口径不同），
-     *   按钮就落在屏幕外。现在改回**系统正常弹窗**：几何交给主题与系统，
-     *   内容区自己封顶可滚，按钮永远在屏幕内（详见 [show] 与 [dialogContentMaxHeightPx]）。
-     */
-    /**
-     * 选择弹窗里的一行。
-     *
-     * ★为什么放在 Activity 类体层级、而不是塞在 [LiveListDialog] 里面（2026-09-26 编译报错修的）：
-     *   Kotlin 不允许在 `inner class` 内部再声明嵌套类（"'Class' is prohibited here"），
-     *   放外面两者都能看见（inner class 能访问外部类的嵌套类）。
-     *
-     * @param current 是否是"当前正在生效"的那一项（打勾 + 主题色高亮）
-     * @param note 次要说明（"当前正在播放" / "已请求 · 当前不可用"）
-     */
-    private class Entry(val label: String, val note: String?, val current: Boolean)
-
-    /**
-     * 弹窗里的**一段**（★第七批新增：一个弹窗装"清晰度"+"线路"两段）。
-     *
-     * ★与 [Entry] 一样必须放在 Activity 类体层级：Kotlin 不允许在 `inner class` 里再声明嵌套类
-     *   （"'Class' is prohibited here"，2026-09-26 编译报错修过一次，见 [Entry] 的注释）。
-     *
-     * @param title 段的 Tab 标题（"清晰度" / "线路"）
-     * @param subheading 段内的"当前是什么"那行（居中、主题色），没有就不占位置
-     * @param entries 段内的可选项（打勾/高亮/说明行的规则都在 [LiveListDialog.show] 里）
-     */
-    private class Segment(
-        val title: String,
-        val subheading: String?,
-        val entries: List<Entry>,
-    )
-
-    /**
-     * 选择列表弹窗（★第七批：**清晰度 + 线路共用同一个弹窗**）—— 正常尺寸的居中弹窗。
-     *
-     * ★这一版和上一版的区别（用户实测反馈驱动的返工）：
-     *   上一版按需求"全屏弹窗 + 旋转适配"做成了**自建全屏 Dialog**（自己 setContentView、
-     *   自己按像素 `setLayout(播放页宽, 播放页高)`、转屏后在 [onConfigurationChanged] 里重算）。
-     *   实测结果是"**弹窗超出了我的屏幕，我点不了**"—— 自建几何那条路只要有一处没算对
-     *   （内容比屏幕高、旋转与重算之间有时间差、沉浸式下坐标口径不同），
-     *   按钮就落在屏幕外。现在改回**系统正常弹窗**：几何交给主题与系统，
-     *   内容区自己封顶可滚，按钮永远在屏幕内（详见 [show] 与 [dialogContentMaxHeightPx]）。
-     *
-     * ★第七批的两处结构性变化：
-     * 1. **两段（TabLayout）**：`segments.size > 1` 时在内容区顶部摆一条 Tab 栏（Material 的
-     *    [TabLayout]，`MODE_FIXED` 两等分），切 Tab 只换下面那块列表的内容 ——
-     *    两个"当前档打勾 / 已请求不可用 / 线路可点选"的行为各自原样保留；
-     * 2. **一个可选的中性按钮**（[neutralLabel] / [onNeutral]）：现在只用来放「重新取流」。
-     *    与正文里的行一样**手动接点击**（`setNeutralButton(label, null)` + `setOnShowListener` 里
-     *    覆盖），因为默认的按钮回调点完会**无条件关弹窗**，而我们要自己决定关不关
-     *    （这里选择：关掉 —— 用户点它就是想"重来一遍"，关掉正好能看顶栏状态）。
-     *    ★**仍然没有「取消」按钮**（2026-09-26 定稿：不设该按钮）：
-     *    关闭方式齐全 —— 点任意条目即切换并关闭、点弹窗外关闭、返回键关闭。
-     */
-    private inner class LiveListDialog(
-        private val heading: String,
-        private val segments: List<Segment>,
-        private val onPick: (segmentIndex: Int, index: Int) -> Unit,
-        private val neutralLabel: String? = null,
-        private val onNeutral: (() -> Unit)? = null,
-    ) {
-        var dialog: AlertDialog? = null
-            private set
-
-        val isShowing: Boolean get() = dialog?.isShowing == true
-
-        /**
-         * 弹出选择列表 —— **正常弹窗**（居中、定宽、内容超高就在内部滚）。
-         *
-         * 行样式保留原样（打勾 + 主题色 = 当前项、副标题写"当前是什么"），
-         * 只是配色改成**跟随弹窗主题**（不再写死白色/黑色）：
-         * 弹窗是浅色还是深色由 `Theme.Bilimiao` 的 DayNight 决定，写死颜色会在浅色主题下看不见。
-         *
-         * ★★第四批第 6 条：**里面的文字改成居中**（当时行文字未居中、贴着弹窗边缘）。
-         *   病根是[自建内容的弹窗]没有 Material 正文那 24dp 内边距：这些行是我们自己 addView 进去的，
-         *   只给了 4dp 左右内边距 → 文字几乎贴到弹窗边缘，而标题（`setTitle`，走 Material 标题样式）
-         *   自带内边距，两者一比就显得"靠边、不居中"。
-         *   修法就是用户说的那个词 —— **居中**：
-         *   · 副标题（"当前：超清（qn 400）"）→ `gravity = CENTER`；
-         *   · 每一行选项（含第二行的说明文字）→ `gravity = CENTER`，
-         *     并且**去掉原来靠 5 个空格手工缩进的对齐**（居中之后那个缩进只会让第二行歪掉）。
-         *   ★标题仍走 `setTitle(heading)`：那是全 App 常规 `MaterialAlertDialog` 的观感
-         *     （`MainActivity.showNotificationPermissionTips()` 同样是它），标题自带内边距、并不"靠边"，
-         *     与"正文居中"并不冲突 —— 用户抱怨的是正文那几行。
-         *
-         * ★★第七批的高度账（已定稿：内容区按真实屏幕高度封顶 + 可滚，
-         *   [dialogContentMaxHeightPx] 已按屏幕 62% 改好，不要再改）：
-         * ```
-         * 列表上限 = dialogContentMaxHeightPx() - DIALOG_TAB_STRIP_DP   （铺开 Tab 栏时）
-         * ```
-         * 不扣这一条的话，"Tab + 列表 + 标题 + 按钮栏"会比 62% 高一截 —— 那正是"按钮被顶出屏幕"的病根。
-         */
-        fun show() {
-            if (isFinishing || isDestroyed) return
-            val accent = accentColor()
-            val textColor = dialogTextColor()
-
-            // 列表容器：切 Tab 只重建**它**的内容，弹窗本身不动（Tab 栏也就不会闪）
-            val list = LinearLayout(this@LivePlayerActivity).apply {
-                orientation = LinearLayout.VERTICAL
-            }
-            fun renderSegment(index: Int) {
-                list.removeAllViews()
-                val segment = segments.getOrNull(index) ?: return
-                segment.subheading?.let { text ->
-                    list.addView(
-                        TextView(this@LivePlayerActivity).apply {
-                            this.text = text
-                            setTextColor(accent)
-                            textSize = 13f
-                            // ★第四批第 6 条：副标题居中（和下面的选项行同一套对齐）
-                            gravity = Gravity.CENTER
-                        },
-                        matchWrap(topMarginDp = 2, bottomMarginDp = 6),
-                    )
-                }
-                segment.entries.forEachIndexed { entryIndex, entry ->
-                    val row = TextView(this@LivePlayerActivity).apply {
-                        text = buildString {
-                            // 打勾 + 主题色 = "就是这一档"，不需要用户自己去比对 qn 数字
-                            append(if (entry.current) "✓ " else "")
-                            append(entry.label)
-                            // ★说明文字另起一行、**不再手工缩进**：整行居中之后缩进会把这一行带歪
-                            entry.note?.let { append("\n$it") }
-                        }
-                        textSize = 15f
-                        setTextColor(if (entry.current) accent else textColor)
-                        // ★第四批第 6 条：整行居中（多行时每一行各自居中）
-                        gravity = Gravity.CENTER
-                        setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12))
-                        isClickable = true
-                        selectableItemBackgroundRes().takeIf { it != 0 }?.let { setBackgroundResource(it) }
-                        setOnClickListener {
-                            dismiss()
-                            onPick(index, entryIndex)
-                        }
-                    }
-                    list.addView(
-                        row,
-                        LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ),
-                    )
-                }
-            }
-            renderSegment(0)
-
-            // 内容区封顶 + 可滚：选项再多也不会把弹窗顶出屏幕（按钮在系统的按钮栏里，不受影响）
-            val twoSegments = segments.size > 1
-            val listCap = if (twoSegments) {
-                (dialogContentMaxHeightPx() - dpToPx(DIALOG_TAB_STRIP_DP)).coerceAtLeast(dpToPx(72))
-            } else {
-                dialogContentMaxHeightPx()
-            }
-            val scroller = MaxHeightScrollView(this@LivePlayerActivity, listCap).apply {
-                addView(
-                    list,
-                    ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
-            }
-
-            // Tab 栏放**滚动容器外面**：滚列表时 Tab 不该跟着滚走（否则切段要先滚回顶部）
-            val content = LinearLayout(this@LivePlayerActivity).apply {
-                orientation = LinearLayout.VERTICAL
-            }
-            if (twoSegments) {
-                val tabs = TabLayout(this@LivePlayerActivity).apply {
-                    tabMode = TabLayout.MODE_FIXED
-                    tabGravity = TabLayout.GRAVITY_FILL
-                    segments.forEach { segment -> addTab(newTab().setText(segment.title)) }
-                    addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
-                        override fun onTabSelected(tab: TabLayout.Tab) {
-                            renderSegment(tab.position)
-                        }
-
-                        override fun onTabUnselected(tab: TabLayout.Tab) = Unit
-
-                        override fun onTabReselected(tab: TabLayout.Tab) = Unit
-                    })
-                }
-                content.addView(
-                    tabs,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
-            }
-            content.addView(
-                scroller,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-
-            val builder = normalDialog()
-                .setTitle(heading)
-                .setView(content)
-            // ★中性按钮（「重新取流」）走"手动接"而不是直接给回调：
-            //   默认回调点完会**无条件关弹窗**，而"关不关"该由调用方决定（见类 KDoc）。
-            //   先落到局部 val 上，后面的匿名监听器里就是普通局部变量，不依赖对成员属性的智能转换。
-            val neutral = neutralLabel
-            val neutralAction = onNeutral
-            if (neutral != null && neutralAction != null) {
-                builder.setNeutralButton(neutral, null)
-            }
-            val d = builder.create()
-            d.setOnDismissListener {
-                if (dialog === d) dialog = null
-            }
-            if (neutral != null && neutralAction != null) {
-                d.setOnShowListener {
-                    d.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
-                        dismiss()
-                        neutralAction.invoke()
-                    }
-                }
-            }
-            dialog = d
-            // ★这里**故意不做**任何 setLayout：弹窗尺寸交给主题与内容自己算（这正是"不越界"的保证）
-            runCatching { d.show() }
-        }
-
-        fun dismiss() {
-            dialog?.takeIf { it.isShowing }?.let { runCatching { it.dismiss() } }
-        }
-
-        private fun matchWrap(topMarginDp: Int = 0, bottomMarginDp: Int = 0): LinearLayout.LayoutParams =
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply {
-                topMargin = dpToPx(topMarginDp)
-                bottomMargin = dpToPx(bottomMarginDp)
-            }
     }
 
     /**
