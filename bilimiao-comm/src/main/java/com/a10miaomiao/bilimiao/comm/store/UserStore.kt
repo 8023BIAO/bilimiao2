@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.apis.WebNavInfo
+import com.a10miaomiao.bilimiao.comm.apis.asExpNumber
 import com.a10miaomiao.bilimiao.comm.apis.toUserInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.auth.LoginInfo
@@ -29,7 +30,14 @@ class UserStore(override val di: DI) :
     ViewModel(), BaseStore<UserStore.State> {
 
     data class State (
-        var info: UserInfo? = null
+        var info: UserInfo? = null,
+        /**
+         * nav 里拿到的等级/经验（`level_info`）。
+         *
+         * 为什么不塞进 [UserInfo]：APP 的 `x/v2/account/mine` 不返回经验，token 会话每次刷新都会把它冲成默认值；
+         * 放这里由 nav 单独维护，编辑资料页"优先用已经在手的数据"才稳。
+         */
+        var navLevelExp: LevelExp? = null,
     ) {
         fun isSelf(mid: String) = info?.mid != null && info?.mid == mid.toLongOrNull()
 
@@ -132,7 +140,11 @@ class UserStore(override val di: DI) :
             }
             when {
                 probe.user != null -> {
-                    setState { info = probe.user }
+                    setState {
+                        info = probe.user
+                        // nav 顺带给了等级/经验就一起记下（cookie 会话冷启动就会走 nav）
+                        probe.levelExp?.let { navLevelExp = it }
+                    }
                     seveUserInfo(probe.user)
                     logAuthDiag("登录态正常", token, probe)
                 }
@@ -200,6 +212,20 @@ class UserStore(override val di: DI) :
         }
     }
 
+    /**
+     * 只补一次 nav 的等级/经验（**不动登录态**）。
+     *
+     * 给"nav 才有、APP 接口不给"的字段用（编辑资料页的「经验」）：token 会话也有 Cookie ⇒ 一样能补。
+     * 没有可用 Cookie / nav 失败 / nav 没带 level_info → 返回 null，调用方走自己的兜底。
+     */
+    suspend fun refreshNavLevel(): LevelExp? {
+        val cookie = cookieHeaderForNav() ?: return null
+        val probe = probeNav(cookie)
+        val levelExp = probe.levelExp ?: return null
+        setState { navLevelExp = levelExp }
+        return levelExp
+    }
+
     /** APP 通道探针（`x/v2/account/mine`） */
     private suspend fun probeApp(): AuthProbe {
         val res = BiliApiService.authApi
@@ -225,7 +251,19 @@ class UserStore(override val di: DI) :
         val nav = res.data
         return when {
             res.isSuccess && nav != null && nav.isLogin && nav.mid != 0L ->
-                AuthProbe(user = nav.toUserInfo(), code = res.code, source = "web")
+                AuthProbe(
+                    user = nav.toUserInfo(),
+                    code = res.code,
+                    source = "web",
+                    // nav 原样带 level_info（等级 + 当前/下一级经验），顺手带出来给编辑资料页用
+                    levelExp = nav.level_info?.let {
+                        LevelExp(
+                            level = it.current_level,
+                            current = it.current_exp.asExpNumber(),
+                            next = it.next_exp.asExpNumber(),
+                        )
+                    },
+                )
             isExplicitNotLogin(res.code, hasPayload = nav != null, notLoggedIn = nav?.isLogin == false) ->
                 AuthProbe(code = res.code, source = "web", explicitNotLogin = true, reason = "服务端返回未登录")
             else -> AuthProbe(code = res.code, source = "web", reason = res.message)
@@ -334,6 +372,18 @@ data class AuthProbe(
     /** 服务端**明确**判未登录（区别于 -352 这类临时错误） */
     val explicitNotLogin: Boolean = false,
     val reason: String = "",
+    /** nav 顺带带回来的等级/经验（只有 web 探针有） */
+    val levelExp: LevelExp? = null,
 ) {
     val ok: Boolean get() = user != null
 }
+
+/**
+ * 等级 + 经验（来自 nav 的 `level_info`）。
+ * `current`/`next` 可能是 null（满级时 `next_exp` 是 `"--"`、字段缺失等），由展示方决定怎么兜。
+ */
+data class LevelExp(
+    val level: Int,
+    val current: Long?,
+    val next: Long?,
+)

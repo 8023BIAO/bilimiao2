@@ -12,6 +12,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.auth.H5LoginPage
 import cn.a10miaomiao.bilimiao.compose.pages.community.components.ReplyImageHelper
 import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.apis.MemberProfileApi
+import com.a10miaomiao.bilimiao.comm.apis.asExpNumber
 import com.a10miaomiao.bilimiao.comm.apis.ProfileAvatarUploader
 import com.a10miaomiao.bilimiao.comm.entity.MessageInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
@@ -19,8 +20,10 @@ import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.entity.user.AccountMyInfoInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
+import com.a10miaomiao.bilimiao.comm.store.LevelExp
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.toast
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -29,7 +32,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.instance
@@ -185,12 +187,11 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
                 return@launch
             }
             _profile.value = data
-            // 经验值只对**自己**有意义（编辑资料页目前也只能从自己的空间进，这道 mid 判断是兜底）
-            // ★ isSelf 的 **Long 重载只挂在 UserStore.State 上**，类级 UserStore 只有 String 版
-            //   （UserStore.kt:138）—— 这里必须 toString()，写法与 UserFavouriteDetailContent.kt:466 一致
-            if (userStore.isSelf(data.mid.toString())) {
-                loadExp(data.mid)
-            }
+            // 经验值：**资料到手就取，不再过 isSelf 这道门**。
+            //   ① `myinfo()` 本来就是"我的资料"接口，返回的 mid 天然是自己，不必再比一次；
+            //   ② `userStore.isSelf()` 依赖 `state.info`，登录态还没填充时它必然 false
+            //      ⇒ 以前连请求都不发（用户实测：经验那一行永远不出现）。
+            loadExp(data.mid)
             // 资料真的到手了，才值得做一次**只读**的 web 登录态体检：
             // 缺 SESSDATA/bili_jct 的话，页面上常驻一行提示 +「去网页登录」，
             // 而不是等用户选完图点上传才失败（报告 P0-1：TV 扫码登录很可能没有 web 登录态）
@@ -217,37 +218,75 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
     }
 
     /**
-     * 读经验值，拼成「当前/下一级」两个数字（页面只负责显示）。
+     * 读经验值，拼成「当前/下一级」两个数字（页面只负责显示）。三级取值链：
      *
-     * ★ 顺带读的是一份**额外的轻请求**（`x/space/acc/info`，只有一个 card 对象）：
-     *   失败/少字段/格式怪 → 直接返回（[exp] 保持原值或 null），不 toast、不写 [_fail]，
-     *   因为编辑资料页的主数据（昵称/签名/硬币）已经由 `myinfo` 拿到了。
+     * ① **已经在手的数据**：nav 的 `level_info`（[UserStore.State.navLevelExp]）。
+     *    cookie 会话冷启动就会调 nav，天然有值 —— 不再多发一次请求。
+     * ② **补一次 nav**：store 里没有时，用本机 Cookie 调一次 `x/web-interface/nav`
+     *    （token 会话也有 Cookie ⇒ 一样能补；没有可用 Cookie 就直接跳过）。
+     * ③ **兜底**：WBI 签名的 `x/space/wbi/acc/info`（裸 `x/space/acc/info` 已 100% 被风控 -799）。
      *
-     * ★ 满级（Lv6）的处理照抄 PiliPlus 的 `LevelInfo.fromJson`：
-     *   服务端这时给的 `next_exp` 可能是 0 / `"--"` / 一个天文数字，直接显示会变成「经验 x/0」，
-     *   所以满级时下一级就取当前值（进度条走满的观感）。
+     * 失败/少字段/格式怪 → **打日志（带 code/message）后返回**，[exp] 保持原值或 null，
+     * 不 toast、不写 [_fail]：主数据（昵称/签名/硬币）已经由 `myinfo` 拿到了，
+     * 页面口径仍是"拿不到就不显示这一行"，不摆占位符。
      */
     private suspend fun loadExp(mid: Long) {
-        val text = try {
+        // ① 先在手的 nav 数据
+        formatExp(userStore.stateFlow.value.navLevelExp)?.let {
+            _exp.value = it
+            return
+        }
+        // ② 再补一次 nav
+        formatExp(userStore.refreshNavLevel())?.let {
+            _exp.value = it
+            return
+        }
+        // ③ 兜底：WBI 签名的空间接口
+        try {
             val res = BiliApiService.userApi
                 .accInfo(mid.toString())
                 .awaitCall()
                 .json<ResultInfo<SpaceAccInfo>>()
-            val level = res.data?.level_info ?: return
-            val current = level.current_exp.asExpNumber() ?: return
-            val next = if ((level.current_level ?: 0) >= MAX_LEVEL) {
-                current
-            } else {
-                level.next_exp.asExpNumber() ?: return
+            if (res.code != 0) {
+                miaoLogger().e("经验值读取失败", "code=${res.code}", "message=${res.message}")
+                return
             }
-            "$current/$next"
+            val level = res.data?.level_info
+            if (level == null) {
+                miaoLogger().e("经验值不可用", "响应缺少 level_info")
+                return
+            }
+            val text = formatExp(
+                LevelExp(
+                    level = level.current_level ?: 0,
+                    current = level.current_exp.asExpNumber(),
+                    next = level.next_exp.asExpNumber(),
+                )
+            )
+            if (text != null) {
+                _exp.value = text
+            } else {
+                miaoLogger().e(
+                    "经验值不可用",
+                    "level=${level.current_level}",
+                    "current=${level.current_exp}",
+                    "next=${level.next_exp}",
+                )
+            }
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            miaoLogger().e("经验值读取异常", e)
         }
-        if (text != null) {
-            _exp.value = text
-        }
+    }
+
+    /**
+     * 经验文案：`当前/下一级`；满级（>= [MAX_LEVEL]）取 `当前/当前`；缺当前、或未满级缺下一级
+     * → null（页面按"不显示这一行"处理）。**满级口径照旧**，见 [MAX_LEVEL]。
+     */
+    private fun formatExp(levelExp: LevelExp?): String? {
+        val level = levelExp?.level ?: return null
+        val current = levelExp.current ?: return null
+        val next = if (level >= MAX_LEVEL) current else (levelExp.next ?: return null)
+        return "$current/$next"
     }
 
     // ──────────────────────────── 头像（第二阶段） ────────────────────────────
@@ -625,10 +664,6 @@ private data class SpaceAccInfo(
         val next_exp: JsonElement? = null,
     )
 }
-
-/** 经验字段转数字：数字与纯数字字符串都认；`"--"`、null、对象等一律 null（= 不显示这一行） */
-private fun JsonElement?.asExpNumber(): Long? =
-    (this as? JsonPrimitive)?.content?.trim()?.toLongOrNull()
 
 /**
  * 头像专用：选中的图片 → 一个可直接上传的本地文件。

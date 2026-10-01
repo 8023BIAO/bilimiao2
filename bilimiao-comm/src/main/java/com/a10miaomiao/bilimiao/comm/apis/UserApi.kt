@@ -3,17 +3,26 @@ package com.a10miaomiao.bilimiao.comm.apis
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
+import com.a10miaomiao.bilimiao.comm.utils.WbiSigner
 
 class UserApi {
 
     /**
-     * 用户名片信息（头像+昵称）
+     * 用户名片信息（头像+昵称+等级/经验）。
+     *
+     * ★2026-10-01：裸 `x/space/acc/info` 已**100% 被风控**（实测 `-799 请求过于频繁，请稍后再试`；
+     *   官方无签名版 `x/space/wbi/acc/info` 回 `-403 访问权限不足`）⇒ 必须换成 wbi 版并带签名。
+     *   这里显式 opt-in `WbiScope.NON_LIVE`（与 `VideoAPI.aiConclusion` 注释里给的写法一致），
+     *   **不动** [WbiSigner.autoScopeFor] 的既有直播白名单。
+     *   注意：该 opt-in 受设置里的 WBI 开关约束（默认开）——关掉时这条兜底不签，
+     *   但编辑资料页的经验值优先走 nav（nav 那条不依赖签名），所以仍有值。
      */
     fun accInfo(mid: String) = MiaoHttp.request {
-        url = BiliApiService.biliApi(
-            "x/space/acc/info",
+        val rawUrl = BiliApiService.biliApi(
+            "x/space/wbi/acc/info",
             "mid" to mid,
         )
+        url = WbiSigner.signUrlBlocking(rawUrl, WbiSigner.WbiScope.NON_LIVE)
     }
 
     /**

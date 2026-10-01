@@ -10,6 +10,8 @@ import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.utils.RSAUtil
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 import java.util.*
 
 class AuthApi {
@@ -426,8 +428,25 @@ data class WebNavInfo(
     @Serializable
     data class LevelInfo(
         val current_level: Int = 0,
+        /**
+         * 当前经验 / 升级所需经验。
+         *
+         * ★nav 原样就有（样例 `level_info{current_level:5, current_min:10800, current_exp:13135, next_exp:28800}`），
+         *   有了这两个值，"经验"那一行就不必再去请求一个动辄被风控的空间接口。
+         * ★用 [JsonElement] 收：满级时 `next_exp` 见过 `"--"`，写死 Int/Long 会让整次 nav 解析失败。
+         */
+        val current_exp: JsonElement? = null,
+        val next_exp: JsonElement? = null,
     )
 }
+
+/**
+ * 经验字段转数字：数字与纯数字字符串都认；`"--"`、null、对象等一律 null（= 这项拿不到）。
+ *
+ * ★放在 comm（nav 与空间接口共用同一把尺子），页面别自己再写一份。
+ */
+fun JsonElement?.asExpNumber(): Long? =
+    (this as? JsonPrimitive)?.content?.trim()?.toLongOrNull()
 
 /**
  * nav 响应 → App 的 [UserInfo]（Cookie 登录 / cookie-only 会话的资料刷新共用这一份映射）。
