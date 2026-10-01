@@ -93,12 +93,13 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
     /**
      * 「当前资料」卡片里那一行经验值，形如 `12345/20000`；null = 不显示这一行。
      *
-     * ★ 数据源：`x/space/acc/info`（[com.a10miaomiao.bilimiao.comm.apis.UserApi.accInfo]）——
-     *   聊天页取昵称/头像用的就是它（ChatPage.kt:289），本页只是多读一个 `level_info`，
-     *   **不新增接口封装**。为什么不直接读 `myinfo`：它的响应里虽然也带 `level_info`，
+     * ★ 数据源有三级（见 [loadExp]）：① nav 的 `level_info`（冷启动就有，优先、零额外请求）→
+     *   ② 需要时补一次 nav → ③ **WBI 签名的** `x/space/wbi/acc/info`
+     *   （[com.a10miaomiao.bilimiao.comm.apis.UserApi.accInfo]；裸 `x/space/acc/info` 已被风控 -799）。
+     *   为什么不直接读 `myinfo`：它的响应里虽然也带 `level_info`，
      *   但我们接的 [AccountMyInfoInfo] 在 comm 模块里没声明这个字段，本页改动不跨模块。
      *
-     * ★ 拿不到就保持 null（页面少一行），不弹错误：这是只读的展示数据，
+     * ★ 拿不到就保持 null（页面少一行），**不弹错误、不写 `_fail`**：这是只读的展示数据，
      *   用户来这一页是为了改昵称/头像，不该被一条读不到的附加信息打断。
      */
     private val _exp = MutableStateFlow<String?>(null)
@@ -220,29 +221,31 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
     /**
      * 读经验值，拼成「当前/下一级」两个数字（页面只负责显示）。三级取值链：
      *
-     * ① **已经在手的数据**：nav 的 `level_info`（[UserStore.State.navLevelExp]）。
-     *    cookie 会话冷启动就会调 nav，天然有值 —— 不再多发一次请求。
-     * ② **补一次 nav**：store 里没有时，用本机 Cookie 调一次 `x/web-interface/nav`
+     * ① **已经在手的数据**：nav 的 `level_info`（[UserStore.State.navLevelExp]），
+     *    但**必须 mid 对得上**当前资料 —— 缓存可能还是上一个账号的（换账号时 store 会清，
+     *    这里再比一次做双保险，见 P0-1）。
+     * ② **补一次 nav**：store 里没有/不属于当前账号时，用本机 Cookie 调一次 `x/web-interface/nav`
      *    （token 会话也有 Cookie ⇒ 一样能补；没有可用 Cookie 就直接跳过）。
      * ③ **兜底**：WBI 签名的 `x/space/wbi/acc/info`（裸 `x/space/acc/info` 已 100% 被风控 -799）。
      *
-     * 失败/少字段/格式怪 → **打日志（带 code/message）后返回**，[exp] 保持原值或 null，
-     * 不 toast、不写 [_fail]：主数据（昵称/签名/硬币）已经由 `myinfo` 拿到了，
-     * 页面口径仍是"拿不到就不显示这一行"，不摆占位符。
+     * ★**整个函数体都在 try 里**：第②步 `refreshNavLevel()` 内部也会 `awaitCall()/json` 抛异常，
+     *   漏在外面会逃到 [load] 的 catch ⇒ 误弹「网络请求失败」并写脏 `_fail`（复核 P0-2）。
+     *   这里任何异常都**只记日志**：[exp] 保持原值或 null，不 toast、不写 `_fail` —— 页面口径仍是
+     *   "拿不到就不显示这一行"，不摆占位符。
      */
     private suspend fun loadExp(mid: Long) {
-        // ① 先在手的 nav 数据
-        formatExp(userStore.stateFlow.value.navLevelExp)?.let {
-            _exp.value = it
-            return
-        }
-        // ② 再补一次 nav
-        formatExp(userStore.refreshNavLevel())?.let {
-            _exp.value = it
-            return
-        }
-        // ③ 兜底：WBI 签名的空间接口
         try {
+            // ① 先在手的 nav 数据（★必须属于当前 mid，避免换账号后串号）
+            formatExp(userStore.stateFlow.value.navLevelExp?.takeIf { it.mid == mid })?.let {
+                _exp.value = it
+                return
+            }
+            // ② 再补一次 nav（同样只认当前 mid）
+            formatExp(userStore.refreshNavLevel()?.takeIf { it.mid == mid })?.let {
+                _exp.value = it
+                return
+            }
+            // ③ 兜底：WBI 签名的空间接口
             val res = BiliApiService.userApi
                 .accInfo(mid.toString())
                 .awaitCall()
@@ -258,6 +261,7 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
             }
             val text = formatExp(
                 LevelExp(
+                    mid = mid,
                     level = level.current_level ?: 0,
                     current = level.current_exp.asExpNumber(),
                     next = level.next_exp.asExpNumber(),
@@ -273,20 +277,11 @@ class EditProfileViewModel(override val di: DI) : ViewModel(), DIAware {
                     "next=${level.next_exp}",
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             miaoLogger().e("经验值读取异常", e)
         }
-    }
-
-    /**
-     * 经验文案：`当前/下一级`；满级（>= [MAX_LEVEL]）取 `当前/当前`；缺当前、或未满级缺下一级
-     * → null（页面按"不显示这一行"处理）。**满级口径照旧**，见 [MAX_LEVEL]。
-     */
-    private fun formatExp(levelExp: LevelExp?): String? {
-        val level = levelExp?.level ?: return null
-        val current = levelExp.current ?: return null
-        val next = if (level >= MAX_LEVEL) current else (levelExp.next ?: return null)
-        return "$current/$next"
     }
 
     // ──────────────────────────── 头像（第二阶段） ────────────────────────────

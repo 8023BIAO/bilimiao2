@@ -67,6 +67,12 @@ class UserStore(override val di: DI) :
     fun setUserInfo(userInfo: UserInfo?) {
         setState {
             info = userInfo
+            // ★换账号/登出必须让 nav 经验值立刻失效：5 条登录路径（LoginPage 两条 / H5 / 扫码 / 短信）
+            //   只调 setUserInfo、**不调 loadInfo()**，不清就会把上一个账号的经验值显示给新账号，
+            //   而且第①步一命中就再也不会去取真值（复核 P0-1：串号且永不自愈）。
+            if (userInfo == null || navLevelExp?.mid != userInfo.mid) {
+                navLevelExp = null
+            }
         }
         seveUserInfo(userInfo)
         if (userInfo != null) {
@@ -258,6 +264,7 @@ class UserStore(override val di: DI) :
                     // nav 原样带 level_info（等级 + 当前/下一级经验），顺手带出来给编辑资料页用
                     levelExp = nav.level_info?.let {
                         LevelExp(
+                            mid = nav.mid,
                             level = it.current_level,
                             current = it.current_exp.asExpNumber(),
                             next = it.next_exp.asExpNumber(),
@@ -290,7 +297,11 @@ class UserStore(override val di: DI) :
      */
     private fun clearStateAndNotify(reason: String) {
         miaoLogger().e("登录态失效(仅清内存，保留凭据)", reason)
-        setState { info = null }
+        setState {
+            info = null
+            // nav 经验值跟着登录态一起失效（否则会拿失效账号的旧值顶上去）
+            navLevelExp = null
+        }
         toast("登录已失效，请重新登录")
     }
 
@@ -383,6 +394,8 @@ data class AuthProbe(
  * `current`/`next` 可能是 null（满级时 `next_exp` 是 `"--"`、字段缺失等），由展示方决定怎么兜。
  */
 data class LevelExp(
+    /** ★这份经验值属于哪个账号：换账号后必须靠它判归属（[UserStore.setUserInfo] 会清，展示方还要再比一次） */
+    val mid: Long,
     val level: Int,
     val current: Long?,
     val next: Long?,
