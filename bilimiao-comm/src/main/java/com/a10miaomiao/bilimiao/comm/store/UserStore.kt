@@ -9,21 +9,18 @@ import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.apis.WebNavInfo
 import com.a10miaomiao.bilimiao.comm.apis.toUserInfo
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
-import com.a10miaomiao.bilimiao.comm.entity.ResponseResult
-import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
+import com.a10miaomiao.bilimiao.comm.entity.auth.LoginInfo
 import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
 import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
 import com.a10miaomiao.bilimiao.comm.store.base.BaseStore
-import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.toast
+import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
 import org.kodein.di.DI
 import org.kodein.di.instance
 import java.io.File
@@ -103,81 +100,135 @@ class UserStore(override val di: DI) :
         }
     }
 
+    /**
+     * 刷新登录态与用户资料（冷启动 / 导入后 / 登录后都会走）。
+     *
+     * 口径（2026-10-01 用户实测后重构，**别再退回"失败就删凭据"**）：
+     * ① 每次先把 auth 文件里的 Cookie **真正**灌回 CookieManager（见 [BilimiaoCommApp.setCookie]）；
+     * ② 有 `access_token` 走 APP `x/v2/account/mine`，没有就走 Web `nav`；
+     * ③ **token 失效 ≠ 会话失效**：APP 判未登录时，只要身份里还有含 SESSDATA 的 Cookie，先回落 Cookie 再判；
+     * ④ 两条都"明确未登录" → **只清内存状态 + 如实提示**，绝不删 auth 文件（凭据只能由"主动退出登录"删）。
+     */
     fun loadInfo() = viewModelScope.launch(Dispatchers.IO) {
-        // ★cookie-only 会话（auth 文件里没有 access_token，只有 Cookie）：APP 接口
-        //   `x/v2/account/mine` 只会回匿名档（实测 code=0 但 mid=0/name 空）——那不是"登录失效"，
-        //   是这条通道根本不认 Cookie。所以改走 Web 的 nav 取资料（见 [AuthApi.webNav]）。
-        if (BilimiaoCommApp.commApp.loginInfo?.token_info?.access_token.isNullOrBlank()) {
-            loadInfoByCookie()
-            return@launch
-        }
+        val loginInfo = BilimiaoCommApp.commApp.loginInfo
+        // 冷启动把 Cookie 灌回 WebView：Web 接口（发弹幕/评论要的 csrf 等）读的是 CookieManager
+        loginInfo?.cookie_info?.let { BilimiaoCommApp.commApp.setCookie(it) }
+        val token = loginInfo?.token_info?.access_token
+        val cookie = cookieHeaderForNav()
         try {
-            val res = BiliApiService.authApi
-                .account()
-                .awaitCall()
-                .json<ResponseData<UserInfo>>()
-            val user = res.data
-            when {
-                res.code == 0 && user != null && user.mid != 0L -> {
-                    setState {
-                        info = user
-                    }
-                    seveUserInfo(user)
+            var probe = if (token.isNullOrBlank()) {
+                if (cookie == null) {
+                    clearStateAndNotify("身份里没有 access_token，也没有可用的 Cookie")
+                    return@launch
                 }
-                // 服务端**明确**判未登录才算失效：实测 access_key 无效时 APP 接口回 code=0 + 匿名档（mid=0），
-                // 不是 -101；`data` 缺失（hasPayload=false）不算 —— 那是响应不完整，别误清。
-                isExplicitNotLogin(res.code, hasPayload = user != null, notLoggedIn = user?.mid == 0L) -> {
-                    clearAuthAndNotify()
-                }
-                // 其余（-352 风控、-509 超限、-412 拦截等）是临时状态：保留缓存资料，别误判失效
-                else -> toast("网络请求失败")
+                probeNav(cookie)
+            } else {
+                probeApp()
             }
-        } catch (e: Exception) { 
+            // ★token 失效要回落 Cookie：旧导出/双凭据的身份常常还留着一份活着的 Cookie
+            if (probe.user == null && probe.explicitNotLogin && !token.isNullOrBlank() && cookie != null) {
+                logAuthDiag("token失效回落Cookie", token, probe)
+                probe = probeNav(cookie)
+            }
+            when {
+                probe.user != null -> {
+                    setState { info = probe.user }
+                    seveUserInfo(probe.user)
+                    logAuthDiag("登录态正常", token, probe)
+                }
+                probe.explicitNotLogin -> clearStateAndNotify(
+                    "服务端返回未登录（来源=${probe.source}；access_token" +
+                        (if (token.isNullOrBlank()) "为空" else "已失效") + "）"
+                )
+                // 其余（-352 风控、-509 超限、-412 拦截、网络异常）都是临时状态：保留缓存资料
+                else -> {
+                    logAuthDiag("刷新失败(临时)", token, probe)
+                    toast("网络请求失败")
+                }
+            }
+        } catch (e: Exception) {
+            logAuthDiag("刷新异常", token, null)
             toast("网络请求失败")
             e.printStackTrace()
         }
     }
 
     /**
-     * cookie-only 会话的资料刷新（走 Web 的 nav）。
-     *
-     * ★判据分级，绝不把"网络失败"当成"登录失效"：
-     * · 拿到有效资料（isLogin && mid != 0）→ 正常置登录态并落盘 user.data；
-     * · **服务端明确说未登录**（code=0 且 isLogin=false / mid=0）→ 才清空 + 「登录已失效」；
-     * · 非 0 code（风控/临时错误）或抛异常 → **保留缓存资料** + 「网络请求失败」。
+     * 现场验真一份 [LoginInfo]（导入身份后**立刻**校验用）：有 `access_token` 走 APP，
+     * 否则用它自己的 `cookie_info` 走 Web nav。**不改全局状态、不写文件**，只回结果。
      */
-    private suspend fun loadInfoByCookie() {
-        val cookie = cookieHeaderForNav()
-        if (cookie == null) {
-            // 连能用的 Cookie 都没有了，这时才算真的失效
-            clearAuthAndNotify()
-            return
-        }
-        try {
-            val res = BiliApiService.authApi
-                .webNav(cookie)
-                .awaitCall()
-                .json<ResponseData<WebNavInfo>>()
-            val nav = res.data
-            when {
-                res.isSuccess && nav != null && nav.isLogin && nav.mid != 0L -> {
-                    val user = nav.toUserInfo()
-                    setState { info = user }
-                    seveUserInfo(user)
+    suspend fun probeLoginInfo(loginInfo: LoginInfo?): AuthProbe {
+        val token = loginInfo?.token_info?.access_token
+        if (!token.isNullOrBlank()) {
+            // ★用**这份候选身份自己的 token** 走 accountByToken（asGuest=true，只带它自己的凭据）：
+            //   导入是"先验真、后落盘"，此刻全局还挂着用户原来的身份 —— 借全局 APP 通道会验错对象。
+            var probe = probeAppByToken(token)
+            if (probe.user == null && probe.explicitNotLogin) {
+                cookieHeaderOf(loginInfo)?.let { cookie ->
+                    logAuthDiag("导入校验:token失效回落Cookie", token, probe)
+                    probe = probeNav(cookie)
                 }
-                // 服务端**明确**说没登录，才算失效：
-                // · Cookie 无效/过期：nav 回 code=-101「账号未登录」（实测，无 Cookie 与假 SESSDATA 都是它）
-                // · nav 对"未登录"也可能回 code=0 + isLogin=false
-                // ★`code=0` 但 `data` 缺失（nav==null）时**不算** —— 响应不完整 ≠ 服务端判失效
-                isExplicitNotLogin(res.code, hasPayload = nav != null, notLoggedIn = nav?.isLogin == false) -> {
-                    clearAuthAndNotify()
-                }
-                // 其余（-352 风控、-509 超限、-412 拦截等）是临时状态：保留缓存，别误判失效
-                else -> toast("网络请求失败")
             }
-        } catch (e: Exception) {
-            toast("网络请求失败")
-            e.printStackTrace()
+            return probe
+        }
+        val cookie = cookieHeaderOf(loginInfo)
+            ?: return AuthProbe(
+                source = "cookie",
+                explicitNotLogin = true,
+                reason = "文件里没有可用的 Cookie（缺少 SESSDATA）",
+            )
+        return probeNav(cookie)
+    }
+
+    /**
+     * 用**指定** access_token 的 APP 探针（导入候选身份用）：
+     * `x/v2/account/mine` + `access_key` + `notoken=1` + `Authorization: identify_v1`，`asGuest = true`
+     * 保证只带这份 token，不受当前全局登录态影响。
+     */
+    private suspend fun probeAppByToken(token: String): AuthProbe {
+        val res = BiliApiService.authApi
+            .accountByToken(token)
+            .awaitCall()
+            .json<ResponseData<UserInfo>>()
+        val user = res.data
+        return when {
+            res.code == 0 && user != null && user.mid != 0L ->
+                AuthProbe(user = user, code = res.code, source = "app:token")
+            isExplicitNotLogin(res.code, hasPayload = user != null, notLoggedIn = user?.mid == 0L) ->
+                AuthProbe(code = res.code, source = "app:token", explicitNotLogin = true, reason = "服务端返回未登录")
+            else -> AuthProbe(code = res.code, source = "app:token", reason = res.message)
+        }
+    }
+
+    /** APP 通道探针（`x/v2/account/mine`） */
+    private suspend fun probeApp(): AuthProbe {
+        val res = BiliApiService.authApi
+            .account()
+            .awaitCall()
+            .json<ResponseData<UserInfo>>()
+        val user = res.data
+        return when {
+            res.code == 0 && user != null && user.mid != 0L ->
+                AuthProbe(user = user, code = res.code, source = "app")
+            isExplicitNotLogin(res.code, hasPayload = user != null, notLoggedIn = user?.mid == 0L) ->
+                AuthProbe(code = res.code, source = "app", explicitNotLogin = true, reason = "服务端返回未登录")
+            else -> AuthProbe(code = res.code, source = "app", reason = res.message)
+        }
+    }
+
+    /** Web 通道探针（`x/web-interface/nav` + 指定 Cookie 串） */
+    private suspend fun probeNav(cookie: String): AuthProbe {
+        val res = BiliApiService.authApi
+            .webNav(cookie)
+            .awaitCall()
+            .json<ResponseData<WebNavInfo>>()
+        val nav = res.data
+        return when {
+            res.isSuccess && nav != null && nav.isLogin && nav.mid != 0L ->
+                AuthProbe(user = nav.toUserInfo(), code = res.code, source = "web")
+            isExplicitNotLogin(res.code, hasPayload = nav != null, notLoggedIn = nav?.isLogin == false) ->
+                AuthProbe(code = res.code, source = "web", explicitNotLogin = true, reason = "服务端返回未登录")
+            else -> AuthProbe(code = res.code, source = "web", reason = res.message)
         }
     }
 
@@ -193,40 +244,61 @@ class UserStore(override val di: DI) :
         code == CODE_NOT_LOGIN || (code == 0 && hasPayload && notLoggedIn)
 
     /**
-     * 明确失效时的统一收尾：清登录态 **并同步 auth 文件 / Cookie**。
+     * 明确失效：**只清内存状态** + 如实提示。
      *
-     * ★必须连 [BilimiaoCommApp.deleteAuth] 一起做：只清 `state.info` 的话 `commApp.loginInfo`
-     *   仍然非空，于是 ①设置页「导出身份信息」（按 `userState.isLogin()` 判）会把**已失效**的
-     *   凭据导出去，②设置页「开启游客模式」那一行（按 `commApp.loginInfo != null` 判）也仍然显示 ——
-     *   同一次失效在两个事实源上分叉（2026-10-01 复核第 3 轮必改）。
+     * ★这里**绝不**删 auth 文件 / Cookie（`deleteAuth()` 只允许出现在"用户主动退出登录"）。
+     *   2026-10-01 用户实测的"导入成功、下次启动身份被静默删除"就是这一步造成的：
+     *   凭据一删，用户连重试 / 换文件的机会都没有。防"失效凭据被导出"改用**导出前判 `state.info`**。
      */
-    private fun clearAuthAndNotify() {
-        BilimiaoCommApp.commApp.deleteAuth()
+    private fun clearStateAndNotify(reason: String) {
+        miaoLogger().e("登录态失效(仅清内存，保留凭据)", reason)
         setState { info = null }
         toast("登录已失效，请重新登录")
     }
 
     /**
-     * cookie-only 会话刷新资料时用的 Cookie：优先用 auth 文件里存的那份（冷启动时
-     * [BilimiaoCommApp.readAuthInfo] 会把它灌回 CookieManager，但外部清过 CookieManager 时
-     * 文件里那份仍在），取不到再回落到 CookieManager。
+     * 登录态诊断日志：**只打"有没有 / 前 6 位 / 长度"**，绝不落完整凭据。
      *
-     * 必须含 `SESSDATA`：只有指纹 Cookie 的"会话"在 Web 侧等于没登录。
+     * 目的是让"登录/导入为什么没生效"一眼可查（用户实测反馈渠道就是截图 + 日志）。
      */
-    private fun cookieHeaderForNav(): String? {
-        val fromFile = BilimiaoCommApp.commApp.loginInfo?.cookie_info?.cookies
+    fun logAuthDiag(tag: String, token: String?, probe: AuthProbe?) {
+        fun masked(name: String): String {
+            val value = runCatching { MiaoHttp.cookieValue(name) }.getOrNull()
+            return if (value.isNullOrBlank()) "$name=无" else "$name=${value.take(6)}…(len=${value.length})"
+        }
+        miaoLogger().e(
+            "AuthDiag[$tag]",
+            "access_token=" + (if (token.isNullOrBlank()) "空" else "有(len=${token.length})"),
+            masked("SESSDATA"),
+            masked("bili_jct"),
+            "probe=" + (probe?.let {
+                "source=${it.source} code=${it.code} ok=${it.ok} explicit=${it.explicitNotLogin} reason=${it.reason}"
+            } ?: "无"),
+        )
+    }
+
+    /** 从一份 LoginInfo 里拼出含 `SESSDATA` 的 Cookie 串；没有就 null */
+    private fun cookieHeaderOf(loginInfo: LoginInfo?): String? =
+        loginInfo?.cookie_info?.cookies
             ?.mapNotNull { c -> c.value.takeIf { it.isNotBlank() }?.let { "${c.name}=$it" } }
             ?.takeIf { pairs -> pairs.any { it.startsWith("SESSDATA=") } }
             ?.joinToString("; ")
-        if (fromFile != null) return fromFile
-        return try {
-            CookieManager.getInstance()
-                .getCookie("https://api.bilibili.com")
-                ?.takeIf { it.contains("SESSDATA") }
-        } catch (e: Exception) {
-            null
-        }
-    }
+
+    /**
+     * cookie-only 会话刷新资料时用的 Cookie：优先用 auth 文件里存的那份（auth 文件是权威，
+     * 外部清过 CookieManager 时它仍在），取不到再回落到 CookieManager。
+     *
+     * 必须含 `SESSDATA`：只有指纹 Cookie 的"会话"在 Web 侧等于没登录。
+     */
+    private fun cookieHeaderForNav(): String? =
+        cookieHeaderOf(BilimiaoCommApp.commApp.loginInfo)
+            ?: try {
+                CookieManager.getInstance()
+                    .getCookie("https://api.bilibili.com")
+                    ?.takeIf { it.contains("SESSDATA") }
+            } catch (e: Exception) {
+                null
+            }
 
     fun sso() = viewModelScope.launch(Dispatchers.IO) {
         try {
@@ -251,4 +323,17 @@ class UserStore(override val di: DI) :
         private const val CODE_NOT_LOGIN = -101
     }
 
+}
+
+/** 登录态探针结果（只用于判断 / 提示 / 日志，不参与持久化） */
+data class AuthProbe(
+    val user: UserInfo? = null,
+    val code: Int = 0,
+    /** `app` = 全局 APP 通道；`app:token` = 指定 token 的 APP 通道；`web` = Web nav；`cookie` = 连 Cookie 都没有 */
+    val source: String = "",
+    /** 服务端**明确**判未登录（区别于 -352 这类临时错误） */
+    val explicitNotLogin: Boolean = false,
+    val reason: String = "",
+) {
+    val ok: Boolean get() = user != null
 }

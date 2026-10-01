@@ -61,6 +61,18 @@ import kotlin.math.min
 private val TIMESTAMP_REGEX = Regex("\\d{1,3}[:：]\\d{1,2}(?:[:：]\\d{1,2})?")
 private val TIME_SEP_REGEX = Regex("[:：]")
 
+/**
+ * 二级回复预览行：正文是否**自带**「回复 @某人」前缀。
+ *
+ * 服务端对"回复楼中楼里的别人"会在正文前面拼这段前缀，对"**直接回复楼主**"不拼；
+ * 预览行原来一律用空格分隔，于是回复楼主那行少了冒号（用户 2026-10-01 截图报障）。
+ * 只认 `回复` + 可选空白 + `@`，**或直接以 `@` 开头**（容错 `回复@`、`回复 @`、`@某人 …`、开头空白）：
+ * 「回复一下楼主…」这类**普通内容**没有 `@`，不会被误判。
+ * ★以 `@某人` 开头的正文也算"已有前缀"⇒ **不补冒号**（观感对齐官方 `用户名 @某人 内容`），
+ *   否则会渲染成 `用户名:@某人 内容` 这种畸形串。
+ */
+private val REPLY_PREFIX_REGEX = Regex("^\\s*(?:回复\\s*)?@")
+
 /** URL 主体允许的字符：RFC3986 的 pchar 加上 `/ ? # [ ]`（`&` `=` `%` 也在内，查询串与转义要用） */
 private const val URL_BODY_CHARS = """A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%"""
 
@@ -626,12 +638,20 @@ private fun SubReplyPreviewRow(sub: SubReplyPreviewInfo) {
     val nodes = content.toAnnotatedTextNode()
     val emoteMap = inlineAnnotatedContent(nodes, size = 16.sp)
     val message = annotatedText(nodes)
+    // 名字与正文之间的分隔符（用户 2026-10-01 截图报障：回复楼主那一行没有冒号）：
+    //   · 正文**自带**「回复 @某人:」前缀（服务端对"回复楼中楼里的别人"会拼）→ 维持「名字 + 空格」，
+    //     再加冒号会变成两个冒号；
+    //   · 否则（= **直接回复楼主**，正文没有前缀）→ 补一个**半角冒号、后面不加空格**，
+    //     与另一行的观感一致。用户明确不要"@楼主"字样，只补冒号。
+    //   · 正文空白时不补（否则会出现「用户名:」后面空着）。
+    val separator = if (message.text.isBlank() || REPLY_PREFIX_REGEX.containsMatchIn(content.message)) " " else ":"
     // 用户名和正文要在同一段里连排（正文可能带表情/链接，所以先拿到 AnnotatedString 再拼）
-    val text = remember(sub.uname, message, unameColor) {
+    // remember 的 key 要带 [separator]：它变了而 message 没变时不能吃旧缓存
+    val text = remember(sub.uname, message, separator, unameColor) {
         buildAnnotatedString {
             if (sub.uname.isNotBlank()) {
                 withStyle(SpanStyle(color = unameColor)) { append(sub.uname) }
-                append(" ")
+                append(separator)
             }
             append(message)
         }

@@ -41,6 +41,7 @@ import com.a10miaomiao.bilimiao.comm.entity.auth.WebKeyInfo
 import com.a10miaomiao.bilimiao.comm.entity.user.UserInfo
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
+import com.a10miaomiao.bilimiao.comm.store.AuthProbe
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.BiliGeetestUtil
@@ -332,7 +333,8 @@ private class LoginPageViewModel(
         val cookieInfo = parseCookie(pasted.cookie)
             .takeIf { it.isNotEmpty() }
             ?.let { LoginInfo.CookieInfo(cookies = it, domains = COOKIE_DOMAINS) }
-        cookieInfo?.let { BilimiaoCommApp.commApp.setCookie(it) }
+        // ★写 Cookie 必须用真实 URL（见 BilimiaoCommApp.setCookie 的说明）：裸域 URL 写不进 WebView
+        val cookieOk = cookieInfo?.let { BilimiaoCommApp.commApp.setCookie(it) } ?: false
         BilimiaoCommApp.commApp.saveAuthInfo(
             LoginInfo(
                 token_info = LoginInfo.TokenInfo(
@@ -346,9 +348,17 @@ private class LoginPageViewModel(
                 cookie_info = cookieInfo,
             )
         )
+        userStore.logAuthDiag("Token登录", pasted.accessToken, AuthProbe(user = user, code = res.code, source = "app"))
         withContext(Dispatchers.Main) {
             userStore.setUserInfo(user)
-            toast(if (cookieInfo != null) "已通过 Token + Cookie 登录" else "已通过 Token 登录")
+            // 提示语说实话：认成 Token 就说 Token；带 Cookie 且真写进去了才提 Cookie
+            toast(
+                when {
+                    cookieInfo == null -> "已按 Token 登录"
+                    cookieOk -> "已按 Token 登录（含 Cookie）"
+                    else -> "已按 Token 登录；Cookie 未写入浏览器，部分功能可能不可用"
+                }
+            )
             onSuccess()
             pageNavigation.popBackStack()
         }
@@ -373,7 +383,9 @@ private class LoginPageViewModel(
             return
         }
         val cookieInfo = LoginInfo.CookieInfo(cookies = cookies, domains = COOKIE_DOMAINS)
-        BilimiaoCommApp.commApp.setCookie(cookieInfo)
+        // ★写 Cookie 必须用真实 URL（见 BilimiaoCommApp.setCookie 的说明）：裸域 URL 写不进 WebView，
+        //   写不进去的直接后果就是"CSRF 认证失败"与导出的 cookie 是空壳
+        val cookieOk = BilimiaoCommApp.commApp.setCookie(cookieInfo)
         BilimiaoCommApp.commApp.saveAuthInfo(
             LoginInfo(
                 // Cookie 登录没有 access_token：只留 mid 让界面能显示账号
@@ -389,10 +401,14 @@ private class LoginPageViewModel(
         )
         // 资料全部来自 nav 的真实返回（与 UserStore 冷启动刷新共用同一份映射）
         val user = navInfo.toUserInfo()
+        userStore.logAuthDiag("Cookie登录", null, AuthProbe(user = user, code = res.code, source = "web"))
         withContext(Dispatchers.Main) {
             userStore.setUserInfo(user)
             // 如实说清楚：Cookie 会话重启后仍在（UserStore 会走 nav 刷新），但需要 App 通道的功能可能受限
-            toast("已登录（Cookie 方式：部分功能可能受限）")
+            toast(
+                if (cookieOk) "已按 Cookie 登录（部分功能受限）"
+                else "已按 Cookie 登录；Cookie 未写入浏览器，网页接口可能不可用"
+            )
             onSuccess()
             pageNavigation.popBackStack()
         }
@@ -596,4 +612,4 @@ private val COOKIE_DOMAINS = listOf(".bilibili.com", "bilibili.com")
 
 /** 输入识别不出时的人话提示：把三种支持的形态说全，别让用户猜 */
 private const val PASTE_FORMAT_HINT =
-    "识别不了这段内容。可以粘贴：① access_token；② 含 SESSDATA 的 Cookie；③ 身份导出文件（JSON）"
+    "没认出登录信息。可以粘贴：① access_token；② Cookie；③ 身份导出 json；④ SESSDATA 的值"

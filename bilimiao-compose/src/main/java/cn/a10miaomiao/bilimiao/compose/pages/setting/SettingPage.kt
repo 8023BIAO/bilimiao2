@@ -41,6 +41,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterRecommendSettingPage
 import cn.a10miaomiao.bilimiao.compose.pages.filter.FilterCommentSettingPage
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.entity.miao.MiaoSettingInfo
+import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.store.WindowStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -424,7 +425,9 @@ private fun SettingPageContent(
             )
 
                 // 退出登录：破坏性操作单独吊在 6 大类最底下（不塞进任何分类里）
-                if (userState.isLogin()) {
+                // ★判据不能只看 userState：登录态校验失败时 state=null 但凭据还在（我们刻意不删凭据），
+                //   只看 isLogin() 会让"退出登录"入口消失、死凭据清不掉（用户实测报过）。
+                if (userState.isLogin() || BilimiaoCommApp.commApp.loginInfo != null) {
                     item("logout_gap") {
                         Spacer(modifier = Modifier.height(18.dp))
                     }

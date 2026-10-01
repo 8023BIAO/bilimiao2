@@ -6,16 +6,36 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
+/** 粘贴内容被识别成了什么（提示语必须说实话，别让用户以为"它自己拿去登录了"） */
+enum class PastedKind {
+    /** 裸 `access_token` */
+    TOKEN,
+
+    /** Cookie 文本 */
+    COOKIE,
+
+    /** JSON 里 token 与 Cookie 都有（导出文件常见） */
+    TOKEN_COOKIE,
+
+    /** 只粘了 SESSDATA 的值本身（DevTools 里双击复制到的那一串） */
+    SESSDATA_VALUE,
+
+    /** 没认出来 */
+    NONE,
+}
+
 /**
  * 从「粘贴内容」里解析出来的登录凭据。
  *
- * 三种粘贴形态都归一到这一份数据上（见 [AuthPasteParser.parse]）：
- * ① 裸 `access_token`；② Cookie 头文本；③ 身份导出文件内容（JSON）。
+ * 五种粘贴形态都归一到这一份数据上（见 [AuthPasteParser.parse]）：
+ * ① 裸 `access_token`；② Cookie 头文本；③ 身份导出文件（扁平 JSON / `LoginInfo` JSON）；
+ * ④ 只粘 SESSDATA 的值；⑤ 认不出（返回 null）。
  */
 data class PastedAuth(
     val accessToken: String = "",
     val refreshToken: String = "",
     val cookie: String = "",
+    val kind: PastedKind = PastedKind.NONE,
 ) {
     val isEmpty: Boolean get() = accessToken.isBlank() && cookie.isBlank()
     val hasToken: Boolean get() = accessToken.isNotBlank()
@@ -25,11 +45,24 @@ data class PastedAuth(
 /** 能证明"这是登录凭据"的 Cookie 名（只有 buvid3 这类指纹不算） */
 private val IDENTITY_COOKIE_NAMES = listOf("SESSDATA", "bili_jct", "DedeUserID")
 
-/** Cookie 名的合法形态（B 站这些名字都是字母数字下划线点横线；不匹配的段一律丢掉） */
-private val COOKIE_NAME = Regex("^[A-Za-z0-9_.\\-]+$")
+/**
+ * SESSDATA **值**的特征：`8位十六进制%2C时间戳%2C…`（F12 里双击复制到的就是这一串）。
+ * ★刻意做成"窄而安全"的规则：只认这个前缀 + 长度≥40，绝不做"长串就当 cookie"的宽泛启发式
+ * （那会把普通 token / 随机串吃掉）。
+ */
+private val SESSDATA_VALUE_PREFIX = Regex("^[0-9a-fA-F]{8}%2C\\d{9,}%2C")
+
+private const val SESSDATA_VALUE_MIN_LEN = 40
 
 /**
- * Token/Cookie 登录输入框的解析器（纯函数，不碰 Android）。
+ * 裸 token 的字符集（JWT / access_token 都是这些字符）。
+ * 含空白、中文、全角标点的"一段话"不是 token —— 那种情况宁可说"没认出登录信息"，
+ * 也不要把一段话当 token 发出去换来一句"Token 无效"。
+ */
+private val TOKEN_CHARS = Regex("^[A-Za-z0-9_.~+/=:\\-]+$")
+
+/**
+ * Token/Cookie 登录输入框的解析器（纯函数，不碰 Android；有单测 [AuthPasteParserTest]）。
  *
  * 支持的 JSON 形态：
  * · 本 App「身份导出」/ `.bili_login.json` 的扁平形态：
@@ -44,42 +77,71 @@ object AuthPasteParser {
     /** `trim()` 不剥这些字符（BOM / 零宽），必须显式处理 */
     private val INVISIBLE_CHARS = charArrayOf('\uFEFF', '\u200B', '\u200C', '\u200D')
 
-    /** 解析粘贴内容；返回 null = 三种形态都识别不出 */
+    /** 解析粘贴内容；返回 null = 认不出（调用方提示"没认出登录信息"） */
     fun parse(raw: String): PastedAuth? {
         val text = raw.stripInvisible()
         if (text.isEmpty()) return null
+
+        // ① JSON（扁平导出 / LoginInfo 形态）
         if (text.startsWith("{")) {
             val root = runCatching {
                 MiaoJson.kotlinJson.parseToJsonElement(text) as? JsonObject
             }.getOrNull() ?: return null
             return fromJson(root).takeIf { !it.isEmpty }
         }
-        // Cookie 分支：必须**真的含身份 Cookie**（SESSDATA / bili_jct / DedeUserID）才认。
-        // 光有 `;` 和 `=` 不算 —— 否则带 BOM 的导出 JSON、DevTools 整段请求头都会被当成 Cookie，
-        // 用户拿着有效文件却看到「Cookie 无效或已过期」。
-        if (text.contains(";") || text.contains("SESSDATA", ignoreCase = true)) {
-            val cookie = normalizeCookie(text)
-            return PastedAuth(cookie = cookie).takeIf { hasIdentityCookie(it.cookie) }
+
+        // ② Cookie 文本 —— 含"整行/整段请求头"（F12 里 Copy、Copy as cURL）。
+        //    ★不靠位置、也不靠"名字像不像 cookie 名"判：直接在整段里找**已知身份 cookie 名**
+        //      （SESSDATA / bili_jct / DedeUserID）。因为真实 Cookie 头里 SESSDATA 几乎总是第一段，
+        //      按位置/名字形状去筛会把第一段（`Cookie: SESSDATA=…`）整条丢掉，
+        //      只剩 bili_jct 去请求 nav ⇒ 用户看到「Cookie 无效或已过期」——这是用户实测过的形态。
+        extractIdentityCookies(text)?.let { cookie ->
+            return PastedAuth(cookie = cookie, kind = PastedKind.COOKIE)
         }
-        // 其余按裸 access_token 处理
-        return PastedAuth(accessToken = text).takeIf { it.hasToken }
+
+        // ③ 只粘了 SESSDATA 的值（窄特征，见 [SESSDATA_VALUE_PREFIX]）
+        if (looksLikeSessDataValue(text)) {
+            return PastedAuth(cookie = "SESSDATA=$text", kind = PastedKind.SESSDATA_VALUE)
+        }
+
+        // ④ 裸 access_token：必须是 token 字符集（一段话 / 整段请求头都不是 token，宁可说"没认出"）
+        if (text.any { it.isWhitespace() } || !TOKEN_CHARS.matches(text)) return null
+        return PastedAuth(accessToken = text, kind = PastedKind.TOKEN).takeIf { it.hasToken }
+    }
+
+    /** 给用户看的识别结论（弹窗实时提示 + 结果 toast 共用同一句话，保证口径一致） */
+    fun describe(pasted: PastedAuth?): String = when {
+        pasted == null || pasted.isEmpty -> "没认出登录信息"
+        pasted.kind == PastedKind.SESSDATA_VALUE -> "识别为 SESSDATA，按 Cookie 登录"
+        pasted.kind == PastedKind.TOKEN_COOKIE -> "识别为 Token + Cookie，按 Token 登录"
+        pasted.kind == PastedKind.COOKIE -> "识别为 Cookie，按 Cookie 登录"
+        else -> "识别为 Token，按 Token 登录"
     }
 
     private fun fromJson(root: JsonObject): PastedAuth {
         val tokenInfo = root["token_info"] as? JsonObject
         val cookieInfo = root["cookie_info"] as? JsonObject
-        val cookie = root.string("cookie")
-            ?: cookieInfo?.cookiesText()
+        val accessToken = root.string("access_token")
+            ?: tokenInfo?.string("access_token")
             ?: ""
-        return PastedAuth(
-            accessToken = root.string("access_token")
-                ?: tokenInfo?.string("access_token")
-                ?: "",
-            refreshToken = root.string("refresh_token")
-                ?: tokenInfo?.string("refresh_token")
-                ?: "",
+        val refreshToken = root.string("refresh_token")
+            ?: tokenInfo?.string("refresh_token")
+            ?: ""
+        val cookie = (root.string("cookie") ?: cookieInfo?.cookiesText() ?: "")
             // JSON 里的 cookie 也按同一把尺子：只有指纹 Cookie 时当没给
-            cookie = cookie.takeIf { hasIdentityCookie(it) } ?: "",
+            .takeIf { hasIdentityCookie(it) }
+            ?: ""
+        val kind = when {
+            accessToken.isNotBlank() && cookie.isNotBlank() -> PastedKind.TOKEN_COOKIE
+            accessToken.isNotBlank() -> PastedKind.TOKEN
+            cookie.isNotBlank() -> PastedKind.COOKIE
+            else -> PastedKind.NONE
+        }
+        return PastedAuth(
+            accessToken = accessToken,
+            refreshToken = refreshToken,
+            cookie = cookie,
+            kind = kind,
         )
     }
 
@@ -99,33 +161,47 @@ object AuthPasteParser {
     }
 
     /**
-     * `SESSDATA=x; bili_jct=y` → 规范化成 `k=v; k=v`。
+     * 在整段文本里提取**已知身份 cookie**，输出规范化的 `k=v; k=v`；一个都没找到就 null。
      *
-     * 丢掉三类段：空段、没有 `=` 的段、以及**名字不像 Cookie 名**的段 —— 后者专门挡住
-     * "整段粘贴 DevTools 请求头"（那种输入的第一个段名会带换行/冒号/空格，
-     * 一旦原样塞进 Cookie 头就是畸形请求）。
+     * 覆盖这些粘贴形态（都不依赖位置）：
+     * · `SESSDATA=v; bili_jct=t`（纯 cookie 文本）
+     * · `Cookie: SESSDATA=v; bili_jct=t`（F12 复制的一整行）
+     * · `-H 'cookie: SESSDATA=v; bili_jct=t'`（Copy as cURL 片段）
+     * · `"SESSDATA=v"` / `'SESSDATA=v'`（带首尾引号）
+     * · 含 `Host:` / `User-Agent:` 等杂行的**整段请求头**
+     *
+     * 只保留三个身份 cookie（SESSDATA / bili_jct / DedeUserID）：登录只要它们，
+     * 其余（buvid3/b_nut/bili_ticket 这类）由 App 自己的指纹链路负责，粘进来也没用。
      */
-    fun normalizeCookie(raw: String): String {
-        val pairs = raw.split(";").mapNotNull { part ->
-            val index = part.indexOf('=')
-            if (index <= 0) return@mapNotNull null
-            val name = part.substring(0, index).trim()
-            val value = part.substring(index + 1).trim()
-            if (name.isEmpty() || value.isEmpty() || !COOKIE_NAME.matches(name)) {
-                null
-            } else {
-                "$name=$value"
-            }
+    private fun extractIdentityCookies(raw: String): String? {
+        val text = raw.stripInvisible()
+        val pairs = IDENTITY_COOKIE_NAMES.mapNotNull { name ->
+            identityValueRegex(name).find(text)
+                ?.groupValues?.get(1)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { "$name=$it" }
         }
-        return pairs.joinToString("; ")
+        return pairs.takeIf { it.isNotEmpty() }?.joinToString("; ")
     }
 
-    /** 是否含身份 Cookie（按规范化后的 `k=v` 段判） */
+    /**
+     * `<名字>=<值>`：名字前允许行首/`;`/空白/引号，值到 `;`、空白或**任一引号**为止（名字大小写不敏感）。
+     * ★值里必须同时排除 `'` 和 `"`：`-H 'cookie: SESSDATA=v; bili_jct=t'` 这种整段是单引号包的，
+     *   只排双引号会把结尾那个 `'` 一起吞进值里（`bili_jct=t'`）⇒ 拿着坏值去请求，用户看到"Cookie 无效"。
+     */
+    private fun identityValueRegex(name: String): Regex =
+        Regex("(?i)(?:^|[;\\s'\"])" + Regex.escape(name) + "=\"?([^;\\s'\"]+)\"?")
+
+    /** 干净的 `k=v; k=v` 串里是否含身份 cookie（**JSON 那条路**用；文本粘贴走 [extractIdentityCookies]） */
     private fun hasIdentityCookie(cookie: String): Boolean =
         cookie.split(";").any { part ->
             val name = part.substringBefore('=').trim()
             IDENTITY_COOKIE_NAMES.any { it.equals(name, ignoreCase = true) }
         }
+
+    /** 只粘 SESSDATA 值时的窄识别：前缀特征 + 足够长 */
+    private fun looksLikeSessDataValue(text: String): Boolean =
+        text.length >= SESSDATA_VALUE_MIN_LEN && SESSDATA_VALUE_PREFIX.containsMatchIn(text)
 
     /**
      * 剥掉首尾的 BOM / 零宽字符再 trim。

@@ -40,13 +40,14 @@ object GuestFingerprint {
             }.awaitCall().json<ResponseData<Map<String, String>>>()
             val b3 = res.data?.get("b_3")?.takeIf { it.isNotBlank() } ?: return@runCatching
             val b4 = res.data?.get("b_4")?.takeIf { it.isNotBlank() }
-            val cm = CookieManager.getInstance()
-            cm.setCookie(".bilibili.com", "buvid3=$b3")
-            if (b4 != null) cm.setCookie(".bilibili.com", "buvid4=$b4")
-            cm.setCookie(".bilibili.com", "b_nut=${System.currentTimeMillis() / 1000}")
-            cm.flush()
+            // ★写入统一走 CookieStore.writeRawCookie（真实 URL + 回读校验）：
+            //   以前直接拿 `.bilibili.com` 当 url 写，其实**从未写进去** ——
+            //   也就是"游客模式补匿名指纹防 -352"这条修法一直没生效。
+            val ok3 = CookieStore.writeRawCookie("buvid3", b3)
+            if (b4 != null) CookieStore.writeRawCookie("buvid4", b4)
+            CookieStore.writeRawCookie("b_nut", (System.currentTimeMillis() / 1000).toString())
             sp.edit().putInt(KEY_DAY, today).apply()
-            miaoLogger().i("GuestFingerprint", "游客匿名指纹已更新：buvid3=${b3.take(8)}…")
+            miaoLogger().i("GuestFingerprint", "游客匿名指纹已更新：buvid3=${b3.take(8)}… 写入成功=$ok3")
         }.onFailure {
             miaoLogger().e("GuestFingerprint", "取匿名指纹失败：${it.message}")
         }

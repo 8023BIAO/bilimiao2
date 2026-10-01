@@ -71,14 +71,56 @@ class BilimiaoCommApp(
         }
     }
 
-    fun setCookie(cookieInfo: LoginInfo.CookieInfo) {
-        val cookieManager = CookieManager.getInstance()
-        cookieInfo.domains.forEach { domain ->
-            cookieInfo.cookies.forEach { cookie ->
-                cookieManager.setCookie(domain, cookie.getValue(domain))
-            }
+    /**
+     * 把一份登录 Cookie 写进 WebView 的 CookieManager（**登录凭据的入口**）。
+     *
+     * 实现只有一份：[CookieStore.writeRawCookie]（真实 URL ×3 + 回读校验 + 只打名字的日志）。
+     * 这里只做三件事：① 非 bilibili 域名直接跳过；② 按 `expires`（**秒级时间戳**，不是 HTTP 日期）
+     * 换算 `Max-Age`；③ 聚合结果。
+     *
+     * @return 是否至少有一条身份 Cookie（SESSDATA / bili_jct / DedeUserID）**真的写进去了**。
+     *         **不抛异常**：写 Cookie 失败不能打断登录流程。
+     */
+    fun setCookie(cookieInfo: LoginInfo.CookieInfo): Boolean {
+        if (cookieInfo.domains.none { it.contains("bilibili.com", ignoreCase = true) }) {
+            miaoLogger().e("写登录Cookie跳过", "非 bilibili 域名：${cookieInfo.domains}")
+            return false
         }
-        cookieManager.flush()
+        val nowSeconds = System.currentTimeMillis() / 1000
+        var written = 0
+        cookieInfo.cookies.forEach { cookie ->
+            if (cookie.name.isBlank() || cookie.value.isBlank()) return@forEach
+            // 已过期的凭据写了也没用（服务端照样判未登录）
+            if (cookie.expires > 0 && cookie.expires < nowSeconds) return@forEach
+            val maxAge = if (cookie.expires > nowSeconds) {
+                cookie.expires - nowSeconds
+            } else {
+                CookieStore.ONE_YEAR_SECONDS
+            }
+            val attributes = buildString {
+                append("; Path=/; Domain=.bilibili.com; Max-Age=").append(maxAge)
+                if (cookie.http_only == 1) append("; HttpOnly")
+            }
+            CookieStore.writeRawCookie(cookie.name, cookie.value, attributes)
+            written++
+        }
+        // 成功判据是"**身份** cookie 在 www 与 api 两个真实 URL 上都回读得到"（只写进指纹不算登录态可用）。
+        // ★必须带上 api：App 真正消费 Cookie 的是 MiaoHttp（读 api.bilibili.com）；只回读 www 的话，
+        //   万一 Domain 属性被丢掉退化成 host-only www，www 照样"回读成功"而 api 侧一条都不带
+        //   —— 那正是「CSRF 认证失败」的形态却报成功。
+        val names = runCatching { CookieManager.getInstance() }
+            .getOrNull()
+            ?.let { manager ->
+                listOf(API_COOKIE_URL, READBACK_COOKIE_URL).flatMap { url ->
+                    CookieStore.readBackCookieNames(manager, url)
+                }.distinct()
+            }
+            .orEmpty()
+        val ok = CookieStore.IDENTITY_COOKIE_NAMES.any { id ->
+            names.any { it.equals(id, ignoreCase = true) }
+        }
+        miaoLogger().e("写登录Cookie${if (ok) "成功" else "失败"}", "写入=$written 个", "回读到=${names.joinToString(",")}")
+        return ok
     }
 
     private fun getMiaoEncryptDecrypt(): MiaoEncryptDecrypt {
@@ -171,3 +213,9 @@ class BilimiaoCommApp(
 
 
 }
+
+/** 回读校验用的第二个真实 URL：App 的 Web 接口（MiaoHttp）读的就是它 */
+private const val API_COOKIE_URL = "https://api.bilibili.com"
+
+/** 回读校验用的第一个真实 URL */
+private const val READBACK_COOKIE_URL = "https://www.bilibili.com"

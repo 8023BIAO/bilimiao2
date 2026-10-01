@@ -69,6 +69,8 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import me.zhanghai.compose.preference.preference
 import me.zhanghai.compose.preference.preferenceCategory
@@ -273,6 +275,7 @@ private fun FlagsSettingPageContent(
         }
     }
     val userStore: UserStore by rememberInstance()
+    val userState = userStore.stateFlow.collectAsStateWithLifecycle().value
     val dataStore = remember {
         SettingPreferences.run { context.dataStore }
     }
@@ -300,9 +303,22 @@ private fun FlagsSettingPageContent(
             // 点完「导出」到选完文件之间可能退出登录：这里再挡一次，绝不写空壳文件
             if (BilimiaoCommApp.commApp.loginInfo == null) {
                 Toast.makeText(context, "未登录，无可导出的身份信息", Toast.LENGTH_SHORT).show()
+            } else if (!userState.isLogin()) {
+                // ★防"把失效凭据当备份导出去"用**导出前判内存登录态**，而不是"失效就删凭据"：
+                //   凭据被删掉用户就没法重试/换文件了（2026-10-01 用户实测的教训）。
+                Toast.makeText(
+                    context,
+                    "登录状态还没通过校验（可能已失效），稍等或重新登录后再导出",
+                    Toast.LENGTH_LONG,
+                ).show()
             } else try {
                 val cookieManager = CookieManager.getInstance()
-                val cookie = cookieManager.getCookie("https://bilibili.com") ?: ""
+                // Cookie 以 auth 文件里的那份为准（凭据的权威来源），CookieManager 只作兜底：
+                // 历史上有过"导出的 cookie 是空壳"（写入用了裸域 URL，WebView 根本没写进去）
+                val cookie = BilimiaoCommApp.commApp.loginInfo?.cookie_info?.cookies
+                    ?.joinToString("; ") { "${it.name}=${it.value}" }
+                    ?.takeIf { it.isNotBlank() }
+                    ?: (cookieManager.getCookie("https://www.bilibili.com") ?: "")
                 val loginInfo = BilimiaoCommApp.commApp.loginInfo
                 val tokenInfo = loginInfo?.token_info
                 val data = buildJsonObject {
@@ -348,12 +364,32 @@ private fun FlagsSettingPageContent(
                     val jsonStr = SettingsExporter.truncateToValidJson(rawJson)
                     val importJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
                     val jsonObj = importJson.parseToJsonElement(jsonStr).jsonObject
-                    val cookieStr = jsonObj["cookie"]?.jsonPrimitive?.content ?: throw Exception("未找到cookie字段")
-                    val accessToken = jsonObj["access_token"]?.jsonPrimitive?.content ?: throw Exception("未找到access_token字段")
-                    val refreshToken = jsonObj["refresh_token"]?.jsonPrimitive?.content ?: throw Exception("未找到refresh_token字段")
-                    val midStr = jsonObj["mid"]?.jsonPrimitive?.content ?: throw Exception("未找到mid字段")
-                    val mid = midStr.toLongOrNull() ?: throw Exception("mid格式错误")
-                    val buvid = jsonObj["buvid"]?.jsonPrimitive?.content ?: ""
+                    // ★两种形态都吃（用户 2026-10-01 拍板）：
+                    //   ① 本 App「身份导出」的扁平形态：cookie / access_token / refresh_token / mid
+                    //   ② LoginInfo 形态：token_info{access_token,refresh_token,mid} + cookie_info.cookies[]
+                    val tokenInfoObj = jsonObj["token_info"] as? JsonObject
+                    val cookieInfoObj = jsonObj["cookie_info"] as? JsonObject
+                    // 扁平形态只给一段 `cookie` 串（没有 expires/http_only 信息 ⇒ 记 0=未知）；
+                    // LoginInfo 形态给的是 cookies[] 数组 ⇒ **保真**读 expires/http_only：
+                    //   写死 0 会让 setCookie 的"已过期跳过"永远走不到，
+                    //   一份**已失效**的 SESSDATA 会被写成一年有效 —— 用户看到"导入成功、实际用不了"（复核 §2）。
+                    val flatCookieText = jsonObj.strOrNull("cookie")
+                    val cookies = flatCookieText?.parseFlatCookieText() ?: cookieInfoObj.toCookies()
+                    val accessToken = jsonObj.strOrNull("access_token")
+                        ?: tokenInfoObj.strOrNull("access_token")
+                        ?: ""
+                    val refreshToken = jsonObj.strOrNull("refresh_token")
+                        ?: tokenInfoObj.strOrNull("refresh_token")
+                        ?: ""
+                    // mid 只用于展示/落盘：拿不到也要能用 Cookie 登录
+                    val mid = (jsonObj.strOrNull("mid") ?: tokenInfoObj.strOrNull("mid"))?.toLongOrNull() ?: 0L
+                    val buvid = jsonObj.strOrNull("buvid") ?: ""
+                    if (cookies.isEmpty() && accessToken.isBlank()) {
+                        throw Exception(
+                            "这个文件里没有可用的登录信息。" +
+                                "支持两种：App「身份导出」生成的 json，或 App 的完整身份文件 json"
+                        )
+                    }
 
                     // 恢复 WBI 缓存（兼容旧版本导出的 mix_key/last_fetch_day 键名）
                     jsonObj["wbi"]?.jsonObject?.let { wbiObj ->
@@ -372,15 +408,6 @@ private fun FlagsSettingPageContent(
                         BilimiaoCommApp.commApp.setBilibiliBuvid(buvid)
                     }
 
-                    val cookies = cookieStr.split(";").map { pair ->
-                        val parts = pair.trim().split("=", limit = 2)
-                        LoginInfo.Cookie(
-                            name = parts[0].trim(),
-                            value = if (parts.size > 1) parts[1].trim() else "",
-                            expires = 0,
-                            http_only = 0
-                        )
-                    }
                     val cookieInfo = LoginInfo.CookieInfo(
                         cookies = cookies,
                         domains = listOf(".bilibili.com", "bilibili.com")
@@ -396,9 +423,41 @@ private fun FlagsSettingPageContent(
                         sso = null,
                         cookie_info = cookieInfo
                     )
+                    // ★先验真、后落盘：验不过就直接如实报错 —— 用户**原来的登录状态一点没动**
+                    //   （以前是"先覆盖 auth_hd 再验真"，一份坏文件就不可逆地顶掉原本可用的身份，
+                    //   提示语却说"文件已保留"—— 老身份其实已经没了）
+                    val probe = userStore.probeLoginInfo(loginInfo)
+                    userStore.logAuthDiag("导入身份(验真)", accessToken, probe)
+                    val importedUser = probe.user
+                    if (importedUser == null) {
+                        Toast.makeText(
+                            context,
+                            "导入的文件无法登录：" + probe.reason.ifBlank { "服务端未返回登录态" } +
+                                "（未改动你原来的登录状态）",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@launch
+                    }
+                    // 验真通过才落盘 + 把 Cookie 真正写进 WebView（写不进去 = 发弹幕/评论读不到 bili_jct）
                     BilimiaoCommApp.commApp.saveAuthInfo(loginInfo)
-                    userStore.loadInfo()  // 加载用户信息
-                    Toast.makeText(context, "身份信息导入成功，正在重启...", Toast.LENGTH_SHORT).show()
+                    val cookieOk = loginInfo.cookie_info?.let { BilimiaoCommApp.commApp.setCookie(it) } ?: false
+                    userStore.setUserInfo(importedUser)
+                    // 验真通过（SESSDATA 之类关键凭据是活的，否则上面就返回了）；
+                    // 但可能有个别 Cookie 已过期被跳过，如实说，别让用户以后自己撞上
+                    val nowSeconds = System.currentTimeMillis() / 1000
+                    val expiredCount = loginInfo.cookie_info?.cookies
+                        ?.count { it.expires > 0 && it.expires < nowSeconds }
+                        ?: 0
+                    Toast.makeText(
+                        context,
+                        buildString {
+                            append("导入成功，已登录：").append(importedUser.name)
+                            append("（mid ").append(importedUser.mid).append("）")
+                            if (expiredCount > 0) append("；有 ").append(expiredCount).append(" 条已过期的 Cookie 未写入")
+                            if (!cookieOk) append("；Cookie 未写入浏览器，网页接口可能不可用")
+                        },
+                        Toast.LENGTH_LONG
+                    ).show()
                     val restartIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
                     if (restartIntent != null) {
                         context.startActivity(android.content.Intent.makeRestartActivityTask(restartIntent.component))
@@ -1272,3 +1331,50 @@ private fun fmtDuration(ms: Long): String {
     val sec = total % 60
     return if (m > 0) "$m 分 ${sec.toString().padStart(2, '0')} 秒" else "$sec 秒"
 }
+
+/**
+ * 取 JSON 字段（字符串/数字都当字符串；`null`、空串返回 null）。
+ * 「导入身份」兼容两种格式时用：扁平键取不到就回落 LoginInfo 形态的嵌套键。
+ */
+private fun JsonObject?.strOrNull(key: String): String? =
+    (this?.get(key) as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+
+/**
+ * `cookie_info.cookies[]` → Cookie 列表，**保真**读 `expires` / `http_only`
+ * （这两个字段决定 `setCookie` 会不会把它当过期凭据跳过，不能写死 0）。
+ */
+private fun JsonObject?.toCookies(): List<LoginInfo.Cookie> {
+    val arr = this?.get("cookies") as? JsonArray ?: return emptyList()
+    return arr.mapNotNull { element ->
+        val obj = element as? JsonObject ?: return@mapNotNull null
+        val name = obj.strOrNull("name") ?: return@mapNotNull null
+        val value = obj.strOrNull("value") ?: return@mapNotNull null
+        LoginInfo.Cookie(
+            name = name,
+            value = value,
+            // expires 是**秒级**时间戳（数字或字符串都收）；缺失记 0 = 未知
+            expires = obj.intOf("expires") ?: 0,
+            http_only = obj.intOf("http_only") ?: 0,
+        )
+    }
+}
+
+/** 扁平形态的一段 `k=v; k=v` → Cookie 列表（**没有** expires/http_only 信息 ⇒ 记 0=未知，按一年有效期写） */
+private fun String.parseFlatCookieText(): List<LoginInfo.Cookie> =
+    split(";").mapNotNull { pair ->
+        val parts = pair.trim().split("=", limit = 2)
+        if (parts.size < 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            null
+        } else {
+            LoginInfo.Cookie(
+                name = parts[0].trim(),
+                value = parts[1].trim(),
+                expires = 0,
+                http_only = 0,
+            )
+        }
+    }
+
+/** 数字/数字字符串都能取；`null`、非数字返回 null */
+private fun JsonObject?.intOf(key: String): Int? =
+    (this?.get(key) as? JsonPrimitive)?.contentOrNull?.trim()?.toIntOrNull()

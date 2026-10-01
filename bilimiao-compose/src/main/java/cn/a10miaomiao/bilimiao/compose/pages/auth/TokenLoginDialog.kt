@@ -56,6 +56,12 @@ private fun TokenLoginSheet(
     onConfirm: (String) -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
+    // 实时识别（纯函数，代价可忽略）：让用户当场知道"我们把它认成了什么、会怎么登录"，
+    // 而不是提交后才发现"它自己拿去登录了"其实是没认出来。
+    val parsed = remember(input) { AuthPasteParser.parse(input) }
+    val isCookieish = parsed?.kind == PastedKind.COOKIE ||
+        parsed?.kind == PastedKind.SESSDATA_VALUE ||
+        parsed?.kind == PastedKind.TOKEN_COOKIE
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -90,14 +96,29 @@ private fun TokenLoginSheet(
                 minLines = 3,
                 maxLines = 8,
                 placeholder = { Text("access_token / Cookie / 导出文件 JSON") },
+                // 表单字段级校验走 supportingText（UI 规则 12）；识别结果就是这里最该说的话
+                supportingText = {
+                    if (input.isNotBlank()) {
+                        Text(
+                            text = AuthPasteParser.describe(parsed),
+                            color = if (parsed == null) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                        )
+                    }
+                },
             )
-            Text(
-                // ≤20 字符的一行小字：只说结论，不解释原因（Cookie 会话重启后仍在，但走的是网页接口）
-                text = "Cookie 走网页接口，部分功能受限",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            if (isCookieish) {
+                Text(
+                    // 只在识别成 Cookie 时才提示限制：≤20 字符，只说结论
+                    text = "Cookie 走网页接口，部分功能受限",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
         Row(
             modifier = Modifier
