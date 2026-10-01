@@ -208,7 +208,7 @@ fun LiveDanmakuOverlay(
         TextStyle(
             fontSize = fontSizeSp.sp,
             fontWeight = FontWeight.Medium,
-            shadow = Shadow(color = Color.Black, offset = Offset(1.5f, 1.5f), blurRadius = 2f),
+            shadow = LIVE_TEXT_SHADOW,
         )
     }
 
@@ -816,7 +816,13 @@ class LiveDanmakuChatLine(
      */
     val uname: String,
     val text: String,
-    /** 已补 alpha 的内容色（**不乘**弹幕不透明度，见 [LiveDanmakuChatLog.add]） */
+    /**
+     * 已补 alpha 的内容色（**存储层不乘**弹幕不透明度，见 [LiveDanmakuChatLog.add] 第 4 条）。
+     *
+     * ★2026-10-01：不透明度改在**渲染层**乘 —— 列表行会把 `settings.opacity` 乘进
+     *   用户名色与这个内容色的 alpha（见 [LiveDanmakuChatRow]）；这样"改设置立刻生效"不需要重建缓冲，
+     *   而且**行内黑阴影保持不透明**（可读性靠它，见 [LIVE_TEXT_SHADOW]）。
+     */
     val color: Color,
 )
 
@@ -834,8 +840,12 @@ class LiveDanmakuChatLine(
  *    按 120ms 一拍算是 ~13KB/s，比"每条都裁"低一个数量级。
  * 3. **只在主线程读写**（宿主的组合、面板的滑动回调都在主线程），所以不需要锁、不用 @Volatile。
  *    对比点播 `DanmakuTextFilter` 当年"主线程 clear + 缓存线程遍历"崩过进程那一类问题。
- * 4. 弹幕**不透明度不参与**列表渲染：列表是"读字"，用户把弹幕透明度调到 30% 是为了不挡画面，
- *    不是为了让自己读不清聊天 —— 所以内容色只补 alpha=FF，不乘 settings.opacity。
+ * 4. **存储层不乘弹幕不透明度**：这里只补 alpha=FF，**不**乘 `settings.opacity`（旧理由：用户把透明度
+ *    调低是为了不挡画面，不是为了读不清聊天）。
+ *    ★★2026-10-01 用户改口径（原话："这个竖屏弹幕字体透明度跟随，直播弹幕透明度"）：
+ *    **列表文字也要跟随同一个设置** —— 但乘的位置放在**渲染层**（[LiveDanmakuChatRow]），
+ *    不在缓冲里：① 改设置当场重画，不用重建 200 条缓冲；② 行内黑阴影保持不透明（读得清靠它）；
+ *    ③ `line.color` 仍是"这条弹幕自己的颜色"，语义不乱。
  */
 class LiveDanmakuChatLog(private val capacity: Int = CHAT_MAX_LINES) {
 
@@ -1205,6 +1215,17 @@ private class LiveChatBottomScroller(private val listState: LazyListState) {
 fun LiveDanmakuChatPanel(
     chat: LiveDanmakuChatLog,
     chatFontSizeSp: Float,
+    /**
+     * ★★2026-10-01（用户："这个竖屏弹幕字体透明度跟随，直播弹幕透明度"）：**列表弹幕行**的不透明度
+     * `0f~1f`，直接来自直播设置项「不透明度」（`live_danmaku_opacity`，与**滚动弹幕同一个值**，
+     * 见 [LiveDanmakuSettings.opacity]）。宿主每帧从 settings 取这一个值传进来（同 `chatFontSizeSp` 的写法）。
+     *
+     * ★只乘在**弹幕行**上（用户名 + 正文的颜色 alpha，见 [LiveDanmakuChatRow]）：
+     *   空态提示 / 「回到底部」按钮 / 底栏那层渐变 scrim 都是**面板 UI**，不跟这个值。
+     * ★不透明度乘在**颜色**上而不是 `Modifier.alpha`：`Modifier.alpha` 会连**行内黑阴影**一起变淡
+     *   （30% 时阴影只剩 30%，亮画面上直接糊）；乘颜色则阴影保持不透明 ⇒ 字淡了但轮廓还在。
+     */
+    danmakuAlpha: Float = 1f,
     visible: Boolean,
     modifier: Modifier = Modifier,
     fadingOut: Boolean = false,
@@ -1214,7 +1235,8 @@ fun LiveDanmakuChatPanel(
      *
      * 面板 View 的地盘铺到**窗口最底**（用户要的"弹幕区把底栏铺满"），但**弹幕内容**不能跟着沉下去 ——
      * IME 弹起时底栏被 insets 抬到键盘之上，内容若铺到底就会停在键盘后面（最新一条看不见）。
-     * 这个值只作用在**列表内容**上（`LazyColumn` 的 `contentPadding`），**不碰**底色/分隔线/任何渲染逻辑。
+     * 这个值只作用在**列表内容**上（`LazyColumn` 的 `contentPadding`）：**不碰**任何绘制
+     *   （面板已无底色、也无分隔线，见文件末尾那两条"已删"说明），也不碰字号/行距链路。
      */
     bottomInsetPx: Int = 0,
 ) {
@@ -1370,10 +1392,13 @@ fun LiveDanmakuChatPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            // 停靠面板是"视频下方的一块区域"，不是浮在画面上的卡片 → 不做圆角，用整块底色。
-            // ★底色 = **不透明纯黑**，与上方视频区/下方底栏同色、**不跟主题深浅**：
-            //   为什么、以及各文字色在这块底上的对比度核对，全写在 [CHAT_PANEL_BG] 的 KDoc 里。
-            .background(CHAT_PANEL_BG)
+            // ★★2026-10-01（用户当场报："那么大个黑色背景挡着我了我看个毛啊"）：**面板不再画任何底色**。
+            //   上一版 panel 是不透明纯黑（`CHAT_PANEL_BG`，已删）——那时它是"画面**下方**的一块区域"，
+            //   黑底只是让列表沉下去；而 v3 让竖屏流**铺满**之后，同一块矩形变成了"**压在画面上的黑墙**"，
+            //   把下半屏整块糊住。⇒ 底色去掉、画面透出来，弹幕文字直接浮在画面上。
+            //   ★可读性靠**文字自己的黑色阴影**（[LIVE_TEXT_SHADOW]，与滚动弹幕同一套），不靠底：
+            //     每个落在画面上的文字（行正文/用户名、空列表提示）都带这层阴影，
+            //     亮画面（白墙/雪景）上也压得住；具体对比度核对与真机验证见报告。
             // ★吃掉落在面板上的**单击**：不然点一下面板的空白处会穿透到手势层，
             //   变成"显隐控制条"（列表常驻之后"点列表空白"是高频动作，一点就闪出控制条很烦）。
             //   indication = null：不要水波纹（这是个容器，不是按钮）。
@@ -1387,16 +1412,11 @@ fun LiveDanmakuChatPanel(
                 onClick = {},
             ),
     ) {
-        // ── 唯一的"头部"：一条 1dp 分隔线 ──
-        // 不做标题栏：列表是**常驻**的，
-        // 标题/收起按钮占的正是"最新那几条"的位置；但画面与列表是两块不同材质，
-        // 边界还是要一条线说清楚。
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(CHAT_DIVIDER),
-        )
+        // ★★2026-10-01：**头部那条 1dp 分隔线（`CHAT_DIVIDER`，已删）也去掉了**。
+        //   它原来的职责是"说明画面与列表是两块不同材质"——那条前提随底色一起去掉了：
+        //   现在列表直接浮在画面上，本就不存在材质边界；而一条 1% 白的细线在亮画面上根本看不见、
+        //   在暗画面上又只是一道多余的亮痕（对照 B站/PiliPlus：竖屏弹幕区没有这条线）。
+        //   ★不做标题栏这一条不变（列表是常驻的，标题/收起按钮占的正是"最新那几条"的位置）。
         Box(modifier = Modifier.weight(1f)) {
             // ★reverseLayout：index 0 贴**底**。这样"最新在最下、旧的在上"是布局自带的，
             //   不需要把 200 条倒过来算坐标；LazyColumn 只组合可见的十来行（懒加载）。
@@ -1416,6 +1436,8 @@ fun LiveDanmakuChatPanel(
                 items(items = chat.lines, key = { it.key }) { line ->
                     LiveDanmakuChatRow(
                         line = line,
+                        // ★★2026-10-01：列表文字跟随「不透明度」设置（乘在颜色 alpha 上，阴影不变淡）
+                        danmakuAlpha = danmakuAlpha,
                         // ★本轮（task-6）：列表正文字号来自直播设置项「竖屏列表字号」
                         //   （宿主从 settings 里取这一个值传进来；滚动弹幕那套不受影响）。
                         chatFontSizeSp = chatFontSizeSp,
@@ -1461,6 +1483,8 @@ fun LiveDanmakuChatPanel(
                     text = "还没有收到弹幕…",
                     color = CHAT_HINT_COLOR,
                     fontSize = 11.sp,
+                    // ★★2026-10-01：面板无底 ⇒ 这行提示也带同一层黑阴影（否则亮画面上看不见）
+                    style = LIVE_TEXT_STYLE,
                     modifier = Modifier.align(Alignment.Center),
                 )
             } else if (!chat.stickToBottom && !chat.pendingScrollToBottom) {
@@ -1526,6 +1550,8 @@ fun LiveDanmakuChatPanel(
 private fun LiveDanmakuChatRow(
     line: LiveDanmakuChatLine,
     chatFontSizeSp: Float,
+    /** ★★2026-10-01：弹幕行不透明度（= 直播设置「不透明度」，与滚动弹幕同值）；1f = 完全不透明 */
+    danmakuAlpha: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
     // 用户名色 = 当前主题色（★不要写死颜色：用户换主题后这里要跟着变）
@@ -1536,21 +1562,33 @@ private fun LiveDanmakuChatRow(
     //   key 不变就返回**同一个实例** —— Text 的文本测量缓存也才有机会命中（重组的代价从
     //   "重新排版一行字 + 重新建 spans"降到"两次引用比较"）。
     //   行的内容是不可变的（`LiveDanmakuChatLine` 全是 val），所以这个 remember 不需要再多的 key。
-    val text = remember(line.key, line.uname, line.text, line.color, unameColor) {
+    // ★★2026-10-01：把「不透明度」乘进**颜色**（用户名 + 正文各乘各的 alpha）。
+    //   为什么不 `Modifier.alpha(danmakuAlpha)`：那会把行内**黑阴影**一起变淡（见 [LIVE_TEXT_SHADOW]）——
+    //   透明度越低，阴影越淡，亮画面上就越糊；乘颜色则阴影恒为不透明黑，字淡了轮廓还在。
+    //   阴影本身不走这里（`style` 里的 Shadow 是独立颜色，不受 span 颜色 alpha 影响）。
+    val alpha = danmakuAlpha.coerceIn(0f, 1f)
+    val unameShown = unameColor.copy(alpha = unameColor.alpha * alpha)
+    val bodyShown = line.color.copy(alpha = line.color.alpha * alpha)
+    val text = remember(line.key, line.uname, line.text, line.color, unameColor, alpha) {
         buildAnnotatedString {
-            withStyle(SpanStyle(color = unameColor)) {
+            withStyle(SpanStyle(color = unameShown)) {
                 append(line.uname)
                 append("：") // 全角冒号（半角冒号在中文里太挤）
             }
-            withStyle(SpanStyle(color = line.color)) {
+            withStyle(SpanStyle(color = bodyShown)) {
                 append(line.text)
             }
         }
     }
     Text(
         text = text,
+        // ★★2026-10-01：**面板底色已删**（列表直接浮在画面上）⇒ 行文字必须自带黑阴影，
+        //   否则亮画面上白字糊成一片。参数与滚动弹幕同一份常量（[LIVE_TEXT_SHADOW]，值一个字节没改）。
+        //   ★阴影只跟着字形走，不占额外面积 —— 用户刚因为"整块背景"骂过，所以这里**不加任何底**。
+        style = LIVE_TEXT_STYLE,
         // ★本轮（task-6）：字号来自「竖屏列表字号」设置项（默认 13sp = 改前写死的值）；
-        //   行距按同一个倍率等比（17/13）—— 字号 13sp 时算出来就是原来写死的 17sp（逐像素一致）。
+        //   行距按同一个倍数等比（17/13）—— 字号 13sp 时算出来就是原来写死的 17sp（逐像素一致）。
+        //   （显式 fontSize/lineHeight 会盖掉 style 里的同名字段 ⇒ 只借它的 shadow，字号链路不受影响）
         fontSize = chatFontSizeSp.sp,
         lineHeight = (chatFontSizeSp * LiveDanmakuSettings.CHAT_LINE_HEIGHT_FACTOR).sp,
         // 长弹幕最多 4 行（列表是拿来扫读的，一条占满屏就失去意义了）；超出省略
@@ -1696,69 +1734,61 @@ internal fun systemDanmakuDensity(): Density {
     return Density(density = density, fontScale = fontScale)
 }
 
+// ★★2026-10-01 删掉了 `CHAT_PANEL_BG = Color(0xFF000000)`（**原来在这里**）：面板**不再画底色**。
+//   删它的直接原因（用户实拍 + 原话："那么大个黑色背景挡着我了我看个毛啊"）：
+//   v1/v3 让竖屏流 **cover 铺满**之后，这块面板从"视频**下方**的一块区域"变成了"**压在画面上的黑墙**"——
+//   不透明纯黑会把画面下半截整块糊住，用户什么都看不见。
+//   ⇒ 底色交还给画面，弹幕文字直接浮在画面上；可读性改由**文字自己的黑色阴影**保证（见 [LIVE_TEXT_SHADOW]）。
+//
+//   随之作废的几条旧理由（原文都建立在"面板恒为纯黑"上，逐条核过）：
+//   · "列表是拿来长时间读的，纯黑更护眼" —— 面板已经没有底，护眼这件事现在由用户自己的画面决定；
+//   · "深灰贴在纯黑旁边会看见一条色带" —— 不再有"面板这块底色"，也就没有色带问题；
+//   · "上下两块区域本来就是纯黑，黑底与它们无缝" —— 无缝的前提是要有底，现在不需要；
+//   · 那一整段"各文字色压在这块黑底上的 WCAG 对比度" —— **前提消失**：现在文字压的是**任意画面**，
+//     对比度不再是一个可以离线算死的数，只能靠"黑阴影 + 亮字"来兜（见 [LIVE_TEXT_SHADOW] 的说明）。
+//   ★唯一保留下来的旧约定：顶栏/底栏那种"压在画面上的中性黑"仍走各自的 `scrimColor()`/渐变，
+//     与面板无关（本文件 `STATUS_BG` 状态条同理，见其 KDoc）。
+
+// ★★2026-10-01 删掉了 `CHAT_DIVIDER = Color(0x22FFFFFF)`（**原来在这里**，头部那条 1dp 分隔线）：
+//   它的职责是"说明画面与列表是两块不同材质"，而面板底色一去掉，这条前提就没了 ——
+//   列表直接浮在画面上，本就不存在材质边界；一条 1% 白的细线在亮画面上看不见、在暗画面上是多一道亮痕。
+//   （对照 B站/PiliPlus：竖屏弹幕区没有这条线；"不做标题栏"那条理由不受影响。）
+
 /**
- * 面板底色：**不透明纯黑**（#000000），**与主题深浅无关**（浅色主题下也不变白）。
+ * ★★2026-10-01 新增：**弹幕文字的统一黑色阴影**（滚动弹幕与竖屏列表**同一套参数**）。
  *
- * 理由：竖屏下要长时间看这块弹幕，纯黑比跟随主题更护眼；
- *       直播间的上下两块区域在竖屏下本来也是纯黑的。
- *
- * 为什么**不跟主题**（不用 `surface` / `surfaceVariant`）：
- * · 宿主现在把面板这棵 ComposeView 的主题**钉在深色档**
- *   （`appColorScheme(themeState.copy(darkMode = 2), systemDark = true)`，理由见 Host 那段注释）——
- *   **深色档下**取 `surface` 恰好也是纯黑，但那是 materialkolor `isAmoled = true` 的**条件**行为
- *   （`(isAmoled && isDark) ? Black : …`，见 `BilimiaoTheme.kt:85` 与 `CustomThemeColorDialog.kt:140`）：
- *   pin 一去掉、用户在浅色档，`surface` 就是近白 —— 整页（窗口底黑、顶栏/底栏黑蒙层）里唯一的亮板，
- *   正是用户"要长期看、想护眼"的那一块。写死纯黑，是把"面板恒黑"从主题参数里解耦出来。
- * · `surfaceVariant` 是 M3 深色色板里的中灰档（不是纯黑）—— 见下一条，深灰在这两块纯黑中间
- *   是一条色带。
- *
- * 为什么是**纯黑**而不是 `#121212` 这类深灰：
- * · 面板上下两块本来就是纯黑：窗口底色 `ColorDrawable(Color.BLACK)`（`LivePlayerActivity`）、
- *   底栏 `scrimColor()` = 纯黑 150/255（浅色主题 120/255）。深灰贴在纯黑旁边**看得见一条色带**
- *   （Material 暗色主题的 `#121212` + 高程提亮是给"整页没有纯黑"的通用场景用的，本页不适用）；
- * · 竖屏 22:9 上视频是 16:9，画面下方本来就可能有一段黑边 —— 纯黑才接得住。
- * · OLED 下纯黑像素熄灭是真的，**但别拿省电当理由**：实测"真黑 vs 深灰"的功耗差只有 ~0.3%
- *   （引用 2）。这里选它的理由是"不刺眼 + 无缝"，不是省电。
- *
- * 对比度（只换底色、不动字色；逐个按 WCAG 公式实算）：
- * · 用户名 = `MaterialTheme.colorScheme.primary` 是**唯一跟主题走**的一处，所以结论带前提：
- *   **钉深色档时**（宿主 `copy(darkMode = 2)`，见 `LiveDanmakuOverlayHost`）primary 恒为亮色调
- *   tone 80（L\*=80，与色相无关）→ 压纯黑 ≈12.3:1，≥ AA 的 4.5:1；
- *   **不钉的话**（历史行为：用户把「主题设置 → 深浅色」设为"关闭" → 拿到浅色色板）是 tone 40 →
- *   压纯黑只有 ≈3.25:1，低于 AA（改前压在合成色 #0E1216 上是 ≈2.9:1 —— 这条不是本次引入的）。
- * · 其余三处**与主题档位无关**（正文值随发弹幕者选的色变，B 站默认白 ≈21:1）
- *   —— 标题/提示是写死常量：[CHAT_TITLE_COLOR] 0xDCE3EA → ≈16.2:1、[CHAT_HINT_COLOR] 0x8A97A3 → ≈7.0:1；
- *   改前分别 ≈14.5 / ≈6.3 / ≈18.8:1 —— 换纯黑之后**标题/提示只升不降**；正文按"同一个发弹幕者选的色"比较
- *   也是只升不降（唯一例外是极深色弹幕，例如 `color=0x000000`：1.12 → 1.00:1，**改前改后都读不出来**，
- *   非本次引入，本 App 发弹幕也不带颜色参数）。
- * 两个半透明层跟着底色一起暗一点点（分隔线合成 0x2E3235 → 0x222222、按钮底 0x252D38 → 0x222A33），
- * 仍是"看得见的一条细线 / 一枚浅色胶囊"，**这次不动它们**（非必要勿增实体）。
- *
- * 引用：1. WCAG 2.2 SC 1.4.3 Contrast (Minimum)：正文 ≥ 4.5:1、大字 ≥ 3:1
- *          https://www.w3.org/TR/WCAG22/#contrast-minimum
- *       2. OLED 上"真黑 vs 深灰"的功耗实测（差 ≈0.3%，可忽略）
- *          https://www.androidauthority.com/true-black-dark-mode-1003537/
- *
- * ★不要改回 `MaterialTheme.colorScheme.*`；也别为它新开设置项。
- *   本页只在**单点**用中性黑（顶栏/底栏的 `scrimColor()` 同款做法）。
+ * 为什么需要它：竖屏列表的面板底色已删（见上面那条说明）⇒ 文字直接压在**任意画面**上，
+ * 而弹幕正文的颜色是发弹幕的人选的（B 站默认纯白 `0xFFFFFF`）、用户名取主题主色（亮色调 tone 80）——
+ * 亮画面上（白墙、雪景、亮灯光）白字会**糊成一片**。给一层黑阴影就等于给每个字自带描边：
+ * 阴影把字形边缘与背景隔开，白字在纯白背景上依然有轮廓（这不是 WCAG 意义上的"对比度达标"，
+ * 而是"可辨认性"：WCAG 假设文字落在**单一色**背景上，压在视频上没有那个前提）。
+ * 参数与滚动弹幕**原来就写死的那一套完全一致**（`Color.Black` / 偏移 (1.5, 1.5) / 模糊 2）——
+ * 滚动弹幕一直靠它在亮画面上保持可读，本版只是把同一个值抽成一份常量、给列表复用（值**一个字节没改**）。
+ * ★为什么不用"半透明黑底"替代：用户刚因为这层底骂过（"挡着我看个毛"）——
+ *   底再淡也是整块矩形，仍会糊画面；阴影只跟着**字形**走，一个像素都不多占。
  */
-// 豁免：「叠在/紧邻画面、构成"视频页中性黑"的那一层」——面板**紧邻画面**
-//       （顶边 = 画面底边，矩形由宿主实测，见 LiveDanmakuOverlayHost.computeDockedRect），底色与顶栏/底栏的
-//       scrimColor() 蒙层**同源**（同一套"视频页保持中性黑"的约定，都是纯黑）；它故意不跟主题
-//       （理由见上面的 KDoc），所以没法用 MaterialTheme.colorScheme.* 表达。
-private val CHAT_PANEL_BG = Color(0xFF000000)
+private val LIVE_TEXT_SHADOW = Shadow(color = Color.Black, offset = Offset(1.5f, 1.5f), blurRadius = 2f)
+
+/** [LIVE_TEXT_SHADOW] 的 `TextStyle` 包装（常量，避免每帧新建；列表行与空列表提示共用） */
+private val LIVE_TEXT_STYLE = TextStyle(shadow = LIVE_TEXT_SHADOW)
 
 /** 头部标题/按钮色 */
 private val CHAT_TITLE_COLOR = Color(0xFFDCE3EA)
 
 /** 头部提示文字色（比标题更淡） */
-private val CHAT_HINT_COLOR = Color(0xFF8A97A3)
+// ★★2026-10-01：底色删掉后这个灰必须提亮（原来是"在黑底上够用"的中灰 0x8A97A3），
+//   并按 [LIVE_TEXT_SHADOW] 给它加同一层阴影 —— 否则亮画面上"还没有收到弹幕…"直接看不见。
+//   仍是"比标题更淡"的那一档（标题 0xDCE3EA），只是整体抬高一档。
+private val CHAT_HINT_COLOR = Color(0xFFB6C0CB)
 
-/** 「回到底部」按钮底色 */
+/**
+ * 「回到底部」按钮底色（`0xCC2B3440` = 80% 深灰蓝）。
+ *
+ * ★2026-10-01 核过：底色删掉之后它**不需要改** —— 这枚胶囊**自带 80% 不透明的深底**，
+ *   白字压在上面与画面无关（最坏情况：底下的画面是纯白 ⇒ 合成后 ≈ 20% 白 + 80% 深灰蓝，
+ *   与 `CHAT_TITLE_COLOR` 的对比度仍在 8:1 以上），所以"在透明面板 + 任意画面上"照样可读。
+ */
 private val CHAT_JUMP_BG = Color(0xCC2B3440)
-
-/** 头部分隔线 */
-private val CHAT_DIVIDER = Color(0x22FFFFFF)
 
 // ★本轮（2026-09-26）删掉了 `CHAT_NAME_COLOR = Color(0xFF8AB4F8)`（原来在这里）。
 //   它就是"名字高亮不跟主题色"的**根因**：用户名是写死的淡蓝，

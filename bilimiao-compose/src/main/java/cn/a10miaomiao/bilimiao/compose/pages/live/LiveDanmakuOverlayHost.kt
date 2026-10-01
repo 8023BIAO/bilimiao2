@@ -389,9 +389,10 @@ class LiveDanmakuOverlayHost(
      * ★★2026-10-01（复核员必守第 1 条 · 键盘）：面板**底部内容内边距**（px）
      * = 背景底边 − 内容可见底边 = `窗口底 − 底栏顶边`（键盘弹起时就是"键盘顶边到底"那一段 1189px）。
      *
-     * 为什么要有它：面板的黑底要铺到窗口最底（用户要的"把底栏铺满"），但**弹幕内容**不能跟着沉下去 ——
+     * 为什么要有它：面板的**地盘**铺到窗口最底（用户要的"把底栏铺满"；面板本身**没有底色**，
+     * 见 `LiveDanmakuOverlay` 里"已删 CHAT_PANEL_BG"那条说明），但**弹幕内容**不能跟着沉下去 ——
      * 否则 IME 弹起时最新一条停在键盘后面（1611..2800 全被键盘盖住）。
-     * 面板把这个值当 `LazyColumn(contentPadding.bottom)`：视觉上列表背景/占位铺满，内容止于底栏上沿。
+     * 面板把这个值当 `LazyColumn(contentPadding.bottom)`：列表内容止于底栏上沿（键盘弹起时 = 键盘上沿）。
      * 它是 Compose state：面板那份组合要跟着它重组（与 [listShown] 同一套驱动方式）。
      */
     private val panelBottomInset = mutableStateOf(0)
@@ -660,9 +661,11 @@ class LiveDanmakuOverlayHost(
      * 它们最终都要经过**一次重组**才落到注入面板的 layoutParams 上，而上面这两种变化是
      * "insets 变了但窗口尺寸没变"或"一次动画里连发几十帧"的形态 —— 只要其中一环没赶上，
      * 面板矩形就会停在旧值上，用户看到的就是：
-     * · 底边停在**旧位置（更靠下）**→ 面板盖住已经被抬起的底栏 → 面板 90% 的底色把底栏
-     *   压成"半透明的按钮/输入条残影"；
-     * · 底边停在**中间态（更靠上）**→ 面板与底栏之间空出一大块（黑底）= "一大块黑色空白"。
+     * · 底边停在**旧位置（更靠下）**→ 列表内容压到底栏下面（最新几条被底栏/输入条盖住）；
+     * · 底边停在**中间态（更靠上）**→ 列表内容与底栏之间空出一大块 = "一大块空白"。
+     *   （★2026-10-01 备注：面板改注入到**底栏之下**的 `danmakuPanelLayer` 之后，面板不再压住底栏；
+     *     上面这两条症状表现为"内容位置不对"，而不是"底栏被半透明底色压成残影"。
+     *     这条不变式本身没变：面板**内容**的底边必须跟着底栏顶边走。）
      * 这里给播放页一个**不依赖重组时机**的同步入口，把"面板底边 = 底栏顶边"这条不变式立刻兑现。
      *
      * ★只重算**几何**，不重新判断"该不该显示"：那个判断要用组合里的弹幕开关/设置（`settings.visible`
@@ -1004,12 +1007,14 @@ class LiveDanmakuOverlayHost(
                 // ★★色板**钉在深色档**：`systemDark = true` 一个人钉不住 —— `appColorScheme` 的归一化是
                 //   `0 -> systemDark / 1 -> false / else -> true`（`BilimiaoTheme.kt:55-59`）。
                 //   用户把「主题设置 → 深浅色」设成"关闭"（darkMode = 1）时，上面那一票会被判成 false，
-                //   面板就拿到**浅色色板**：`primary` = tone 40（给浅底用的暗色调），压在恒为纯黑的面板
-                //   （`CHAT_PANEL_BG`）上只有 ≈3.25:1，低于 WCAG AA 的 4.5:1，13sp 的用户名发闷
-                //   （改前就是这个行为，按 WCAG 公式算下来 ≈2.9:1）。面板底色既然恒黑，色板就得跟底色走：
+                //   面板就拿到**浅色色板**：`primary` = tone 40（给浅底用的暗色调）—— 那个色本来是给"浅底
+                //   上的深字"配的，压在**画面**上（2026-10-01 起面板已无底色，见
+                //   `LiveDanmakuOverlay` 里"已删 CHAT_PANEL_BG"那条说明）会与"亮画面 + 黑阴影"这条
+                //   可读性策略正好相反：暗色名字在深色画面上直接消失。
+                //   ⇒ 色板仍按**亮色调**取（tone 80，与色相无关）：亮字 + 不透明黑阴影在任何画面上都有轮廓。
                 //   显式 `copy(darkMode = 2)` 走 `else -> true` 那一支，与 `systemDark` 无关地钉死深色。
                 //   · 为什么在这里 copy、而不是改 `appColorScheme`：那是**全 App 的公共取色入口**，
-                //     而"黑底面板"只有这一处 —— 只借它的 isDark 分支，不碰公共路径
+                //     而"面板那份独立色板"只有这一处 —— 只借它的 isDark 分支，不碰公共路径
                 //     （同款 copy 写法见 `AppStore.kt:130` 的 `theme?.copy(darkMode = mode)`）。
                 //   · 影响面：面板里吃 `colorScheme` 的**只有用户名一处**
                 //     （`LiveDanmakuOverlay.kt:1499` `val unameColor = MaterialTheme.colorScheme.primary`），
@@ -1031,12 +1036,20 @@ class LiveDanmakuOverlayHost(
                     CompositionLocalProvider(LocalDensity provides remember { systemDanmakuDensity() }) {
                         LiveDanmakuChatPanel(
                             chat = chat,
-                            // ★★2026-10-01：面板黑底铺到窗口底，但**内容**止于底栏顶边（键盘弹起=键盘顶边）
+                            // ★★2026-10-01：面板**地盘**铺到窗口底（面板无底色，不遮画面），
+                            //   但**内容**止于底栏顶边（键盘弹起=键盘顶边）
                             //   —— 复核员必守第 1 条，值由 [refreshDockedPanel] 每帧下发。
                             bottomInsetPx = panelBottomInset.value,
                             // ★本轮（task-6）：竖屏列表正文字号（默认 13sp = 改前写死的值）。
                             //   只传这一个值：面板用不到 settings 里别的字段。
                             chatFontSizeSp = settings.chatFontSizeSp,
+                            // ★★2026-10-01（用户："这个竖屏弹幕字体透明度跟随，直播弹幕透明度"）：
+                            //   列表**弹幕行**的不透明度也跟随同一个设置项（`live_danmaku_opacity`，
+                            //   与画面上的滚动弹幕**同一个值**）。这一份组合本来就订阅了 settings
+                            //   （`LiveDanmakuSettings.watch` + `collectAsStateWithLifecycle`）⇒
+                            //   用户在设置里拖动滑块，这一行立刻拿到新值、面板当场重画，不用重进直播间。
+                            //   ★只传这一个 Float（照 `chatFontSizeSp` 的同款写法），不塞整个 settings 对象。
+                            danmakuAlpha = settings.opacity,
                             visible = listShown.value,
                             // ★本轮：退场动画期间内容要留一拍（不然 View 淡的是一个空面板 = 还是硬切）。
                             //   触摸与三个 effect 仍然只认 `visible`（那条"不可见不干活"的线没动）。
@@ -1068,7 +1081,8 @@ class LiveDanmakuOverlayHost(
      * ```
      * 顶边          = 画面底边（videoView 锚点 > 结构找到的画面）> 槽顶边 > 宿主高÷2
      *                 ★画面铺满到容器底时（cover）画面底边刻意取 null ⇒ 落到槽顶边（播放页算好的列表顶）
-     * 背景底边      = **内容区底边**（容器底 = 窗口底）—— 面板黑底/占位铺到这里 ⇒ 弹幕区"把底栏铺满"
+     * 背景底边      = **内容区底边**（容器底 = 窗口底）—— 面板地盘铺到这里（面板**无底色**，不遮画面）⇒
+     *                 "弹幕区把底栏铺满"指的是**列表区域**铺到底，不是又画一层底
      * 内容可见底边  = 底栏顶边（bottomBound 锚点 > 自己找到的贴底那一条）> 宿主底边
      *                 ⇒ 面板的 contentPadding.bottom = 背景底边 − 内容可见底边（键盘弹起时=键盘那一段）
      * ```
@@ -1095,7 +1109,7 @@ class LiveDanmakuOverlayHost(
         val rect = computeDockedRect()
         dockedRect = rect
         // ★★2026-10-01：把"背景底边 − 内容可见底边"这一段交给面板做底部内容内边距
-        //   （面板黑底照旧铺到窗口底，弹幕内容止于底栏顶边 / 键盘顶边 —— 见 [panelBottomInset]）。
+        //   （面板地盘照旧铺到窗口底、且**不画任何底色**；弹幕内容止于底栏顶边 / 键盘顶边 —— 见 [panelBottomInset]）。
         panelBottomInset.value = (rect.bottom - rect.contentBottom).coerceAtLeast(0)
         // 地方太小（比如视频几乎占满、或底栏特别高）：宁可保留滚动弹幕，也不挤出一条读不了的列表。
         // ★按**内容**高判（`contentHeight`）：背景那 212px（底栏那一条）不算"能读的地方"。
@@ -1272,7 +1286,7 @@ class LiveDanmakuOverlayHost(
         val top = rawTop.coerceIn(0, contentHeight)
         // ★★背景底边：**看注入目标是谁**（2026-10-01 用户拍板 + 复核必改 M2）：
         //   · 注入到 [panelLayer]（正常路径）：铺到**内容区底边**（容器底 = 窗口底）——
-        //     面板连黑底一起铺到窗口最底 ⇒ 底栏那一条也被弹幕区填满（用户："把底栏铺满"），
+        //     面板地盘铺到窗口最底（**不画底色**，画面照常透出来）⇒ 底栏那一条也归弹幕区（用户："把底栏铺满"），
         //     而底栏浮在面板**之上**（z 序保证），按钮照旧能点；
         //   · 退回 `android.R.id.content`（老播放页 / 层没就绪）：面板在底栏**之上**，
         //     这时必须按老口径把背景**扣到内容可见底边**（= 底栏顶边），否则会盖住底栏、连按钮触摸一起吃掉，
@@ -1509,7 +1523,8 @@ class LiveDanmakuOverlayHost(
  *
  * ★★2026-10-01 起它带**两条底边**（用户拍板："弹幕区把底栏铺满" + 复核员的键盘必守条）：
  * ```
- * bottom        = 背景底边 = 内容区底边（= 窗口底）：面板的黑底/占位铺到这里 ⇒ 底栏那一条也被弹幕区填满
+ * bottom        = 背景底边 = 内容区底边（= 窗口底）：面板地盘铺到这里（面板**无底色**，画面透出来）
+ *                 ⇒ 底栏那一条也归弹幕区（"把底栏铺满"）
  * contentBottom = 内容可见底边 = 底栏顶边（键盘弹起时 = 键盘顶边）：**弹幕内容**不许沉到它下面
  *                 ⇒ 最新一条始终看得见（面板里靠 contentPadding(bottom = bottom − contentBottom) 实现）
  * ```
