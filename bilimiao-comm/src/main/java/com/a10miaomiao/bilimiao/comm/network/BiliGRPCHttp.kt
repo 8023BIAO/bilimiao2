@@ -189,13 +189,19 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
         // 业务码：优先从 grpc-message 里取（B 站给的是 "-404" 这种）；
         // 取不到再从 details-bin（base64 的 bilibili.rpc.Status protobuf）的原始字节里找一眼，
         // **不引 protobuf 解析**、失败就当没有。
-        val bizCode = NEGATIVE_CODE_REGEX.find(message.orEmpty())
-            ?.groupValues?.get(1)?.toIntOrNull()?.unaryMinus()
-            ?: details?.let { d ->
-                runCatching {
-                    String(Base64.decode(d, Base64.DEFAULT), Charsets.ISO_8859_1)
-                }.getOrNull()
-            }?.let { raw -> NEGATIVE_CODE_REGEX.find(raw)?.groupValues?.get(1)?.toIntOrNull()?.unaryMinus() }
+        // ★写成"显式类型 + 分步赋值"而不是链式 `?.let{}`：PC 真编译在链式版本上
+        //   报 `Cannot infer type for type parameter 'T'`（runCatching/let 嵌套 + 平台类型），
+        //   这里宁可啰嗦也要让类型一眼可推。
+        val detailsRaw: String? = try {
+            details?.let { String(Base64.decode(it, Base64.DEFAULT), Charsets.ISO_8859_1) }
+        } catch (e: Exception) {
+            null
+        }
+        var codeDigits: Int? = NEGATIVE_CODE_REGEX.find(message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+        if (codeDigits == null) {
+            codeDigits = NEGATIVE_CODE_REGEX.find(detailsRaw.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+        }
+        val bizCode: Int? = codeDigits?.unaryMinus()
         // 日志拼成**单个字符串**：`MiaoLogger.d(vararg Any?)` 在这条调用上对 `Pair` 的
         // 类型推断不稳定（PC 编译报 "Cannot infer type for type parameter 'B'"），
         // 单字符串既绕开推断、也少一次装箱。
