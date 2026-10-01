@@ -1217,10 +1217,13 @@ fun LiveDanmakuChatPanel(
     chat: LiveDanmakuChatLog,
     chatFontSizeSp: Float,
     /**
-     * ★★2026-10-01（用户："这个竖屏弹幕字体透明度跟随，直播弹幕透明度"）：**列表弹幕行**的不透明度
-     * `0f~1f`，直接来自直播设置项「不透明度」（`live_danmaku_opacity`，与**滚动弹幕同一个值**，
-     * 见 [LiveDanmakuSettings.opacity]）。宿主每帧从 settings 取这一个值传进来（同 `chatFontSizeSp` 的写法）。
+     * ★★2026-10-01：**列表弹幕行**的不透明度 `0f~1f`，来自直播设置项**「竖屏弹幕透明度」**
+     * （键 `live_danmaku_chat_opacity`，见 [LiveDanmakuSettings.chatOpacity]，默认 100%）。
+     * 宿主从 settings 取这一个值传进来（同 `chatFontSizeSp` 的写法）。
      *
+     * ★与**滚动弹幕**的「弹幕不透明度」（`live_danmaku_opacity` → [LiveDanmakuSettings.opacity]）
+     *   **各管各的**：2026-10-01 用户要求"竖屏状态下的弹幕透明度不再跟随那个弹幕透明度，单独设置一个"
+     *   ⇒ 两个键、两个设置项、两条读取路径（本条历史上曾短暂"跟随"过，已被该要求取代）。
      * ★只乘在**弹幕行**上（用户名 + 正文的颜色 alpha，见 [LiveDanmakuChatRow]）：
      *   空态提示 / 「回到底部」按钮 / 底栏那层渐变 scrim 都是**面板 UI**，不跟这个值。
      * ★不透明度乘在**颜色**上而不是 `Modifier.alpha`：`Modifier.alpha` 会连**行内黑阴影**一起变淡
@@ -1437,7 +1440,8 @@ fun LiveDanmakuChatPanel(
                 items(items = chat.lines, key = { it.key }) { line ->
                     LiveDanmakuChatRow(
                         line = line,
-                        // ★★2026-10-01：列表文字跟随「不透明度」设置（乘在颜色 alpha 上，阴影不变淡）
+                        // ★★2026-10-01：列表文字用**自己的**「竖屏弹幕透明度」设置（`chatOpacity`；
+                        //   不是滚动弹幕那个「弹幕不透明度」）。乘在颜色 alpha 上，阴影不变淡。
                         danmakuAlpha = danmakuAlpha,
                         // ★本轮（task-6）：列表正文字号来自直播设置项「竖屏列表字号」
                         //   （宿主从 settings 里取这一个值传进来；滚动弹幕那套不受影响）。

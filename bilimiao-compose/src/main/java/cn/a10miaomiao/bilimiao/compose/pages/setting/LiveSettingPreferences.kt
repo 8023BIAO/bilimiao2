@@ -236,7 +236,9 @@ private fun LazyListScope.liveDanmakuPreferenceItems() {
             Text("$it%")
         },
         summary = {
-            Text("只影响竖屏的弹幕列表，与上面「弹幕不透明度」各调各的")
+            // ★写明默认值：这个键是 2026-10-01 新加的，"没调过 = 100%"要让人一眼看到
+            Text("只影响竖屏的弹幕列表（默认 ${SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT}%），" +
+                "与上面「弹幕不透明度」各调各的")
         },
     )
     sliderIntPreference(

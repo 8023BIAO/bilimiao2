@@ -642,8 +642,14 @@ object SettingPreferences {
                 LiveDanmakuChatFontSize,
                 SettingConstants.LIVE_DANMAKU_CHAT_FONT_SIZE_DEFAULT,
             ),
-            // 竖屏列表不透明度：Int 键（与 danmakuOpacity 同量纲），同样给默认值兜底。
+            // 竖屏列表不透明度：Int 键（与 danmakuOpacity 同量纲）。
+            // ★★2026-10-01（Lead 批准的**迁移**，就这一行）：新键**没设过**时退回**旧键**「弹幕不透明度」——
+            //   上一批"跟随"期间把 `live_danmaku_opacity` 调低过的用户，升级后**维持现状**（不会突然跳回 100%）；
+            //   之后新键一旦被拖动就立即优先（新键有值 ⇒ 不再看旧键）。
+            //   ★迁移**只写在这里、不在 `from()` 里合并**：否则"新键=100、旧键=50"的用户会永远显示 100，
+            //     看起来像滑块坏了（`from()` 只负责 ÷100 的归一化，不管值的来源）。
             danmakuChatOpacity = prefs?.get(LiveDanmakuChatOpacity)
+                ?: prefs?.get(LiveDanmakuOpacity)
                 ?: SettingConstants.LIVE_DANMAKU_CHAT_OPACITY_DEFAULT,
             danmakuOpacity = prefs?.get(LiveDanmakuOpacity)
                 ?: SettingConstants.LIVE_DANMAKU_OPACITY_DEFAULT,

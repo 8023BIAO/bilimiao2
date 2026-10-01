@@ -271,7 +271,7 @@ import kotlin.math.roundToInt
  *    这一批的"字号归一 + 交给 autosize"其实从来没生效过（③ 是空的）。
  * 2. **听音频舞台整体垂直居中**（原来整体顶在上方）：
  *    ★该舞台与整个听音频模式已在第五批删除，这里只留记录。
- * 3. **竖屏视频带下移到「状态栏 + 顶栏」之下**（原来贴得太靠上）：
+ * 3. 【第四批，**顶边口径已于 2026-10-01 被用户推翻**，见下】**竖屏视频带下移到「状态栏 + 顶栏」之下**：
  *    顶边 = [videoBandTopPx]（顶栏底边，顶栏那份 insets 里已经含状态栏内边距）；
  *    ★★2026-10-01 用户拍板**推翻了这一条的"顶边"**：竖屏顶边改挂**状态栏底边**
  *      （[portraitVideoTopPx]）、顶栏改成浮在画面之上。"底边 = 列表槽顶边"那半条**没变**。
@@ -604,7 +604,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          *
          * 为什么要有它：竖屏版式是"上面视频、下面列表"分一块固定的纵向空间，**两边抢的是同一块**：
          * ```
-         * 页高 = 顶栏 + 视频带 + 列表 + 底栏
+         * 页高 = 顶栏 + 视频带 + 列表 + 底栏        ← 第四批口径的记账式（★2026-10-01 起竖屏
+         *                                              视频顶边改挂状态栏 inset、顶栏与列表都成了浮层，
+         *                                              这里只作"两边抢同一块纵向空间"的历史说明）
          * ```
          * · 只给 96dp（vc209）→ 列表约 4 行，用户嫌小；
          * · 给到 180dp → 9:16 画面掉回 ~77% 屏宽 ≈ 逼近改动前的 0.62 时代，用户嫌画面小。
@@ -1097,7 +1099,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /**
      * 竖屏视频带**当前生效**的顶边（页内 px，-1 = 还没排过）。
-     * 顶栏高度一变（状态栏临时划出/标题换行）就拿它比对，只在真的变了时重排，防自激。
+     *
+     * ★2026-10-01：原来顶栏那只布局监听拿它做"变了才重排"的比对（防自激）；竖屏视频顶边改挂
+     *   状态栏 inset 之后那条比对**已删**（见 [installPageLayoutWatchers] 里顶栏那段注释），
+     *   本字段现在**只进 `stage.video` 诊断日志**（看"这一帧顶边到底排到哪了"）。
      */
     private var appliedVideoBandTop = -1
 
@@ -2702,7 +2707,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ```
      *
      * ## 为什么"横屏 = 全屏"
-     * 本页恒为沉浸式全屏，横竖屏就是它的**两套版式**（竖屏 = 顶栏之下一条视频带 + 下面整块弹幕列表，
+     * 本页恒为沉浸式全屏，横竖屏就是它的**两套版式**（竖屏 = **状态栏之下**一条视频带 +
+     * 下面整块弹幕列表（浮层；2026-10-01 前顶边在顶栏之下），
      * 横屏 = 整屏视频，见类注释"竖屏版式"那一段），所以"退出全屏"就落成"把方向切回竖屏"。
      * 判据用 [isPageLandscape]（**真实布局尺寸**，不是 `Configuration.orientation`）——
      * 与页面版式、弹幕宿主 `portrait = h > w` 同源，分屏/折叠屏/小窗下也不会判错。
@@ -5357,7 +5363,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ```
      * 而重下发的路径**只有两条**：`onVideoSizeChanged`（比例）与 [onConfigurationChanged]（配置）。
      * **"版式几何变了"那条路没有** —— 本页的版式由 [applyVideoStageLayout] / [measurePortraitStage]
-     * 算出来（顶栏高度、底栏行数、键盘 insets、竖屏带子的 62% 封顶都会改它），
+     * 算出来（状态栏/顶栏 insets、底栏行数、键盘 insets、竖屏带子的 reserve 上限都会改它），
      * 这些变化**不经过上面两条回调**。于是系统手上那份 `setSourceRectHint` 会一直停在旧值：
      * 进/出小窗的过渡动画会从"旧画面位置"开始，而系统按旧矩形算出来的缩放/裁切与此刻真实的
      * 画面矩形对不上 —— 表现出来就是"小窗里画面不占满、有黑边"。
@@ -5633,7 +5639,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
             maxLines = 1
             // ★本轮起它**只在异常/过渡时可见**（正常播放时 `GONE`，顶栏只剩返回 + 标题，
             //   见 [renderStatus]）；异常文案仍然可能很长（播放失败原因 / 追流提示），
-            //   所以照旧"宁可截断也不要换行"——顶栏高度必须稳定（它决定竖屏视频带的顶边）。
+            //   所以照旧"宁可截断也不要换行"——顶栏高度要稳定（★原来理由是"它决定竖屏视频带的顶边"；
+            //   2026-10-01 起视频顶边改挂状态栏 inset，这条已不成立，稳定性只为顶栏自己不抽动）。
             ellipsize = TextUtils.TruncateAt.END
             setShadowLayer(4f, 0f, 0f, Color.BLACK)
             text = "准备中…"
@@ -5906,7 +5913,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         rebuildBottomBar()
         // ★把主题色刷到控件上（按钮底色/状态文字/进度条/封面占位）
         applyThemeColors()
-        // ★竖屏版式（视频带落在顶栏之下 + 给弹幕列表留出下面那块）——必须在底栏排好之后调：
+        // ★竖屏版式（视频带落在**状态栏之下** + 给弹幕列表留出下面那块）——必须在底栏排好之后调：
         //   列表区的底边就是"底栏顶"，底栏没分行完就量不到那个位置。
         applyVideoStageLayout()
         // 初始状态：还没起播 → "播放"（真正的状态随后由 delegate 的 PLAYING/PAUSED 回调刷新）
@@ -8582,7 +8589,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
          * ## 矩形从哪来（"竖屏版式的唯一真相"）
          * 直接读 [videoContainer]（`AspectRatioFrameLayout`）**当前的真实几何**，换算到屏幕坐标：
          * ```
-         * 竖屏：videoContainer = 顶栏之下的视频带，高 = min(宽 ÷ 视频比例, 可用高 − 列表 reserve)
+         * 竖屏：videoContainer = **状态栏之下**的视频带（2026-10-01 前是顶栏之下），
+         *      高 = min(宽 ÷ 视频比例, 可用高 − 列表 reserve)
          *       —— 这与 [measurePortraitStage] 发布出去的 [portraitVideoRect] **是同一个矩形**
          *          （那里面写的就是 `Rect(videoContainer.left, top, right, bottom)`），
          *          也就是弹幕列表要贴的那个"画面底边"的来源；这里直接读容器，不多一份镜像。
@@ -8814,11 +8822,15 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
     // 第三批：竖屏下把播放区域往靠上一点（参考 B 站官方 App 的竖屏直播页：上面视频，
     // 下面整块是弹幕/聊天区）。
     // 第四批修正：画面顶得太高，把状态栏和"点一下显示几秒"的顶栏都压住了 ——
-    // **视频带必须落在状态栏 + 顶栏之下**。
+    // 当时定的是"**视频带必须落在状态栏 + 顶栏之下**"。
+    // ★★2026-10-01 用户拍板**推翻这一条**（"让直播画面全屏到上面，不要顶着状态栏就可以了……
+    //  让那个顶栏悬浮在画面之上"）：现在只要求"**落在状态栏之下**"，顶栏改成浮在画面上的那一层
+    //  —— 别再照第四批那句把顶栏高度加回视频顶边（那会把状态栏安全区又加回来）。
     //
-    // 落地成"两套版式、一个开关"，**视频带的顶边由顶栏说话**：
+    // 落地成"两套版式、一个开关"，**视频带的顶边由状态栏 inset 说话**（[portraitVideoTopPx]）：
     // ```
-    // 竖屏：视频 = 顶栏之下的那条带（顶边 = 状态栏内边距 + 顶栏高，高度 = min(宽 ÷ 比例, 可用高 − 列表 reserve)）
+    // 竖屏：视频 = 状态栏之下的那条带（顶边 = 状态栏内边距，**不含顶栏**，
+    //                                    高度 = min(宽 ÷ 比例, 可用高 − 列表 reserve)）
     //       ├─ 底边 = 列表槽 [danmakuListSlot] 的顶边（同一时刻同一个值，中间不留黑缝）
     //       ├─ 下面全部留给弹幕列表：矩形由 [portraitDanmakuListBounds] 发布给宿主
     //       └─ 底栏照旧贴底（列表区的底边就是底栏顶，所以面板不会压住按钮）
@@ -8839,12 +8851,11 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * = 顶栏底边（[topBar].bottom）
      * = 状态栏内边距 + 顶栏内容高     ← 顶栏那份 OnApplyWindowInsetsListener 已经把 bars.top 加进自己的 padding
      * ```
-     * 所以"放在状态栏和顶栏下面"这一条用**一个值**就表达完了，不用分别去要两段的 insets。
-     *
-     * ★顶栏是**浮层**（GONE 之后 4 秒才随单击回来），但这条**不跟着它显隐变**：
-     *   · 这正是那条要求：视频**始终**在顶栏之下，不被它压住；
-     *   · 依据与宿主"底栏留白"那条完全一样：被 GONE 的 View 不会重新 layout，
-     *     `top/bottom` 保留**最后一次显示时的位置** —— 拿到的就是稳定的"顶栏占位"。
+     * ★★2026-10-01：**竖屏视频的顶边已不再取这个值**（改用状态栏 inset，见 [portraitVideoTopPx]）——
+     *   第四批"放在状态栏和顶栏下面"那条要求被用户推翻。本函数现在的两个用途见上面那段 KDoc
+     *   （兜底 + 列表目标的可用高基准）。
+     * ★它**不跟着顶栏显隐变**（依据与宿主"底栏留白"那条一样）：被 GONE 的 View 不会重新 layout，
+     *   `top/bottom` 保留**最后一次显示时的位置** —— 所以即使顶栏自动隐藏，这个值也是稳定的。
      * ★顶栏还没量出来（首帧之前）返回 0：视频带先贴顶，紧接着 [installPageLayoutWatchers] 里
      *   挂在顶栏上的那只监听器会在它量出来之后把带子挪下来（同一帧内，页面还是黑的，看不见闪）。
      */
@@ -8874,7 +8885,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * 竖屏视频带**下方要预留的总高**（px）—— 新版带高的唯一输入。
      *
      * ```
-     * 可用高   = 页高 − 视频带顶边（= 顶栏底边）      ← 与 onMeasure 的 containerHeight 同口径
+     * 可用高   = 页高 − 视频带顶边                    ← 与 onMeasure 的 containerHeight 同口径
+     *           （竖屏 = [portraitVideoTopPx] 的**状态栏底边**；横屏 / PiP = 0）
      * 底栏占位 = 页高 − 底栏顶边
      * 列表目标 = max(可用高 × [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION],
      *               [PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP])
@@ -8933,7 +8945,10 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
 
     /**
      * 竖屏列表的**目标高**（px）= max(可用高 × [PORTRAIT_LIST_TARGET_HEIGHT_FRACTION],
-     * [PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP])，其中可用高 = 页高 − 视频带顶边（= 顶栏底边）。
+     * [PORTRAIT_LIST_TARGET_MIN_HEIGHT_DP])，其中可用高 = 页高 − **传入的那个顶边**：
+     * 带子口径（[portraitBandReservePx]）传 [portraitVideoTopPx]（状态栏底边）；
+     * 列表矩形口径（[measurePortraitStage] 的 cover 支）**刻意**传 [videoBandTopPx]（顶栏底边），
+     * 理由见那一行注释（让列表矩形逐像素不变）。
      *
      * ★抽出来只有一个理由：**这个数现在有两个用法** —— 带子模式下它是 reserve 里的那一份
      *   （[portraitBandReservePx]）；铺满模式下它是"列表从底栏顶边往上要多少"
@@ -8988,7 +9003,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      * ## ★★第八批：**PiP 里必须"画面铺满窗口"**（用户实测第 4 条的修法，根因证据在这段里）
      *
      * ```
-     * 不在 PiP：竖屏 + **横屏流** = 顶栏之下的一条带（高 = min(宽÷比例, 可用高 − 列表 reserve)，顶边 = 顶栏底边）
+     * 不在 PiP：竖屏 + **横屏流** = **状态栏之下**的一条带
+     *          （高 = min(宽÷比例, 可用高 − 列表 reserve)，顶边 = [portraitVideoTopPx] 状态栏底边）
      *          竖屏 + **竖屏流** = 容器铺满可用区 + 画面 **cover**（2026-10-01 用户拍板①：填满、不留黑边）
      *          横屏 = 容器铺满整页、画面按比例居中
      * 在  PiP：**一律走"铺满"这一支**（band = 0、topMargin = 0）—— 与小窗的形状无关
@@ -9001,8 +9017,9 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *    `isInPictureInPictureMode` 时**直接 return**（那是有意的：小窗的尺寸不代表全屏版式），
      *    而 [applyVideoStageLayout] 的唯一调用点就是 [syncPageLayoutToRealSize]（+ [buildUi]）；
      * ③ 于是竖屏进小窗时，`videoContainer.bandMinHeightFraction` 还是 0.62、
-     *    `topMargin` 还是全屏时顶栏的高度（`topBar` 已经 GONE，`top()` 停在最后一次布局的位置）
-     *    —— 小窗里画面被压成"小窗高 - 顶栏高"的 62%，还要再按比例居中，四周全是黑边；
+     *    `topMargin` 还是全屏时那个值（当时 = 顶栏高；2026-10-01 起 = 状态栏 inset。`topBar` 已经 GONE，
+     *    `top()` 停在最后一次布局的位置）—— 小窗里画面被压成"小窗高 − 这个 topMargin"的 62%，
+     *    还要再按比例居中，四周全是黑边；
      * ④ 竖屏**主播（9:16）**更明显：小窗本身是竖的（窗口比例 = 视频比例），
      *    而带子还在（按"下限口径"摆成一条）→ 画面只有小窗中间一小块，四面黑边。
      * ⇒ 修法就是这一段：**在 PiP 里关掉带子、顶边归零**，容器铺满小窗；此时
@@ -9025,7 +9042,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         //   填满、不拉伸，超出容器的部分由容器裁掉（这块屏 9:19.9 装 9:16 的流 ⇒ 左右各裁 ~9.4%）。
         //   横屏流、以及**比例还没到的起播瞬间**一个字节都不动 —— 用户："那些横屏的流就不用动，那个非常好"。
         val cover = portrait && isPortraitStream()
-        // ① 视频：竖屏 + 横屏流 = 顶栏之下的一条带（高度由 [AspectRatioFrameLayout] 按比例量）；
+        // ① 视频：竖屏 + 横屏流 = **状态栏之下**的一条带（高度由 [AspectRatioFrameLayout] 按比例量）；
         //          横屏 / PiP = 0f = 关掉带子，容器铺满整页（横屏与改动前逐字一致）；
         //          竖屏流 = 0f + cover = 容器同样铺满可用区，只是画面按"填满"量（不再留黑边）。
         val band = if (portrait && !cover) PORTRAIT_VIDEO_MIN_HEIGHT_FRACTION else 0f
@@ -9041,7 +9058,8 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
         if (lp is FrameLayout.LayoutParams &&
             (lp.gravity != Gravity.TOP || lp.topMargin != bandTop)
         ) {
-            // 贴顶 + 顶边下移到顶栏之下。横屏也显式写 TOP：FrameLayout 的默认 gravity 在纵向本来
+            // 贴顶 + 顶边下移到**状态栏之下**（2026-10-01 前是"顶栏之下"）。
+            // 横屏也显式写 TOP：FrameLayout 的默认 gravity 在纵向本来
             // 就是"贴顶"，显式写出来只是把这条不变量固定住 —— 横向因为宽度是 MATCH_PARENT 而不受影响。
             // ★topMargin 不只是"挪一下"：FrameLayout 给 MATCH_PARENT 子 View 的高度测量里会**扣掉
             //   margin**（`getChildMeasureSpec(parentHeight, padding + margins, MATCH_PARENT)`），
@@ -9147,7 +9165,7 @@ class LivePlayerActivity : AppCompatActivity(), LivePortraitStage {
      *   "视频带与下方弹幕列表之间不要留黑缝"的落点，也是与宿主约定好的唯一契约
      *   （宿主 `bindPortraitListArea(slot = …)` 就是照这块矩形摆面板）。
      *   为了让它在**任何时刻**都成立，[installPageLayoutWatchers] 还给 [videoContainer]
-     *   挂了一只"矩形一变就重新量"的监听器（比例到达、顶栏高度变化、底栏换行都会走到）。
+     *   挂了一只"矩形一变就重新量"的监听器（比例到达、视频顶边变化、底栏换行都会走到）。
      *   ★★2026-10-01（用户拍板①）**唯一例外**：**竖屏流铺满**时画面铺到页底，那条"底边"不存在了 ⇒
      *   列表顶改由"底栏顶边往上要一块"给出（列表目标 + 底栏占位，见下面的 `cover` 分支）。
      *   除这一支外，整块逻辑与坐标契约**一个字没变**。
