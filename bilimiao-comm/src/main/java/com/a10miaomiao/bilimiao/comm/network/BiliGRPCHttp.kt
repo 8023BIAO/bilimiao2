@@ -201,8 +201,10 @@ class BiliGRPCHttp<ReqT : Message, RespT : Message>(
             "httpCode" to res.code,
             "grpcStatus" to status,
             "grpcMessage" to message,
-            "grpcStatusDetails" to details,
-            "trailers" to res.trailers.names().joinToString(","),
+            // details-bin 很长（base64），拼成单个字符串：省掉一次 Pair 的类型推断
+            "grpcStatusDetails=$details",
+            // ★ OkHttp 5 的 trailers 是**函数**（trailers(): Headers），不是属性
+            "trailers" to res.trailers().names().joinToString(","),
         )
         return GrpcStatusException(
             grpcStatus = status,
