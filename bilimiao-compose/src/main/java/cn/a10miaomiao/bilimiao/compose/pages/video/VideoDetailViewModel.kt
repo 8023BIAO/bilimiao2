@@ -283,7 +283,7 @@ class VideoDetailViewModel(
     /**
      * 番剧兜底：`View/View` 说"这条内容不存在"（-404）时，用 web 接口换成番剧页。
      *
-     * 依据（2026-10-01 取证，见 `/root/test/evidence/grpc-header-truncated.md`）：
+     * 依据（2026-10-01 取证，内部文档《gRPC 空响应取证报告》）：
      *   · 这类稿件的 web `x/web-interface/view` 会给出 `redirect_url`
      *     （形如 `https://www.bilibili.com/bangumi/play/ep5578285`）；
      *   · 而 UGC 的 `View/View` gRPC 对它们一律回 HTTP 200 + **空 body** +
