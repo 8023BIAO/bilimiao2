@@ -248,16 +248,25 @@ private fun VideoDetailPageContent(
     //   （ReplyItemBox）⇒ 实际被门控的是：评论正文 + 二级回复预览 + 二级评论详情页。
     //   ★**不覆盖** AI 总结/分段大纲（VideoInfoBox 是 `Text + clickable { onSeekTime() }` **直连**
     //   LocalOnSeekTime，不走 annotatedText），也不覆盖视频简介；别以为 provide 了就都管住了。
-    //   取 arc.duration = **全片时长**（多分P 视频下是各分P 之和 ⇒ 保守上界：B 站评论按 aid 共享、
-    //   各分P 同一评论区，评论里的秒数未必指当前这P；宁可多放行一条，也不要把合法评论误判成"超长"）。
-    //   来源：线上 view 接口实测（单样本 BV14Baa6JENd：4 个分P 215+221+221+221 ⇒ duration=878），非文档结论。
-    //   arc.duration <= 0（接口缺数据）→ 回落 Int.MAX_VALUE = 不设上限，避免整屏时间戳被误禁。
+    //   ★取"**当前正在播的那一P**"的时长（与 PiliPlus 同口径：它拿播放地址响应的 totalTimeMilli）：
+    //   多分P 视频里 arc.duration 是各分P 之和，用它当上限会把"比当前这P 长、但没超全片"的时间戳
+    //   也放过去（BV14Baa6JENd：4 个分P 215+221+221+221 ⇒ 全片 878，播第 1P 时评论"10:30"竟仍可点）。
+    //   这种时间戳点下去也只能跳到当前P 的片尾，判定成"超长不可点"才是诚实的。
+    //   currentPartDuration 靠 playerState.cid 在 detailData.pages 里匹配（setPlayerSource 每次起播都写 cid）。
+    //   ★匹配不到（还没起播 / 同一个详情页在放别的视频）→ 回落 arc.duration；两者都拿不到 → 不设上限，
+    //   避免接口缺数据时整屏时间戳被误禁。
     //   ★只在**主内容**那层 provide：左栏（双栏/横屏的 VideoDetailContent）里没有任何 annotatedText
     //   产出 seek 链接的路径，多给一处是空转，反而会让后来人误以为左栏也受门控。
-    val seekMaxSeconds = if (arcData.duration > 0L) {
-        arcData.duration.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-    } else {
-        Int.MAX_VALUE
+    val currentPartDuration = remember(videoPages, playerState.cid) {
+        videoPages.asSequence()
+            .mapNotNull { it.page }
+            .firstOrNull { it.cid.toString() == playerState.cid }
+            ?.duration ?: 0L
+    }
+    val seekMaxSeconds = when {
+        currentPartDuration > 0L -> currentPartDuration.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        arcData.duration > 0L -> arcData.duration.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        else -> Int.MAX_VALUE
     }
     DoubleColumnAutofitLayout(
         modifier = Modifier
