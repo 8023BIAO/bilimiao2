@@ -11,7 +11,8 @@ data class DownloadInfo(
     var is_completed: Boolean,
     val total_bytes: Long,
     val downloaded_bytes: Long,
-    val title: String,
+    /** 卡片标题。var：合集分组的标题要在合并过程中被"合集名"改写（见 DownloadListPage.filterDownloadList） */
+    var title: String,
     val cover: String,
     val id: Long,
     val cid: Long,

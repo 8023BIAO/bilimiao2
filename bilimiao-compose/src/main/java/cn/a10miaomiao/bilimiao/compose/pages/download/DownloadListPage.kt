@@ -173,6 +173,12 @@ internal class DownloadListPageViewModel(
                 if (existing.is_completed && !downloadItem.is_completed) {
                     existing.is_completed = false
                 }
+                // ★合集名兜底（2026-10-02）：只要这一组里**任何一条**带 season_title，卡片就用它。
+                //   不能只靠"建组时那条恰好带了"——同一组里可能混着改动前下载的旧条目（那时还没写这个字段），
+                //   而建组顺序取决于读取顺序，会出现"详情页表头是合集名、外面卡片却是某一集"的不一致。
+                biliEntry.seasonTitle?.let { name ->
+                    if (name != existing.title) existing.title = name
+                }
                 existing.items.add(downloadItem)
             } else {
                 result.add(
