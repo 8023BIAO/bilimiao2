@@ -56,8 +56,9 @@ internal fun TextBox(
     status: TextBoxStatus = TextBoxStatus.Enable
 ) {
     // 选中态（起 / 止 / 区间内）统一用**主题强调色**（primaryContainer）。
-    // 原来用的是 tertiaryContainer——本主题的 tertiary 是偏粉的强调色，全仓只有时光姬这两处在用，
+    // 原来用的是 tertiaryContainer——本主题的 tertiary 是偏粉的强调色，压在"选中"这个语义上
     // 看着像"没跟主题"（用户 2026-10-02 反馈"选中间那个一直是粉色固定的"）。
+    // （tertiaryContainer 全仓另有几处，但都是别的语义：CDN 延迟色阶 / 调色板预览 / 测试页，别去动。）
     val containerColor = MaterialTheme.colorScheme.primaryContainer
     val onContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
     // 注意：区间内（Middle）的文字也是压在 primaryContainer 上的，必须一起换成 onPrimaryContainer，

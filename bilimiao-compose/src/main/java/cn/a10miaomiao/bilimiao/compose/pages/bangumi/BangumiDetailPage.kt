@@ -1117,7 +1117,8 @@ private fun BangumiDetailPageContent(
                             //   剧集实体（entity/bangumi/EpisodeInfo）没有 duration 字段，PlayerStore.State
                             //   也没有；为它单独拉一次接口不划算。所以这里不 provide LocalSeekMaxSeconds，
                             //   走默认值（不设上限），番剧评论区的行为与改动前完全一致。
-                            //   普通视频页的接法见 pages/video/content/VideoReplyContent.kt。
+                            //   普通视频页的接法见 pages/video/VideoDetailPage.kt：:257 附近算上限、
+                            //   :325 附近在主内容层 provide（左栏不 provide——那里不产出空降链接）。
                             CompositionLocalProvider(LocalOnSeekTime provides seekCallback) {
                                 replyViewModel?.let { vm ->
                                 val currentReply by vm.currentReply.collectAsStateWithLifecycle()
