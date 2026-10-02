@@ -300,7 +300,7 @@ private fun VideoSettingPageContent(
                     Text("$it%")
                 },
                 summary = {
-                    Text("调小更灵敏，调大更迟钝")
+                    Text("调小更灵敏，调大更迟钝；点播与直播共用")
                 },
             )
             // 亮度手势滑动距离：整条亮度 = 屏高的几倍（0.5×~6.0×，步进 0.5×，默认 3.0× = 今天的手感）。
@@ -317,7 +317,7 @@ private fun VideoSettingPageContent(
                     Text("${it / 10f}×")
                 },
                 summary = {
-                    Text("调小更灵敏，调大更迟钝")
+                    Text("调小更灵敏，调大更迟钝；点播与直播共用")
                 },
             )
             // 定时关闭：原来只在设置首页一级挂着，用户在播放器点齿轮进来找不到它（用户反馈）

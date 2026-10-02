@@ -22,16 +22,22 @@ internal fun TextBox(
     active: Boolean,
     onClick: () -> Unit,
 ) {
+    // 选中月份与「自定义范围」那套保持一致：用主题强调色 primaryContainer，
+    // 不用 tertiaryContainer（本主题的 tertiary 偏粉，看着像没跟主题）。
     Surface(
         color = if (active) {
-            MaterialTheme.colorScheme.tertiaryContainer
+            MaterialTheme.colorScheme.primaryContainer
         } else {
             Color.Transparent
         },
         shape = RoundedCornerShape(5.dp)
     ) {
         Text(
-            color = MaterialTheme.colorScheme.outline,
+            color = if (active) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.outline
+            },
             text = text,
             modifier = Modifier
                 .clickable(onClick = onClick)

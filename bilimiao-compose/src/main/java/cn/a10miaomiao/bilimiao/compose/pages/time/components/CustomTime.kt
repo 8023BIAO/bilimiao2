@@ -55,12 +55,23 @@ internal fun TextBox(
     onClick: (() -> Unit)? = null,
     status: TextBoxStatus = TextBoxStatus.Enable
 ) {
+    // 选中态（起 / 止 / 区间内）统一用**主题强调色**（primaryContainer）。
+    // 原来用的是 tertiaryContainer——本主题的 tertiary 是偏粉的强调色，全仓只有时光姬这两处在用，
+    // 看着像"没跟主题"（用户 2026-10-02 反馈"选中间那个一直是粉色固定的"）。
+    val containerColor = MaterialTheme.colorScheme.primaryContainer
+    val onContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
+    // 注意：区间内（Middle）的文字也是压在 primaryContainer 上的，必须一起换成 onPrimaryContainer，
+    // 否则会拿星期/次要文字色去压强调色底 → 对比度不够。
+    val selected = status == TextBoxStatus.Start ||
+        status == TextBoxStatus.End ||
+        status == TextBoxStatus.Middle
+
     Surface(
         modifier = if (onClick != null) {
             modifier.clickable(onClick = onClick)
         } else modifier,
         color = if (status == TextBoxStatus.Start || status == TextBoxStatus.End) {
-            MaterialTheme.colorScheme.tertiaryContainer
+            containerColor
         } else Color.Transparent,
         shape = RoundedCornerShape(5.dp),
     ) {
@@ -71,7 +82,7 @@ internal fun TextBox(
                 .height(height)
                 .let {
                       if (status == TextBoxStatus.Middle) {
-                          it.background(MaterialTheme.colorScheme.tertiaryContainer)
+                          it.background(containerColor)
                       } else it
                 },
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -79,18 +90,18 @@ internal fun TextBox(
         ) {
             Text(
                 text = text,
-                color = textColor
+                color = if (selected) onContainerColor else textColor
             )
             if (status == TextBoxStatus.Start) {
                 Text(
                     text = "起",
-                    color = textColor,
+                    color = onContainerColor,
                     fontSize = 10.sp,
                 )
             } else if (status == TextBoxStatus.End) {
                 Text(
                     text = "止",
-                    color = textColor,
+                    color = onContainerColor,
                     fontSize = 10.sp,
                 )
             }
