@@ -170,7 +170,7 @@ private fun UserSpacePageLoadingContent(
                 .fillMaxSize()
                 .padding(innerPadding)
         )
-    } else if (loading) {
+    } else {
         // ★原来这里什么都不画：loading 参数收了却没用过 ⇒ 失败为 null 的这段时间整页空白
         //   （用户报"点进某人的空间是白的"）。补一个居中转圈。
         Box(
