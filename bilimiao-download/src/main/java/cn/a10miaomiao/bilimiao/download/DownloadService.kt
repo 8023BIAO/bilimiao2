@@ -99,6 +99,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     private val downloadNotify by lazy { DownloadNotify(this) }
     private var downloadManager: DownloadManager? = null
     private var audioDownloadManager: DownloadManager? = null
+    // @Volatile：写在 IO 协程里、读在 manager 回调（下载线程）与主线程
+    @Volatile
     private var currentTaskId = 1L
     private var idCounter = 1L
 
@@ -107,6 +109,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
 
         override fun onTaskComplete(info: CurrentDownloadInfo) {
+            // ★过期任务的回调必须丢弃：音频 manager 被 cancel 后仍可能回调，写进来的会是上一个任务的状态
+            if (info.taskId != currentTaskId) return
             if (downloadManager?.downloadInfo?.status == CurrentDownloadInfo.STATUS_COMPLETED) {
                 downloadNotify.showCompletedStatusNotify(info)
                 completeDownload()
@@ -114,6 +118,11 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
 
         override fun onTaskError(info: CurrentDownloadInfo, error: Throwable) {
+            // ★同上：不是当前任务就直接丢弃（否则会把新任务标成失败并把它停掉）
+            if (info.taskId != currentTaskId) {
+                logToFile("忽略过期音频任务回调: taskId=${info.taskId} current=$currentTaskId")
+                return
+            }
             // 音频下载失败：终止整个任务并给出失败提示（此前空实现导致任务永久卡在等待音频）
             logToFile("audio download FAILED: ${error.message}")
             curDownload.value = info.copy(status = CurrentDownloadInfo.STATUS_FAIL_DOWNLOAD)
@@ -892,6 +901,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     }
 
     override fun onTaskRunning(info: CurrentDownloadInfo) {
+        // ★过期任务（已被新任务 cancel）的进度回调不许写进当前任务的状态
+        if (info.taskId != currentTaskId) return
         if (info.progress == 0L && info.size != 0L) {
             (curMediaFileInfo as BiliDownloadMediaFileInfo.Type2)?.let {
                 if (it.video[0].size == 0L && info.size != 0L) {
@@ -924,6 +935,11 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     }
 
     override fun onTaskComplete(info: CurrentDownloadInfo) {
+        // ★过期任务不许把当前任务"完成"掉
+        if (info.taskId != currentTaskId) {
+            logToFile("忽略过期任务的完成回调: taskId=${info.taskId} current=$currentTaskId")
+            return
+        }
         // 当 Content-Length 未知时 info.size = -1 (chunked encoding)
         // size > 0 且 progress < size 才是真的未完成
         if (info.size > 0 && info.progress < info.size) {
@@ -974,6 +990,11 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     }
 
     override fun onTaskError(info: CurrentDownloadInfo, error: Throwable) {
+        // ★过期任务的错误不许把当前任务标成失败并停掉（用户会看到"下完又出错"这种怪通知）
+        if (info.taskId != currentTaskId) {
+            logToFile("忽略过期任务的错误回调: taskId=${info.taskId} current=$currentTaskId err=${error.message}")
+            return
+        }
         error.printStackTrace()
         curDownload.value = info.copy(
             status = CurrentDownloadInfo.STATUS_FAIL_DOWNLOAD

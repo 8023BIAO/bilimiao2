@@ -286,7 +286,12 @@ internal fun DownloadDetailPageContent(
         ) {
             item {
                 downloadInfo?.let {
-                    DownloadListItem(curDownload, it, queued = viewModel.isQueued(it.dir_path), onClick = {})
+                    DownloadListItem(
+                        curDownload = curDownload,
+                        item = it,
+                        queued = remember(waitQueueVersion, curDownload) { viewModel.isQueued(it.dir_path) },
+                        onClick = {},
+                    )
                 }
             }
             items(

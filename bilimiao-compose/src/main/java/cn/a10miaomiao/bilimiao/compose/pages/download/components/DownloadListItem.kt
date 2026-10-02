@@ -117,8 +117,8 @@ fun DownloadListItem(
 @Composable
 fun DownloadListItemPreview() {
     DownloadListItem(
-        null,
-        DownloadInfo("", 1,
+        curDownload = null,
+        item = DownloadInfo("", 1,
             has_dash_audio = true,
             is_completed = true,
             total_bytes = 0L,
@@ -130,6 +130,6 @@ fun DownloadListItemPreview() {
             type = DownloadType.VIDEO,
             items = mutableListOf()
         ),
-        {}
+        onClick = {},
     )
 }
