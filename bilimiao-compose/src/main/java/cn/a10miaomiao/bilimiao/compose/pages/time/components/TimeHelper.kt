@@ -60,8 +60,10 @@ internal fun getMonthDayNum(y: Int, m: Int): Int {
 /**
  * 日历要画几行（每行 7 格）。
  *
- * 行数 = ⌈(月首列偏移 + 当月天数) / 7⌉。月首正好是周一（偏移 0）且该月 31 天时是 5 行，
- * 偏移 0 且正好 28 天的 2 月是 4 行 —— 边界上不能多画一整行空白（见 TimeHelperTest）。
+ * 行数 = ⌈(月首列偏移 + 当月天数) / 7⌉，**与原来 `while (num < total)` 的写法逐月等价**
+ * （2009–2030 共 264 个月对拍 0 差异，见 `evidence/verify-timepicker-abc.md`）；
+ * 抽出来只为让 CustomTime 用 `for (row in 0 until rowCount)`，读起来更直白。
+ * 月首周一 + 31 天 = 5 行、月首周一 + 28 天 = 4 行 —— 整除时也不多画一整行空白。
  */
 internal fun getCalendarRowCount(y: Int, m: Int): Int {
     return (getWeek(y, m, 1) + getMonthDayNum(y, m) + 6) / 7

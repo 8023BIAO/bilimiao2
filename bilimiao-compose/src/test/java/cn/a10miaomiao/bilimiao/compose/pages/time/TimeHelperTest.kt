@@ -111,13 +111,15 @@ class TimeHelperTest {
     }
 
     @Test
-    fun calendarRowCount_hasNoBlankLastRow() {
-        // 月首正好是周一 + 该月 31 天：正好 5 行（边界上不许多画一整行空白）
+    fun calendarRowCount_coversEveryDayWithNoBlankRow() {
+        // 注意：这是**等价重构的看护测试**，不是"修了 bug"——
+        // 老的 `while (num < total)` 与新公式 2009-2030 逐月 0 差异（见 verify-timepicker-abc.md）。
+        // 月首周一 + 31 天：正好 5 行（5×7=35 格，末行是 27-31 号，不多画空白行）
         assertEquals(0, getWeek(2024, 1, 1))
         assertEquals(5, getCalendarRowCount(2024, 1))
-        // 月首周一 + 28 天（平年 2 月）：正好 4 行
+        // 月首周一 + 28 天：正好 4 行
         assertEquals(4, getCalendarRowCount(2027, 2))
-        // 月首周日 + 30 天：月末那天单独占最后一行 → 6 行
+        // 月首周日 + 30 天：首行只 1 格，月末那天单独占最后一行 → 6 行
         assertEquals(6, getCalendarRowCount(2024, 9))
     }
 
