@@ -34,5 +34,7 @@ data class DownloadItemInfo(
     val index_title: String,
     val cid: Long,
     val epid: Long,
-    val page: Int = 0, // 合集分P序号
+    val page: Int = 0, // 分P序号（多P 下载时是第几P）
+    /** 合集内序号（0 起；合集下载才有；番剧用 ep.sort_index）。老的 entry.json 没有 = null */
+    val seasonIndex: Int? = null,
 )

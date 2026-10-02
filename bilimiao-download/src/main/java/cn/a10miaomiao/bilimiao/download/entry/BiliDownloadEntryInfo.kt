@@ -38,18 +38,38 @@ data class BiliDownloadEntryInfo(
             return source?.cid ?: page_data?.cid ?: 0
         }
 
-    val name: String
+    /**
+     * **这一条该显示什么名字** —— 下载列表/详情页/通知栏统一走它。
+     *
+     * 为什么需要它：B 站接口的 `pages[].part` 是**上传者填的分P标题**，很多 UP 主压根没改，
+     * 服务端就把原始上传文件名回给我们（实测两种形态都出现过：`lv_0_20260907165529` 这种
+     * 带前缀的，和 `1790770453216` 这种纯数字的）。多P 视频里 `part` 是有信息量的分P名，
+     * 但单P/合集场景下它就是垃圾名 ⇒ 取名字必须按"这条是从哪下的"来分：
+     *   · 番剧（ep 有值）→ 集数 + 长标题（保持原行为）
+     *   · 有 [PageInfo.display_title]（2026-10-02 起新下载会写）→ 直接用它（下载时就定好的真名）
+     *   · 否则回落 `part` → `download_subtitle` → `title`（老条目不崩、不显示 unknown）
+     */
+    val showTitle: String
         get() {
             val e = ep
             if (e != null) {
-                return title + e.index_title
+                return e.index + e.index_title
             }
             val p = page_data
             if (p != null) {
-                return title + p.part
+                p.display_title?.takeIf { it.isNotBlank() }?.let { return it }
+                p.part?.takeIf { it.isNotBlank() }?.let { return it }
+                p.download_subtitle?.takeIf { it.isNotBlank() }?.let { return it }
             }
             return title
         }
+
+    /** 合集中的序号（0 起；仅合集下载写。老的 entry.json 没有 = null） */
+    val seasonIndex: Int?
+        get() = page_data?.season_index ?: ep?.sort_index
+
+    val name: String
+        get() = showTitle
 
     val videoDirName: String
         get() = type_tag ?: video_quality.toString()
@@ -68,7 +88,14 @@ data class BiliDownloadEntryInfo(
         val height: Int = 0,
         val rotate: Int = 0,
         val download_title: String? = null,
-        val download_subtitle: String? = null
+        val download_subtitle: String? = null,
+        /**
+         * **这一条要显示的真名**（2026-10-02 起写入；老 entry.json 没有 = null，走 [showTitle] 的回落链）。
+         * 写入规则：合集 → 剧集真名；多P → 该分P名；单P → 视频真标题。
+         */
+        val display_title: String? = null,
+        /** 合集内序号（0 起）。老 entry.json 没有 = null */
+        val season_index: Int? = null,
     )
 
     // 番剧源信息

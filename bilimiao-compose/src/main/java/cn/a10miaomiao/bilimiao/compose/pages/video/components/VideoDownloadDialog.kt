@@ -69,6 +69,7 @@ import android.content.Context
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import kotlinx.coroutines.withContext
 import java.lang.annotation.Inherited
+import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadSearchBox
 
 @Stable
 class VideoDownloadDialogState(
@@ -154,6 +155,9 @@ class VideoDownloadDialogState(
         // 注意只在"换了视频"时清：同一个视频误触遮罩关掉再打开，勾选要保留
         if (videoBvid != bvid) {
             _checkedMap.clear()
+            // 换了视频，搜索词也归零（否则新列表一进来就是空的，像坏了）
+            pageKeyword.value = ""
+            seasonKeyword.value = ""
         }
         videoBvid = bvid
         _tabIndex.value = 0
@@ -268,24 +272,18 @@ class VideoDownloadDialogState(
             e.printStackTrace()
         }
     }
-    fun checkedChange(cid: Long, index: Int) {
+    /**
+     * 勾选/取消。勾选态按 `cid` 存（不按下标）⇒ 搜索过滤前后勾选都不丢。
+     * 下标（用于按分P顺序下载）这里自己按**完整分P列表**算：加了搜索后渲染的是"可见项"，
+     * 由调用方传下标必然错位。
+     */
+    fun checkedChange(cid: Long) {
         if (checkedMap.contains(cid)) {
             _checkedMap.remove(cid)
         } else {
-            _checkedMap[cid] = index
+            val idx = list.indexOfFirst { it.cid == cid }
+            _checkedMap[cid] = if (idx >= 0) idx else 0
         }
-    }
-
-    fun selectAll() {
-        list.forEachIndexed { index, page ->
-            if (!downloadedSet.contains(page.cid)) {
-                _checkedMap[page.cid] = index
-            }
-        }
-    }
-
-    fun deselectAll() {
-        _checkedMap.clear()
     }
 
     val allSelectable: Boolean get() = list.any { !downloadedSet.contains(it.cid) }
@@ -299,25 +297,69 @@ class VideoDownloadDialogState(
         _seasonCheckedMap[aid] = !current
     }
 
-    fun seasonSelectAll() {
-        // 只勾选未下载的，已下载的保持其默认勾选态
-        _seasonEpisodes.value.forEach { ep ->
+    // 全选按钮是否可用：存在未下载项才显示
+    val seasonAllSelectable: Boolean get() = _seasonEpisodes.value.any { !seasonDownloadedSet.contains(it.aid) }
+    // 全选状态：未下载项全部勾选（已下载项不计入）
+    val seasonAllSelected: Boolean get() = _seasonEpisodes.value.isNotEmpty()
+            && _seasonEpisodes.value.all { seasonDownloadedSet.contains(it.aid) || _seasonCheckedMap[it.aid] == true }
+
+    // ===== 搜索过滤（2026-10-02）=====
+    // 动因：几千集的合集靠手划翻不动，只想搜关键字、勾选、下载。
+    // 两个 tab 各留各的关键词（来回切不丢）；清空关键词 = 恢复全部。
+    // ★全选与"可见即所选"的判定都只作用于**当前可见项**，勾选态本身按 cid/aid 存、过滤前后不丢。
+    val pageKeyword = mutableStateOf("")
+    val seasonKeyword = mutableStateOf("")
+
+    /** 分P tab 当前可见项 */
+    fun visiblePages(): List<Page> {
+        val k = pageKeyword.value.trim()
+        if (k.isEmpty()) return list
+        return list.filter { it.part.contains(k, ignoreCase = true) }
+    }
+
+    /** 合集 tab 当前可见项 */
+    fun visibleSeasonEpisodes(): List<VideoDownloadDialogState.SeasonEpisodeItem> {
+        val k = seasonKeyword.value.trim()
+        val all = _seasonEpisodes.value
+        if (k.isEmpty()) return all
+        return all.filter { it.title.contains(k, ignoreCase = true) }
+    }
+
+    fun selectAllVisible() {
+        visiblePages().forEach { p ->
+            if (!downloadedSet.contains(p.cid)) {
+                val idx = list.indexOfFirst { it.cid == p.cid }
+                _checkedMap[p.cid] = if (idx >= 0) idx else 0
+            }
+        }
+    }
+
+    fun seasonSelectAllVisible() {
+        visibleSeasonEpisodes().forEach { ep ->
             if (!seasonDownloadedSet.contains(ep.aid)) {
                 _seasonCheckedMap[ep.aid] = true
             }
         }
     }
 
-    fun seasonDeselectAll() {
-        // 只清未下载的勾选，已下载项不参与勾选 map（其"已勾选"态由 UI 层根据 downloadedSet 渲染）
-        _seasonCheckedMap.clear()
+    fun allVisibleSelected(): Boolean {
+        val v = visiblePages().filter { !downloadedSet.contains(it.cid) }
+        return v.isNotEmpty() && v.all { checkedMap.containsKey(it.cid) }
     }
 
-    // 全选按钮是否可用：存在未下载项才显示
-    val seasonAllSelectable: Boolean get() = _seasonEpisodes.value.any { !seasonDownloadedSet.contains(it.aid) }
-    // 全选状态：未下载项全部勾选（已下载项不计入）
-    val seasonAllSelected: Boolean get() = _seasonEpisodes.value.isNotEmpty()
-            && _seasonEpisodes.value.all { seasonDownloadedSet.contains(it.aid) || _seasonCheckedMap[it.aid] == true }
+    fun seasonAllVisibleSelected(): Boolean {
+        val v = visibleSeasonEpisodes().filter { !seasonDownloadedSet.contains(it.aid) }
+        return v.isNotEmpty() && v.all { _seasonCheckedMap[it.aid] == true }
+    }
+
+    /** 只清"当前可见项"的勾选（别的筛选结果里已勾的保留） */
+    fun deselectAllVisible() {
+        visiblePages().forEach { _checkedMap.remove(it.cid) }
+    }
+
+    fun seasonDeselectAllVisible() {
+        visibleSeasonEpisodes().forEach { _seasonCheckedMap.remove(it.aid) }
+    }
 
     fun setQuality(quality: Int) {
         _quality.intValue = quality
@@ -370,6 +412,9 @@ class VideoDownloadDialogState(
             }
             scope.launch(Dispatchers.IO) {
                 var successCount = 0
+                // 合集内序号：按"用户看到的顺序"（_seasonEpisodes 是完整有序列表，不受搜索过滤影响）
+                val seasonOrder = _seasonEpisodes.value
+                    .withIndex().associate { it.value.aid to it.index }
                 for (aid in checkedAids) {
                     try {
                         val episode = _seasonEpisodes.value.find { it.aid == aid } ?: continue
@@ -391,7 +436,11 @@ class VideoDownloadDialogState(
                                 height = 0,
                                 rotate = 0,
                                 download_title = "视频已缓存完成",
-                                download_subtitle = entryTitle
+                                download_subtitle = entryTitle,
+                                // 合集：真名就是剧集标题（part 同样是上传文件名垃圾）；
+                                // 序号 = 在合集里的位置，用于下载详情页按 UP 主顺序排
+                                display_title = entryTitle,
+                                season_index = seasonOrder[aid],
                             )
                             val biliVideoEntry = BiliDownloadEntryInfo(
                                 media_type = 2, has_dash_audio = true,
@@ -442,7 +491,11 @@ class VideoDownloadDialogState(
             height = 0,
             rotate = 0,
             download_title = "视频已缓存完成",
-            download_subtitle = videoArc.title
+            download_subtitle = videoArc.title,
+            // ★下载时就把"这一条该显示什么名字"定下来（2026-10-02）：
+            //   多P → 用户看得懂的分P名；单P → 视频真标题。
+            //   不能直接用 page.part：单P 场景它是上传者没改过的原始文件名（实测有 lv_0_2026… 和纯数字两种）。
+            display_title = if (list.size > 1) page.part else videoArc.title,
         )
         val currentTime = System.currentTimeMillis()
         val biliVideoEntry = BiliDownloadEntryInfo(
@@ -483,6 +536,8 @@ class VideoDownloadDialogState(
 @Composable
 private fun VideoDownloadItem(
     page: Page,
+    /** 该显示的名字：多P=分P名，单P=视频真标题（page.part 单P 时可能是上传文件名垃圾） */
+    displayTitle: String,
     enabled: Boolean,
     checked: Boolean,
     onCheckedChange: ((Boolean) -> Unit)?,
@@ -510,7 +565,7 @@ private fun VideoDownloadItem(
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
-                        text = page.part,
+                        text = displayTitle,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -668,13 +723,10 @@ fun VideoDownloadDialog(
                         if ((tabs.size == 1 && hasPages || pagerState.currentPage == 0) && state.allSelectable) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(
-                                    checked = state.allSelected,
+                                    checked = state.allVisibleSelected(),
                                     onCheckedChange = {
-                                        if (state.allSelected) state.deselectAll()
-                                        else state.list.forEachIndexed { i, p ->
-                                            if (!state.downloadedSet.contains(p.cid))
-                                                state.checkedChange(p.cid, i)
-                                        }
+                                        if (state.allVisibleSelected()) state.deselectAllVisible()
+                                        else state.selectAllVisible()
                                     },
                                 )
                                 Text(
@@ -687,10 +739,10 @@ fun VideoDownloadDialog(
                         if ((tabs.size == 1 && hasSeason || pagerState.currentPage == 1) && state.seasonAllSelectable) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(
-                                    checked = state.seasonAllSelected,
+                                    checked = state.seasonAllVisibleSelected(),
                                     onCheckedChange = {
-                                        if (state.seasonAllSelected) state.seasonDeselectAll()
-                                        else state.seasonSelectAll()
+                                        if (state.seasonAllVisibleSelected()) state.seasonDeselectAllVisible()
+                                        else state.seasonSelectAllVisible()
                                     },
                                 )
                                 Text(
@@ -702,6 +754,31 @@ fun VideoDownloadDialog(
                         }
                     }
 
+
+                    // ===== 搜索框（2026-10-02）=====
+                    // 位置：紧贴"标题 + 全选"那行、列表之上 ⇒ 常驻可见、不随列表滚走；
+                    // 几千集翻到一半想搜，不用先滚回顶部。两个 tab 各绑各的关键词。
+                    // 只有列表够长（>5 条）才显示：单P/短合集给个搜索框纯属添乱。
+                    val visiblePages = state.visiblePages()
+                    val visibleSeasons = state.visibleSeasonEpisodes()
+                    val isPagesTab = (tabs.size == 1 && hasPages) || pagerState.currentPage == 0
+                    val isSeasonTab = (tabs.size == 1 && hasSeason) || pagerState.currentPage == 1
+                    if (isPagesTab && hasPages && state.list.size > 5) {
+                        DownloadSearchBox(
+                            value = state.pageKeyword.value,
+                            onValueChange = { state.pageKeyword.value = it },
+                            placeholder = "搜索分P标题",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                        )
+                    }
+                    if (isSeasonTab && hasSeason && state.seasonEpisodes.size > 5) {
+                        DownloadSearchBox(
+                            value = state.seasonKeyword.value,
+                            onValueChange = { state.seasonKeyword.value = it },
+                            placeholder = "搜索合集内视频标题",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                        )
+                    }
 
                     // 列表
                     Box(
@@ -715,25 +792,26 @@ fun VideoDownloadDialog(
                                 when (pageIndex) {
                                     0 -> {
                                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                            items(state.list.size, { state.list[it].cid }) { index ->
-                                                val item = state.list[index]
+                                            items(visiblePages.size, { visiblePages[it].cid }) { index ->
+                                                val item = visiblePages[index]
                                                 val isEnabled = !state.downloadedSet.contains(item.cid)
                                                 val isChecked = if (isEnabled) {
                                                     state.checkedMap.containsKey(item.cid)
                                                 } else { true }
                                                 VideoDownloadItem(
                                                     page = item,
+                                                    displayTitle = if (state.list.size > 1) item.part else (state.arcData?.title ?: item.part),
                                                     enabled = isEnabled,
                                                     checked = isChecked,
-                                                    onCheckedChange = { state.checkedChange(item.cid, index) }
+                                                    onCheckedChange = { state.checkedChange(item.cid) }
                                                 )
                                             }
                                         }
                                     }
                                     1 -> {
                                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                            items(state.seasonEpisodes.size, { state.seasonEpisodes[it].aid }) { index ->
-                                                val item = state.seasonEpisodes[index]
+                                            items(visibleSeasons.size, { visibleSeasons[it].aid }) { index ->
+                                                val item = visibleSeasons[index]
                                                 val isEnabled = !state.seasonDownloadedSet.contains(item.aid)
                                                 val isChecked = if (isEnabled) {
                                                     state.seasonCheckedMap[item.aid] ?: false
@@ -751,8 +829,8 @@ fun VideoDownloadDialog(
                             }
                         } else if (hasSeason) {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(state.seasonEpisodes.size, { state.seasonEpisodes[it].aid }) { index ->
-                                    val item = state.seasonEpisodes[index]
+                                items(visibleSeasons.size, { visibleSeasons[it].aid }) { index ->
+                                    val item = visibleSeasons[index]
                                     val isEnabled = !state.seasonDownloadedSet.contains(item.aid)
                                     val isChecked = if (isEnabled) {
                                         state.seasonCheckedMap[item.aid] ?: false
@@ -768,17 +846,18 @@ fun VideoDownloadDialog(
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 // key 用 cid，不要用 index：列表内容变化时按位置复用会串状态
-                                items(state.list.size, { state.list[it].cid }) { index ->
-                                    val item = state.list[index]
+                                items(visiblePages.size, { visiblePages[it].cid }) { index ->
+                                    val item = visiblePages[index]
                                     val isEnabled = !state.downloadedSet.contains(item.cid)
                                     val isChecked = if (isEnabled) {
                                         state.checkedMap.containsKey(item.cid)
                                     } else { true }
                                     VideoDownloadItem(
                                         page = item,
+                                        displayTitle = if (state.list.size > 1) item.part else (state.arcData?.title ?: item.part),
                                         enabled = isEnabled,
                                         checked = isChecked,
-                                        onCheckedChange = { state.checkedChange(item.cid, index) }
+                                        onCheckedChange = { state.checkedChange(item.cid) }
                                     )
                                 }
                             }

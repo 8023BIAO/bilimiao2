@@ -115,7 +115,8 @@ internal class DownloadDetailPageViewModel(
                 indexTitle = page.download_title ?: "unknown"
                 cid = page.cid
                 type = DownloadType.VIDEO
-                itemTitle = page.part ?: "unknown"
+                // ★统一走 entry.showTitle：新下载有 display_title（真名），老条目回落 part/subtitle/title
+                itemTitle = biliEntry.showTitle
             }
             val ep = biliEntry.ep
             val source = biliEntry.source
@@ -125,7 +126,7 @@ internal class DownloadDetailPageViewModel(
                 epid = ep.episode_id
                 cid = source.cid
                 type = DownloadType.BANGUMI
-                itemTitle = ep.index + ep.index_title
+                itemTitle = biliEntry.showTitle
             }
             val item = DownloadItemInfo(
                 dir_path = it.entryDirPath,
@@ -141,6 +142,8 @@ internal class DownloadDetailPageViewModel(
                 cid = cid,
                 epid = epid,
                 index_title = indexTitle,
+                page = biliEntry.page_data?.page ?: 0,
+                seasonIndex = biliEntry.seasonIndex,
             )
             items.add(item)
             if (!item.is_completed) {
@@ -167,7 +170,14 @@ internal class DownloadDetailPageViewModel(
                 type = item.type,
                 items = items
             )
-            downloadItems.value = items
+            // ★按"UP 主的顺序"排（2026-10-02）：
+            //   合集 ⇒ seasonIndex（下载时写入的合集内序号）；多P ⇒ page（第几P）；
+            //   番剧 ⇒ ep.sort_index（由 showTitle/seasonIndex 统一取值）。
+            //   老条目这两个字段都是 null/0 ⇒ 全部并列，退化成原来的顺序（不会更差）。
+            val ordered = items.sortedWith(
+                compareBy({ it.seasonIndex ?: Int.MAX_VALUE }, { it.page })
+            )
+            downloadItems.value = ordered
         }
     }
 

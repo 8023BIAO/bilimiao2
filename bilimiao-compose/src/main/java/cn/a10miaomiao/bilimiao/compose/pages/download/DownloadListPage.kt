@@ -16,10 +16,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -138,7 +135,8 @@ internal class DownloadListPageViewModel(
                 indexTitle = page.download_title ?: "unknown"
                 cid = page.cid
                 type = DownloadType.VIDEO
-                itemTitle = page.part ?: "unknown"
+                // ★统一走 entry.showTitle：新下载有 display_title（真名），老条目回落 part/subtitle/title
+                itemTitle = biliEntry.showTitle
             }
             val ep = biliEntry.ep
             val source = biliEntry.source
@@ -252,8 +250,11 @@ internal fun DownloadListPageContent(
                     myItem { key = 1; iconFileName = "ic_baseline_done_24"; title = "完成" }
                     myItem { key = 3; iconFileName = "ic_baseline_delete_24"; title = "删除" }
                 } else {
+                    // ★2026-10-02 用户拍板：**不显示"编辑"**。
+                    //   编辑态是"多选 + 批量删除"，但它没有任何"选中数/非空"判断 —— 空列表或零选中时
+                    //   点删除会弹"选中的 0 项"、一个文件都不删却提示"已删除0项"。做减法：直接不给入口。
+                    //   （单个条目的删除不受影响，仍在详情页里）
                     myItem { key = 0; iconFileName = "ic_baseline_lightbulb_24"; title = "提示" }
-                    myItem { key = 2; iconFileName = "ic_baseline_edit_24"; title = "编辑" }
                 }
             }
         }
@@ -290,7 +291,6 @@ internal fun DownloadListPageContent(
             when(menuItem.key) {
                 0 -> showHelpDialog = true
                 1 -> { isEditMode = false; selectedDirs.clear() }
-                2 -> isEditMode = true
                 3 -> showDeleteDialog = true
                 // 搜索已常驻显示
             }
@@ -357,30 +357,14 @@ internal fun DownloadListPageContent(
         Column(modifier = Modifier.fillMaxSize()) {
             // 搜索栏
             if (!isEditMode) {
-                OutlinedTextField(
+                // 公共搜索框组件（下载面板也用同一个，见 components/DownloadSearchBox.kt）
+                DownloadSearchBox(
                     value = searchText,
                     onValueChange = { searchText = it },
+                    placeholder = "搜索下载标题",
                     modifier = Modifier
-                        .fillMaxWidth()
                         .padding(top = windowInsets.topDp.dp)
                         .padding(horizontal = 10.dp, vertical = 5.dp),
-                    singleLine = true,
-                    placeholder = { Text("搜索下载标题", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "搜索", tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    trailingIcon = {
-                        if (searchText.isNotEmpty()) {
-                            IconButton(onClick = { searchText = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "清空", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    },
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                    ),
                 )
             }
             // 全选行（编辑模式）
