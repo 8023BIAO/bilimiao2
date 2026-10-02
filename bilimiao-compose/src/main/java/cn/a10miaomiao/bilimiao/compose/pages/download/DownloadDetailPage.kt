@@ -205,8 +205,12 @@ internal class DownloadDetailPageViewModel(
         val info = downloadInfo?.value ?: return
         viewModelScope.launch {
             val service = DownloadService.getService(fragment.requireContext())
-            service.deleteDownload(info.dir_path, item.dir_path)
-            toast("已删除：" + info.title + "-"  +item.title)
+            // ★如实提示（同列表页批量删除那条）：删不到文件时不要还说"已删除"
+            val deleted = service.deleteDownload(info.dir_path, item.dir_path)
+            toast(
+                if (deleted > 0) "已删除：" + item.title
+                else "没有找到可删除的文件（可能已被移动或删除）"
+            )
             _loadDownloadDetail(service, dirPath)
             if (downloadInfo.value == null) {
                 pageNavigation.popBackStack()
