@@ -141,6 +141,9 @@ class DownloadManager(
         }
         val body = response.body
             ?: throw IOException("Response body is null for url: ${info.url}")
+        // ★暂停可能在"建立连接 / 拿响应"这段时间到达：cancel() 已经把状态置成 PAUSE 并取消了 call。
+        //   这里若无条件改回 DOWNLOADING，用户刚点的暂停就被"复活"（读循环会继续跑到结束）。2026-10-02
+        if (downloadInfo.status == CurrentDownloadInfo.STATUS_PAUSE) return@flow
         downloadInfo.status = CurrentDownloadInfo.STATUS_DOWNLOADING
         if (info.size == 0L) {
             info.size = body.contentLength()
