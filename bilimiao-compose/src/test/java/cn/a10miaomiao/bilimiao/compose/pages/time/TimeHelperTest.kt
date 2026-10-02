@@ -100,11 +100,14 @@ class TimeHelperTest {
 
     @Test
     fun spanDays_isInclusive() {
+        // 纯算法口径：含首尾计数（同一天 = 1 天）
         assertEquals(1, spanDays(date(2026, 8, 7), date(2026, 8, 7)))
         assertEquals(29, spanDays(date(2026, 8, 7), date(2026, 9, 4)))
-        // 上限口径：含首尾 30 天正好到顶（差 29 天），差 30 天（含首尾 31 天）就超了
-        assertEquals(MAX_SPAN_DAYS, spanDays(date(2026, 8, 7), date(2026, 9, 5)))
-        assertEquals(MAX_SPAN_DAYS + 1, spanDays(date(2026, 8, 7), date(2026, 9, 6)))
+        assertEquals(30, spanDays(date(2026, 8, 7), date(2026, 9, 5)))
+        assertEquals(31, spanDays(date(2026, 8, 7), date(2026, 9, 6)))
+        // 注意：这里断言的是天数本身，**不要**写成 MAX_SPAN_DAYS ——
+        // 那会把"算法正确"和"上限取值"绑在一起（2026-10-02 上限由 30 抬到 90 时就这么挂过一次）。
+        assertTrue("上限必须是正数", MAX_SPAN_DAYS > 0)
     }
 
     @Test
