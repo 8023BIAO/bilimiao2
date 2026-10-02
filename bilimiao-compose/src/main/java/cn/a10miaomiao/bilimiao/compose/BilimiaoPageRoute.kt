@@ -107,7 +107,14 @@ class BilimiaoPageRoute (
 //        }
         
         // search
+        // ★搜索页的进入/退出动画单独调快、并且不再"弹"一下：
+        //   原来的 fade-through 带 0.85/1.15 缩放、时长也偏长，点搜索会有明显等待感与突兀的缩放。
+        //   只改这一条路由，其它页面的动画一行不动（保持全站一致，搜索是高频入口才单独优化）。
         composable<SearchResultPage>(
+            enterTransition = { materialFadeThroughIn(initialScale = 1f, durationMillis = 120) },
+            exitTransition = { materialFadeThroughOut(durationMillis = 120) },
+            popEnterTransition = { materialFadeThroughIn(initialScale = 1f, durationMillis = 120) },
+            popExitTransition = { materialFadeThroughOut(durationMillis = 120) },
             deepLinks = listOf(
                 navDeepLink {
                     uriPattern = "bilibili://search/?keyword={keyword}"
