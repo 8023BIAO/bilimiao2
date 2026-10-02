@@ -116,7 +116,7 @@ private class WebPageViewModel(
     fun skipSelfIfHandedOff(): Boolean {
         if (!inAppNavigated.value) return false
         val route = pageNavigation.hostController.currentBackStackEntry?.destination?.route ?: return false
-        // 注意：ComposePage 是 @Serializable 且没有 @SerialName，navigation 2.9.8 直接拿
+        // 注意：ComposePage 是 @Serializable 且没有 @SerialName，navigation 2.10.1 直接拿
         // serialName 当 path → 真实 route 是"全限定类名/WebPage/{url}"，
         // 用 startsWith("WebPage/") 判断会恒假（这段"跳过中间页"就成了死代码）
         if (!route.substringAfterLast('.').startsWith("WebPage/")) return false
@@ -207,7 +207,8 @@ private class WebPageViewModel(
          */
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
             super.doUpdateVisitedHistory(view, url, isReload)
-            canGoBack.value = view.canGoBack()
+            // 只认当前 WebView：已 destroy 的旧 WebView 在途回调不该再写状态（复核 2026-10-02 的 Q2）
+            if (view === webView) canGoBack.value = view.canGoBack()
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -266,7 +267,7 @@ private class WebPageViewModel(
             super.onPageStarted(view, url, favicon)
             loading.value = true
             // 整页跳转也兜一次底（有些跳转不一定走 doUpdateVisitedHistory 的时序）
-            canGoBack.value = view.canGoBack()
+            if (view === webView) canGoBack.value = view.canGoBack()
             hideNavbar.value = url.indexOf("navhide=1") != -1
             view.evaluateJavascript("""
                 (function(){
@@ -300,7 +301,7 @@ private class WebPageViewModel(
             super.onPageFinished(view, url)
             loading.value = false
             // 加载完再兜一次底：SPA 首屏进来时历史可能刚建好
-            canGoBack.value = view.canGoBack()
+            if (view === webView) canGoBack.value = view.canGoBack()
 //            val js = """javascript:(function() {
 //                        var parent = document.getElementsByTagName('head').item(0);
 //                        var style = document.createElement('style');
@@ -387,6 +388,10 @@ private fun WebPageContent(
                     // 释放 WebView 原生资源，避免页面频繁进出时内存持续累积
                     viewModel.webView?.destroy()
                     viewModel.webView = null
+                    // ★复位历史状态（复核 2026-10-02 的 S1）：WebView 销毁重建后新的那个没有历史，
+                    //   不复位的话同一 VM 再进本页会带着旧 true 起跑 ⇒ onPageStarted 到达前按返回
+                    //   会被空 goBack() 吃掉一次（真实路径：JS 桥 ability.openScheme 交棒后回网页时重建）。
+                    viewModel.canGoBack.value = false
                     it.removeAllViews()
                 }
             )
