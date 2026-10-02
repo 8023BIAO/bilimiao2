@@ -113,8 +113,15 @@ class UserSpaceViewModel(
                 _detailData.value = result
                 _isFollow.value = result.card.relation.is_follow == 1
             } else {
-                _fail.value = res.message
-                toast(res.message)
+                // 已注销账号：空间接口回 -404（官方文档写着"用户不存在（如注销账号）"）。
+                // 原来直接把接口的原始 message 甩进失败框 + toast，用户看到的是机器话；
+                // 这里换成一句人话，页面就会显示"该账号已注销"。
+                if (res.code == -404) {
+                    _fail.value = "该账号已注销"
+                } else {
+                    _fail.value = res.message
+                    toast(res.message)
+                }
             }
         } catch (e: Exception) {
             _fail.value = e
