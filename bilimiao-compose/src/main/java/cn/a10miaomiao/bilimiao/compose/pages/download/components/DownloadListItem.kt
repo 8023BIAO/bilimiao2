@@ -71,11 +71,11 @@ fun DownloadListItem(
                             .height(80.dp)
                             .padding(horizontal = 10.dp),
                     ) {
+                        // ★不限制行数：下载的视频/合集标题本来就长（"晚上来回忆一集熊出没《稻草人》"这类），
+                        //   截断后用户认不出是哪一集。换行显示全，行数由内容决定。2026-10-02
                         Text(
                             text = item.title,
-                            maxLines = 2,
                             modifier = Modifier.weight(1f),
-                            overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         val status = if (item.is_completed) {

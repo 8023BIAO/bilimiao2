@@ -97,10 +97,9 @@ fun DownloadDetailItem(
                             .weight(1f)
                             .padding(start = 5.dp)
                     ) {
+                        // ★不限制行数：显示完整剧集标题（换行没关系），方便一眼认出是哪一集。2026-10-02
                         Text(
                             text = item.title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         // ★排队中要单独显示（2026-10-02）：勾选多集时除当前那条外都在排队，
