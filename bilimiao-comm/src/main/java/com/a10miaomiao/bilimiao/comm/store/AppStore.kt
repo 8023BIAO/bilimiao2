@@ -66,6 +66,14 @@ class AppStore(override val di: DI) :
          *     以后加一项只改一处。
          */
         var live: SettingPreferences.Live.Values = SettingPreferences.Live.Values(),
+        /**
+         * 自动连播（全局持久化，默认开）。
+         *
+         * 挂在 AppStore 上的理由和 [live] 一样：五个页面（视频页合集浮层、合集详情、收藏夹、
+         * 用户合集、稍后再看）读的都是同一个值，改一处要立刻反映到其它页面 ——
+         * 各页面自己 collect 一份 datastore 就会重演"同一件事两条流"的老问题。
+         */
+        var autoPlayEnable: Boolean = true,
     )
 
     override val stateFlow = MutableStateFlow(State())
@@ -84,6 +92,7 @@ class AppStore(override val di: DI) :
                     (it[ThemeColor] ?: 0xFF2196F3).toInt()
                 }
                 setState {
+                    autoPlayEnable = it[AutoPlayEnable] ?: true
                     home = HomeSettingState(
                         showTimeMachine = it[HomeTimeMachineShow] ?: false,
                         showPopular = it[HomePopularShow] ?: false,

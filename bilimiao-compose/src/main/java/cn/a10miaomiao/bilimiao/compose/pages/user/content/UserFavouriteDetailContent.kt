@@ -115,6 +115,9 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import com.a10miaomiao.bilimiao.comm.store.AppStore
+import com.a10miaomiao.bilimiao.comm.store.autoPlayEnableFlow
+import com.a10miaomiao.bilimiao.comm.store.setAutoPlayEnable
 
 enum class FavSortMode(val label: String) {
     TIME_DESC("最新发布"),
@@ -130,6 +133,7 @@ class UserFavouriteDetailViewModel(
 ) : ViewModel(), DIAware {
 
     private val activity by instance<Activity>()
+    private val appStore by instance<AppStore>()
     private val pageNavigation: PageNavigation by instance()
     val userStore: UserStore by instance()
     private val playerDelegate: BasePlayerDelegate by instance()
@@ -144,6 +148,10 @@ class UserFavouriteDetailViewModel(
     val sortMode = MutableStateFlow(FavSortMode.TIME_DESC)
 
     init {
+        // 自动连播：读全局持久化设置（五个页面共用同一个值）
+        viewModelScope.launch {
+            appStore.autoPlayEnableFlow().collect { isAutoPlay.value = it }
+        }
         loadData(1)
     }
 
@@ -202,6 +210,7 @@ class UserFavouriteDetailViewModel(
     }
 
     fun changeAutoPlay(value: Boolean) {
+        viewModelScope.launch { activity.setAutoPlayEnable(value) }
         isAutoPlay.value = value
     }
 

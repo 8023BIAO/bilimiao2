@@ -84,6 +84,9 @@ import okhttp3.OkHttpClient
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
+import com.a10miaomiao.bilimiao.comm.store.AppStore
+import com.a10miaomiao.bilimiao.comm.store.autoPlayEnableFlow
+import com.a10miaomiao.bilimiao.comm.store.setAutoPlayEnable
 
 class VideoDetailViewModel(
     override val di: DI,
@@ -92,6 +95,7 @@ class VideoDetailViewModel(
     private val highlightDanmakuText: String? = null,
 ) : ViewModel(), DIAware {
     private val activity by instance<Activity>()
+    private val appStore by instance<AppStore>()
     private val pageNavigation by instance<PageNavigation>()
     private val basePlayerDelegate by instance<BasePlayerDelegate>()
 
@@ -174,6 +178,10 @@ class VideoDetailViewModel(
         get() = getBvid().ifBlank { _id.takeIf { BvUtils.isValidBvid(it) } ?: "" }
 
     init {
+        // 自动连播：读全局持久化设置（五个页面共用同一个值）
+        viewModelScope.launch {
+            appStore.autoPlayEnableFlow().collect { _isAutoPlaySeason.value = it }
+        }
         loadData()
     }
 
@@ -741,6 +749,7 @@ class VideoDetailViewModel(
     }
 
     fun updateIsAutoPlaySeason(isChecked: Boolean) {
+        viewModelScope.launch { activity.setAutoPlayEnable(isChecked) }
         _isAutoPlaySeason.value = isChecked
     }
 

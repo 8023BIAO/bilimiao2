@@ -77,6 +77,9 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import com.a10miaomiao.bilimiao.comm.store.AppStore
+import com.a10miaomiao.bilimiao.comm.store.autoPlayEnableFlow
+import com.a10miaomiao.bilimiao.comm.store.setAutoPlayEnable
 
 private class UserMedialistDetailViewMode(
     override val di: DI,
@@ -88,6 +91,7 @@ private class UserMedialistDetailViewMode(
 
     val userStore: UserStore by instance()
     private val activity by instance<Activity>()
+    private val appStore by instance<AppStore>()
     private val pageNavigation: PageNavigation by instance()
     private val playerDelegate: BasePlayerDelegate by instance()
     private val playerStore by instance<PlayerStore>()
@@ -104,6 +108,10 @@ private class UserMedialistDetailViewMode(
     val isAutoPlay get() = _isAutoPlay.value
 
     init {
+        // 自动连播：读全局持久化设置（五个页面共用同一个值）
+        viewModelScope.launch {
+            appStore.autoPlayEnableFlow().collect { _isAutoPlay.value = it }
+        }
         loadData("")
     }
 
@@ -270,6 +278,7 @@ private class UserMedialistDetailViewMode(
     }
 
     fun changeAutoPlay(value: Boolean) {
+        viewModelScope.launch { activity.setAutoPlayEnable(value) }
         _isAutoPlay.value = value
     }
 

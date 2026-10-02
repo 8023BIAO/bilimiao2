@@ -119,6 +119,10 @@ object SettingPreferences {
     // 新键 = 新字符串，所以默认值 true 能直接对"老用户升级后第一次读"生效。
     val HomeLiveShow = booleanPreferencesKey("home_live_show")
     // 【已删除】HomePopularCarryToken — 热门API不支持个性化，开关无实际作用
+    // 自动连播（全局持久化，默认**开**）。
+    // 视频页合集浮层、合集详情、收藏夹、用户合集、稍后再看 —— 五处共用这一个值。
+    // 以前各页面把开关状态放在自己的 ViewModel 里，退出页面就回到默认值，用户关掉再进来又变"开"。
+    val AutoPlayEnable = booleanPreferencesKey("auto_play_enable")
     // 推荐列表样式
     val HomeRecommendListStyle = intPreferencesKey("home_recommend_list_style")
     // 首页入口视图

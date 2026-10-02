@@ -96,6 +96,9 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import com.a10miaomiao.bilimiao.comm.store.AppStore
+import com.a10miaomiao.bilimiao.comm.store.autoPlayEnableFlow
+import com.a10miaomiao.bilimiao.comm.store.setAutoPlayEnable
 
 private enum class SeasonSortMode(val label: String) {
     TIME_DESC("最新发布"),
@@ -115,6 +118,7 @@ private class UserSeasonDetailViewModel(
     private val playerDelegate: BasePlayerDelegate by instance()
     private val playerStore by instance<PlayerStore>()
     private val playListStore by instance<PlayListStore>()
+    private val appStore by instance<AppStore>()
 
     var seasonInfo = MutableStateFlow<bilibili.app.view.v1.UgcSeason?>(null)
     val isRefreshing = MutableStateFlow(false)
@@ -129,6 +133,10 @@ private class UserSeasonDetailViewModel(
     private var originalEpisodes: List<bilibili.app.view.v1.Episode> = emptyList()
 
     init {
+        // 自动连播：读全局持久化设置（五个页面共用同一个值）
+        viewModelScope.launch {
+            appStore.autoPlayEnableFlow().collect { isAutoPlay.value = it }
+        }
         loadData(1)
     }
 
@@ -201,6 +209,7 @@ private class UserSeasonDetailViewModel(
     }
 
     fun changeAutoPlay(value: Boolean) {
+        viewModelScope.launch { activity.setAutoPlayEnable(value) }
         isAutoPlay.value = value
     }
 

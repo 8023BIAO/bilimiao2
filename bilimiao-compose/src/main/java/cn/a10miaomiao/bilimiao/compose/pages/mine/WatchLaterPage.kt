@@ -82,6 +82,10 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import com.a10miaomiao.bilimiao.comm.store.AppStore
+import com.a10miaomiao.bilimiao.comm.store.autoPlayEnableFlow
+import com.a10miaomiao.bilimiao.comm.store.setAutoPlayEnable
+import android.content.Context
 
 @Serializable
 class WatchLaterPage : ComposePage() {
@@ -103,6 +107,8 @@ private class WatchLaterPageViewModel(
     private val playerStore by instance<PlayerStore>()
     private val playerDelegate by instance<BasePlayerDelegate>()
     private val userLibraryStore by instance<UserLibraryStore>()
+    private val appStore by instance<AppStore>()
+    private val appContext by instance<Context>()
 
     private var nextKey = ""
 
@@ -119,6 +125,10 @@ private class WatchLaterPageViewModel(
     val selectedItemMap: Map<Long, Int> get() = _selectedItemMap
 
     init {
+        // 自动连播：读全局持久化设置（五个页面共用同一个值）
+        viewModelScope.launch {
+            appStore.autoPlayEnableFlow().collect { _isAutoPlay.value = it }
+        }
         loadData("")
     }
 
@@ -145,6 +155,7 @@ private class WatchLaterPageViewModel(
     }
 
     fun changeAutoPlay(autoPlay: Boolean) {
+        viewModelScope.launch { appContext.setAutoPlayEnable(autoPlay) }
         _isAutoPlay.value = autoPlay
     }
 
