@@ -286,8 +286,6 @@ class VideoDownloadDialogState(
         }
     }
 
-    val allSelectable: Boolean get() = list.any { !downloadedSet.contains(it.cid) }
-    val allSelected: Boolean get() = list.isNotEmpty() && list.all { downloadedSet.contains(it.cid) || checkedMap.containsKey(it.cid) }
 
     // ===== 合集选择 =====
     fun seasonCheckedChange(aid: Long) {
@@ -297,11 +295,6 @@ class VideoDownloadDialogState(
         _seasonCheckedMap[aid] = !current
     }
 
-    // 全选按钮是否可用：存在未下载项才显示
-    val seasonAllSelectable: Boolean get() = _seasonEpisodes.value.any { !seasonDownloadedSet.contains(it.aid) }
-    // 全选状态：未下载项全部勾选（已下载项不计入）
-    val seasonAllSelected: Boolean get() = _seasonEpisodes.value.isNotEmpty()
-            && _seasonEpisodes.value.all { seasonDownloadedSet.contains(it.aid) || _seasonCheckedMap[it.aid] == true }
 
     // ===== 搜索过滤（2026-10-02）=====
     // 动因：几千集的合集靠手划翻不动，只想搜关键字、勾选、下载。
@@ -341,6 +334,12 @@ class VideoDownloadDialogState(
             }
         }
     }
+
+    /** 可见项里还有没下载的吗（没有就不显示全选框，免得点了没反应） */
+    fun hasVisibleSelectable(): Boolean = visiblePages().any { !downloadedSet.contains(it.cid) }
+
+    fun seasonHasVisibleSelectable(): Boolean =
+        visibleSeasonEpisodes().any { !seasonDownloadedSet.contains(it.aid) }
 
     fun allVisibleSelected(): Boolean {
         val v = visiblePages().filter { !downloadedSet.contains(it.cid) }
@@ -720,7 +719,7 @@ fun VideoDownloadDialog(
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
-                        if ((tabs.size == 1 && hasPages || pagerState.currentPage == 0) && state.allSelectable) {
+                        if ((tabs.size == 1 && hasPages || pagerState.currentPage == 0) && state.hasVisibleSelectable()) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(
                                     checked = state.allVisibleSelected(),
@@ -736,7 +735,7 @@ fun VideoDownloadDialog(
                                 )
                             }
                         }
-                        if ((tabs.size == 1 && hasSeason || pagerState.currentPage == 1) && state.seasonAllSelectable) {
+                        if ((tabs.size == 1 && hasSeason || pagerState.currentPage == 1) && state.seasonHasVisibleSelectable()) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(
                                     checked = state.seasonAllVisibleSelected(),

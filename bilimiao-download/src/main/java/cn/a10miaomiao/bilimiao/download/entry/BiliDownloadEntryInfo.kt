@@ -68,8 +68,20 @@ data class BiliDownloadEntryInfo(
     val seasonIndex: Int?
         get() = page_data?.season_index ?: ep?.sort_index
 
+    /**
+     * 通知栏标题。**新下载**（有 display_title）直接用真名；
+     * **老条目/番剧保持原来的拼接方式**（`title + part` / `title + index_title`）——
+     * 老条目的 part 常常是上传文件名垃圾，只留它会把真标题弄丢。
+     */
     val name: String
-        get() = showTitle
+        get() {
+            val p = page_data
+            if (p?.display_title?.isNotBlank() == true) return showTitle
+            val e = ep
+            if (e != null) return title + e.index_title
+            if (p != null) return title + p.part
+            return title
+        }
 
     val videoDirName: String
         get() = type_tag ?: video_quality.toString()
