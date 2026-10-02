@@ -1,5 +1,20 @@
 package cn.a10miaomiao.bilimiao.compose.pages.time.components
 
+import com.a10miaomiao.bilimiao.comm.store.model.DateModel
+import kotlin.math.abs
+
+/**
+ * 自定义时间范围最多能选多少天（**含首尾两天**）。
+ *
+ * 这是**客户端自设的上限，不是接口限制**：2026-10-02 实测 `newlist_rank` 在含首尾
+ * **94 天**时仍返回 `code=0` + 数据、**95 天**才 `-10`（跨锚点/跨分区一致，见
+ * `evidence/probe-newlist-rank-span.md`）。取 90 是**留 4 天安全余量**，
+ * 免得服务端哪天收紧就整段时间线查不出内容。
+ *
+ * 日历上的三处判断（点第二端、选中态、提示语）都必须引用它，不许再写死天数。
+ */
+internal const val MAX_SPAN_DAYS = 90
+
 /**
  * 计算星期几。
  *
@@ -19,10 +34,16 @@ internal fun getWeek(y: Int, m: Int, d: Int): Int {
 }
 
 /**
- * 是否闰年
+ * 是否闰年。
+ *
+ * 整百年份必须能被 400 整除才是闰年：2000 闰年，1900/2100 平年。
+ * 注：`DateModel.getMonthDate()` 是同口径的另一份实现，不在本模块，未同步改动。
  */
 internal fun isLeapYear(y: Int): Boolean {
-    return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    if (y % 100 == 0 && y % 400 != 0) {
+        return false
+    }
+    return y % 4 == 0
 }
 
 /**
@@ -34,4 +55,42 @@ internal fun getMonthDayNum(y: Int, m: Int): Int {
         return dates[m - 1]
     }
     return 30
+}
+
+/**
+ * 日历要画几行（每行 7 格）。
+ *
+ * 行数 = ⌈(月首列偏移 + 当月天数) / 7⌉。月首正好是周一（偏移 0）且该月 31 天时是 5 行，
+ * 偏移 0 且正好 28 天的 2 月是 4 行 —— 边界上不能多画一整行空白（见 TimeHelperTest）。
+ */
+internal fun getCalendarRowCount(y: Int, m: Int): Int {
+    return (getWeek(y, m, 1) + getMonthDayNum(y, m) + 6) / 7
+}
+
+/**
+ * 公历年月日 → 递增的日序号（Fliegel–Van Flandern 儒略日算法）。
+ * 纯整数运算，只跟年月日有关。
+ */
+private fun toDayNumber(y: Int, m: Int, d: Int): Int {
+    val a = if (m <= 2) 1 else 0
+    val yy = y - a
+    val mm = m + 12 * a - 3
+    return d + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400
+}
+
+/**
+ * 按年月日算的整日差（`to - from`，单位：天）。
+ *
+ * 不用 `DateModel.getGapCount()`：它取"本地午夜毫秒差 ÷ 86400000"的整数商，在有夏令时的
+ * 地区跨越切换日会错一天。这里只按年月日做整数运算，与系统时区无关。
+ */
+internal fun daysBetween(from: DateModel, to: DateModel): Int {
+    return toDayNumber(to.year, to.month, to.date) - toDayNumber(from.year, from.month, from.date)
+}
+
+/**
+ * 区间含首尾共几天（同一天 = 1 天）。
+ */
+internal fun spanDays(from: DateModel, to: DateModel): Int {
+    return abs(daysBetween(from, to)) + 1
 }

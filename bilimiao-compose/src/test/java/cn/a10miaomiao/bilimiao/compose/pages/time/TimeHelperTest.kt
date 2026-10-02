@@ -1,8 +1,13 @@
 package cn.a10miaomiao.bilimiao.compose.pages.time
 
+import cn.a10miaomiao.bilimiao.compose.pages.time.components.MAX_SPAN_DAYS
+import cn.a10miaomiao.bilimiao.compose.pages.time.components.daysBetween
+import cn.a10miaomiao.bilimiao.compose.pages.time.components.getCalendarRowCount
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.getMonthDayNum
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.getWeek
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.isLeapYear
+import cn.a10miaomiao.bilimiao.compose.pages.time.components.spanDays
+import com.a10miaomiao.bilimiao.comm.store.model.DateModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,8 +18,17 @@ import org.junit.Test
  *
  * getWeek 之前返回 0=周日..6=周六，却被直接当成"周一起始"日历的列偏移 →
  * 每个月都错位一格。这里用真实日历锁定 0=周一..6=周日 的约定。
+ *
+ * 自定义范围的"整日差"与"含首尾天数"（daysBetween / spanDays）不用系统时区的毫秒差，
+ * 见 TimeHelper 注释；日历行数（getCalendarRowCount）锁定"不多画一整行空白"。
  */
 class TimeHelperTest {
+
+    private fun date(year: Int, month: Int, day: Int) = DateModel().also {
+        it.year = year
+        it.month = month
+        it.date = day
+    }
 
     @Test
     fun week_isMondayBased() {
@@ -53,10 +67,67 @@ class TimeHelperTest {
     }
 
     @Test
+    fun leapYear_centuryRule() {
+        // 整百年份必须能被 400 整除：2100 是平年（2 月 28 天），2000 是闰年
+        assertFalse(isLeapYear(2100))
+        assertEquals(28, getMonthDayNum(2100, 2))
+        assertEquals(29, getMonthDayNum(2000, 2))
+    }
+
+    @Test
     fun monthDayNum() {
         assertEquals(29, getMonthDayNum(2024, 2))
         assertEquals(28, getMonthDayNum(2025, 2))
         assertEquals(31, getMonthDayNum(2026, 1))
         assertEquals(30, getMonthDayNum(2026, 4))
+    }
+
+    @Test
+    fun daysBetween_countsWholeDaysByYmd() {
+        // 2026-08-07 → 2026-09-04：相差 28 天（含首尾 29 天，摘要那行的例子）
+        assertEquals(28, daysBetween(date(2026, 8, 7), date(2026, 9, 4)))
+        assertEquals(-28, daysBetween(date(2026, 9, 4), date(2026, 8, 7)))
+        assertEquals(0, daysBetween(date(2026, 8, 7), date(2026, 8, 7)))
+        // 跨年
+        assertEquals(1, daysBetween(date(2025, 12, 31), date(2026, 1, 1)))
+        // 闰年 2 月 29 日
+        assertEquals(2, daysBetween(date(2024, 2, 28), date(2024, 3, 1)))
+        assertEquals(1, daysBetween(date(2025, 2, 28), date(2025, 3, 1)))
+        // 整百年份（2100 平年）：365 天，2 月只有 28 天
+        assertEquals(365, daysBetween(date(2100, 1, 1), date(2101, 1, 1)))
+        assertEquals(28, daysBetween(date(2100, 2, 1), date(2100, 3, 1)))
+    }
+
+    @Test
+    fun spanDays_isInclusive() {
+        assertEquals(1, spanDays(date(2026, 8, 7), date(2026, 8, 7)))
+        assertEquals(29, spanDays(date(2026, 8, 7), date(2026, 9, 4)))
+        // 上限口径：含首尾 30 天正好到顶（差 29 天），差 30 天（含首尾 31 天）就超了
+        assertEquals(MAX_SPAN_DAYS, spanDays(date(2026, 8, 7), date(2026, 9, 5)))
+        assertEquals(MAX_SPAN_DAYS + 1, spanDays(date(2026, 8, 7), date(2026, 9, 6)))
+    }
+
+    @Test
+    fun calendarRowCount_hasNoBlankLastRow() {
+        // 月首正好是周一 + 该月 31 天：正好 5 行（边界上不许多画一整行空白）
+        assertEquals(0, getWeek(2024, 1, 1))
+        assertEquals(5, getCalendarRowCount(2024, 1))
+        // 月首周一 + 28 天（平年 2 月）：正好 4 行
+        assertEquals(4, getCalendarRowCount(2027, 2))
+        // 月首周日 + 30 天：月末那天单独占最后一行 → 6 行
+        assertEquals(6, getCalendarRowCount(2024, 9))
+    }
+
+    @Test
+    fun calendarRowCount_coversAllDays() {
+        for (y in 2009..2030) {
+            for (m in 1..12) {
+                val cells = getCalendarRowCount(y, m) * 7
+                val used = getWeek(y, m, 1) + getMonthDayNum(y, m)
+                assertTrue("y=$y m=$m cells=$cells used=$used", cells >= used)
+                // 最多只多出最后一行的空格，不允许整整多一行
+                assertTrue("y=$y m=$m cells=$cells used=$used", cells - used < 7)
+            }
+        }
     }
 }

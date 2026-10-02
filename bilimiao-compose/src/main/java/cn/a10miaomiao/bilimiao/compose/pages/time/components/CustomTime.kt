@@ -18,7 +18,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingViewMode
 import com.a10miaomiao.bilimiao.comm.store.model.DateModel
-import kotlin.math.abs
+import com.a10miaomiao.bilimiao.comm.toast
+
+/** 年月日 → DateModel（日历里到处都在拼这个，抽一处） */
+private fun dateOf(year: Int, month: Int, day: Int) = DateModel().also {
+    it.year = year
+    it.month = month
+    it.date = day
+}
 
 @Composable
 internal fun MonthText(y: Int, m: Int): String {
@@ -247,6 +254,10 @@ internal fun CustomTime(
     val monthDayNum = remember(year.value, month.value) {
         getMonthDayNum(year.value, month.value)
     }
+    // 行数 = ⌈(月首列偏移 + 当月天数) / 7⌉：月底不再多画一整行空白
+    val rowCount = remember(year.value, month.value) {
+        getCalendarRowCount(year.value, month.value)
+    }
 
     var startTime by remember {
         mutableStateOf<DateModel?>(null)
@@ -266,38 +277,76 @@ internal fun CustomTime(
 
     val itemClick = remember(viewModel) {
         { i: Int ->
+            val clicked = dateOf(year.value, month.value, i)
             val _startTime = startTime
-            if (_startTime == null) {
-                startTime = DateModel().also {
-                    it.year = year.value
-                    it.month = month.value
-                    it.date = i
+            val _endTime = endTime
+            when {
+                // 还没选开始：落一个起点，并告诉 ViewModel"未选完整"
+                //（否则点一下再按"确定"会把上一次的旧区间静默存下去）
+                _startTime == null -> {
+                    startTime = clicked
+                    endTime = null
+                    viewModel.setCustomTime(clicked, null)
                 }
-            } else if (endTime == null) {
-                val dateModel = DateModel().also {
-                    it.year = year.value
-                    it.month = month.value
-                    it.date = i
+                // 选了开始、还没选结束
+                _endTime == null -> {
+                    val gap = daysBetween(_startTime, clicked) // 有符号整日差
+                    if (gap == 0) {
+                        // 同一天点两次 = 单日区间（以前 gap==0 时 > 和 < 都不成立，选择会一直悬着）
+                        endTime = clicked
+                        viewModel.setCustomTime(startTime, endTime)
+                    } else if (spanDays(_startTime, clicked) > MAX_SPAN_DAYS) {
+                        // 超过上限给明确反馈，不再静默：起点保留，等用户点一个更近的日期
+                        toast("最多只能选 $MAX_SPAN_DAYS 天，请重新选择")
+                    } else if (gap > 0) {
+                        endTime = clicked
+                        viewModel.setCustomTime(startTime, endTime)
+                    } else {
+                        startTime = clicked
+                        endTime = _startTime
+                        viewModel.setCustomTime(startTime, endTime)
+                    }
                 }
-                if (abs(_startTime.getGapCount(dateModel)) > 30) {
-                    // TODO: toast
-                } else if (dateModel.getDate().time > _startTime.getDate().time) {
-                    endTime = dateModel
-                } else {
-                    endTime = _startTime
-                    startTime = dateModel
+                // 已选完整区间
+                else -> {
+                    if (daysBetween(_startTime, clicked) >= 0 && daysBetween(clicked, _endTime) >= 0) {
+                        // 点区间内部（含两端）→ 只移动更近的那一端，不再把整个区间清掉；
+                        // 正好落在中点时移动终点。
+                        if (daysBetween(_startTime, clicked) < daysBetween(clicked, _endTime)) {
+                            startTime = clicked
+                        } else {
+                            endTime = clicked
+                        }
+                        viewModel.setCustomTime(startTime, endTime)
+                    } else {
+                        // 点在区间外 → 以这一格为新起点重新选，保留"再点一次可以重来"的旧手感
+                        startTime = clicked
+                        endTime = null
+                        viewModel.setCustomTime(clicked, null)
+                    }
                 }
-                viewModel.setCustomTime(startTime, endTime)
-            } else {
-                startTime = null
-                endTime = null
-                viewModel.setCustomTime(null, null)
             }
             Unit
         }
     }
 
+    val selectedStart = startTime
+    val selectedEnd = endTime
+    // 摘要放日历上方：原来那行在日历下方，会被底部"确定"按钮压住
+    val summaryText = when {
+        selectedStart == null -> "点日期选择开始与结束（最多 $MAX_SPAN_DAYS 天）"
+        selectedEnd == null -> "开始 ${selectedStart.getValue("-")}，请再点一个日期作为结束（最多 $MAX_SPAN_DAYS 天）"
+        else -> "${selectedStart.getValue("-")} → ${selectedEnd.getValue("-")}（共 ${spanDays(selectedStart, selectedEnd)} 天，上限 $MAX_SPAN_DAYS 天）"
+    }
+
     Column() {
+
+        Text(
+            text = summaryText,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
 
         Header(
             year = year,
@@ -309,9 +358,8 @@ internal fun CustomTime(
         Column(
 //            modifier = Modifier.height(350.dp)
         ) {
-            var total = monthDayNum + monthStartWeek
-            var num = 0
-            while (num < total) {
+            for (row in 0 until rowCount) {
+                val num = row * 7
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -319,11 +367,7 @@ internal fun CustomTime(
                     for (dayOfWeek in num..(num + 6)) {
                         val day = dayOfWeek - monthStartWeek + 1
                         if (day in 1..monthDayNum && !(isMaxMonth && day > maxDate.date)) {
-                            val curTime = DateModel().also {
-                                it.year = year.value
-                                it.month = month.value
-                                it.date = day
-                            }
+                            val curTime = dateOf(year.value, month.value, day)
                             val _startTime = startTime
                             val _endTime = endTime
 
@@ -332,7 +376,7 @@ internal fun CustomTime(
                             } else if (curTime == _startTime) {
                                 TextBoxStatus.Start
                             } else if (_endTime == null) {
-                                if (abs(_startTime.getGapCount(curTime)) > 30) {
+                                if (spanDays(_startTime, curTime) > MAX_SPAN_DAYS) {
                                     TextBoxStatus.Disable
                                 } else {
                                     TextBoxStatus.Enable
@@ -340,8 +384,8 @@ internal fun CustomTime(
                             } else if (curTime == _endTime) {
                                 TextBoxStatus.End
                             } else {
-                                if (_startTime.getGapCount(curTime) > 0
-                                    && _endTime.getGapCount(curTime) < 0
+                                if (daysBetween(_startTime, curTime) > 0
+                                    && daysBetween(curTime, _endTime) > 0
                                 ) {
                                     TextBoxStatus.Middle
                                 } else {
@@ -372,15 +416,8 @@ internal fun CustomTime(
                         }
                     }
                 }
-                num += 7
             }
         }
-        Text(
-            text = "已选择时间线：${startTime?.getValue("-") ?: "未选择"} 至 ${endTime?.getValue("-") ?: "未选择"}",
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(top = 5.dp)
-        )
     }
 }
 
