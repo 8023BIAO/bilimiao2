@@ -35,21 +35,6 @@ android {
         resValues = true
     }
 
-    // 只保留中文（默认 values/ 就是中文）与英文：原来 APK 里带了 40+ 种语言，
-    // 全是 AppCompat/Material/media3/Play Services 等库自带翻译，我们一条都用不到。
-    // AGP 8.1+ 的写法（老的 defaultConfig.resConfigs 已被 localeFilters 取代）。
-    androidResources {
-        localeFilters += listOf("zh", "en")
-    }
-
-    // 协议源文件（bilibili/**/*.proto 等 600+ KB）是 protobuf 插件当 Java 资源打进包的，
-    // 运行时用不到（pbandk 的 descriptor 是生成在代码里的，全仓没有任何地方读 .proto 文件）。
-    packaging {
-        resources {
-            excludes += "**/*.proto"
-        }
-    }
-
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"
@@ -148,6 +133,7 @@ dependencies {
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.decoder)
+    implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.dash)
     // 直播 HLS(.m3u8)：LivePlayerDelegate 造 HlsMediaSource 用（方案 §3.1）
