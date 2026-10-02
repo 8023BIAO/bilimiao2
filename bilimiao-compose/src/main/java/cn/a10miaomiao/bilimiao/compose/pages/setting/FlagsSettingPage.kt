@@ -1250,6 +1250,25 @@ private fun FlagsSettingPageContent(
                 summary = { Text(updateSummaryText(updateState)) },
                 onClick = { startUpdateCheck() },
             )
+            // 问题反馈：腾讯问卷（低门槛，不需要 GitHub 账号；一个输入框，随便写）
+            // 与上面「检查更新」并排放在最前 —— 这是最希望被用户点的一行
+            preference(
+                key = "feedback_survey",
+                title = { Text("问题反馈") },
+                summary = { Text("匿名留言，随便写") },
+                onClick = {
+                    if (ClickGuard.allow("flags:feedback_survey")) {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://wj.qq.com/s2/28080250/ae4q/")
+                                )
+                            )
+                        }
+                    }
+                },
+            )
             preference(
                 key = "github_repo",
                 title = { Text("我的 GitHub 仓库") },
