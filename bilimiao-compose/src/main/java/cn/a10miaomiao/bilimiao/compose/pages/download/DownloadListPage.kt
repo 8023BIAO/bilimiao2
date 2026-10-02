@@ -50,6 +50,7 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadSearchBox
 
 @Serializable
 class DownloadListPage : ComposePage() {
