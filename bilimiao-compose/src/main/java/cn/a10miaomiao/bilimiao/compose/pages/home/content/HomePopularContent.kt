@@ -241,6 +241,14 @@ private class HomePopularContentViewModel(
 
 }
 
+// ★ 2026-10-02 用户拍板：热门页**不显示**接口下发的顶部入口那排
+//   （排行榜 / 每周必看 / 入站必刷）。理由：做减法——"排行榜"是长期总榜，
+//   与时光机的时间段检索高度重合且内容更差；"每周必看""入站必刷"内容质量不行，
+//   而且"入站必刷"对新用户才有意义。用户的话：别人用这软件不会去点它们。
+//   这里**只摘掉渲染**：接口字段（PopularGRPC.index 的 top_entrance）与 VM 里的
+//   `topEntranceList` 保持不动，避免动到取数链路（用户明确要求别碰 API 相关的代码）。
+//   要恢复显示：把下面这行从注释里挪回 LazyVerticalGrid 的 item{} 即可。
+/*
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun EntranceListBox(
@@ -273,6 +281,7 @@ private fun EntranceListBox(
         }
     }
 }
+*/
 
 @Composable
 internal fun HomePopularContent() {
@@ -313,9 +322,8 @@ internal fun HomePopularContent() {
                 top = 0.dp,
             )
         ) {
-            item {
-                EntranceListBox(viewModel)
-            }
+            // ★ 顶部入口那排（排行榜 / 每周必看 / 入站必刷）已按用户拍板隐藏，见文件下方说明。
+            //   原调用：item { EntranceListBox(viewModel) }
             items(list, { it.base?.param?.ifEmpty { it.base?.uri ?: "" } ?: "" }) {
                 VideoItemBox(
                     modifier = Modifier.padding(

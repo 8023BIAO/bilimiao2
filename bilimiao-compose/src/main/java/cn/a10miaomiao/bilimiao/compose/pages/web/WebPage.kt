@@ -91,6 +91,19 @@ private class WebPageViewModel(
     val pageTitle = mutableStateOf("")
     val hideNavbar = mutableStateOf(false)
 
+    /**
+     * 网页内部**是否还有上一层历史**（决定返回键是"网页后退"还是"退出网页"）。
+     *
+     * ★必须是可观察状态、并由 [WebViewClient.doUpdateVisitedHistory] 驱动：
+     *   2026-10-02 修的真实 bug —— 原来 `BackHandler(enabled = webView?.canGoBack() == true)` 直接读方法，
+     *   而 `canGoBack()` 不是 Compose 状态，网页内跳转不会触发重组，`enabled` 就一直是打开页面那一刻的
+     *   旧值 false ⇒ 按返回直接退出整个网页。B 站是 SPA，站内点链接常常只 pushState、连
+     *   `onPageFinished`/`onReceivedTitle` 都不触发（那两处改的是 `pageTitle`，所以"整页跳转"那一次会侥幸生效、
+     *   站内跳转就不生效——这正是用户看到的"有时好使有时不好使"）。
+     *   `doUpdateVisitedHistory` 在**每次历史变化**（含 pushState/replaceState/后退）都会回调，是唯一可靠的钩子。
+     */
+    val canGoBack = mutableStateOf(false)
+
     /** 是否已经把导航交棒给 App 内页面（此后本页只是"跳转中间页"） */
     val inAppNavigated = mutableStateOf(false)
 
@@ -188,6 +201,15 @@ private class WebPageViewModel(
     }
 
     private val mWebViewClient = object : WebViewClient() {
+        /**
+         * 网页历史每次变化都会走这里（整页跳转、SPA 的 pushState/replaceState、后退都算）
+         * ⇒ 在这里刷新 [canGoBack]，返回键才能正确判断"退网页"还是"退上一层"。
+         */
+        override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+            super.doUpdateVisitedHistory(view, url, isReload)
+            canGoBack.value = view.canGoBack()
+        }
+
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             // 只接管主框架导航：iframe/广告等子框架不该决定整页跳转
             if (!request.isForMainFrame) return false
@@ -243,6 +265,8 @@ private class WebPageViewModel(
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
             super.onPageStarted(view, url, favicon)
             loading.value = true
+            // 整页跳转也兜一次底（有些跳转不一定走 doUpdateVisitedHistory 的时序）
+            canGoBack.value = view.canGoBack()
             hideNavbar.value = url.indexOf("navhide=1") != -1
             view.evaluateJavascript("""
                 (function(){
@@ -275,6 +299,8 @@ private class WebPageViewModel(
             applyThemeToWebView(view)
             super.onPageFinished(view, url)
             loading.value = false
+            // 加载完再兜一次底：SPA 首屏进来时历史可能刚建好
+            canGoBack.value = view.canGoBack()
 //            val js = """javascript:(function() {
 //                        var parent = document.getElementsByTagName('head').item(0);
 //                        var style = document.createElement('style');
@@ -307,7 +333,9 @@ private fun WebPageContent(
 ) {
     // 网页内部的历史要自己接管返回：否则按一次返回就把整个网页关掉，
     // 网页里点进去的几层全丢（系统返回和 App 底栏返回都走 OnBackPressedDispatcher，这里都能拦到）
-    BackHandler(enabled = viewModel.webView?.canGoBack() == true) {
+    // ★enabled 读的是**可观察状态** `canGoBack`（由 WebViewClient.doUpdateVisitedHistory 刷新）：
+    //   直接写 `webView?.canGoBack() == true` 会永远停在打开页面那一刻的 false，站内跳转后按返回直接退网页。
+    BackHandler(enabled = viewModel.canGoBack.value) {
         viewModel.webView?.goBack()
     }
 
