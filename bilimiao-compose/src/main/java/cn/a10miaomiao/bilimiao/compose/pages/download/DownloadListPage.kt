@@ -183,7 +183,9 @@ internal class DownloadListPageViewModel(
                         is_completed = biliEntry.is_completed,
                         total_bytes = biliEntry.total_bytes,
                         downloaded_bytes = biliEntry.downloaded_bytes,
-                        title = biliEntry.title,
+                        // ★卡片标题（新建分组这一处才是列表上显示的那个）：合集优先用合集名，
+                        //   否则用条目标题（多P=视频标题 / 番剧=番剧名）。别用分P名——那会让多P 卡片只显示某一P。
+                        title = biliEntry.seasonTitle ?: biliEntry.title,
                         cover = biliEntry.cover,
                         cid = cid,
                         id = id,
@@ -220,14 +222,18 @@ internal class DownloadListPageViewModel(
         val service = DownloadService.getService(fragment.requireContext())
         // ★统计"真正删掉了几份"（私有 + 公共两边都可能有一份），删不到就如实说 ——
         //   原来是"选了 N 个文件夹就报已删除 N 项"，遇到身份失配（发布后路径从绝对变相对）会谎报
-        var deleted = 0
+        // ★按"条目"计数，不按"文件份数"：一集发布到公共目录后是 video/audio/danmaku/index/entry 约 5 个文件，
+        //   直接累加会提示"已删除 5 个视频文件"，批量删 30 集就是"150 个" —— 用户数的是视频，不是文件。
+        var deletedItems = 0
         items.forEach { info ->
             info.items.forEach { item ->
-                try { deleted += service.deleteDownload(info.dir_path, item.dir_path) } catch (_: Exception) {}
+                try {
+                    if (service.deleteDownload(info.dir_path, item.dir_path) > 0) deletedItems++
+                } catch (_: Exception) {}
             }
         }
         toast(
-            if (deleted > 0) "已删除 $deleted 个视频文件"
+            if (deletedItems > 0) "已删除 $deletedItems 个视频"
             else "没有找到可删除的文件（可能已被移动或删除）"
         )
         _loadDownloadList(service)
@@ -394,8 +400,12 @@ internal fun DownloadListPageContent(
                     Checkbox(
                         checked = selectedDirs.size == filteredList.size && filteredList.isNotEmpty(),
                         onCheckedChange = { checked ->
-                            if (checked) filteredList.forEach { selectedDirs.add(it.dir_path) }
-                            else selectedDirs.clear()
+                            if (checked) {
+                                // 去重：手选过几项再点"全选"，否则 selectedDirs 会有重复项、"已选 N 项"虚高
+                                filteredList.forEach { info ->
+                                    if (info.dir_path !in selectedDirs) selectedDirs.add(info.dir_path)
+                                }
+                            } else selectedDirs.clear()
                         }
                     )
                     Text(
