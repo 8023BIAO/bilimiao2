@@ -64,6 +64,10 @@ data class BiliDownloadEntryInfo(
             return title
         }
 
+    /** 合集标题（仅合集下载写；老的 entry.json 没有 = null） */
+    val seasonTitle: String?
+        get() = page_data?.season_title?.takeIf { it.isNotBlank() }
+
     /** 合集中的序号（0 起；仅合集下载写。老的 entry.json 没有 = null） */
     val seasonIndex: Int?
         get() = page_data?.season_index ?: ep?.sort_index
@@ -108,6 +112,8 @@ data class BiliDownloadEntryInfo(
         val display_title: String? = null,
         /** 合集内序号（0 起）。老 entry.json 没有 = null */
         val season_index: Int? = null,
+        /** **合集标题**（只有合集下载会写；老 entry.json 没有 = null ⇒ 显示回落"第一条的标题"） */
+        val season_title: String? = null,
     )
 
     // 番剧源信息

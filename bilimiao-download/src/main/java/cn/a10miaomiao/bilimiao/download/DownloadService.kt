@@ -693,7 +693,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     fun deleteDownload (
         pageDirPath: String,
         entryDirPath: String,
-    ) {
+    ): Int {
         // 先按 (页面目录, 剧集目录) 精确匹配；匹配不到再只按剧集目录匹配 ——
         // 同一分组里可能混着"已发布（相对路径）"和"未发布（绝对路径）"两种身份的条目，
         // 页面目录字符串不一定对得上，但 entryDirPath 是唯一的，只按它兜底更可靠
@@ -709,7 +709,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
         // 公共（相对身份）和私有（绝对身份）两边都要删：发布成功但删私有失败、发布到一半失败
         // 都会让同一集在两边各留一份，用户点删除就是"这一集不要了"
-        DownloadFileResolver.deleteDir(this, entryDirPath)
+        // ★返回真实删掉的份数（0 = 两边都没找到）——调用方据此如实提示，不再出现"删了 0 项还说已删除"
+        val deleted = DownloadFileResolver.deleteDir(this, entryDirPath)
         // 页面目录空了顺手删掉（公共目录那边空目录会自动消失，MediaStore 不记录空目录）
         val pageDir = DownloadFileResolver.privateFile(this, pageDirPath)
         if (pageDir.isDirectory && pageDir.listFiles()?.isEmpty() == true) {
@@ -720,6 +721,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             downloadList.removeAt(index)
             downloadListVersion.value++
         }
+        return deleted
     }
 
     /**

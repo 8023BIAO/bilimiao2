@@ -440,6 +440,8 @@ class VideoDownloadDialogState(
                                 // 序号 = 在合集里的位置，用于下载详情页按 UP 主顺序排
                                 display_title = entryTitle,
                                 season_index = seasonOrder[aid],
+                                // 合集标题也带上：下载详情的表头要显示"这是哪个合集"，而不是某一集的名字
+                                season_title = _seasonTitle,
                             )
                             val biliVideoEntry = BiliDownloadEntryInfo(
                                 media_type = 2, has_dash_audio = true,

@@ -4,14 +4,7 @@ import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -20,7 +13,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModel
@@ -48,6 +40,7 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
+import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadSearchBox
 
 @Serializable
 data class DownloadDetailPage(
@@ -163,7 +156,9 @@ internal class DownloadDetailPageViewModel(
                 is_completed = isCompleted,
                 total_bytes = biliEntry.total_bytes,
                 downloaded_bytes = biliEntry.downloaded_bytes,
-                title = biliEntry.title,
+                // ★表头标题：合集优先用**合集名**（新下载写了 season_title），否则回落第一条的标题。
+                //   原来固定用 list[0] 的标题 ⇒ 合集表头显示的却是"某一集"的名字。
+                title = list.firstNotNullOfOrNull { it.entry.seasonTitle } ?: biliEntry.title,
                 cover = biliEntry.cover,
                 cid = item.cid,
                 id = item.id,
@@ -255,24 +250,14 @@ internal fun DownloadDetailPageContent(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 搜索框
-        OutlinedTextField(
+        // 搜索框：改用公共组件（与下载列表页/下载面板同一个，右侧带"一键清空"的叉）
+        DownloadSearchBox(
             value = searchQuery,
             onValueChange = { searchQuery = it },
+            placeholder = "搜索下载视频",
             modifier = Modifier
-                .fillMaxWidth()
                 .padding(top = windowInsets.topDp.dp)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
-            placeholder = {
-                Text("搜索下载视频", color = MaterialTheme.colorScheme.outline)
-            },
-            leadingIcon = {
-                Icon(Icons.Default.Search, "搜索", tint = MaterialTheme.colorScheme.outline)
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { }),
-            shape = RoundedCornerShape(8.dp),
         )
 
         LazyColumn(

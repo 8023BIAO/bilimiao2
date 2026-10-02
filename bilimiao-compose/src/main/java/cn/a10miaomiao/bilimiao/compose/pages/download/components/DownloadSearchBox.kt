@@ -41,14 +41,14 @@ internal fun DownloadSearchBox(
             )
         },
         trailingIcon = {
-            if (value.isNotEmpty()) {
-                IconButton(onClick = { onValueChange("") }) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "清空",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            // ★叉号常驻（不随"有没有输入"显隐）：用户明确要求几个搜索框都要有这个"一键清空"，
+            //   没输入时点它等于空操作，不会出错。
+            IconButton(onClick = { onValueChange("") }) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "清空",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
         textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),

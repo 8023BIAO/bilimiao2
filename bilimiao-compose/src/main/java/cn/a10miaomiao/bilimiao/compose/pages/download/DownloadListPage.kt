@@ -132,8 +132,8 @@ internal class DownloadListPageViewModel(
                 indexTitle = page.download_title ?: "unknown"
                 cid = page.cid
                 type = DownloadType.VIDEO
-                // ★统一走 entry.showTitle：新下载有 display_title（真名），老条目回落 part/subtitle/title
-                itemTitle = biliEntry.showTitle
+                // ★卡片标题：**合集优先用合集名**（新下载写了 season_title），否则用统一真名解析
+                itemTitle = biliEntry.seasonTitle ?: biliEntry.showTitle
             }
             val ep = biliEntry.ep
             val source = biliEntry.source
@@ -218,12 +218,18 @@ internal class DownloadListPageViewModel(
 
     fun deleteSelections(items: List<DownloadInfo>) = viewModelScope.launch {
         val service = DownloadService.getService(fragment.requireContext())
+        // ★统计"真正删掉了几份"（私有 + 公共两边都可能有一份），删不到就如实说 ——
+        //   原来是"选了 N 个文件夹就报已删除 N 项"，遇到身份失配（发布后路径从绝对变相对）会谎报
+        var deleted = 0
         items.forEach { info ->
             info.items.forEach { item ->
-                try { service.deleteDownload(info.dir_path, item.dir_path) } catch (_: Exception) {}
+                try { deleted += service.deleteDownload(info.dir_path, item.dir_path) } catch (_: Exception) {}
             }
         }
-        toast("已删除${items.size}项")
+        toast(
+            if (deleted > 0) "已删除 $deleted 个视频文件"
+            else "没有找到可删除的文件（可能已被移动或删除）"
+        )
         _loadDownloadList(service)
     }
 }
@@ -239,40 +245,18 @@ internal fun DownloadListPageContent(
     var isEditMode by remember { mutableStateOf(false) }
     val selectedDirs = remember { mutableStateListOf<String>() }
 
-    val pageConfigId = PageConfig(
-        title = if (isEditMode) "已选${selectedDirs.size}项" else "下载列表",
-        menu = remember(isEditMode) {
-            myMenu {
-                if (isEditMode) {
-                    myItem { key = 1; iconFileName = "ic_baseline_done_24"; title = "完成" }
-                    myItem { key = 3; iconFileName = "ic_baseline_delete_24"; title = "删除" }
-                } else {
-                    // ★2026-10-02 用户拍板：**不显示"编辑"**。
-                    //   编辑态是"多选 + 批量删除"，但它没有任何"选中数/非空"判断 —— 空列表或零选中时
-                    //   点删除会弹"选中的 0 项"、一个文件都不删却提示"已删除0项"。做减法：直接不给入口。
-                    //   （单个条目的删除不受影响，仍在详情页里）
-                    myItem { key = 0; iconFileName = "ic_baseline_lightbulb_24"; title = "提示" }
-                }
-            }
-        }
-    )
-    val windowStore: WindowStore by rememberInstance()
-    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
-    val windowInsets = windowState.getContentInsets(localContainerView())
-    val bottomAppBarHeight = windowStore.bottomAppBarHeightDp
-
+    // ★先把列表状态读出来：下面菜单"给不给编辑入口 / 给不给删除"都取决于它
     var status by remember { mutableStateOf(0) }
     val downloadList by viewModel.downloadList.collectAsStateWithLifecycle()
     val curDownload by viewModel.curDownload.collectAsStateWithLifecycle()
     val list = remember(downloadList, status) {
         viewModel.filterDownloadList(downloadList, status)
     }
-
     var showHelpDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var isSearchMode by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
-    
+
     // 搜索过滤
     val filteredList = remember(list, searchText) {
         if (searchText.isBlank()) list
@@ -281,6 +265,34 @@ internal fun DownloadListPageContent(
             info.items.any { it.title.contains(searchText, ignoreCase = true) }
         }
     }
+    // ★2026-10-02：**列表空的时候才不给"编辑"**（没东西可编辑，点进去只会看到"已选0项"）；
+    //   有东西时必须给 —— 用户要靠它多选、一次性把整个下载文件夹删掉。
+    val canEdit = filteredList.isNotEmpty()
+
+    val pageConfigId = PageConfig(
+        title = if (isEditMode) "已选${selectedDirs.size}项" else "下载列表",
+        // selectedDirs.size 也要进 key：菜单里"删除"的显隐依赖它，只按 isEditMode 缓存会读到旧菜单
+        menu = remember(isEditMode, canEdit, selectedDirs.size) {
+            myMenu {
+                if (isEditMode) {
+                    myItem { key = 1; iconFileName = "ic_baseline_done_24"; title = "完成" }
+                    // 一项都没选就不显示"删除"：原来点了会弹"选中的 0 项"、一个文件都不删还提示"已删除0项"
+                    if (selectedDirs.isNotEmpty()) {
+                        myItem { key = 3; iconFileName = "ic_baseline_delete_24"; title = "删除" }
+                    }
+                } else {
+                    myItem { key = 0; iconFileName = "ic_baseline_lightbulb_24"; title = "提示" }
+                    if (canEdit) {
+                        myItem { key = 2; iconFileName = "ic_baseline_edit_24"; title = "编辑" }
+                    }
+                }
+            }
+        }
+    )
+    val windowStore: WindowStore by rememberInstance()
+    val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
+    val windowInsets = windowState.getContentInsets(localContainerView())
+    val bottomAppBarHeight = windowStore.bottomAppBarHeightDp
     
     PageListener(
         pageConfigId,
@@ -288,7 +300,12 @@ internal fun DownloadListPageContent(
             when(menuItem.key) {
                 0 -> showHelpDialog = true
                 1 -> { isEditMode = false; selectedDirs.clear() }
-                3 -> showDeleteDialog = true
+                2 -> { isEditMode = true; selectedDirs.clear() }
+                3 -> {
+                    // 双保险：真到这一步还是一项没选，就别说"删除"了
+                    if (selectedDirs.isEmpty()) toast("请先选择要删除的项")
+                    else showDeleteDialog = true
+                }
                 // 搜索已常驻显示
             }
         }
