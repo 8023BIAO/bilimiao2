@@ -116,7 +116,8 @@ class UserSpaceViewModel(
                 // 已注销账号：空间接口回 -404（官方文档写着"用户不存在（如注销账号）"）。
                 // 原来直接把接口的原始 message 甩进失败框 + toast，用户看到的是机器话；
                 // 这里换成一句人话，页面就会显示"该账号已注销"。
-                if (res.code == -404) {
+                // 不同注销账号返回码不一样：实测两个分别是 -404（用户不存在）与 -400（请求错误）
+                if (res.code == -404 || res.code == -400) {
                     _fail.value = "该账号已注销"
                 } else {
                     _fail.value = res.message
