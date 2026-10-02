@@ -69,6 +69,13 @@ internal class DownloadListPageViewModel(
     var downloadListVersion = 0
     val downloadList = MutableStateFlow(emptyList<BiliDownloadEntryAndPathInfo>())
     val curDownload = MutableStateFlow<CurrentDownloadInfo?>(null)
+    /** 队列版本号：变化时界面重算"这组是不是在排队" */
+    val waitQueueVersion = MutableStateFlow(0)
+    private var downloadService: DownloadService? = null
+
+    /** 这一组里是否有条目在等待队列（排队中 ≠ 暂停中） */
+    fun isQueuedGroup(info: DownloadInfo): Boolean =
+        info.items.any { downloadService?.isInWaitDownloadQueue(it.dir_path) == true }
     var downloadPath = ""
 
     init {
@@ -82,6 +89,7 @@ internal class DownloadListPageViewModel(
 
     private fun loadDownloadList() = viewModelScope.launch {
         val service = DownloadService.getService(fragment.requireContext())
+        downloadService = service
         downloadPath = service.getDownloadPath()
         _loadDownloadList(service)
         launch {
@@ -93,6 +101,9 @@ internal class DownloadListPageViewModel(
             }
         }
         launch {
+            launch {
+                service.waitQueueVersion.collect { waitQueueVersion.value = it }
+            }
             service.curDownload.collect(curDownload::value::set)
         }
     }
@@ -261,6 +272,8 @@ internal fun DownloadListPageContent(
     var status by remember { mutableStateOf(0) }
     val downloadList by viewModel.downloadList.collectAsStateWithLifecycle()
     val curDownload by viewModel.curDownload.collectAsStateWithLifecycle()
+    // 读一下队列版本：队列变化时要重算每张卡片的"排队中/暂停中"
+    val waitQueueVersion by viewModel.waitQueueVersion.collectAsStateWithLifecycle()
     val list = remember(downloadList, status) {
         viewModel.filterDownloadList(downloadList, status)
     }
@@ -439,6 +452,8 @@ internal fun DownloadListPageContent(
             items(filteredList, key = { it.dir_path }) { info ->
                 DownloadListItem(
                     curDownload = curDownload, item = info,
+                    // waitQueueVersion 作 key：队列变化时重算，其它时候不重复算
+                    queued = remember(waitQueueVersion, curDownload) { viewModel.isQueuedGroup(info) },
                     onClick = { viewModel.toDetailPage(info) },
                     selectMode = isEditMode,
                     selected = info.dir_path in selectedDirs,

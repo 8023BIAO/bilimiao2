@@ -129,6 +129,44 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     // 普通 ArrayList 在 removeAll/removeAt 交叉时会抛 ConcurrentModificationException
     //（被 exceptionHandler 接住后表现成"下载出错"）
     var waitDownloadQueue = java.util.concurrent.CopyOnWriteArrayList<BiliDownloadEntryAndPathInfo>()
+
+    /**
+     * 等待队列版本号：队列增删时 +1。
+     *
+     * 为什么要它：界面原来把"未完成且不是当前任务"的条目一律显示成**"暂停中"** —— 一次勾选多集时，
+     * 除第一条外全在排队，用户看到一片"暂停中"，以为被自动暂停了（2026-10-02 用户反馈）。
+     * 有了这个版本号，界面能区分"排队中（马上会自己开始）"和"真的暂停/失败了"。
+     */
+    val waitQueueVersion = MutableStateFlow(0)
+
+    private fun bumpWaitQueueVersion() {
+        waitQueueVersion.value++
+    }
+
+    /**
+     * **已受理但还没登记进 [curDownload] 的任务 key**。
+     *
+     * 为什么必须有它（2026-10-02 用户实测的真 bug）：[createDownload] 是同步的，而 [startDownload] 是
+     * `launch`（跑在 Dispatchers.IO，异步）——勾选多集下载时是一个 for 循环连续 createDownload，
+     * 每次都在协程真正跑起来之前读到 `curDownload == null`，于是**每一条都走"立即开始"**；
+     * 后一条的 startDownload 又会 `downloadManager?.cancel()` 掉前一条的 manager，
+     * 前一条于是被置成"暂停"、且**从未进入等待队列** ⇒ 永远不会自己开始。
+     * 用户看到的就是"两集一起下，第二集下完了，第一集压根没下"。
+     *
+     * 修法：启动前**同步**占位，登记进 curDownload 后立刻释放；占位期间新的 createDownload 一律排队。
+     */
+    @Volatile
+    private var pendingStartKey: Long? = null
+
+    /** 有任务在跑，或有一条刚受理、正在启动 */
+    private fun hasRunningOrStartingTask(): Boolean =
+        curDownload.value != null || pendingStartKey != null
+
+    /** 同步占位后启动（所有"立即开始"的入口都要走它） */
+    private fun beginStart(biliDownInfo: BiliDownloadEntryAndPathInfo) {
+        pendingStartKey = biliDownInfo.entry.key
+        startDownload(biliDownInfo)
+    }
     val curDownload = MutableStateFlow<CurrentDownloadInfo?>(null)
     private val curBiliDownloadEntryAndPathInfo: BiliDownloadEntryAndPathInfo?
         get() = curDownload.value?.let { cur ->
@@ -383,12 +421,14 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         if (curDl != null && curDl.status < 0) {
             curDownload.value = null
         }
-        if (curDownload.value == null) {
+        if (!hasRunningOrStartingTask()) {
             logToFile("createDownload: STARTING immediately")
-            startDownload(biliDownInfo)
+            // ★走 beginStart（同步占位）：否则紧接着的下一个 createDownload 会看到 curDownload 还是 null
+            beginStart(biliDownInfo)
         } else {
-            logToFile("createDownload: QUEUED (curDownload not null)")
+            logToFile("createDownload: QUEUED (curDownload/pendingStart not null)")
             waitDownloadQueue.add(biliDownInfo)
+            bumpWaitQueueVersion()
         }
     }
 
@@ -397,7 +437,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             it.entryDirPath == entryDirPath
         }
         if (biliDownInfo != null) {
-            startDownload(biliDownInfo)
+            beginStart(biliDownInfo)
         } else {
 //            val entryFile = File(entryDirPath, "entry.json")
 //            if (entryFile.exists()) {
@@ -421,6 +461,7 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         // 真正开跑就从等待队列里摘掉：否则暂停/失败后 nextDownload() 又会把它从队列里取出来重启
         //（用户看到"已暂停"，过一会儿它自己又跑起来；失败项也会被悄悄重跑一次）
         waitDownloadQueue.removeAll { it.entry.key == biliDownInfo.entry.key }
+        bumpWaitQueueVersion()
         // 真正有任务要跑了才提升前台服务
         startForegroundCompat()
         // 取消当前任务
@@ -448,6 +489,10 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
             progress = entry.downloaded_bytes,
             length = entry.total_time_milli,
         )
+        // ★尽早同步登记为"当前任务"并释放占位：此后到来的 createDownload 一律排队。
+        //   后面各阶段会把这个 info 覆盖成"取弹幕/取播放地址/下载中"等状态，这里先立个桩。
+        curDownload.value = currentDownloadInfo
+        pendingStartKey = null
         if (!danmakuXMLFile.exists()) {
             try {
                 // 获取弹幕并下载
@@ -684,6 +729,8 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
         }
         curMediaFile = null
         curMediaFileInfo = null
+        // 兜底：任务没登记完就被停掉时，别把"启动中"的槽位一直占着（否则后续任务永远只排队不开始）
+        pendingStartKey = null
         nextDownload()
     }
 
@@ -830,8 +877,9 @@ class DownloadService: Service(), CoroutineScope, DownloadManager.Callback {
     private fun nextDownload() {
         while (waitDownloadQueue.isNotEmpty()) {
             val next = waitDownloadQueue.removeAt(0)
+            bumpWaitQueueVersion()
             if (downloadList.indexOfFirst { it.entry.key == next.entry.key } != -1) {
-                startDownload(next)
+                beginStart(next)
                 return
             }
         }

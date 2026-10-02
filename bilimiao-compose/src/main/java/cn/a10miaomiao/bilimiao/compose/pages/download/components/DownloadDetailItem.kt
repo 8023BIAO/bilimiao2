@@ -23,10 +23,14 @@ import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
 import com.bumptech.glide.integration.compose.GlideImage
 import com.bumptech.glide.integration.compose.placeholder
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun DownloadDetailItem(
+    /** 是否在等待队列里排队（排队 ≠ 暂停：它马上会自己开始） */
+    queued: Boolean = false,
     curDownload: CurrentDownloadInfo?,
     item: DownloadItemInfo,
     onClick: () -> Unit,
@@ -99,10 +103,14 @@ fun DownloadDetailItem(
                             overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
+                        // ★排队中要单独显示（2026-10-02）：勾选多集时除当前那条外都在排队，
+                        //   原来一律显示"暂停中"，用户以为被自动暂停了
                         val status = if (item.is_completed) {
                             "已完成下载"
                         } else if (item.cid == curDownload?.id) {
                             curDownload.statusText
+                        } else if (queued) {
+                            "排队中"
                         } else {
                             "暂停中"
                         }
@@ -118,6 +126,9 @@ fun DownloadDetailItem(
                             IconButton(onClick = { onPauseClick(curDownload.taskId) }) {
                                 Icon(Icons.Filled.Pause, null)
                             }
+                        } else if (queued) {
+                            // 排队中的不给"开始"按钮：点它会把当前任务挤掉；它自己会轮到
+                            Spacer(modifier = Modifier.size(48.dp))
                         } else {
                             IconButton(onClick = onStartClick) {
                                 Icon(Icons.Filled.PlayArrow, null)

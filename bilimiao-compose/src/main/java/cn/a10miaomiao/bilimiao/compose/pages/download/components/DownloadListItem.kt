@@ -30,6 +30,8 @@ import com.bumptech.glide.integration.compose.placeholder
 @Composable
 fun DownloadListItem(
     curDownload: CurrentDownloadInfo?,
+    /** 这一组里是否有条目在排队（排队 ≠ 暂停） */
+    queued: Boolean = false,
     item: DownloadInfo,
     onClick: () -> Unit,
     selectMode: Boolean = false,
@@ -80,6 +82,8 @@ fun DownloadListItem(
                             "已完成下载"
                         } else if (item.id.toString() == curDownload?.parentId){
                             curDownload.statusText
+                        } else if (queued) {
+                            "排队中"
                         } else {
                             "暂停中"
                         }

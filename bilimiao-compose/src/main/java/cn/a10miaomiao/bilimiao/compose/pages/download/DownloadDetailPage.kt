@@ -65,7 +65,13 @@ internal class DownloadDetailPageViewModel(
     val downloadInfo = MutableStateFlow<DownloadInfo?>(null)
     val downloadItems = MutableStateFlow(emptyList<DownloadItemInfo>())
     val curDownload = MutableStateFlow<CurrentDownloadInfo?>(null)
+    /** 队列版本号：变化时界面重算"这条是不是在排队" */
+    val waitQueueVersion = MutableStateFlow(0)
     private var downloadService: DownloadService? = null
+
+    /** 这一条是否在等待队列里（排队中 ≠ 暂停中） */
+    fun isQueued(dirPath: String): Boolean =
+        downloadService?.isInWaitDownloadQueue(dirPath) == true
 
     fun loadDownloadDetail(
         dirPath: String,
@@ -79,6 +85,11 @@ internal class DownloadDetailPageViewModel(
         launch {
             service.downloadListVersion.collect {
                 _loadDownloadDetail(service, dirPath)
+            }
+        }
+        launch {
+            service.waitQueueVersion.collect {
+                waitQueueVersion.value = it
             }
         }
         service.curDownload.collect {
@@ -238,6 +249,8 @@ internal fun DownloadDetailPageContent(
     val downloadInfo by viewModel.downloadInfo.collectAsStateWithLifecycle()
     val downloadItems by viewModel.downloadItems.collectAsStateWithLifecycle()
     val curDownload by viewModel.curDownload.collectAsStateWithLifecycle()
+    // 读一下队列版本：队列变化时要重算下面每条的"排队中/暂停中"
+    val waitQueueVersion by viewModel.waitQueueVersion.collectAsStateWithLifecycle()
 
     // 搜索过滤
     var searchQuery by remember { mutableStateOf("") }
@@ -273,7 +286,7 @@ internal fun DownloadDetailPageContent(
         ) {
             item {
                 downloadInfo?.let {
-                    DownloadListItem(curDownload, it, onClick = {})
+                    DownloadListItem(curDownload, it, queued = viewModel.isQueued(it.dir_path), onClick = {})
                 }
             }
             items(
@@ -281,6 +294,7 @@ internal fun DownloadDetailPageContent(
             ) { item ->
                 DownloadDetailItem(
                     curDownload = curDownload,
+                    queued = remember(waitQueueVersion, curDownload) { viewModel.isQueued(item.dir_path) },
                     item = item,
                     onClick = {
                         viewModel.itemClick(item)
