@@ -87,6 +87,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.video.components.VideoReplyTitleBar
 import cn.a10miaomiao.bilimiao.compose.pages.video.content.VideoDetailContent
 import cn.a10miaomiao.bilimiao.compose.pages.video.content.VideoReplyContent
 import cn.a10miaomiao.bilimiao.compose.common.foundation.LocalOnSeekTime
+import cn.a10miaomiao.bilimiao.compose.common.foundation.LocalSeekMaxSeconds
 import androidx.compose.runtime.CompositionLocalProvider
 import com.a10miaomiao.bilimiao.comm.delegate.player.BasePlayerDelegate
 import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerSource
@@ -242,6 +243,22 @@ private fun VideoDetailPageContent(
             }
         }
     }
+    // ★ 评论空降按视频时长门控：秒数超过时长的时间戳不再渲染成可点链接。
+    //   判定点在 annotatedText，只作用于 bilimiao://seek/ 链接，而**全仓只有评论区产出这种链接**
+    //   （ReplyItemBox）⇒ 实际被门控的是：评论正文 + 二级回复预览 + 二级评论详情页。
+    //   ★**不覆盖** AI 总结/分段大纲（VideoInfoBox 是 `Text + clickable { onSeekTime() }` **直连**
+    //   LocalOnSeekTime，不走 annotatedText），也不覆盖视频简介；别以为 provide 了就都管住了。
+    //   取 arc.duration = **全片时长**（多分P 视频下是各分P 之和 ⇒ 保守上界：B 站评论按 aid 共享、
+    //   各分P 同一评论区，评论里的秒数未必指当前这P；宁可多放行一条，也不要把合法评论误判成"超长"）。
+    //   来源：线上 view 接口实测（单样本 BV14Baa6JENd：4 个分P 215+221+221+221 ⇒ duration=878），非文档结论。
+    //   arc.duration <= 0（接口缺数据）→ 回落 Int.MAX_VALUE = 不设上限，避免整屏时间戳被误禁。
+    //   ★只在**主内容**那层 provide：左栏（双栏/横屏的 VideoDetailContent）里没有任何 annotatedText
+    //   产出 seek 链接的路径，多给一处是空转，反而会让后来人误以为左栏也受门控。
+    val seekMaxSeconds = if (arcData.duration > 0L) {
+        arcData.duration.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    } else {
+        Int.MAX_VALUE
+    }
     DoubleColumnAutofitLayout(
         modifier = Modifier
             .fillMaxSize()
@@ -285,8 +302,12 @@ private fun VideoDetailPageContent(
                 }
             } else {
                 // 双栏（平板/横屏）时左栏在下面那个 CompositionLocalProvider 的作用域之外，
-                // 不在这里补一份的话，AI 总结/分段大纲的时间戳点了没有反应
-                CompositionLocalProvider(LocalOnSeekTime provides seekCallback) {
+                // 不在这里补一份的话，AI 总结/分段大纲的时间戳点了没有反应。
+                // 只补 LocalOnSeekTime：左栏的 VideoDetailContent 不产出 bilimiao://seek/ 链接，
+                // 补 LocalSeekMaxSeconds 是空转（见上面 seekMaxSeconds 的注释）。
+                CompositionLocalProvider(
+                    LocalOnSeekTime provides seekCallback,
+                ) {
                     VideoDetailContent(
                         viewModel = viewModel,
                         innerPadding = innerPadding,
@@ -299,7 +320,12 @@ private fun VideoDetailPageContent(
             }
         }
     ) { orientation, innerPadding ->
-        CompositionLocalProvider(LocalOnSeekTime provides seekCallback) {
+        // 主内容（详情/评论两页 + 二级评论详情页 + 双栏时右栏的评论）统一在这里拿回调与时长上限；
+        // 原来 "reply" 分支里还嵌了一层同样的 LocalOnSeekTime provider，纯冗余，已收掉（做减法）。
+        CompositionLocalProvider(
+            LocalOnSeekTime provides seekCallback,
+            LocalSeekMaxSeconds provides seekMaxSeconds,
+        ) {
         val tabs = remember(orientation) {
             if (orientation == Orientation.Vertical) {
                 listOf(
@@ -449,23 +475,21 @@ private fun VideoDetailPageContent(
                         }
 
                         "reply" -> {
-                            CompositionLocalProvider(LocalOnSeekTime provides seekCallback) {
-                                VideoReplyContent(
-                                    viewModel = mainReplyViewModel,
-                                    listState = replyListState,
-                                    innerPadding = PaddingValues(
-                                        bottom = innerPadding.calculateBottomPadding(),
-                                        start = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
-                                        end = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
-                                    ),
-                                    sharedTransitionScope = sharedTransitionScope,
-                                    animatedVisibilityScope = animatedVisibilityScope,
-                                    detailData = detailData,
-                                    arcData = arcData,
-                                    isActive = index == pagerState.currentPage,
-                                    usePageConfig = orientation == Orientation.Vertical,
-                                )
-                            }
+                            VideoReplyContent(
+                                viewModel = mainReplyViewModel,
+                                listState = replyListState,
+                                innerPadding = PaddingValues(
+                                    bottom = innerPadding.calculateBottomPadding(),
+                                    start = innerPadding.calculateStartPadding(LayoutDirection.Ltr),
+                                    end = innerPadding.calculateEndPadding(LayoutDirection.Ltr),
+                                ),
+                                sharedTransitionScope = sharedTransitionScope,
+                                animatedVisibilityScope = animatedVisibilityScope,
+                                detailData = detailData,
+                                arcData = arcData,
+                                isActive = index == pagerState.currentPage,
+                                usePageConfig = orientation == Orientation.Vertical,
+                            )
                         }
                     }
                 }

@@ -1113,6 +1113,11 @@ private fun BangumiDetailPageContent(
                                     // else: 播放的是别的视频 → 什么都不做
                                 }
                             }
+                            // ★ 评论空降**未接时长门控**（保持原行为）：这一页拿不到"当前剧集时长"——
+                            //   剧集实体（entity/bangumi/EpisodeInfo）没有 duration 字段，PlayerStore.State
+                            //   也没有；为它单独拉一次接口不划算。所以这里不 provide LocalSeekMaxSeconds，
+                            //   走默认值（不设上限），番剧评论区的行为与改动前完全一致。
+                            //   普通视频页的接法见 pages/video/content/VideoReplyContent.kt。
                             CompositionLocalProvider(LocalOnSeekTime provides seekCallback) {
                                 replyViewModel?.let { vm ->
                                 val currentReply by vm.currentReply.collectAsStateWithLifecycle()

@@ -83,11 +83,12 @@ fun annotatedText(
 ): AnnotatedString {
     val onSeekTime = LocalOnSeekTime.current
     val seekEnabled = LocalSeekEnabled.current
+    val seekMaxSeconds = LocalSeekMaxSeconds.current
     val primary = MaterialTheme.colorScheme.primary
     // ★ 缓存：buildAnnotatedString + 每个链接一个 LinkAnnotation 对象，在评论列表里
     //   父级每次重组（加载状态/滚动/屏蔽词变化）都会把所有可见评论重建一遍。
-    //   结果只跟 nodes、是否允许空降、颜色、回调有关。
-    return remember(nodes, seekEnabled, onSeekTime, primary) {
+    //   结果只跟 nodes、是否允许空降、空降秒数上限、颜色、回调有关。
+    return remember(nodes, seekEnabled, seekMaxSeconds, onSeekTime, primary) {
         buildAnnotatedString {
             nodes.forEach {
                 when (it) {
@@ -99,13 +100,13 @@ fun annotatedText(
                         if (it.withLineBreak) {
                             append("\n")
                         }
-                        // 时间戳链接（专栏禁用空降 → 渲染为纯文本）
+                        // 时间戳链接（专栏禁用空降 / 秒数超出视频时长 → 渲染为纯文本）
                         if (it.url.startsWith("bilimiao://seek/")) {
-                            if (!seekEnabled) {
+                            val seconds = it.url.substringAfter("//seek/").toIntOrNull() ?: 0
+                            if (!seekEnabled || seconds > seekMaxSeconds) {
                                 append(it.text)
                                 return@forEach
                             }
-                            val seconds = it.url.substringAfter("//seek/").toIntOrNull() ?: 0
                             withLink(
                                 LinkAnnotation.Clickable(
                                     tag = "seek",
