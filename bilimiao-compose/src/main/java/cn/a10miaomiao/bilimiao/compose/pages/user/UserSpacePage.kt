@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
@@ -80,8 +81,13 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.kodein.di.compose.rememberInstance
 import kotlin.math.roundToInt
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
+import cn.a10miaomiao.bilimiao.compose.components.status.BiliLoadingBox
 
 @Serializable
 data class UserSpacePage(
@@ -110,6 +116,9 @@ data class UserSpacePage(
     }
 }
 
+/** 空间页的三种界面态：加载中 / 已注销账号 / 正常账号。 */
+private enum class UserSpacePageState { Loading, Deleted, Detail }
+
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun UserSpacePageContent(
@@ -121,12 +130,20 @@ private fun UserSpacePageContent(
     val windowInsets = windowState.getContentInsets(localContainerView())
 
     val detailData = viewModel.detailData.collectAsStateWithLifecycle().value
+    val deletedUpper = viewModel.deletedUpper.collectAsStateWithLifecycle().value
+    val fail = viewModel.fail.collectAsStateWithLifecycle().value
+
+    val pageState = when {
+        deletedUpper -> UserSpacePageState.Deleted
+        detailData == null -> UserSpacePageState.Loading
+        else -> UserSpacePageState.Detail
+    }
 //    val slideDistance = LocalDensity.current.run {
 //        100.dp.toPx()
 //    }
     AnimatedContent(
         modifier = Modifier.fillMaxSize(),
-        targetState = detailData == null,
+        targetState = pageState,
         label = "UserSpacePageContent",
         transitionSpec = {
             // Follow M3 Clean fades
@@ -136,19 +153,21 @@ private fun UserSpacePageContent(
             val fadeOut = fadeOut()
             fadeIn.togetherWith(fadeOut)
         }
-    ) {
-        if (it || detailData == null) {
-            UserSpacePageLoadingContent(
-                loading = viewModel.loading.collectAsStateWithLifecycle().value,
-                fail = viewModel.fail.collectAsStateWithLifecycle().value,
-                innerPadding = windowInsets.toPaddingValues()
+    ) { state ->
+        when {
+            state == UserSpacePageState.Deleted -> UserSpaceDeletedContent(
+                viewModel = viewModel,
+                windowInsets = windowInsets,
             )
-        } else {
-            UserSpacePageDetailContent(
+            state == UserSpacePageState.Detail && detailData != null -> UserSpacePageDetailContent(
                 viewModel = viewModel,
                 archiveViewModel = archiveViewModel,
                 windowInsets = windowInsets,
                 detailData = detailData,
+            )
+            else -> UserSpacePageLoadingContent(
+                fail = fail,
+                innerPadding = windowInsets.toPaddingValues()
             )
         }
     }
@@ -156,7 +175,6 @@ private fun UserSpacePageContent(
 
 @Composable
 private fun UserSpacePageLoadingContent(
-    loading: Boolean,
     fail: Any?,
     innerPadding: PaddingValues,
 ) {
@@ -171,15 +189,183 @@ private fun UserSpacePageLoadingContent(
                 .padding(innerPadding)
         )
     } else {
-        // ★原来这里什么都不画：loading 参数收了却没用过 ⇒ 失败为 null 的这段时间整页空白
-        //   （用户报"点进某人的空间是白的"）。补一个居中转圈。
-        Box(
+        // ★原来这里什么都不画：失败为 null 的这段时间整页空白（用户报"点进某人的空间是白的"）。
+        //   vc210 那版补的是**手写** CircularProgressIndicator —— UI 红线 11 不许手写，
+        //   且复核也点过名；这里换回现成的 BiliLoadingBox。
+        BiliLoadingBox(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
-            contentAlignment = Alignment.Center,
+                .padding(innerPadding)
+        )
+    }
+}
+
+/**
+ * 已注销账号的空间页。
+ *
+ * 空间接口（`x/v2/space`）对已注销账号一律失败，昵称/头像/粉丝数这些 card 数据**拿不回来**
+ * （WBI 的 `x/space/wbi/acc/info` 也回 -404），所以这里只画一个极简头部：
+ * 默认头像 + 「账号已注销」+ UID —— 不摆"0 粉 0 获赞"那种假计数
+ * （见 `evidence/deactivated-account-space-audit.md` 的"明确不建议"一节）。
+ *
+ * tab 用 [UserSpaceViewModel.deletedTabs]：去掉主页（数据源已失效，会是纯空白），
+ * 保留仍能按 vmid 直接拉的投稿/动态/专栏 —— 2026-10-02 实测：投稿 tab 用的
+ * `x/v2/space/archive/cursor` 回 code 0 且**返回 3 条投稿**，专栏 `x/v2/space/article` 回 code 0；
+ * 动态那条走 gRPC `dynSpace`、**未实测**（失败只是该 tab 的空态，不影响投稿）。
+ */
+@Composable
+private fun UserSpaceDeletedContent(
+    viewModel: UserSpaceViewModel,
+    windowInsets: Insets,
+) {
+    val pageConfigId = PageConfig(
+        title = "账号已注销",
+        // 只留不需要 card 数据的入口：复制链接 + 搜索投稿（关注/私信/屏蔽都依赖 detailData，这里不给）。
+        menu = rememberMyMenu {
+            myItem {
+                key = MenuKeys.more
+                iconFileName = "ic_more_vert_grey_24dp"
+                title = "更多"
+                childMenu = myMenu {
+                    myItem {
+                        key = 4
+                        title = "复制链接"
+                    }
+                }
+            }
+            myItem {
+                key = MenuKeys.search
+                title = "搜索"
+                iconFileName = "ic_search_gray"
+                action = MenuActions.search
+            }
+        },
+        search = SearchConfigInfo(
+            name = "搜索投稿列表",
+            keyword = "",
+        )
+    )
+    PageListener(
+        pageConfigId,
+        onMenuItemClick = viewModel::menuItemClick,
+        onSearchSelfPage = viewModel::searchSelfPage
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            // ★只吃上/左/右三边：底部安全区由各 tab 自己的列表 contentPadding 出一次
+            //   （投稿/专栏/动态三个 ListContent 都带 `toPaddingValues(...)`）——
+            //   这里再吃一次的话，列表滚到底会在底栏之上多出一整份 bottomDp 的死白（复核抓到的必改 1）。
+            .padding(windowInsets.toPaddingValues(bottom = 0.dp)),
+    ) {
+        UserSpaceDeletedHeader(vmid = viewModel.vmid)
+        UserSpaceTabsSection(
+            tabs = viewModel.deletedTabs,
+            pagerState = rememberPagerState { viewModel.deletedTabs.size },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * 已注销账号的极简头部：默认头像 + 「账号已注销」+ UID。
+ * 颜色/间距全走主题（rule 02：只用 `MaterialTheme.*` 与 4/8/12/16 间距）。
+ */
+@Composable
+private fun UserSpaceDeletedHeader(
+    vmid: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.AccountCircle,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.size(64.dp),
+        )
+        Column(modifier = Modifier.padding(start = 16.dp)) {
+            Text(
+                text = "账号已注销",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = "UID:$vmid",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 空间页那排 tab（TabRow + HorizontalPager）。
+ *
+ * 正常账号与已注销账号**共用这一份** —— 两边只有 tab 列表 / pager 状态 / 修饰符不同
+ * （rule 02 第 15 条：同一交互已有组件就不许写第二份）。
+ */
+@Composable
+private fun UserSpaceTabsSection(
+    tabs: List<UserSpacePageTabs>,
+    pagerState: PagerState,
+    modifier: Modifier = Modifier,
+    tabRowModifier: Modifier = Modifier,
+    pagerModifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val emitter = localEmitter()
+    val combinedTabClick = combinedTabDoubleClick(
+        pagerState = pagerState,
+        onDoubleClick = { index ->
+            scope.launch {
+                emitter.emit(
+                    EmitterAction.DoubleClickTab(
+                        tab = tabs[index].id
+                    ))
+            }
+        }
+    )
+    Column(modifier = modifier) {
+        TabRow(
+            modifier = tabRowModifier,
+            selectedTabIndex = pagerState.currentPage,
+            indicator = { positions ->
+                TabRowDefaults.PrimaryIndicator(
+                    Modifier.pagerTabIndicatorOffset(pagerState, positions),
+                )
+            },
         ) {
-            CircularProgressIndicator()
+            tabs.forEachIndexed { index, tab ->
+                Tab(
+                    text = {
+                        Text(
+                            text = tab.name,
+                            color = if (index == pagerState.currentPage) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onBackground
+                            }
+                        )
+                    },
+                    selected = pagerState.currentPage == index,
+                    onClick = { combinedTabClick(index) },
+                )
+            }
+        }
+        val saveableStateHolder = rememberSaveableStateHolder()
+        HorizontalPager(
+            modifier = pagerModifier.weight(1f),
+            state = pagerState,
+        ) { index ->
+            saveableStateHolder.SaveableStateProvider(index) {
+                tabs[index].PageContent()
+            }
         }
     }
 }
@@ -326,9 +512,6 @@ private fun UserSpacePageDetailContent(
     }
     val scrollableState = rememberScrollState()
 
-    val scope = rememberCoroutineScope()
-    val emitter = localEmitter()
-
     ChainScrollableLayout(
         modifier = Modifier.fillMaxSize(),
         state = chainScrollableLayoutState,
@@ -376,72 +559,27 @@ private fun UserSpacePageDetailContent(
             )
             }
         }
-        val combinedTabClick = combinedTabDoubleClick(
+        UserSpaceTabsSection(
+            tabs = viewModel.tabs,
             pagerState = viewModel.pagerState,
-            onDoubleClick = {
-                scope.launch {
-                    emitter.emit(
-                        EmitterAction.DoubleClickTab(
-                            tab = viewModel.tabs[it].id
-                        ))
-                }
-            }
+            modifier = Modifier.offset {
+                IntOffset(
+                    0,
+                    (state.maxPx + state.getOffsetYValue()).roundToInt()
+                )
+            },
+            tabRowModifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(
+                    start = windowInsets.leftDp.dp,
+                    end = windowInsets.rightDp.dp,
+                )
+                .nestedScroll(state.nestedScroll)
+                .scrollable(scrollableState, Orientation.Vertical),
+            pagerModifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = state.minScrollPosition),
         )
-        Column(
-            modifier = Modifier
-                .offset {
-                    IntOffset(
-                        0,
-                        (state.maxPx + state.getOffsetYValue()).roundToInt()
-                    )
-                },
-        ) {
-            TabRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.background)
-                    .padding(
-                        start = windowInsets.leftDp.dp,
-                        end = windowInsets.rightDp.dp,
-                    )
-                    .nestedScroll(state.nestedScroll)
-                    .scrollable(scrollableState, Orientation.Vertical),
-                selectedTabIndex = viewModel.pagerState.currentPage,
-                indicator = { positions ->
-                    TabRowDefaults.PrimaryIndicator(
-                        Modifier.pagerTabIndicatorOffset(viewModel.pagerState, positions),
-                    )
-                },
-            ) {
-                viewModel.tabs.forEachIndexed { index, tab ->
-                    Tab(
-                        text = {
-                            Text(
-                                text = tab.name,
-                                color = if (index == viewModel.currentPage) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onBackground
-                                }
-                            )
-                        },
-                        selected = viewModel.currentPage == index,
-                        onClick = { combinedTabClick(index) },
-                    )
-                }
-            }
-            val saveableStateHolder = rememberSaveableStateHolder()
-            HorizontalPager(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .weight(1f)
-                    .padding(bottom = state.minScrollPosition),
-                state = viewModel.pagerState,
-            ) { index ->
-                saveableStateHolder.SaveableStateProvider(index) {
-                    viewModel.tabs[index].PageContent()
-                }
-            }
-        }
     }
 }

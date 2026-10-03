@@ -35,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.instance
@@ -57,6 +58,15 @@ class UserSpaceViewModel(
 
     private val _fail = MutableStateFlow<Any?>(null)
     val fail: StateFlow<Any?> get() = _fail
+
+    /**
+     * 已注销账号：空间接口（`x/v2/space`）对它一律失败、拿不到 card，
+     * 但账号本身还在 —— 投稿/专栏这些"按 vmid 直接拉"的接口仍回 code 0（2026-10-02 实测；
+     * 动态那条走 gRPC、未实测，见 [deletedTabs] 的说明）。
+     * 页面据此走极简头部 + 仍可用的 tab，而不是弹一串接口原文。
+     */
+    private val _deletedUpper = MutableStateFlow(false)
+    val deletedUpper: StateFlow<Boolean> get() = _deletedUpper
 
     private val _detailData = MutableStateFlow<SpaceInfo?>(null)
     val detailData: StateFlow<SpaceInfo?> get() = _detailData
@@ -82,6 +92,27 @@ class UserSpaceViewModel(
         UserSpacePageTabs.Article(this, articleViewModel),
     )
 
+    /**
+     * 已注销账号下仍能用的 tab（[deletedUpper] 为真时页面用这一份）。
+     *
+     * ★去掉「主页」：它的内容全部来自 `x/v2/space`，注销后这条接口给不出数据 ⇒ 那个 tab 会是纯空白，
+     *   比没有还糟（用户刚踩过"点进去白屏"）。
+     * ★投稿放第一个（正常空间是"动态"在前）：注销账号里真正想看的就是他注销前的投稿，
+     *   而动态对多数注销号是空的 —— 落页直接是内容，不用再点一下。
+     *
+     * 三条 tab 的数据源与实测状态（2026-10-02，原始 JSON 在 `evidence/deleted-space-probe/`）：
+     *   · 投稿 `x/v2/space/archive/cursor` —— **已实测**：注销号回 code 0 + 3 条；
+     *   · 专栏 `x/v2/space/article` —— **已实测**：注销号回 code 0（该号 0 条）；
+     *   · 动态 `DynamicGRPC.dynSpace`（gRPC）—— **未实测**（探针打的是同源的 Web REST `feed/space`，回 code 0/0 条）。
+     *     真机上若它显示「网络请求失败」，就是这条；失败只是那个 tab 的空态，不影响投稿。
+     */
+    val deletedTabs = listOf(
+        UserSpacePageTabs.Archive(archiveViewModel),
+        UserSpacePageTabs.Dynamic(vmid),
+        // 专栏卡片要显示作者名，而注销号的卡片数据（detailData）拿不回来 ⇒ 这里显式兜一句。
+        UserSpacePageTabs.Article(this, articleViewModel, authorNameOverride = "账号已注销"),
+    )
+
     val pagerState = PagerState{ tabs.size }
     val currentPage get() = pagerState.currentPage
 
@@ -103,6 +134,7 @@ class UserSpaceViewModel(
         try {
             _loading.value = true
             _fail.value = null
+            _deletedUpper.value = false
             val res = BiliApiService
                 .userApi
                 .space(vmid)
@@ -112,13 +144,14 @@ class UserSpaceViewModel(
                 val result = res.requireData()
                 _detailData.value = result
                 _isFollow.value = result.card.relation.is_follow == 1
+            } else if (isDeletedUpper()) {
+                // 已注销账号：空间接口失败是"正常现象"，页面照常打开（见 [deletedUpper] 的说明）。
+                // 不写 _fail（会变成失败框）、不 toast（会弹一串接口机器话）。
+                _deletedUpper.value = true
             } else {
-                // 已注销账号：空间接口回 -404（官方文档写着"用户不存在（如注销账号）"）。
-                // 原来直接把接口的原始 message 甩进失败框 + toast，用户看到的是机器话；
-                // 这里换成一句人话，页面就会显示"该账号已注销"。
-                // 只认 -404：实测 -404 = 用户不存在（已注销账号就是这条）。
-                // ★别把 -400 也算进来：-400 是"请求错误"，与账号状态无关（vmid=0 / 非法 vmid 都是 -400），
-                //   而文章作者按钮等路径可能拼出 space/0 ⇒ 会把正常场景误报成"已注销"。
+                // 只认 -404 是"用户不存在（如注销账号）"这句人话；
+                // -400 是"请求错误"、与账号状态无关（vmid=0 / 非法 vmid 都是 -400），照旧把接口原文给用户。
+                // ★别把 -400 也算进来：文章作者按钮等路径可能拼出 space/0 ⇒ 会把正常场景误报成"已注销"。
                 if (res.code == -404) {
                     _fail.value = "该账号不存在或已注销"
                 } else {
@@ -132,6 +165,37 @@ class UserSpaceViewModel(
             e.printStackTrace()
         } finally {
             _loading.value = false
+        }
+    }
+
+    /**
+     * 这个 mid 是不是"已注销账号"（= 空间接口失败时，页面该不该走极简头部那条路）。
+     *
+     * 判据 = WBI 签名的 `x/space/wbi/acc/info` 回 `-404`。2026-10-02 实测（探针脚本
+     * `scripts/probe-deleted-space.py`，原始响应在 `scratch/deleted-space-probe/`）：
+     *   · 已注销号（UID 3546910874929882）：`x/v2/space` 回 -404/-400，acc/info 回 **-404**；
+     *   · 正常号：acc/info **code 0**；
+     *   · `mid=0`（文章作者按钮可能拼出 `space/0`）：acc/info 回 **-400**，不是 -404。
+     * ⇒ 只有 -404 才算注销，正常账号与 mid=0 都不会被误判。
+     *
+     * 拿不到结论时（限流 -799 / 未登录 / 用户把 WBI 总开关关掉 / 网络异常）返回 false
+     * ⇒ 回退到原来的错误提示，**不冒充**"已注销"。
+     */
+    private suspend fun isDeletedUpper(): Boolean {
+        val mid = vmid.toLongOrNull() ?: return false
+        if (mid <= 0) return false
+        return try {
+            @Serializable
+            data class AccInfoProbe(val mid: Long = 0)
+            val res = BiliApiService
+                .userApi
+                .accInfo(vmid)
+                .awaitCall()
+                .json<ResultInfo<AccInfoProbe>>()
+            res.code == -404
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
         }
     }
 

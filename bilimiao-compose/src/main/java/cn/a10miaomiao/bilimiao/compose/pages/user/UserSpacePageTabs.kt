@@ -53,24 +53,27 @@ sealed class UserSpacePageTabs(
 
     /**
      * 第 4 个 tab「专栏」（对齐 PiliPlus `MemberArticle`）。
-     * 作者名从用户空间主数据取（卡片上展示 UP 名）。
+     * 作者名从用户空间主数据取（卡片上展示 UP 名）；[authorNameOverride] 给"拿不到主数据"的场景用
+     * ——已注销账号的空间接口是失败的，卡片上没有名字，显式兜一句「账号已注销」。
      */
     data class Article(
         val userViewModel: UserSpaceViewModel,
         val articleViewModel: UserArticleViewModel,
+        val authorNameOverride: String? = null,
     ) : UserSpacePageTabs(
         id = PageTabIds.UserArticle,
         name = "专栏",
     ) {
         @Composable
         override fun PageContent() {
-            val authorName = userViewModel
-                .detailData
-                .collectAsStateWithLifecycle()
-                .value
-                ?.card
-                ?.name
-                .orEmpty()
+            val authorName = authorNameOverride
+                ?: userViewModel
+                    .detailData
+                    .collectAsStateWithLifecycle()
+                    .value
+                    ?.card
+                    ?.name
+                    .orEmpty()
             UserArticleListContent(
                 viewModel = articleViewModel,
                 authorName = authorName,
