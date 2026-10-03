@@ -172,7 +172,7 @@ class UserSpaceViewModel(
      * 这个 mid 是不是"已注销账号"（= 空间接口失败时，页面该不该走极简头部那条路）。
      *
      * 判据 = WBI 签名的 `x/space/wbi/acc/info` 回 `-404`。2026-10-02 实测（探针脚本
-     * `scripts/probe-deleted-space.py`，原始响应在 `scratch/deleted-space-probe/`）：
+     * `scripts/probe-deleted-space.py`，原始响应在 `evidence/deleted-space-probe/`）：
      *   · 已注销号（UID 3546910874929882）：`x/v2/space` 回 -404/-400，acc/info 回 **-404**；
      *   · 正常号：acc/info **code 0**；
      *   · `mid=0`（文章作者按钮可能拼出 `space/0`）：acc/info 回 **-400**，不是 -404。
