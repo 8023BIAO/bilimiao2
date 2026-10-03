@@ -43,8 +43,6 @@ import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerSeekBus
 import com.a10miaomiao.bilimiao.widget.player.DanmakuTextFilter
 import com.a10miaomiao.bilimiao.widget.player.DanmakuVideoPlayer
-import com.a10miaomiao.bilimiao.widget.player.DlnaManager
-import com.a10miaomiao.bilimiao.widget.player.DlnaDevice
 import com.a10miaomiao.bilimiao.widget.player.VideoPlayerCallBack
 import com.a10miaomiao.bilimiao.widget.player.SponsorBlockUi
 import master.flame.danmaku.controller.DanmakuFilters
@@ -85,9 +83,6 @@ class PlayerController(
     private val playerSourceInfo get() = delegate.playerSourceInfo
     private var moreMenuAnchor: View? = null
 
-    // 🚫 DLNA_DISABLED
-    // private val dlnaManager by lazy { DlnaManager(activity) }
-    private val dlnaManager: DlnaManager? = null
     private val danmakuContext = DanmakuContext.create()
     private val danmakuTextFilter = DanmakuTextFilter()
 
@@ -154,14 +149,6 @@ class PlayerController(
             true
         }
         serHoldUpButtonOnClickListener(that::holdUpPlayer)
-        // 🚫 DLNA_DISABLED
-//        dlnaManager = that.dlnaManager
-//        dlnaManager?.onDevicesChanged = { _ ->
-//            updateCastButton()
-//        }
-//        onCastClick = { view ->
-//            that.showCastDeviceList(view)
-//        }
         videoPlayerCallBack = that
         setGSYVideoProgressListener(that)
         updatePlayerMode(activity.resources.configuration)
@@ -1093,12 +1080,7 @@ class PlayerController(
         delegate.savePlaybackPositionNow()
     }
 
-    override fun onVideoResume(isResume: Boolean) {
-        if (isResume) {
-            // 🚫 DLNA_DISABLED
-            // dlnaManager.startDiscovery()
-        }
-    }
+    override fun onVideoResume(isResume: Boolean) {}
 
 
 
@@ -1120,8 +1102,6 @@ class PlayerController(
     }
 
     override fun onVideoClose() {
-        // 🚫 DLNA_DISABLED
-        // dlnaManager.stopDiscovery()
         delegate.closePlayer()
     }
 
@@ -1275,39 +1255,4 @@ class PlayerController(
             }
         }
     }
-
-    // 🚫 DLNA_DISABLED — showCastDeviceList 暂时禁用
-    /*
-    private fun showCastDeviceList(anchor: View) {
-        val devices = dlnaManager.devices
-        if (devices.isEmpty()) {
-            Toast.makeText(activity, "未发现投屏设备", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val popupMenu = PopupMenu(ContextThemeWrapper(activity, com.a10miaomiao.bilimiao.R.style.Theme_Bilimiao), anchor)
-        devices.forEachIndexed { index, device ->
-            popupMenu.menu.add(0, index, 0, device.name)
-        }
-        popupMenu.setOnMenuItemClickListener { item ->
-            val device = devices[item.itemId]
-            val videoUrl = player?.currentVideoUrl ?: ""
-            val title = delegate.playerSource?.title ?: "视频"
-            if (videoUrl.isNotEmpty()) {
-                dlnaManager.castToDevice(device, videoUrl, title) { success, msg ->
-                    scope.launch(Dispatchers.Main) {
-                        if (success) {
-                            player?.onVideoPause() // 暂停本地播放
-                        }
-                        Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } else {
-                Toast.makeText(activity, "无法获取视频地址", Toast.LENGTH_SHORT).show()
-            }
-            true
-        }
-        popupMenu.show()
-    }
-    */
 }

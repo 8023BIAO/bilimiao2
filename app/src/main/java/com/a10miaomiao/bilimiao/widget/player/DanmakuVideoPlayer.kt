@@ -129,17 +129,6 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     // 画面比例（底栏）
     private val mScreenScaleSwitch: ViewGroup by lazy { findViewById(R.id.screen_scale_switch) }
 
-    // 投屏按钮
-    private val mCastBtnLayout: ViewGroup by lazy { findViewById(R.id.cast_btn_layout) }
-    private val mCastBtnText: TextView by lazy { findViewById(R.id.cast_btn_text) }
-
-    // DlnaManager（由外部设置）
-    var dlnaManager: DlnaManager? = null
-    var onCastClick: ((View) -> Unit)? = null
-
-    /** 当前播放视频的URL（供DLNA投屏使用） */
-    val currentVideoUrl: String get() = mUrl
-
     // 底栏布局
     private val mBottomLayout: LinearLayout by lazy { findViewById(R.id.layout_bottom) }
 
@@ -1044,9 +1033,6 @@ initDanmakuTouchListener()
             takeScreenshot()
         }
         chapterManager.initChapterButton()
-        mCastBtnLayout.setOnClickListener {
-            onCastClick?.invoke(it)
-        }
         mBottomSubtitleTV.setTextColor(Color.parseColor("#FFFFFF"))
         mBottomSubtitleTV.backgroundColor = Color.parseColor("#66000000")
         applySubtitleTextSize()

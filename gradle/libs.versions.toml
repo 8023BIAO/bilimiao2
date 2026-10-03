@@ -27,7 +27,6 @@ gsyVideoPlayer = "v13.2.1"
 accompanist = "0.37.3"
 materialKolor = "5.0.1"
 microgSafeParcel = "1.7.1"
-jupnp = "3.0.5"
 
 # ui components
 recyclerview = "1.4.0"
@@ -122,8 +121,6 @@ splitties-android-material-components-with-views-dsl = { group = "com.louiscad.s
 # third party
 materialkolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
 microg-safeparcel = { group = "org.microg", name = "safe-parcel", version.ref = "microgSafeParcel" }
-jupnp-core = { group = "org.jupnp", name = "org.jupnp", version.ref = "jupnp" }
-jupnp-support = { group = "org.jupnp", name = "org.jupnp.support", version.ref = "jupnp" }
 # compose additional
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 glide-compose = { group = "com.github.bumptech.glide", name = "compose", version.ref = "glideCompose" }

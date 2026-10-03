@@ -109,8 +109,6 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kodein.di) // 依赖注入
-    implementation(libs.jupnp.core)
-    implementation(libs.jupnp.support)
 
     implementation(libs.kongzue.dialogx) {
         exclude("com.github.kongzue.DialogX", "DialogXInterface")

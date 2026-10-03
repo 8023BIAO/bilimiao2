@@ -165,8 +165,7 @@
 -dontwarn org.openjsse.**
 -dontwarn com.google.protobuf.**
 -dontwarn pbandk.**
-# jUPnP 投屏库引用了 OSGi 注解（Android 不需要）
--dontwarn org.jupnp.**
+# OSGi 注解（Android 不需要）
 -dontwarn org.osgi.**
 # Kotlin 2.x / OkHttp 5.x 内部类
 -dontwarn kotlin.collections.builders.**

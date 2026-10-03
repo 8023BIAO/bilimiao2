@@ -81,10 +81,4 @@ class ChapterManager(
         mChapterBtnLayout.visibility =
             if (visible && chapters.size > 1) View.VISIBLE else View.GONE
     }
-
-    /** 投屏按钮可见性 */
-    fun updateCastButton(hasDevices: Boolean, isVideoReady: Boolean) {
-        player.findViewById<View>(R.id.cast_btn_layout).visibility =
-            if (hasDevices && isVideoReady) View.VISIBLE else View.GONE
-    }
 }
