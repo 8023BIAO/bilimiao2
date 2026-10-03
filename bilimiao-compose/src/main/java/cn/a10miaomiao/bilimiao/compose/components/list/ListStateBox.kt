@@ -12,6 +12,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,14 +94,26 @@ fun ListStateBox(
             }
         }
     }
-    LaunchedEffect(Unit) {
-        // 尾部项被组合出来 = 用户翻到底 → 自动加载下一页（无限滚动靠它）。
-        //
-        // ⚠️ 这里**不要**用 fail 当开关（曾经改成 fail.isNullOrBlank()，是负优化）：
-        // FlowPaginationInfo.fail 是非空 String、默认 ""，很多页面的 fail 只在 refresh() 里清，
-        // 一旦某次翻页失败就会永久卡死自动翻页 —— 用户必须下拉刷新才能继续。
-        // 是否该加载只看"在途/是否已到底/有没有列表"，失败重试交给下面那个错误按钮。
-        if (!loading && !finished && listData?.size != 0) {
+    // ★自动翻页的触发键原来只有 LaunchedEffect(Unit)：只在尾部项**首次进入组合**时跑一次。
+    //   首屏就装得下的短列表（实例：楼中楼徽标写"7条回复"、gRPC 第一页只回 6 条）首帧时
+    //   loading=true，这次机会被空跑跳过；数据回来后 effect 永不重跑 ⇒ 底部只剩一个没人会去点的
+    //   「加载更多」灰字按钮，用户看到的就是"7条回复只显示6条"。
+    //   改成按 (loading/finished/条数) 重新触发：
+    //   - 数据/状态每次变化都重新判定；翻页把尾部推出视口后本组合被销毁，自然停住；
+    //   - lastAutoLoadSize 挡住"服务端回空页却不置 isEnd"的死循环；列表刷新变短时自动重新武装。
+    //   （fail 不当开关 —— ⚠️ 这里**不要**改成 fail.isNullOrBlank()，是负优化：
+    //     FlowPaginationInfo.fail 是非空 String、默认 ""，很多页面的 fail 只在 refresh() 里清，
+    //     一旦拿它当自动翻页的门槛，某次翻页失败就会永久卡死，用户必须下拉刷新才能继续。
+    //     是否该加载只看"在途/是否已到底/有没有列表"，失败重试交给上面的「重试」按钮。）
+    val lastAutoLoadSize = remember { mutableIntStateOf(-1) }
+    LaunchedEffect(loading, finished, listData?.size) {
+        val size = listData?.size ?: 0
+        if (size < lastAutoLoadSize.intValue) {
+            // 列表被刷新/重置（比上次触发时短）⇒ 重新武装
+            lastAutoLoadSize.intValue = -1
+        }
+        if (!loading && !finished && size > 0 && size != lastAutoLoadSize.intValue) {
+            lastAutoLoadSize.intValue = size
             loadMore()
         }
     }
