@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 前景 = 512px 官方图抠掉外围白底后的角色（只向下缩放，不再放大 ⇒ 不糊），
+     底色仍是品牌粉；不再提供单色层（用户 2026-10-04：不跟随主题变色）。 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_bilimiao_33_foreground"/>
-    <monochrome android:drawable="@mipmap/ic_bilimiao_33_filled"/>
 </adaptive-icon>
