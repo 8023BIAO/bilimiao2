@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DatePicker
@@ -34,6 +36,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -378,8 +384,18 @@ internal fun MoreConditionsDialog(
         ) {
             // 星期名改**单字**：M3 自带的中文星期名是「星期日/星期一…」这类两三个字的窄式名，
             // 7 列等分后每列只有约 40dp，长名字被挤成同一个首字「星」——七列全长一样。
-            // DatePicker 本来就开放 `calendarModel` 参数，把星期名换成单字即可，不必自己画一层。
-            DatePicker(state = pickerState, calendarModel = WeekdayNamesProvider)
+            // ★`calendarModel` 参数走不通：`CalendarModel`/`CalendarDate` 是 material3 的
+            //   internal 类，跨模块继承不了（编译报 "it is internal in file"）。
+            //   所以仍用自绘一行盖在 M3 那行星期上：几何照 `WeekDays`（行高 40dp、7 等分格子、
+            //   两侧各 24dp），垂直偏移见 [WeekdayHeaderTopPadding]。
+            Box {
+                DatePicker(state = pickerState)
+                WeekdayHeaderRow(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = WeekdayHeaderTopPadding),
+                )
+            }
         }
     }
 }
@@ -426,42 +442,57 @@ private fun JSONArray?.toIntList(): List<Int> {
 }
 
 /**
- * 把 M3 日历的星期名换成**单字**（一/二/三/四/五/六/日）。
+ * 覆盖 M3 DatePicker 星期头的自绘横排：`一 二 三 四 五 六 日`。
  *
- * 为什么需要：M3 自带的中文星期名是「星期日/星期一…」这类两三个字的窄式名，7 列等分后每列约
- * 40dp，长名字被挤成同一个首字「星」——七列全长一样。`CalendarModel.getWeekdayNames()` 返回
- * `(全名, 窄名)`，DatePicker 用的是**第二个**元素；换成单字即可，其余能力全部委托平台实现。
+ * 为什么不用 M3 自带的：中文星期名是「星期日/星期一…」两三个字，7 列等分每列约 40dp，
+ * 被挤成同一个首字「星」；而 `calendarModel` 参数无法自定义（那是 material3 的 internal 类）。
  *
- * 用顶层 object + 平台单例（而不是每次重组新建匿名对象）：`calendarModel` 一变，DatePicker 会
- * 重建并触发日期换算，稳定单例可避免这种多余重建。
+ * 实现：7 个 [Text] 作为 [Layout] 的直接子项逐格摆放，格子宽度自己控制。
+ * 几何照 material3 1.4.0 `WeekDays`：行高 40dp、7 等分、两侧各 24dp。
  */
-private object WeekdayNamesProvider : CalendarModel(Locale.getDefault()) {
-    /** 索引 = ISO 星期号（1=周一 … 7=周日） */
-    private val singleChar = listOf("一", "二", "三", "四", "五", "六", "日")
-    private val delegate = createCalendarModel(Locale.getDefault())
-
-    override fun getToday(): CalendarDate = delegate.today
-    override fun getFirstDayOfWeek(): Int = delegate.firstDayOfWeek
-    override fun getWeekdayNames(): List<Pair<String, String>> {
-        val first = delegate.firstDayOfWeek
-        return (0 until 7).map { offset ->
-            val isoDay = ((first - 1 + offset) % 7) + 1
-            val name = singleChar[isoDay - 1]
-            name to name
-        }
-    }
-    override fun getDateInputFormat(locale: Locale): DateInputFormat = delegate.getDateInputFormat(locale)
-    override fun getCanonicalDate(timeInMillis: Long): CalendarDate = delegate.getCanonicalDate(timeInMillis)
-    override fun getMonth(timeInMillis: Long): CalendarMonth = delegate.getMonth(timeInMillis)
-    override fun getMonth(date: CalendarDate): CalendarMonth = delegate.getMonth(date)
-    override fun getMonth(year: Int, month: Int): CalendarMonth = delegate.getMonth(year, month)
-    override fun getDayOfWeek(date: CalendarDate): Int = delegate.getDayOfWeek(date)
-    override fun plusMonths(from: CalendarMonth, addedMonthsCount: Int): CalendarMonth =
-        delegate.plusMonths(from, addedMonthsCount)
-    override fun minusMonths(from: CalendarMonth, subtractedMonthsCount: Int): CalendarMonth =
-        delegate.minusMonths(from, subtractedMonthsCount)
-    override fun formatWithPattern(utcTimeMillis: Long, pattern: String, locale: Locale): String =
-        delegate.formatWithPattern(utcTimeMillis, pattern, locale)
-    override fun parse(dateString: String, pattern: String, locale: Locale): CalendarDate =
-        delegate.parse(dateString, pattern, locale)
+@Composable
+private fun WeekdayHeaderRow(modifier: Modifier = Modifier) {
+    val labels = listOf("一", "二", "三", "四", "五", "六", "日")
+    Layout(
+        content = {
+            labels.forEachIndexed { i, label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                    // 与 M3 一致：周末用主题强调色，工作日用表头内容色
+                    color = if (i >= 5) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        },
+        modifier = modifier,
+        measurePolicy = { measurables, constraints ->
+            val cellWidth = ((constraints.maxWidth - 48.dp.roundToPx()) / 7).coerceAtLeast(1)
+            val rowHeight = 40.dp.roundToPx()
+            val cells = measurables.map { it.measure(Constraints.fixedWidth(cellWidth)) }
+            layout(constraints.maxWidth, rowHeight) {
+                cells.forEachIndexed { i, cell ->
+                    cell.place(
+                        x = 24.dp.roundToPx() + i * cellWidth,
+                        y = (rowHeight - cell.height) / 2,
+                    )
+                }
+            }
+        },
+    )
 }
+
+/**
+ * 自绘星期头相对 **DatePicker 顶端** 的下移量。
+ *
+ * ★取值依据（2026-10-13 r5 真机截图反推）：截图 1264px 宽 ↔ 屏 1264px、density 560（=3.5x），
+ * 预览 537px 宽 ⇒ 1 预览 px ≈ 2.354 真实 px ≈ 0.673dp。截图里 M3 那行「星」距 DatePicker 顶端
+ * 约 325 预览 px ⇒ ≈ **219dp**（它上面还有标题行「2026年10月12日」与月份导航行）。
+ * 上一版取 72dp 只有三分之一，所以浮层压在标题上。
+ */
+private val WeekdayHeaderTopPadding = 220.dp
