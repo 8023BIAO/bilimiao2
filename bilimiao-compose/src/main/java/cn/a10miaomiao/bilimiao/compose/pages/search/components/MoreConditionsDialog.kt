@@ -432,13 +432,16 @@ private fun Modifier.weekdayCellLayout(): Modifier =
     this.layout { measurable, constraints ->
         val cellWidth = ((constraints.maxWidth - 48.dp.roundToPx()) / 7).coerceAtLeast(1)
         val rowHeight = 40.dp.roundToPx()
-        val placeables = measurable.children.map { child ->
-            val placeable = child.measure(Constraints.fixedWidth(cellWidth))
-            placeable to (rowHeight - placeable.height) / 2
+        val placeables = measurable.children.map {
+            it.measure(Constraints.fixedWidth(cellWidth))
         }
         layout(constraints.maxWidth, rowHeight) {
-            placeables.forEachIndexed { i, (placeable, offsetY) ->
-                placeable.place(x = 24.dp.roundToPx() + i * cellWidth, y = offsetY)
+            placeables.forEachIndexed { i, placeable ->
+                placeable.place(
+                    x = 24.dp.roundToPx() + i * cellWidth,
+                    // 垂直居中：不用解构/嵌套泛型推断，编译器不必猜类型
+                    y = (rowHeight - placeable.height) / 2,
+                )
             }
         }
     }
