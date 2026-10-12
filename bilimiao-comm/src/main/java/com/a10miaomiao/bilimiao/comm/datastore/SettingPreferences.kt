@@ -377,6 +377,17 @@ object SettingPreferences {
     val PlayerAutoStopDuration = intPreferencesKey("player_auto_stop_duration")
     // 锁定底栏，不随滚动隐藏
     val BottomBarLock = booleanPreferencesKey("bottom_bar_lock")
+
+    /**
+     * 侧栏（个人中心）**边缘滑动**开关（2026-10-12 加）。
+     *
+     * true（默认，保持老行为）= 竖屏时从左边缘 40dp 内横滑即可拉出侧栏；
+     * false = 只能从底栏（菜单栏）起手横滑 —— 用户反馈 40dp 边缘区太容易误触。
+     *
+     * 读法：`DrawerBehaviorDelegate` 直接读主线程内存快照（同 `PlayerDelegate2` 那套），
+     * 设置一改立刻生效，不需要额外接线、也不需要重启。
+     */
+    val DrawerEdgeSwipeEnabled = booleanPreferencesKey("drawer_edge_swipe_enabled")
     /**
      * 滚动隐藏底栏时，**是否连"页名"那一条标题行一起收起**（默认是）。
      * 关掉 = 只收起 50dp 菜单排、页名那 20dp 留在屏幕上（旧行为，"我在哪"更有底）。
@@ -518,6 +529,17 @@ object SettingPreferences {
      * 排序不在这里 —— 它有自己的键 `live_sort_type`（早就在用了）。
      */
     val HomeLiveFilter = stringPreferencesKey("home_live_filter")
+
+    /**
+     * 搜索页「筛选」记忆（2026-10-12 加）。
+     *
+     * 以前三项选择只活在搜索页实例里 —— 页面是按关键字建实例的，换个词进来必然回到
+     * "不限/不限/不限"。这里与 [HomeLiveFilter]/[HomeBangumiFilter] 同一套做法：
+     * 一个字符串键装下整份选择；但格式用 JSON（分区/时长本来多选，再加两个时间戳，
+     * 分隔符拼接会越来越脆）。
+     * 字段：`t`=时间范围(天,0=不限)、`d`=时长多选、`r`=分区多选、`from`/`to`=自定义起止(epoch 秒,0=未设)。
+     */
+    val SearchFilter = stringPreferencesKey("search_filter")
 
     /**
      * ★「上次停在哪个直播间」（2026-09-26 本轮）：**用户带着直播间离开 App** 时记下的房间号。

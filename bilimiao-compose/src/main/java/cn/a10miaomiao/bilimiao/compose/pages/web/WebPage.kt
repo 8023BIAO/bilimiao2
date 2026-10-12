@@ -1,5 +1,8 @@
 package cn.a10miaomiao.bilimiao.compose.pages.web
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -24,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
@@ -38,7 +42,10 @@ import cn.a10miaomiao.bilimiao.compose.common.addPaddingValues
 import cn.a10miaomiao.bilimiao.compose.common.diViewModel
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
+import cn.a10miaomiao.bilimiao.compose.common.mypage.PageListener
+import cn.a10miaomiao.bilimiao.compose.common.mypage.rememberMyMenu
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
+import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.store.WindowStore
 import com.a10miaomiao.bilimiao.comm.toast
@@ -90,6 +97,13 @@ private class WebPageViewModel(
     val loading = mutableStateOf(false)
     val pageTitle = mutableStateOf("")
     val hideNavbar = mutableStateOf(false)
+
+    /**
+     * 当前网页地址：底栏「复制链接」用。
+     * 必须由 WebView 回调驱动 —— B 站是 SPA，站内跳转常只 pushState、
+     * onPageFinished 不触发，只有 doUpdateVisitedHistory 每次历史变化都到。
+     */
+    val currentUrl = mutableStateOf(startUrl)
 
     /**
      * 网页内部**是否还有上一层历史**（决定返回键是"网页后退"还是"退出网页"）。
@@ -208,7 +222,10 @@ private class WebPageViewModel(
         override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
             super.doUpdateVisitedHistory(view, url, isReload)
             // 只认当前 WebView：已 destroy 的旧 WebView 在途回调不该再写状态（复核 2026-10-02 的 Q2）
-            if (view === webView) canGoBack.value = view.canGoBack()
+            if (view === webView) {
+                canGoBack.value = view.canGoBack()
+                if (url.isNotBlank()) currentUrl.value = url
+            }
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -267,7 +284,10 @@ private class WebPageViewModel(
             super.onPageStarted(view, url, favicon)
             loading.value = true
             // 整页跳转也兜一次底（有些跳转不一定走 doUpdateVisitedHistory 的时序）
-            if (view === webView) canGoBack.value = view.canGoBack()
+            if (view === webView) {
+                canGoBack.value = view.canGoBack()
+                if (url.isNotBlank()) currentUrl.value = url
+            }
             hideNavbar.value = url.indexOf("navhide=1") != -1
             view.evaluateJavascript("""
                 (function(){
@@ -340,9 +360,29 @@ private fun WebPageContent(
         viewModel.webView?.goBack()
     }
 
-    PageConfig(
+    val context = LocalContext.current
+    // 底栏「复制链接」：与「文章阅读」页同一套写法（同图标、同文案），
+    // 差别只在复制的是**当前 WebView 地址**（含 SPA 站内跳转后的地址）。
+    val menu = rememberMyMenu {
+        myItem {
+            key = MenuKeys.copyLink
+            iconFileName = "ic_baseline_content_copy_24"
+            title = "复制链接"
+        }
+    }
+    val configId = PageConfig(
         title = viewModel.pageTitle.value,
+        menu = menu,
     )
+    PageListener(configId) { _, item ->
+        if (item.key == MenuKeys.copyLink) {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(
+                ClipData.newPlainText("网页链接", viewModel.currentUrl.value)
+            )
+            toast("已复制链接")
+        }
+    }
     val windowStore: WindowStore by rememberInstance()
     val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
     val windowInsets = windowState.getContentInsets(localContainerView())

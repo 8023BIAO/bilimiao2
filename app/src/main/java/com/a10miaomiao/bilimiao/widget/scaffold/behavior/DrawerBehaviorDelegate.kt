@@ -8,6 +8,7 @@ import androidx.annotation.RestrictTo
 import androidx.annotation.VisibleForTesting
 import androidx.core.view.ViewCompat
 import androidx.customview.widget.ViewDragHelper
+import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.config.config
 import com.a10miaomiao.bilimiao.widget.scaffold.ScaffoldView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -26,6 +27,15 @@ class DrawerBehaviorDelegate(
     private val minLeft = parent.dip(40)
 
     private val appBarHeight = parent.context.config.appBarHeight
+
+    /**
+     * 是否允许"从左边缘 40dp 内横滑"拉出侧栏。
+     * 读的是设置的主线程内存快照（设置一改立刻生效）；快照还没就绪按 true 兜底 = 老行为。
+     * 关掉它以后只有 `touchOnAppBar`（竖屏=底栏）那一路能拉出侧栏，专治边缘误触。
+     */
+    private val edgeSwipeAllowed: Boolean
+        get() = SettingPreferences.cachedPreferencesOrNull()
+            ?.get(SettingPreferences.DrawerEdgeSwipeEnabled) ?: true
     private val appBarWidth = parent.context.config.appBarMenuWidth
 
     @DragState
@@ -114,7 +124,8 @@ class DrawerBehaviorDelegate(
                 ev.action == MotionEvent.ACTION_MOVE
                 && initialX > 0f
                 && ev.x - initialX > dragger.touchSlop
-                && (this.touchOnAppBar || this.initialX < minLeft)
+                // 边缘那一路受设置控制（防误触）；底栏那一路永远可拉
+                && (this.touchOnAppBar || (edgeSwipeAllowed && this.initialX < minLeft))
             ) {
                 this.initialX = 0f
                 this.touchOnAppBar = false

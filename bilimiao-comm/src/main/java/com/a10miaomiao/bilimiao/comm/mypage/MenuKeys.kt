@@ -40,6 +40,9 @@ object MenuKeys {
     val url = id_counter++
     val parent = id_counter++
 
+    /** 底栏：复制当前页链接（内置网页页，2026-10-12 加） */
+    val copyLink = id_counter++
+
     /** 消息页底栏：消息提醒设置（回复我的 / @我的 / 收到的赞，2026-09-27 加） */
     val msgNoticeSetting = id_counter++
     val aiSummary = id_counter++

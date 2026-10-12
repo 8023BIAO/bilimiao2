@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.search.content
 
+import android.content.Context
 import android.net.Uri
 import android.view.View
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,8 +48,10 @@ import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
 import cn.a10miaomiao.bilimiao.compose.pages.search.components.MoreConditionsDialog
 import cn.a10miaomiao.bilimiao.compose.pages.search.components.MoreConditionsDialogState
+import cn.a10miaomiao.bilimiao.compose.pages.search.components.MoreConditionsInfo
 import cn.a10miaomiao.bilimiao.compose.pages.search.components.SearchItemCard
 import cn.a10miaomiao.bilimiao.compose.pages.search.searchErrorText
+import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import com.a10miaomiao.bilimiao.comm.mypage.MenuActions
 import com.a10miaomiao.bilimiao.comm.mypage.MenuItemPropInfo
 import com.a10miaomiao.bilimiao.comm.mypage.MenuKeys
@@ -62,6 +66,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
@@ -72,6 +77,8 @@ typealias SearchItem = bilibili.polymer.app.search.v1.Item
 private class SearchAllContentViewModel(
     override val di: DI,
     val keyword: String,
+    /** DataStore 需要 Context；由页面用 LocalContext 传进来（同 HomeBangumiContentViewModel 的做法） */
+    private val context: Context,
 ) : ViewModel(), DIAware {
 
     private val pageNavigation: PageNavigation by instance()
@@ -108,8 +115,35 @@ private class SearchAllContentViewModel(
     val hasFilter = mutableStateOf(false)
 
     init {
+        restoreFilterThenLoad()
+    }
+
+    /**
+     * 先恢复上次的筛选再首次加载 —— 顺序很重要：先 loadData 的话首屏会用"不限/不限/不限"查一遍，
+     * 用户看到的是没筛选的结果，得手动刷新才对得上弹窗里的选择。
+     *
+     * 为什么以前会"永远三项不限"：搜索页是按关键字建实例的（`key = SearchAll + keyword`），
+     * 筛选状态只活在实例里，换个词进来必然重置。落盘键见 [SettingPreferences.SearchFilter]。
+     */
+    private fun restoreFilterThenLoad() = viewModelScope.launch {
+        val saved = withContext(Dispatchers.IO) {
+            try {
+                SettingPreferences.mapData(context) { it[SettingPreferences.SearchFilter] }
+            } catch (e: Exception) {
+                null // 读不出来就按没存过处理，不影响搜索
+            }
+        }
+        if (!saved.isNullOrBlank()) {
+            moreConditionsDialogState.restoreFrom(saved)
+            hasFilter.value = hasAnyFilter(moreConditionsDialogState.data)
+        }
         loadData("")
     }
+
+    /** "有没有筛选"只算一次，避免三处各写一遍条件、加字段时漏掉一处 */
+    private fun hasAnyFilter(c: MoreConditionsInfo): Boolean =
+        c.timeType != 0 || c.regionList[0] != 0 || c.durationList[0] != 0
+                || c.timeFrom > 0 || c.timeTo > 0
 
     private fun loadData(
         next: String = _next
@@ -131,6 +165,9 @@ private class SearchAllContentViewModel(
                 timeType = timeType,
                 tidList = tidList,
                 durationList = durationList,
+                // 自定义时间区间：proto 里本就有 timeFrom/timeTo，0 = 不传（服务端按未设处理）
+                timeFrom = moreConditions.timeFrom,
+                timeTo = moreConditions.timeTo,
                 pagination = bilibili.pagination.Pagination(
                     pageSize = list.pageSize,
                     next = next
@@ -205,9 +242,19 @@ private class SearchAllContentViewModel(
 
     fun confirmConditions() {
         val moreConditions = moreConditionsDialogState.data
-        hasFilter.value = moreConditions.timeType != 0
-                || moreConditions.regionList[0] != 0
-                || moreConditions.durationList[0] != 0
+        hasFilter.value = hasAnyFilter(moreConditions)
+        // 落盘：下次进搜索页（哪怕是另一个关键字）沿用这份选择；写失败不能挡住本次搜索
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    SettingPreferences.edit(context) {
+                        it[SettingPreferences.SearchFilter] = moreConditionsDialogState.snapshotJson()
+                    }
+                } catch (e: Exception) {
+                    // 存不下就算了
+                }
+            }
+        }
         refresh()
     }
 
@@ -294,10 +341,11 @@ internal fun SearchAllContent(
     keyword: String,
     isActive: Boolean,
 ) {
+    val context = LocalContext.current
     val viewModel = diViewModel(
         key = PageTabIds.SearchAll + keyword
     ) {
-        SearchAllContentViewModel(it, keyword)
+        SearchAllContentViewModel(it, keyword, context)
     }
     if (isActive) {
         SearchAllContentConfig(keyword, viewModel)

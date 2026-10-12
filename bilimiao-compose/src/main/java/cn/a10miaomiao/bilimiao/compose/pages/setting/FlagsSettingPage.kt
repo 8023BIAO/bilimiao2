@@ -1192,6 +1192,17 @@ private fun FlagsSettingPageContent(
                     defaultValue = true,
                 )
             }
+            // 防误触：关掉后只有"从底栏起手"才能拉出侧栏
+            switchPreference(
+                key = SettingPreferences.DrawerEdgeSwipeEnabled.name,
+                title = {
+                    Text("允许边缘滑动打开侧栏")
+                },
+                summary = {
+                    Text("关闭后只能从底栏滑动打开，避免误触")
+                },
+                defaultValue = true,
+            )
             }
 
             if (MoreSection.STORAGE in sections) {

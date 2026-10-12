@@ -13,8 +13,8 @@ import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
  * 数据源：各设置页里真实存在的 switchPreference / sliderIntPreference / sliderPreference /
  * textIntPreference 调用点（`components/preference/` 下的 DSL 定义本身不算），外加 listPreference /
  * multiSelectIntPreference / listStylePreference / customSetsPreference 这类**搜索页改不了、
- * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 100 个调用点，
- * 收录 141 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
+ * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 101 个调用点，
+ * 收录 142 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
  * （注释掉的调用、`key = item.prefKey` 这类动态渲染、`preference(...)+onClick` 动作项等）。
  *
  * ★搜索结果必须用**与原设置页同款控件**：Kind 与控件一一对应 —— [SettingSearchItem.Kind.SWITCH]
@@ -126,7 +126,7 @@ data class SettingSearchItem(
 
 object SettingsSearchIndex {
 
-    /** 141 条；由 gen_settings_index.py 生成（覆盖 100 个调用点） */
+    /** 142 条；由 gen_settings_index.py 生成（覆盖 101 个调用点） */
     val items: List<SettingSearchItem> = listOf(
         SettingSearchItem(prefName = "PlayerBackground", prefKey = "player_background", title = "后台播放", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "后台播放 ① 播放 播放器设置 PlayerBackground player_background"),
@@ -450,6 +450,8 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "锁定底栏 ② 界面 底栏与导航 BottomBarLock bottom_bar_lock 导航 navbar"),
         SettingSearchItem(prefName = "BottomBarScrollHideTitle", prefKey = "bottom_bar_scroll_hide_title", title = "标题行一起隐藏", category = "② 界面", page = "底栏与导航", section = "底栏与导航",
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "标题行一起隐藏 ② 界面 底栏与导航 BottomBarScrollHideTitle bottom_bar_scroll_hide_title"),
+        SettingSearchItem(prefName = "DrawerEdgeSwipeEnabled", prefKey = "drawer_edge_swipe_enabled", title = "允许边缘滑动打开侧栏", category = "② 界面", page = "底栏与导航", section = "底栏与导航",
+            kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "允许边缘滑动打开侧栏 ② 界面 底栏与导航 DrawerEdgeSwipeEnabled drawer_edge_swipe_enabled"),
         SettingSearchItem(prefName = "TimeSelectExcludeRecent", prefKey = "time_select_exclude_recent", title = "排除最近N天", category = "② 界面", page = "时光精选设置", section = "时间线设置",
             kind = SettingSearchItem.Kind.TEXT_INT, default = 0, keywords = "排除最近N天 ② 界面 时光精选设置 时间线设置 TimeSelectExcludeRecent time_select_exclude_recent", label = "天"),
         SettingSearchItem(prefName = "TimeSelectAllRegions", prefKey = "time_select_all_regions", title = "全部分区", category = "② 界面", page = "时光精选设置", section = "分区选择",
