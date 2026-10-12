@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
@@ -29,7 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
@@ -397,31 +398,42 @@ internal fun MoreConditionsDialog(
 @Composable
 private fun WeekdayHeaderRow(modifier: Modifier = Modifier) {
     val labels = listOf("一", "二", "三", "四", "五", "六", "日")
-    Layout(
-        content = {
-            labels.forEachIndexed { i, label ->
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    modifier = Modifier.width(24.dp),
-                    textAlign = TextAlign.Center,
-                    // 与 M3 一致：周末用主题强调色，工作日用表头内容色
-                    color = if (i >= 5) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-        },
-        modifier = modifier,
-    ) { measurables, constraints ->
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .weekdayCellLayout(),
+    ) {
+        labels.forEachIndexed { i, label ->
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
+                // 与 M3 一致：周末用主题强调色，工作日用表头内容色
+                color = if (i >= 5) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+    }
+}
+
+/**
+ * 把星期头那一行按 M3 日历的几何摆放：行高固定 **40dp**、7 个格子等分宽度、
+ * 两侧各留 **24dp**（与下方日期网格对齐），文字垂直居中。
+ *
+ * 为什么不用 `Layout { }`：那个 content lambda 不是 @Composable 作用域，
+ * 里面放 `Text` 会直接编译报错；`Modifier.layout` 的 content 仍是 composable，正合适。
+ */
+private fun Modifier.weekdayCellLayout(): Modifier =
+    this.layout { measurable, constraints ->
         val cellWidth = ((constraints.maxWidth - 48.dp.roundToPx()) / 7).coerceAtLeast(1)
         val rowHeight = 40.dp.roundToPx()
-        val placeables = measurables.map { m ->
-            val placeable = m.measure(Constraints.fixedWidth(cellWidth))
-            // 垂直居中：M3 那行也是把文字摆在 40dp 行中间，跟着它对就不必赌基线
+        val placeables = measurable.children.map { child ->
+            val placeable = child.measure(Constraints.fixedWidth(cellWidth))
             placeable to (rowHeight - placeable.height) / 2
         }
         layout(constraints.maxWidth, rowHeight) {
@@ -430,7 +442,6 @@ private fun WeekdayHeaderRow(modifier: Modifier = Modifier) {
             }
         }
     }
-}
 
 /**
  * epoch 秒 → "yyyy-MM-dd"，按**设备默认时区**显示（只用于日期按钮文案）。
