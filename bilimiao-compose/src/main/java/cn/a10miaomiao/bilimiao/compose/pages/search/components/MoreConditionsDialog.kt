@@ -1,9 +1,10 @@
 package cn.a10miaomiao.bilimiao.compose.pages.search.components
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -28,7 +29,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -370,7 +373,60 @@ internal fun MoreConditionsDialog(
                 }
             },
         ) {
-            DatePicker(state = pickerState)
+            // ★M3 的 DatePicker 没开放"星期头"文字，且在部分中文设备上它取到的窄式星期名
+            //   会被压成同一个字（实测七列全是"星"）。这里自己画一周横排盖在它上面：
+            //   几何按 M3 `WeekDays` 的内部固定值对齐 —— 行高 40dp、7 等分格子宽。
+            Box {
+                DatePicker(state = pickerState)
+                WeekdayHeaderRow(Modifier.align(Alignment.TopCenter))
+            }
+        }
+    }
+}
+
+/**
+ * 覆盖 M3 DatePicker 星期头的自绘横排：`一 二 三 四 五 六 日`（周一起始，与 M3 中文习惯一致）。
+ *
+ * 为什么不用 M3 自带的：它的文字来自 `CalendarModel.getWeekdayNames()`，中文设备上拿到的是
+ * 窄式名字，实测被压成同一个字（七列全"星"），且没有参数可以换。
+ *
+ * 几何依据（material3 1.4.0 `DatePickerKt.WeekDays`）：行高固定 **40dp**、7 个格子等分宽度；
+ * 日历网格有 24dp 横向内边距 ⇒ 格子宽 = (总宽 − 48dp) / 7，文字居中落在各自格心。
+ */
+@Composable
+private fun WeekdayHeaderRow(modifier: Modifier = Modifier) {
+    val labels = listOf("一", "二", "三", "四", "五", "六", "日")
+    Layout(
+        content = {
+            labels.forEachIndexed { i, label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    modifier = Modifier.width(24.dp),
+                    textAlign = TextAlign.Center,
+                    // 与 M3 一致：周末用主题强调色，工作日用表头内容色
+                    color = if (i >= 5) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val cellWidth = ((constraints.maxWidth - 48.dp.roundToPx()) / 7).coerceAtLeast(1)
+        val rowHeight = 40.dp.roundToPx()
+        val placeables = measurables.map { m ->
+            val placeable = m.measure(Constraints.fixedWidth(cellWidth))
+            // 垂直居中：M3 那行也是把文字摆在 40dp 行中间，跟着它对就不必赌基线
+            placeable to (rowHeight - placeable.height) / 2
+        }
+        layout(constraints.maxWidth, rowHeight) {
+            placeables.forEachIndexed { i, (placeable, offsetY) ->
+                placeable.place(x = 24.dp.roundToPx() + i * cellWidth, y = offsetY)
+            }
         }
     }
 }
