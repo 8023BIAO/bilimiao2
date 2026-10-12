@@ -32,9 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.Calendar
+import java.util.TimeZone
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import com.a10miaomiao.bilimiao.comm.store.RegionStore
 import org.kodein.di.instance
@@ -337,21 +336,26 @@ internal fun MoreConditionsDialog(
 
     // 自定义时间区间：点「起始/结束日期」弹 M3 日期选择器
     if (pickerTarget != 0) {
-        // 显式声明 Long：别让编译器去猜 takeIf/times 的类型（第一版就是在这里栽的）
+        // ★DatePicker 用的是**UTC 零点**毫秒：回填时必须把"本地日的秒"反算回去，
+        //   否则 +08:00 下 timeFrom/timeTo 会被读成前一天（时间按钮与选择器自相矛盾）。
         val seedSeconds: Long = if (pickerTarget == 1) state.timeFrom else state.timeTo
-        val pickerState = rememberDatePickerState(
-            initialSelectedDateMillis = if (seedSeconds > 0) seedSeconds * 1000 else null
-        )
+        val pickerSeedMillis = if (seedSeconds > 0) {
+            val localDaySeconds = if (pickerTarget == 2) seedSeconds - 86399 else seedSeconds
+            localDayToUtcMillis(localDaySeconds)
+        } else {
+            null
+        }
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = pickerSeedMillis)
         DatePickerDialog(
             onDismissRequest = { pickerTarget = 0 },
             confirmButton = {
                 TextButton(onClick = {
                     pickerState.selectedDateMillis?.let { ms ->
-                        val seconds = ms / 1000
+                        val seconds = utcMillisToLocalDaySeconds(ms)
                         if (pickerTarget == 1) {
                             state.handleSetTimeFrom(seconds)
                         } else {
-                            // 结束日期含当天：补到 23:59:59，否则选"今天"会查不到今天发的内容
+                            // 结束日期含当天：补到本地 23:59:59，否则选"今天"会查不到今天发的内容
                             state.handleSetTimeTo(seconds + 86399)
                         }
                     }
@@ -371,9 +375,37 @@ internal fun MoreConditionsDialog(
     }
 }
 
-/** epoch 秒 → "yyyy-MM-dd"（只用于日期按钮文案；用 SimpleDateFormat 而非 java.time，兼容低版本） */
+/**
+ * epoch 秒 → "yyyy-MM-dd"，按**设备默认时区**显示（只用于日期按钮文案）。
+ * 两个时间戳在库里都存"本地日对齐"的值，所以这里直接按本地时区格式化即自洽。
+ */
 private fun formatDay(seconds: Long): String =
-    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(seconds * 1000))
+    Calendar.getInstance().apply { timeInMillis = seconds * 1000 }
+        .let { "%04d-%02d-%02d".format(it.get(Calendar.YEAR), it.get(Calendar.MONTH) + 1, it.get(Calendar.DAY_OF_MONTH)) }
+
+/**
+ * M3 DatePicker 的 `selectedDateMillis` → **本地日** 00:00:00 的 epoch 秒。
+ *
+ * 为什么必须换算：`selectedDateMillis` 是该日期的 **UTC 零点**（material3 的
+ * `CalendarModelImpl.getCanonicalDate` 明确按 UTC 取 LocalDate）。+08:00 下直接 `ms / 1000`
+ * 得到的是本地 08:00 —— 既让"起始日"丢掉当天 00:00~08:00 的内容，也让"结束日"整体晚 8 小时。
+ */
+private fun utcMillisToLocalDaySeconds(utcMillis: Long): Long {
+    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+    return Calendar.getInstance().apply {
+        clear()
+        set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+    }.timeInMillis / 1000
+}
+
+/** [utcMillisToLocalDaySeconds] 的逆运算：本地日的 epoch 秒 → DatePicker 需要的 UTC 零点毫秒。 */
+private fun localDayToUtcMillis(localDaySeconds: Long): Long {
+    val local = Calendar.getInstance().apply { timeInMillis = localDaySeconds * 1000 }
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(local.get(Calendar.YEAR), local.get(Calendar.MONTH), local.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+    }.timeInMillis
+}
 
 private fun JSONArray?.toIntList(): List<Int> {
     val arr = this ?: return emptyList()

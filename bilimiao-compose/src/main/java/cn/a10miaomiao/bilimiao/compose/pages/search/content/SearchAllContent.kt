@@ -151,8 +151,13 @@ private class SearchAllContentViewModel(
         try {
             val moreConditions = moreConditionsDialogState.data
             val order = rankOrder.value.first
-            val timeType = moreConditions.timeType
-                .let { if (it == 0) "" else "${it}d" }
+            // ★自定义区间与"最近 N 天"互斥：两个都发时服务端可能取交集 ⇒ 选过日期就不再下发 timeType
+            //   （参考实现同样在选了自定义日期后清空 pubTimeType）。0 值 pbandk 不上线，等于不传。
+            val timeType = if (moreConditions.timeFrom > 0 || moreConditions.timeTo > 0) {
+                ""
+            } else {
+                moreConditions.timeType.let { if (it == 0) "" else "${it}d" }
+            }
             val tidList = moreConditions.regionList
                 .joinToString(",")
             val durationList = moreConditions.durationList
