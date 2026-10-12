@@ -380,7 +380,11 @@ internal fun MoreConditionsDialog(
             //   行高 40dp、7 等分格子、两侧各 24dp。
             Box {
                 DatePicker(state = pickerState)
-                WeekdayHeaderRow(Modifier.align(Alignment.TopCenter))
+                WeekdayHeaderRow(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = WeekdayHeaderTopPadding),
+                )
             }
         }
     }
@@ -395,6 +399,16 @@ internal fun MoreConditionsDialog(
  * 实现：7 个 [Text] 作为 [Layout] 的直接子项（不额外套 Row），逐格测量与摆放 —— 格子宽度
  * 完全由我们控制，不受外层布局的 weight 影响。
  */
+/**
+ * 自绘星期头相对 **DatePicker 顶端** 的下移量。
+ *
+ * ★实测校准（2026-10-12 真机截图，537px 预览 / 屏宽 1080 ⇒ 1px ≈ 2.01dp）：M3 那行星期文字
+ * 距 DatePicker 顶端约 **72dp** —— 因为 `DatePickerContent` 在星期行之上还有标题行与月份导航行。
+ * 上一版这个常量被弄丢了，浮层贴顶端 ⇒ 盖在标题「选择日期」上、M3 那行「星」还留在下面。
+ * 若日后 M3 改版又对不上，只改这一个值即可整体上下移。
+ */
+private val WeekdayHeaderTopPadding = 72.dp
+
 @Composable
 private fun WeekdayHeaderRow(modifier: Modifier = Modifier) {
     val labels = listOf("一", "二", "三", "四", "五", "六", "日")
