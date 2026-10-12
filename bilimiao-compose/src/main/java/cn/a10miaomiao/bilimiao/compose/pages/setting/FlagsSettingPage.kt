@@ -1254,7 +1254,7 @@ private fun FlagsSettingPageContent(
                         title = { Text("当前版本") },
                         summary = { Text(appVersionLabel) },
                     )
-            // 检查更新：只查 GitHub Release（新版看日期，versionCode 固定 210 不参与）
+            // 检查更新：只查 GitHub Release（新版看日期，versionCode 固定 211 不参与）
             preference(
                 key = "check_update",
                 title = { Text("检查更新") },

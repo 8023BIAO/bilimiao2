@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
  *
  * ## 版本约定（rules/03）
  * · tag = `v<YYYY.MM.DD>`，与 `versionName` 逐字一致（例 `v2026.10.01`）；
- * · **只按日期比**：`v2026.10.01 → 20261001`，整数比大小；versionCode 固定 210，永不参与比较；
+ * · **只按日期比**：`v2026.10.01 → 20261001`，整数比大小；versionCode 固定 211，永不参与比较；
  * · APK 是 Release 附件（`bilimiao-v<YYYY.MM.DD>.apk`），Release 正文 = 更新说明。
  *
  * ## 为什么解析全是纯函数
