@@ -54,7 +54,12 @@ internal fun TextBox(
     textColor: Color = Color.Unspecified,
     height: Dp = 25.dp,
     onClick: (() -> Unit)? = null,
-    status: TextBoxStatus = TextBoxStatus.Enable
+    status: TextBoxStatus = TextBoxStatus.Enable,
+    /**
+     * 区间端点是否画「起」/「止」小字。
+     * 默认 **false**：那是时光姬时间线页的标注，用在别处（如搜索筛选）只会让格子变高、字变挤。
+     */
+    showRangeLabels: Boolean = false,
 ) {
     // 选中态（起 / 止 / 区间内）统一用**主题强调色**（primaryContainer）。
     // 原来用的是 tertiaryContainer——本主题的 tertiary 是偏粉的强调色，压在"选中"这个语义上
@@ -94,13 +99,13 @@ internal fun TextBox(
                 text = text,
                 color = if (selected) onContainerColor else textColor
             )
-            if (status == TextBoxStatus.Start) {
+            if (showRangeLabels && status == TextBoxStatus.Start) {
                 Text(
                     text = "起",
                     color = onContainerColor,
                     fontSize = 10.sp,
                 )
-            } else if (status == TextBoxStatus.End) {
+            } else if (showRangeLabels && status == TextBoxStatus.End) {
                 Text(
                     text = "止",
                     color = onContainerColor,
