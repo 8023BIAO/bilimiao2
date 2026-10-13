@@ -56,10 +56,11 @@ internal fun TextBox(
     onClick: (() -> Unit)? = null,
     status: TextBoxStatus = TextBoxStatus.Enable,
     /**
-     * 区间端点是否画「起」/「止」小字。
-     * 默认 **false**：那是时光姬时间线页的标注，用在别处（如搜索筛选）只会让格子变高、字变挤。
+     * 区间端点是否画「起」/「止」小字。默认 **true**（时光姬页面就靠这两个字分辨哪端是起、哪端是止
+     * —— 两端的底色块完全一样）。
+     * 搜索筛选那边是"一次只选一天"，传 `showRangeLabels = !singleDate` 即自动不画。
      */
-    showRangeLabels: Boolean = false,
+    showRangeLabels: Boolean = true,
 ) {
     // 选中态（起 / 止 / 区间内）统一用**主题强调色**（primaryContainer）。
     // 原来用的是 tertiaryContainer——本主题的 tertiary 是偏粉的强调色，压在"选中"这个语义上
@@ -328,9 +329,12 @@ internal fun CustomTimeContent(
         mutableStateOf<DateModel?>(null)
     }
 
-    LaunchedEffect(timeFrom, timeTo) {
-        // timeFrom.year <= 0 表示"没设/未选完整"（旧约定用 -1，新增调用方用 0），此时不预填、由用户点
-        if (timeFrom.year > 0) {
+    // ★只在"本地还没有选择"时用入参预填一次。
+    //   原来写成 LaunchedEffect(timeFrom, timeTo)：时光姬每次 setCustomTime 都会换出新对象（内容 equals），
+    //   effect 于是**每次选完都重跑**并把视图月份重置回 timeFrom —— 用户在 9 月点了第一端、切到 10 月
+    //   点第二端后，视图会被拽回 9 月（丢位置）。改成只认第一次，且不再抢视图月份。
+    LaunchedEffect(Unit) {
+        if (startTime == null && timeFrom.year > 0) {
             startTime = timeFrom.copy()
             endTime = if (timeTo.year > 0) timeTo.copy() else null
             year.value = timeFrom.year
@@ -480,6 +484,7 @@ internal fun CustomTimeContent(
 
                             TextBox(
                                 text =  day.toString(),
+                                showRangeLabels = !singleDate,
                                 modifier = Modifier.weight(1f),
                                 textColor = if (status == TextBoxStatus.Disable) {
                                     // 禁用

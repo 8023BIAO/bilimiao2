@@ -1,13 +1,11 @@
 package cn.a10miaomiao.bilimiao.compose.pages.search.components
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -36,14 +34,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayCardDialog
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.CustomTimeContent
 import com.a10miaomiao.bilimiao.comm.store.RegionStore
 import com.a10miaomiao.bilimiao.comm.store.model.DateModel
-import org.kodein.di.instance
 
 data class MoreConditionsInfo(
     val timeType: Int,
@@ -159,17 +154,7 @@ internal class MoreConditionsDialogState(
         _visible.value = true
     }
 
-    /** 选「起始日期」（epoch 秒；0 = 清空）。起 > 止 时顺手把止清掉，别让用户对着矛盾区间发懵 */
-    fun handleSetTimeFrom(seconds: Long) {
-        _timeFrom.value = seconds
-        if (seconds > 0 && timeTo > 0 && timeTo < seconds) _timeTo.value = 0L
-    }
 
-    /** 选「结束日期」（epoch 秒；0 = 清空） */
-    fun handleSetTimeTo(seconds: Long) {
-        _timeTo.value = seconds
-        if (seconds > 0 && timeFrom > seconds) _timeFrom.value = 0L
-    }
 
     fun clearTimeRange() {
         _timeFrom.value = 0L
@@ -181,10 +166,12 @@ internal class MoreConditionsDialogState(
      *
      * 起始/截止各点一次：**谁空就补谁**（不要求先点起始），两端都满时从起始重新开始；
      * 若这一端晚于另一端就**自动对调**，省得用户对着矛盾区间发懵。
-     * 截止日按"含当天"处理（+86399 → 本地 23:59:59），否则选「今天」查不到今天发的内容。
+     * 截止日按"含当天"处理（本地 23:59:59），否则选「今天」查不到今天发的内容。
+     * ★不能用固定 `+86399`：夏令时切换那天只有 23 小时，加了会溢到次日
+     *   （America/Los_Angeles 2026-03-08 → 会变成 03-09 00:59:59，显示也跟着错一天）。
      */
     fun setTimeBound(seconds: Long) {
-        val end = seconds + 86399
+        val end = endOfLocalDay(seconds)
         when {
             _timeFrom.value <= 0L -> {
                 _timeFrom.value = seconds
@@ -195,7 +182,7 @@ internal class MoreConditionsDialogState(
                     _timeTo.value = end
                 } else {
                     // 选的比起始还早：两端对调，保持 from <= to
-                    _timeTo.value = _timeFrom.value + 86399
+                    _timeTo.value = endOfLocalDay(_timeFrom.value)
                     _timeFrom.value = seconds
                 }
             }
@@ -248,15 +235,20 @@ internal class MoreConditionsDialogState(
                 timeType = o.optInt("t", 0),
                 durationList = o.optJSONArray("d").toIntList().ifEmpty { listOf(0) },
                 regionList = o.optJSONArray("r").toIntList().ifEmpty { listOf(0) },
-                // ★入口隐藏期间**必须丢弃**旧的自定义区间：否则用户在旧版本存下的 from/to 会一直
-                //   静默生效（还会让标题显示"已筛选"），而界面上没有任何地方能清除它。
-                //   入口恢复（ShowCustomTimeRange = true）时这两行也要跟着恢复读取。
-                timeFrom = if (ShowCustomTimeRange) o.optLong("from", 0L) else 0L,
-                timeTo = if (ShowCustomTimeRange) o.optLong("to", 0L) else 0L,
+                // ★读回来必须做**范围校验**：DataStore 里可能是
+                //   ① 入口隐藏那版写下的旧值；② 更早那版用 M3 的 UTC 零点毫秒存的错口径值；
+                //   ③ 设置导入功能能原样写回任意 key（含负数/超大值）。不校验就会静默生效，
+                //   而界面上没有任何地方能看出它不对。
+                timeFrom = sanitizeTimeBound(if (ShowCustomTimeRange) o.optLong("from", 0L) else 0L),
+                timeTo = sanitizeTimeBound(if (ShowCustomTimeRange) o.optLong("to", 0L) else 0L),
             )
             _timeTypeSelected.intValue = _data.timeType
             _durationSelectedList.value = _data.durationList
             _regionSelectedList.value = _data.regionList
+            // 两端都有值但顺序反了（历史/手改数据）→ 整对丢弃，别把反向区间发给服务端
+            if (_data.timeFrom > 0 && _data.timeTo > 0 && _data.timeFrom > _data.timeTo) {
+                _data = _data.copy(timeFrom = 0L, timeTo = 0L)
+            }
             _timeFrom.value = _data.timeFrom
             _timeTo.value = _data.timeTo
         } catch (_: Exception) {
@@ -366,6 +358,9 @@ internal fun MoreConditionsDialog(
             },
             confirmButton = {
                 TextButton(
+                    // ★两端齐全才允许确认：否则一次误点就会把上次的完整区间悄悄改成"只有起始"，
+                    //   请求变成"无上限"（今天的内容也会进来），而用户看不出来。
+                    enabled = state.timeFrom > 0 && state.timeTo > 0,
                     onClick = state::handleConfirm
                 ) {
                     Text("确认")
@@ -396,7 +391,9 @@ internal fun MoreConditionsDialog(
         }
         OverlayCardDialog(
             onDismissRequest = { pickerTarget = 0 },
-            scrollable = false,
+            // ★必须可滚动：日历固定高度 = 75dp 表头 + 58dp×行数（6 行月 = 423dp），
+            //   横屏可用高只有 ~285dp，不可滚动时最后 1~2 行会被压成 0 高、点不到。
+            scrollable = true,
         ) {
             // 只选一天：singleDate 模式下组件点一格就回调，弹窗随即关闭 ——
             // 日历里不会出现"开始/结束/最多 N 天"那套区间交互（那是时光姬时间线的规则）。
@@ -480,7 +477,7 @@ private fun DateRangeChip(
     }
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(50),
+        shape = MaterialTheme.shapes.extraSmall,   // Chip 按 rules/02 用 4dp 圆角
         color = Color.Transparent,
         border = BorderStroke(1.dp, borderColor),
     ) {
@@ -488,7 +485,44 @@ private fun DateRangeChip(
             text = text,
             color = contentColor,
             style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         )
     }
 }
+
+/**
+ * 本地日 `localDaySeconds` 的最后一秒（23:59:59）。
+ *
+ * 用"次日 00:00 − 1 秒"而不是固定 `+86399`：夏令时开始那天只有 23 小时，
+ * 固定加 86399 会落到次日 00:59:59，用户看到的日期就会比选的晚一天。
+ */
+private fun endOfLocalDay(localDaySeconds: Long): Long =
+    Calendar.getInstance().apply {
+        timeInMillis = localDaySeconds * 1000L
+        add(Calendar.DAY_OF_MONTH, 1)
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis / 1000L - 1
+
+/**
+ * 校验落盘的区间端点（epoch 秒）：只接受 `[MinSelectableDaySeconds, 明天]` 之内、且为正的值，
+ * 其余一律当"未设"（返回 0）。
+ *
+ * 为什么需要：DataStore 里的值可能来自旧版本（含用 M3 UTC 零点毫秒存的错口径值）、
+ * 或被"设置导入"原样写回来的任意数字；负数/超大值会让 chip 显示 1970 附近的假日期，
+ * 还会把反向或越界的区间原样发给服务端。
+ */
+private fun sanitizeTimeBound(seconds: Long): Long {
+    if (seconds <= 0) return 0L
+    val lower = MinSelectableDaySeconds
+    val upper = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 1) }.timeInMillis / 1000L
+    return if (seconds in lower..upper) seconds else 0L
+}
+
+/** 可选日期下限 2009-01-01 00:00:00 的 epoch 秒（与 [MinSelectableDate] 一致）。 */
+private val MinSelectableDaySeconds: Long = Calendar.getInstance().apply {
+    clear()
+    set(2009, 0, 1, 0, 0, 0)
+}.timeInMillis / 1000L
