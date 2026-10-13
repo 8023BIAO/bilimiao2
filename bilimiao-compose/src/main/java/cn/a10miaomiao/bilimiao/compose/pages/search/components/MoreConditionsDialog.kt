@@ -1,5 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose.pages.search.components
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +15,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -340,20 +343,19 @@ internal fun MoreConditionsDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // 起始/截止各选一次：点进来只选"一天"，选完弹窗立刻关。
-                            // 两个日期谁空就补谁（不要求非得先点起始），后选的若早于另一个则自动对调。
-                            OutlinedButton(onClick = { pickerTarget = 1 }) {
-                                Text("选择日期")
-                            }
+                            // 外面直接显示「起始日期 至 截止日期」（点整块就能改），右边跟一个「清除」。
+                            // 点进来只选"一天"：选完弹窗立刻关，回来这行就更新了。
+                            DateRangeChip(
+                                text = when {
+                                    state.timeFrom <= 0 && state.timeTo <= 0 -> "选择日期"
+                                    state.timeTo <= 0 -> "${formatDay(state.timeFrom)} 起"
+                                    state.timeFrom <= 0 -> "至 ${formatDay(state.timeTo)}"
+                                    else -> "${formatDay(state.timeFrom)} 至 ${formatDay(state.timeTo)}"
+                                },
+                                filled = state.timeFrom > 0 || state.timeTo > 0,
+                                onClick = { pickerTarget = 1 },
+                            )
                             if (state.timeFrom > 0 || state.timeTo > 0) {
-                                Text(
-                                    text = when {
-                                        state.timeTo <= 0 -> "${formatDay(state.timeFrom)} 起"
-                                        state.timeFrom <= 0 -> "至 ${formatDay(state.timeTo)}"
-                                        else -> "${formatDay(state.timeFrom)} → ${formatDay(state.timeTo)}"
-                                    },
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
                                 TextButton(onClick = state::clearTimeRange) {
                                     Text("清除")
                                 }
@@ -454,3 +456,39 @@ private fun localDayStartSeconds(d: DateModel): Long =
         clear()
         set(d.year, d.month - 1, d.date, 0, 0, 0)
     }.timeInMillis / 1000L
+
+/**
+ * 「起始日期 至 截止日期」的可点摘要 —— 外形与筛选区那些 chip 一致（带描边、圆角胶囊），
+ * 目的是**在外面就看得见**已经选了什么，而不是一行容易被忽略的小灰字。
+ * 有值时用主题强调色描边（对齐 PiliPlus 那两个日期框的 `enable` 态），无值时用中性描边。
+ */
+@Composable
+private fun DateRangeChip(
+    text: String,
+    filled: Boolean,
+    onClick: () -> Unit,
+) {
+    val borderColor = if (filled) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
+    val contentColor = if (filled) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, borderColor),
+    ) {
+        Text(
+            text = text,
+            color = contentColor,
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+        )
+    }
+}
