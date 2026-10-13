@@ -173,9 +173,34 @@ internal class MoreConditionsDialogState(
         _timeTo.value = 0L
     }
 
-    /** 只清"上界"。搜索是单日语义（选定日之后），上界保持 0；旧的 to 值必须清掉，否则会缩小范围。 */
-    fun clearTimeTo() {
-        _timeTo.value = 0L
+    /**
+     * 落一个日期（`seconds` = 本地日 00:00:00）。
+     *
+     * 起始/截止各点一次：**谁空就补谁**（不要求先点起始），两端都满时从起始重新开始；
+     * 若这一端晚于另一端就**自动对调**，省得用户对着矛盾区间发懵。
+     * 截止日按"含当天"处理（+86399 → 本地 23:59:59），否则选「今天」查不到今天发的内容。
+     */
+    fun setTimeBound(seconds: Long) {
+        val end = seconds + 86399
+        when {
+            _timeFrom.value <= 0L -> {
+                _timeFrom.value = seconds
+                if (_timeTo.value in 1..seconds) _timeTo.value = 0L
+            }
+            _timeTo.value <= 0L -> {
+                if (seconds >= _timeFrom.value) {
+                    _timeTo.value = end
+                } else {
+                    // 选的比起始还早：两端对调，保持 from <= to
+                    _timeTo.value = _timeFrom.value + 86399
+                    _timeFrom.value = seconds
+                }
+            }
+            else -> {
+                _timeFrom.value = seconds
+                _timeTo.value = 0L
+            }
+        }
     }
 
     fun close() {
@@ -308,18 +333,27 @@ internal fun MoreConditionsDialog(
                     }
                     if (ShowCustomTimeRange) {
                         Text(
-                            "指定日期",
+                            "时间区间",
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // 只选**一个**日期（搜索是"某天之后"，不需要起止两个框）
+                            // 起始/截止各选一次：点进来只选"一天"，选完弹窗立刻关。
+                            // 两个日期谁空就补谁（不要求非得先点起始），后选的若早于另一个则自动对调。
                             OutlinedButton(onClick = { pickerTarget = 1 }) {
-                                Text(if (state.timeFrom > 0) formatDay(state.timeFrom) else "选择日期")
+                                Text("选择日期")
                             }
                             if (state.timeFrom > 0 || state.timeTo > 0) {
+                                Text(
+                                    text = when {
+                                        state.timeTo <= 0 -> "${formatDay(state.timeFrom)} 起"
+                                        state.timeFrom <= 0 -> "至 ${formatDay(state.timeTo)}"
+                                        else -> "${formatDay(state.timeFrom)} → ${formatDay(state.timeTo)}"
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
                                 TextButton(onClick = state::clearTimeRange) {
                                     Text("清除")
                                 }
@@ -353,27 +387,26 @@ internal fun MoreConditionsDialog(
     if (pickerTarget != 0) {
         val today = remember { DateModel().setDate(Date()) }
         // from/to 是"本地日 00:00:00 / 23:59:59"的 epoch 秒；未设时给 0 ⇒ 组件不预选
-        val selectedDate = remember(pickerTarget) {
-            if (state.timeFrom > 0) localDateOf(state.timeFrom) else DateModel().also { it.year = 0 }
+        // 打开时定位到"该补的那一端"：两端都空 → 从起始开始；只有起始 → 定位到起始那个月
+        val seedSeconds = if (state.timeFrom > 0) state.timeFrom else state.timeTo
+        val seedDate = remember(pickerTarget) {
+            if (seedSeconds > 0) localDateOf(seedSeconds) else DateModel().also { it.year = 0 }
         }
         OverlayCardDialog(
             onDismissRequest = { pickerTarget = 0 },
             scrollable = false,
         ) {
+            // 只选一天：singleDate 模式下组件点一格就回调，弹窗随即关闭 ——
+            // 日历里不会出现"开始/结束/最多 N 天"那套区间交互（那是时光姬时间线的规则）。
             CustomTimeContent(
-                timeFrom = selectedDate,
-                timeTo = selectedDate,
+                timeFrom = seedDate,
+                timeTo = seedDate,
                 minDate = MinSelectableDate,
                 maxDate = today,
-                // 搜索只要一个日期：点哪天就是哪天，点完直接关（不需要"起止两次点击 + 确定"）
                 singleDate = true,
                 showSummary = false,
-                onRangeChange = { start, _ ->
-                    start?.let {
-                        // 单日 = 当天 00:00:00 起到之后；timeTo 保持 0（不设上界）
-                        state.handleSetTimeFrom(localDayStartSeconds(it))
-                        state.clearTimeTo()
-                    }
+                onRangeChange = { picked, _ ->
+                    picked?.let { state.setTimeBound(localDayStartSeconds(it)) }
                     pickerTarget = 0
                 },
             )
