@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingViewMode
 import com.a10miaomiao.bilimiao.comm.store.model.DateModel
+import java.util.Date
 import com.a10miaomiao.bilimiao.comm.toast
 
 /** 年月日 → DateModel（日历里到处都在拼这个，抽一处） */
@@ -323,7 +324,8 @@ internal fun CustomTimeContent(
         }
     }
 
-    val itemClick = remember(viewModel) {
+    // 组件抽出来后这里没有 viewModel 可当 key 了；点选逻辑只依赖下面这些 state，用 Unit 即可
+    val itemClick = remember(Unit) {
         { i: Int ->
             val clicked = dateOf(year.value, month.value, i)
             val _startTime = startTime
