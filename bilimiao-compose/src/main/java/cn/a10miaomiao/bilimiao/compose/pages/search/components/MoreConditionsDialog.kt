@@ -301,23 +301,28 @@ internal fun MoreConditionsDialog(
                             )
                         }
                     }
-                    Text(
-                        "时间区间",
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        OutlinedButton(onClick = { pickerTarget = 1 }) {
-                            Text(if (state.timeFrom > 0) formatDay(state.timeFrom) else "起始日期")
-                        }
-                        OutlinedButton(onClick = { pickerTarget = 2 }) {
-                            Text(if (state.timeTo > 0) formatDay(state.timeTo) else "结束日期")
-                        }
-                        if (state.timeFrom > 0 || state.timeTo > 0) {
-                            TextButton(onClick = state::clearTimeRange) {
-                                Text("清除")
+                    // ★2026-10-13 产品决定：M3 日历的星期头在中文设备上无法改成单字（internal），
+                    //   自绘月历方向也被否掉 ⇒ **先隐藏整个时间区间入口**，等讨论定方案再放回来。
+                    //   开关一行即可恢复：把 ShowCustomTimeRange 改成 true（其余代码全部保留）。
+                    if (ShowCustomTimeRange) {
+                        Text(
+                            "时间区间",
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            OutlinedButton(onClick = { pickerTarget = 1 }) {
+                                Text(if (state.timeFrom > 0) formatDay(state.timeFrom) else "起始日期")
+                            }
+                            OutlinedButton(onClick = { pickerTarget = 2 }) {
+                                Text(if (state.timeTo > 0) formatDay(state.timeTo) else "结束日期")
+                            }
+                            if (state.timeFrom > 0 || state.timeTo > 0) {
+                                TextButton(onClick = state::clearTimeRange) {
+                                    Text("清除")
+                                }
                             }
                         }
                     }
@@ -483,11 +488,23 @@ private fun WeekdayHeaderRow(modifier: Modifier = Modifier) {
 }
 
 /**
- * 自绘星期头相对 **DatePicker 顶端** 的下移量。
+ * 自绘星期头相对 **DatePicker 顶端** 的下移量（覆盖 M3 那行「星期X」）。
  *
- * ★取值依据（2026-10-13 r5 真机截图反推）：截图 1264px 宽 ↔ 屏 1264px、density 560（=3.5x），
- * 预览 537px 宽 ⇒ 1 预览 px ≈ 2.354 真实 px ≈ 0.673dp。截图里 M3 那行「星」距 DatePicker 顶端
- * 约 325 预览 px ⇒ ≈ **219dp**（它上面还有标题行「2026年10月12日」与月份导航行）。
- * 上一版取 72dp 只有三分之一，所以浮层压在标题上。
+ * ★算法（不再靠试）：M3 `DatePickerContent` 是 `Column { 标题行(约44dp) ; 月份导航行(40dp) ;
+ *   WeekDays(40dp) ; 日期网格 }`，`WeekDays` 紧贴在日期网格上方 ⇒
+ *   **星期行的下沿 = 日期网格顶 − 8dp 间距**，而我的浮层是摆在网格顶之上 40dp 的格子行。
+ *   从 2026-10-13 真机截图量：「星」行比我 220dp 那行高约 87 预览 px（≈59dp），
+ *   反推出 M3 星期行的**下沿 ≈ 数字区顶 − 8dp** ⇒ 偏移取 **32dp**（= 40dp 行高 − 8dp 间距）。
  */
-private val WeekdayHeaderTopPadding = 220.dp
+private val WeekdayHeaderTopPadding = 32.dp
+
+/**
+ * 「搜索筛选」弹窗里是否显示**自定义时间区间**入口。
+ *
+ * ★2026-10-13 产品决定：先关掉。原因——M3 `DatePicker` 的星期头在中文设备上是
+ * 「星期日/星期一…」这类窄名被挤成一个「星」（七列全同），而它**没有公开入口**改文字或隐藏
+ * 该行（`CalendarModel` 等是 material3 的 internal 类，跨模块继承不了；自绘月历方案已被否）。
+ * 方案定下来之前先隐藏入口，避免露出一个坏掉的日历；后端能力（落盘、互斥、UTC/本地日换算）
+ * 全部保留，翻回 true 即可恢复。
+ */
+private const val ShowCustomTimeRange = false
