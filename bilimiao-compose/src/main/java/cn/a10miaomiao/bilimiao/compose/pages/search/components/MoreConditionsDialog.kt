@@ -7,11 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -22,7 +19,6 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -171,6 +167,9 @@ internal class MoreConditionsDialogState(
      *   （America/Los_Angeles 2026-03-08 → 会变成 03-09 00:59:59，显示也跟着错一天）。
      */
     fun setTimeBound(seconds: Long) {
+        // ★选了自定义区间就把"时间范围"chip 复位：两者互斥（请求里区间优先），
+        //   不复位会出现"弹窗高亮最近一周、实际只按区间查"这种看到与发出去不一致。
+        _timeTypeSelected.intValue = 0
         val end = endOfLocalDay(seconds)
         when {
             _timeFrom.value <= 0L -> {
@@ -245,8 +244,11 @@ internal class MoreConditionsDialogState(
             _timeTypeSelected.intValue = _data.timeType
             _durationSelectedList.value = _data.durationList
             _regionSelectedList.value = _data.regionList
-            // 两端都有值但顺序反了（历史/手改数据）→ 整对丢弃，别把反向区间发给服务端
-            if (_data.timeFrom > 0 && _data.timeTo > 0 && _data.timeFrom > _data.timeTo) {
+            // 半开（只有一端）与反向都**整对丢弃**：前者会让请求变"无上限"、后者会被服务端拒，
+            // 而且这两种脏值在界面上看不出来（旧版本单日选择就曾只写 from）。
+            if ((_data.timeFrom > 0) != (_data.timeTo > 0) ||
+                (_data.timeFrom > 0 && _data.timeFrom > _data.timeTo)
+            ) {
                 _data = _data.copy(timeFrom = 0L, timeTo = 0L)
             }
             _timeFrom.value = _data.timeFrom
@@ -267,9 +269,6 @@ internal fun MoreConditionsDialog(
     val regionSelectedList = state.regionSelectedList
     // 0 = 没在选日期；1 = 正在选起始；2 = 正在选结束
     var pickerTarget by remember { mutableStateOf(0) }
-    val leadingIcon: @Composable () -> Unit = {
-        Icon(Icons.Default.Check, null)
-    }
     if (state.visible) {
         OverlayAlertDialog(
             title = {
@@ -358,9 +357,11 @@ internal fun MoreConditionsDialog(
             },
             confirmButton = {
                 TextButton(
-                    // ★两端齐全才允许确认：否则一次误点就会把上次的完整区间悄悄改成"只有起始"，
-                    //   请求变成"无上限"（今天的内容也会进来），而用户看不出来。
-                    enabled = state.timeFrom > 0 && state.timeTo > 0,
+                    // ★只拦"半开"（只有一端）：那种状态会让请求变成"无上限"，用户看不出来。
+                    //   **空区间 (0,0) 必须放行** —— 它正是「清除」的落点，也是从没选过日期的默认态；
+                    //   写成"两端都必须有值"会把确认键恒灰，导致其它三组筛选全部提交不了。
+                    enabled = (state.timeFrom <= 0 && state.timeTo <= 0) ||
+                        (state.timeFrom > 0 && state.timeTo > 0),
                     onClick = state::handleConfirm
                 ) {
                     Text("确认")
