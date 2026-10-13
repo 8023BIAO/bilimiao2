@@ -244,21 +244,56 @@ fun Header(
     }
 }
 
+/**
+ * 时光姬「自定义时间」页用的包装：把 ViewModel 的数据摊平成 [CustomTimeContent] 的参数。
+ * 行为与以前完全一致（只是多了一层转发）。
+ */
 @Composable
 internal fun CustomTime(
     viewModel: TimeSettingViewMode
 ) {
     val customTime = viewModel.customTime.collectAsStateWithLifecycle()
-    val timeFrom = customTime.value.timeFrom
-    val timeTo = customTime.value.timeTo
-    val maxDate = viewModel.maxDate
-    val minDate = viewModel.minDate
+    CustomTimeContent(
+        timeFrom = customTime.value.timeFrom,
+        timeTo = customTime.value.timeTo,
+        maxDate = viewModel.maxDate,
+        minDate = viewModel.minDate,
+        onRangeChange = viewModel::setCustomTime,
+    )
+}
 
+/**
+ * 自绘日历区间选择（从时光姬的 `CustomTime` 抽出来的**纯参数**版本，供别处复用）。
+ *
+ * 为什么抽出来：这套组件已经有完整能力 —— 星期头是单字「一 二 三 四 五 六 日」、年月导航带年份下拉、
+ * 起止两端点击成一个区间、点区间内部只移动更近的一端、同一天点两次=单日、有上下限与最大跨度，
+ * 并且**几何全在自己手里**（不依赖任何框架内部尺寸）。搜索页的「自定义时间区间」需要的就是它。
+ *
+ * @param timeFrom 区间起点；`year == -1` 表示"未选完整"（点了第一端、还没点第二端）
+ * @param timeTo   区间终点
+ * @param onRangeChange 回调：`(start, end)`；`end == null` 表示只选了起点
+ */
+@Composable
+internal fun CustomTimeContent(
+    timeFrom: DateModel,
+    timeTo: DateModel,
+    maxDate: DateModel,
+    minDate: DateModel,
+    onRangeChange: (DateModel?, DateModel?) -> Unit,
+) {
+
+    // 初始显示的月份从入参推导（原来写死 2009/9，只有时光姬那个"进来就被 LaunchedEffect 覆盖"的
+    // 场景才碰巧看不出问题；复用到别处时写死值会让用户先看到一个无关的月份）。
+    val seedDate = when {
+        timeFrom.year > 0 -> timeFrom
+        timeTo.year > 0 -> timeTo
+        else -> DateModel().setDate(Date())
+    }
     var year = remember {
-        mutableStateOf(2009)
+        mutableStateOf(seedDate.year)
     }
     var month = remember {
-        mutableStateOf(9)
+        mutableStateOf(seedDate.month)
     }
     val monthStartWeek = remember(year.value, month.value) {
         getWeek(year.value, month.value, 1)
@@ -278,10 +313,11 @@ internal fun CustomTime(
         mutableStateOf<DateModel?>(null)
     }
 
-    LaunchedEffect(Unit) {
-        if (timeFrom.year != -1) {
+    LaunchedEffect(timeFrom, timeTo) {
+        // timeFrom.year <= 0 表示"没设/未选完整"（旧约定用 -1，新增调用方用 0），此时不预填、由用户点
+        if (timeFrom.year > 0) {
             startTime = timeFrom.copy()
-            endTime = timeTo.copy()
+            endTime = if (timeTo.year > 0) timeTo.copy() else null
             year.value = timeFrom.year
             month.value = timeFrom.month
         }
@@ -298,7 +334,7 @@ internal fun CustomTime(
                 _startTime == null -> {
                     startTime = clicked
                     endTime = null
-                    viewModel.setCustomTime(clicked, null)
+                    onRangeChange(clicked, null)
                 }
                 // 选了开始、还没选结束
                 _endTime == null -> {
@@ -306,17 +342,17 @@ internal fun CustomTime(
                     if (gap == 0) {
                         // 同一天点两次 = 单日区间（以前 gap==0 时 > 和 < 都不成立，选择会一直悬着）
                         endTime = clicked
-                        viewModel.setCustomTime(startTime, endTime)
+                        onRangeChange(startTime, endTime)
                     } else if (spanDays(_startTime, clicked) > MAX_SPAN_DAYS) {
                         // 超过上限给明确反馈，不再静默：起点保留，等用户点一个更近的日期
                         toast("最多只能选 $MAX_SPAN_DAYS 天，请重新选择")
                     } else if (gap > 0) {
                         endTime = clicked
-                        viewModel.setCustomTime(startTime, endTime)
+                        onRangeChange(startTime, endTime)
                     } else {
                         startTime = clicked
                         endTime = _startTime
-                        viewModel.setCustomTime(startTime, endTime)
+                        onRangeChange(startTime, endTime)
                     }
                 }
                 // 已选完整区间
@@ -329,12 +365,12 @@ internal fun CustomTime(
                         } else {
                             endTime = clicked
                         }
-                        viewModel.setCustomTime(startTime, endTime)
+                        onRangeChange(startTime, endTime)
                     } else {
                         // 点在区间外 → 以这一格为新起点重新选，保留"再点一次可以重来"的旧手感
                         startTime = clicked
                         endTime = null
-                        viewModel.setCustomTime(clicked, null)
+                        onRangeChange(clicked, null)
                     }
                 }
             }

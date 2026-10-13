@@ -5,12 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -18,7 +14,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
@@ -31,18 +26,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayAlertDialog
+import cn.a10miaomiao.bilimiao.compose.components.dialogs.OverlayCardDialog
+import cn.a10miaomiao.bilimiao.compose.pages.time.components.CustomTimeContent
 import com.a10miaomiao.bilimiao.comm.store.RegionStore
+import com.a10miaomiao.bilimiao.comm.store.model.DateModel
 import org.kodein.di.instance
 
 data class MoreConditionsInfo(
@@ -304,9 +299,6 @@ internal fun MoreConditionsDialog(
                             )
                         }
                     }
-                    // ★2026-10-13 产品决定：M3 日历的星期头在中文设备上无法改成单字（internal），
-                    //   自绘月历方向也被否掉 ⇒ **先隐藏整个时间区间入口**，等讨论定方案再放回来。
-                    //   开关一行即可恢复：把 ShowCustomTimeRange 改成 true（其余代码全部保留）。
                     if (ShowCustomTimeRange) {
                         Text(
                             "时间区间",
@@ -349,55 +341,56 @@ internal fun MoreConditionsDialog(
         )
     }
 
-    // 自定义时间区间：点「起始/结束日期」弹 M3 日期选择器
+    // 自定义时间区间：复用时光姬那套自绘日历（星期头是单字「一 二 三 四 五 六 日」，
+    // 几何全在组件自己手里，不依赖 M3 内部尺寸，因此换手机/换字号都不会错位）。
+    // ★弃用 M3 `DatePicker` 的原因：它的星期头在中文设备上七列全「星」，而 `CalendarModel` 等
+    //   都是 material3 的 internal 类，没有任何公开入口改文字或隐藏该行。
     if (pickerTarget != 0) {
-        // ★DatePicker 用的是**UTC 零点**毫秒：回填时必须把"本地日的秒"反算回去，
-        //   否则 +08:00 下 timeFrom/timeTo 会被读成前一天（时间按钮与选择器自相矛盾）。
-        val seedSeconds: Long = if (pickerTarget == 1) state.timeFrom else state.timeTo
-        val pickerSeedMillis = if (seedSeconds > 0) {
-            val localDaySeconds = if (pickerTarget == 2) seedSeconds - 86399 else seedSeconds
-            localDayToUtcMillis(localDaySeconds)
-        } else {
-            null
+        val today = remember { DateModel().setDate(Date()) }
+        // from/to 是"本地日 00:00:00 / 23:59:59"的 epoch 秒；未设时给 0 ⇒ 组件不预选
+        val fromDate = remember(pickerTarget) {
+            if (state.timeFrom > 0) localDateOf(state.timeFrom) else DateModel().also { it.year = 0 }
         }
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = pickerSeedMillis)
-        DatePickerDialog(
+        val toDate = remember(pickerTarget) {
+            if (state.timeTo > 0) localDateOf(state.timeTo) else DateModel().also { it.year = 0 }
+        }
+        var range by remember(pickerTarget) { mutableStateOf<Pair<DateModel, DateModel>?>(null) }
+        OverlayCardDialog(
             onDismissRequest = { pickerTarget = 0 },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickerState.selectedDateMillis?.let { ms ->
-                        val seconds = utcMillisToLocalDaySeconds(ms)
-                        if (pickerTarget == 1) {
-                            state.handleSetTimeFrom(seconds)
-                        } else {
-                            // 结束日期含当天：补到本地 23:59:59，否则选"今天"会查不到今天发的内容
-                            state.handleSetTimeTo(seconds + 86399)
-                        }
-                    }
-                    pickerTarget = 0
-                }) {
-                    Text("确定")
-                }
-            },
-            dismissButton = {
+            scrollable = false,
+        ) {
+            CustomTimeContent(
+                timeFrom = fromDate,
+                timeTo = toDate,
+                minDate = MinSelectableDate,
+                maxDate = today,
+                onRangeChange = { start, end ->
+                    // end == null = 只点了第一端（组件用"未选完整"表达），此时不允许确定
+                    range = if (start != null && end != null) start to end else null
+                },
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
                 TextButton(onClick = { pickerTarget = 0 }) {
                     Text("取消")
                 }
-            },
-        ) {
-            // 星期名改**单字**：M3 自带的中文星期名是「星期日/星期一…」这类两三个字的窄式名，
-            // 7 列等分后每列只有约 40dp，长名字被挤成同一个首字「星」——七列全长一样。
-            // ★`calendarModel` 参数走不通：`CalendarModel`/`CalendarDate` 是 material3 的
-            //   internal 类，跨模块继承不了（编译报 "it is internal in file"）。
-            //   所以仍用自绘一行盖在 M3 那行星期上：几何照 `WeekDays`（行高 40dp、7 等分格子、
-            //   两侧各 24dp），垂直偏移见 [WeekdayHeaderTopPadding]。
-            Box {
-                DatePicker(state = pickerState)
-                WeekdayHeaderRow(
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = WeekdayHeaderTopPadding),
-                )
+                TextButton(
+                    enabled = range != null,
+                    onClick = {
+                        range?.let { (start, end) ->
+                            state.handleSetTimeFrom(localDayStartSeconds(start))
+                            // 结束日含当天：补到本地 23:59:59，否则选「今天」会查不到今天发的内容
+                            state.handleSetTimeTo(localDayStartSeconds(end) + 86399)
+                        }
+                        pickerTarget = 0
+                    },
+                ) {
+                    Text("确定")
+                }
             }
         }
     }
@@ -413,29 +406,6 @@ private fun formatDay(seconds: Long): String =
     Calendar.getInstance().apply { timeInMillis = seconds * 1000 }
         .let { "%04d-%02d-%02d".format(it.get(Calendar.YEAR), it.get(Calendar.MONTH) + 1, it.get(Calendar.DAY_OF_MONTH)) }
 
-/**
- * M3 DatePicker 的 `selectedDateMillis` → **本地日** 00:00:00 的 epoch 秒。
- *
- * 为什么必须换算：`selectedDateMillis` 是该日期的 **UTC 零点**（material3 的
- * `CalendarModelImpl.getCanonicalDate` 明确按 UTC 取 LocalDate）。+08:00 下直接 `ms / 1000`
- * 得到的是本地 08:00 —— 既让"起始日"丢掉当天 00:00~08:00 的内容，也让"结束日"整体晚 8 小时。
- */
-private fun utcMillisToLocalDaySeconds(utcMillis: Long): Long {
-    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
-    return Calendar.getInstance().apply {
-        clear()
-        set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
-    }.timeInMillis / 1000
-}
-
-/** [utcMillisToLocalDaySeconds] 的逆运算：本地日的 epoch 秒 → DatePicker 需要的 UTC 零点毫秒。 */
-private fun localDayToUtcMillis(localDaySeconds: Long): Long {
-    val local = Calendar.getInstance().apply { timeInMillis = localDaySeconds * 1000 }
-    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
-        clear()
-        set(local.get(Calendar.YEAR), local.get(Calendar.MONTH), local.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
-    }.timeInMillis
-}
 
 private fun JSONArray?.toIntList(): List<Int> {
     val arr = this ?: return emptyList()
@@ -444,70 +414,25 @@ private fun JSONArray?.toIntList(): List<Int> {
     return out
 }
 
-/**
- * 覆盖 M3 DatePicker 星期头的自绘横排：`一 二 三 四 五 六 日`。
- *
- * 为什么不用 M3 自带的：中文星期名是「星期日/星期一…」两三个字，7 列等分每列约 40dp，
- * 被挤成同一个首字「星」；而 `calendarModel` 参数无法自定义（那是 material3 的 internal 类）。
- *
- * 实现：7 个 [Text] 作为 [Layout] 的直接子项逐格摆放，格子宽度自己控制。
- * 几何照 material3 1.4.0 `WeekDays`：行高 40dp、7 等分、两侧各 24dp。
- */
-@Composable
-private fun WeekdayHeaderRow(modifier: Modifier = Modifier) {
-    val labels = listOf("一", "二", "三", "四", "五", "六", "日")
-    Layout(
-        content = {
-            labels.forEachIndexed { i, label ->
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    textAlign = TextAlign.Center,
-                    // 与 M3 一致：周末用主题强调色，工作日用表头内容色
-                    color = if (i >= 5) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-        },
-        modifier = modifier,
-        measurePolicy = { measurables, constraints ->
-            val cellWidth = ((constraints.maxWidth - 48.dp.roundToPx()) / 7).coerceAtLeast(1)
-            val rowHeight = 40.dp.roundToPx()
-            val cells = measurables.map { it.measure(Constraints.fixedWidth(cellWidth)) }
-            layout(constraints.maxWidth, rowHeight) {
-                cells.forEachIndexed { i, cell ->
-                    cell.place(
-                        x = 24.dp.roundToPx() + i * cellWidth,
-                        y = (rowHeight - cell.height) / 2,
-                    )
-                }
-            }
-        },
-    )
-}
-
-/**
- * 自绘星期头相对 **DatePicker 顶端** 的下移量（覆盖 M3 那行「星期X」）。
- *
- * ★算法（不再靠试）：M3 `DatePickerContent` 是 `Column { 标题行(约44dp) ; 月份导航行(40dp) ;
- *   WeekDays(40dp) ; 日期网格 }`，`WeekDays` 紧贴在日期网格上方 ⇒
- *   **星期行的下沿 = 日期网格顶 − 8dp 间距**，而我的浮层是摆在网格顶之上 40dp 的格子行。
- *   从 2026-10-13 真机截图量：「星」行比我 220dp 那行高约 87 预览 px（≈59dp），
- *   反推出 M3 星期行的**下沿 ≈ 数字区顶 − 8dp** ⇒ 偏移取 **32dp**（= 40dp 行高 − 8dp 间距）。
- */
-private val WeekdayHeaderTopPadding = 32.dp
 
 /**
  * 「搜索筛选」弹窗里是否显示**自定义时间区间**入口。
  *
- * ★2026-10-13 产品决定：先关掉。原因——M3 `DatePicker` 的星期头在中文设备上是
- * 「星期日/星期一…」这类窄名被挤成一个「星」（七列全同），而它**没有公开入口**改文字或隐藏
- * 该行（`CalendarModel` 等是 material3 的 internal 类，跨模块继承不了；自绘月历方案已被否）。
- * 方案定下来之前先隐藏入口，避免露出一个坏掉的日历；后端能力（落盘、互斥、UTC/本地日换算）
- * 全部保留，翻回 true 即可恢复。
+ * 2026-10-13：弃用 M3 `DatePicker`（中文星期头七列全「星」，且无公开入口可改），
+ * 改用时光姬那套自绘日历 `CustomTimeContent` ⇒ 入口已打开。
  */
-private const val ShowCustomTimeRange = false
+private const val ShowCustomTimeRange = true
+
+/** 可选日期下限（B 站内容起点），与时光姬保持一致。 */
+private val MinSelectableDate = DateModel().also { it.year = 2009; it.month = 1; it.date = 1 }
+
+/** 本地日 → `DateModel`（只取年月日；入库的 epoch 秒本来就是"本地日对齐"的）。 */
+private fun localDateOf(localDaySeconds: Long): DateModel =
+    DateModel().setDate(Date(localDaySeconds * 1000L))
+
+/** `DateModel` 这一天在**设备时区** 00:00:00 的 epoch 秒。 */
+private fun localDayStartSeconds(d: DateModel): Long =
+    Calendar.getInstance().apply {
+        clear()
+        set(d.year, d.month - 1, d.date, 0, 0, 0)
+    }.timeInMillis / 1000L
