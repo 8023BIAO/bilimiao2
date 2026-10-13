@@ -259,6 +259,7 @@ internal fun CustomTime(
         timeTo = customTime.value.timeTo,
         maxDate = viewModel.maxDate,
         minDate = viewModel.minDate,
+        singleDate = false,
         onRangeChange = viewModel::setCustomTime,
     )
 }
@@ -280,6 +281,14 @@ internal fun CustomTimeContent(
     timeTo: DateModel,
     maxDate: DateModel,
     minDate: DateModel,
+    /**
+     * true = **只选一个日期**（点哪天就是哪天，立刻回调 `(那天, 那天)` 并由调用方收尾）：
+     * 搜索页的「起始日期/结束日期」就是两次独立的单日选择，不需要区间那套（点两端、最大跨度、
+     * 「点日期选择开始与结束」提示）——那些是时光姬的规则，套用过来反而不对。
+     */
+    singleDate: Boolean = false,
+    /** 是否显示日历上方那行摘要（单日模式且空间紧张时可以关掉）。 */
+    showSummary: Boolean = true,
     onRangeChange: (DateModel?, DateModel?) -> Unit,
 ) {
 
@@ -327,7 +336,17 @@ internal fun CustomTimeContent(
     // 组件抽出来后这里没有 viewModel 可当 key 了；点选逻辑只依赖下面这些 state，用 Unit 即可
     val itemClick = remember(Unit) {
         { i: Int ->
-            val clicked = dateOf(year.value, month.value, i)
+            // 单日模式：点哪天就是哪天，夹到可选范围内后立刻回调（调用方负责关弹窗）
+            val clicked = if (singleDate) {
+                clampToSelectable(dateOf(year.value, month.value, i), minDate, maxDate)
+            } else {
+                dateOf(year.value, month.value, i)
+            }
+            if (singleDate) {
+                startTime = clicked
+                endTime = clicked
+                onRangeChange(clicked, clicked)
+            } else {
             val _startTime = startTime
             val _endTime = endTime
             when {
@@ -376,6 +395,7 @@ internal fun CustomTimeContent(
                     }
                 }
             }
+            }
             Unit
         }
     }
@@ -383,15 +403,19 @@ internal fun CustomTimeContent(
     val selectedStart = startTime
     val selectedEnd = endTime
     // 摘要放日历上方：原来那行在日历下方，会被底部"确定"按钮压住
-    val summaryText = when {
-        selectedStart == null -> "点日期选择开始与结束（最多 $MAX_SPAN_DAYS 天）"
-        selectedEnd == null -> "开始 ${selectedStart.getValue("-")}，请再点一个日期作为结束（最多 $MAX_SPAN_DAYS 天）"
-        else -> "${selectedStart.getValue("-")} → ${selectedEnd.getValue("-")}（共 ${spanDays(selectedStart, selectedEnd)} 天，上限 $MAX_SPAN_DAYS 天）"
+    val summaryText = if (singleDate) {
+        if (selectedStart == null) "点一个日期" else "已选 ${selectedStart.getValue("-")}"
+    } else {
+        when {
+            selectedStart == null -> "点日期选择开始与结束（最多 $MAX_SPAN_DAYS 天）"
+            selectedEnd == null -> "开始 ${selectedStart.getValue("-")}，请再点一个日期作为结束（最多 $MAX_SPAN_DAYS 天）"
+            else -> "${selectedStart.getValue("-")} → ${selectedEnd.getValue("-")}（共 ${spanDays(selectedStart, selectedEnd)} 天，上限 $MAX_SPAN_DAYS 天）"
+        }
     }
 
     Column() {
 
-        Text(
+        if (showSummary) Text(
             text = summaryText,
             fontSize = 15.sp,
             color = MaterialTheme.colorScheme.onBackground,
@@ -421,7 +445,13 @@ internal fun CustomTimeContent(
                             val _startTime = startTime
                             val _endTime = endTime
 
-                            val status = if (_startTime == null) {
+                            val status = if (singleDate) {
+                                if (_startTime != null && curTime == _startTime) {
+                                    TextBoxStatus.Start
+                                } else {
+                                    TextBoxStatus.Enable
+                                }
+                            } else if (_startTime == null) {
                                 TextBoxStatus.Enable
                             } else if (curTime == _startTime) {
                                 TextBoxStatus.Start
@@ -476,3 +506,10 @@ internal fun CustomTimeContent(
 //fun CustomTimePreview() {
 //    CurrentTime()
 //}
+
+/** 把日期夹进 `[minDate, maxDate]`（单日模式用；月份导航本来也会挡，但直接调进来时仍需兜底）。 */
+private fun clampToSelectable(date: DateModel, minDate: DateModel, maxDate: DateModel): DateModel = when {
+    daysBetween(date, minDate) > 0 -> minDate
+    daysBetween(maxDate, date) > 0 -> maxDate
+    else -> date
+}

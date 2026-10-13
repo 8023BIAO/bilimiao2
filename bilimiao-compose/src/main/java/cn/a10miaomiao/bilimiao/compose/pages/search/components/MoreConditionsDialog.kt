@@ -173,6 +173,11 @@ internal class MoreConditionsDialogState(
         _timeTo.value = 0L
     }
 
+    /** 只清"上界"。搜索是单日语义（选定日之后），上界保持 0；旧的 to 值必须清掉，否则会缩小范围。 */
+    fun clearTimeTo() {
+        _timeTo.value = 0L
+    }
+
     fun close() {
         _visible.value = false
     }
@@ -303,18 +308,16 @@ internal fun MoreConditionsDialog(
                     }
                     if (ShowCustomTimeRange) {
                         Text(
-                            "时间区间",
+                            "指定日期",
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // 只选**一个**日期（搜索是"某天之后"，不需要起止两个框）
                             OutlinedButton(onClick = { pickerTarget = 1 }) {
-                                Text(if (state.timeFrom > 0) formatDay(state.timeFrom) else "起始日期")
-                            }
-                            OutlinedButton(onClick = { pickerTarget = 2 }) {
-                                Text(if (state.timeTo > 0) formatDay(state.timeTo) else "结束日期")
+                                Text(if (state.timeFrom > 0) formatDay(state.timeFrom) else "选择日期")
                             }
                             if (state.timeFrom > 0 || state.timeTo > 0) {
                                 TextButton(onClick = state::clearTimeRange) {
@@ -350,50 +353,30 @@ internal fun MoreConditionsDialog(
     if (pickerTarget != 0) {
         val today = remember { DateModel().setDate(Date()) }
         // from/to 是"本地日 00:00:00 / 23:59:59"的 epoch 秒；未设时给 0 ⇒ 组件不预选
-        val fromDate = remember(pickerTarget) {
+        val selectedDate = remember(pickerTarget) {
             if (state.timeFrom > 0) localDateOf(state.timeFrom) else DateModel().also { it.year = 0 }
         }
-        val toDate = remember(pickerTarget) {
-            if (state.timeTo > 0) localDateOf(state.timeTo) else DateModel().also { it.year = 0 }
-        }
-        var range by remember(pickerTarget) { mutableStateOf<Pair<DateModel, DateModel>?>(null) }
         OverlayCardDialog(
             onDismissRequest = { pickerTarget = 0 },
             scrollable = false,
         ) {
             CustomTimeContent(
-                timeFrom = fromDate,
-                timeTo = toDate,
+                timeFrom = selectedDate,
+                timeTo = selectedDate,
                 minDate = MinSelectableDate,
                 maxDate = today,
-                onRangeChange = { start, end ->
-                    // end == null = 只点了第一端（组件用"未选完整"表达），此时不允许确定
-                    range = if (start != null && end != null) start to end else null
+                // 搜索只要一个日期：点哪天就是哪天，点完直接关（不需要"起止两次点击 + 确定"）
+                singleDate = true,
+                showSummary = false,
+                onRangeChange = { start, _ ->
+                    start?.let {
+                        // 单日 = 当天 00:00:00 起到之后；timeTo 保持 0（不设上界）
+                        state.handleSetTimeFrom(localDayStartSeconds(it))
+                        state.clearTimeTo()
+                    }
+                    pickerTarget = 0
                 },
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = { pickerTarget = 0 }) {
-                    Text("取消")
-                }
-                TextButton(
-                    enabled = range != null,
-                    onClick = {
-                        range?.let { (start, end) ->
-                            state.handleSetTimeFrom(localDayStartSeconds(start))
-                            // 结束日含当天：补到本地 23:59:59，否则选「今天」会查不到今天发的内容
-                            state.handleSetTimeTo(localDayStartSeconds(end) + 86399)
-                        }
-                        pickerTarget = 0
-                    },
-                ) {
-                    Text("确定")
-                }
-            }
         }
     }
 }
