@@ -218,8 +218,11 @@ internal class MoreConditionsDialogState(
                 timeType = o.optInt("t", 0),
                 durationList = o.optJSONArray("d").toIntList().ifEmpty { listOf(0) },
                 regionList = o.optJSONArray("r").toIntList().ifEmpty { listOf(0) },
-                timeFrom = o.optLong("from", 0L),
-                timeTo = o.optLong("to", 0L),
+                // ★入口隐藏期间**必须丢弃**旧的自定义区间：否则用户在旧版本存下的 from/to 会一直
+                //   静默生效（还会让标题显示"已筛选"），而界面上没有任何地方能清除它。
+                //   入口恢复（ShowCustomTimeRange = true）时这两行也要跟着恢复读取。
+                timeFrom = if (ShowCustomTimeRange) o.optLong("from", 0L) else 0L,
+                timeTo = if (ShowCustomTimeRange) o.optLong("to", 0L) else 0L,
             )
             _timeTypeSelected.intValue = _data.timeType
             _durationSelectedList.value = _data.durationList
