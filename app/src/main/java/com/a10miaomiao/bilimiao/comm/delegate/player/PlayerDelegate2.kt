@@ -77,6 +77,7 @@ import com.a10miaomiao.bilimiao.comm.store.UserStore
 import com.a10miaomiao.bilimiao.comm.utils.NumberUtil
 import com.a10miaomiao.bilimiao.comm.utils.CdnHosts
 import com.a10miaomiao.bilimiao.comm.utils.UrlUtil
+import com.a10miaomiao.bilimiao.comm.utils.VideoCacheUtil
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.config.config
 import com.a10miaomiao.bilimiao.service.PlaybackService
@@ -131,34 +132,38 @@ class PlayerDelegate2(
 
     companion object {
         /**
-         * 磁盘缓存上限（字节）。**不做任何阻塞 IO**。
+         * 磁盘缓存上限（**MB**）。★**0 = 不启用磁盘缓存**（产品决定 2026-10-15）。
          *
-         * 以前这里 runBlocking 读 DataStore（带 500ms 超时），而它是被主线程的
-         * `ExoSourceManager.getMediaSource()` 调到的 —— 等于每次开播、每次换清晰度都要赌一次
-         * "设置读得够不够快"。现在读 [SettingPreferences.cachedPreferencesOrNull]
+         * 正数照旧夹在 [100, 10240]（太小没意义、太大浪费空间）；
+         * 以前 0 会被 `coerceIn` 悄悄夹成 100MB —— 用户以为"关了"，其实还在写盘，
+         * 所以现在 0 单独走"整条缓存链路都不套"（见 [createCachedFactory]）。
+         *
+         * **不做任何阻塞 IO**：读 [SettingPreferences.cachedPreferencesOrNull]
          * （进程启动时后台维护、设置一改就跟着更新）；快照还没就绪就用默认 512MB，
          * 和原来"超时 → 512MB"的兜底结果一致，但绝不卡主线程。
          */
-        private fun getCacheMaxSize(context: Context): Long {
-            val fromSnapshot = SettingPreferences.cachedPreferencesOrNull()
+        private fun getCacheSizeMb(context: Context): Int {
+            SettingPreferences.cachedPreferencesOrNull()
                 ?.get(SettingPreferences.PlayerDiskCacheSize)
-                ?.coerceIn(100, 10240)
-            val sizeMb = fromSnapshot ?: run {
-                // 快照还没就绪（进程刚起就直接播本地/下载视频这种情况）→ 退回一次**有上限**的阻塞读。
-                // 为什么这里破例：SimpleCache 的上限是在本次调用里首次创建时定型的，用错值会错一整个进程。
-                // 正常路径（联网取流）里 DataStore 快照早就绪，走不到这儿。
-                runCatching {
-                    kotlinx.coroutines.runBlocking {
-                        kotlinx.coroutines.withTimeoutOrNull(500L) {
-                            SettingPreferences.mapData(context) { prefs ->
-                                (prefs[SettingPreferences.PlayerDiskCacheSize] ?: 512).coerceIn(100, 10240)
-                            }
+                ?.let { return normalizeCacheSizeMb(it) }
+            // 快照还没就绪（进程刚起就直接播本地/下载视频这种情况）→ 退回一次**有上限**的阻塞读。
+            // 为什么这里破例：SimpleCache 的上限是在本次调用里首次创建时定型的，用错值会错一整个进程。
+            // 正常路径（联网取流）里 DataStore 快照早就绪，走不到这儿。
+            val fromDataStore = runCatching {
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeoutOrNull(500L) {
+                        SettingPreferences.mapData(context) { prefs ->
+                            prefs[SettingPreferences.PlayerDiskCacheSize] ?: 512
                         }
                     }
-                }.getOrNull() ?: 512
-            }
-            return sizeMb * 1024L * 1024L
+                }
+            }.getOrNull()
+            return normalizeCacheSizeMb(fromDataStore ?: 512)
         }
+
+        /** 0（或负数）= 停用；其余夹到 100~10240MB */
+        private fun normalizeCacheSizeMb(sizeMb: Int): Int =
+            if (sizeMb <= 0) 0 else sizeMb.coerceIn(100, 10240)
 
         @Volatile
         private var videoCache: SimpleCache? = null
@@ -189,16 +194,34 @@ class PlayerDelegate2(
         @Volatile
         private var pausedByBackground = false
 
-        private fun getCache(context: Context): SimpleCache {
+        /**
+         * 进程内单例缓存。**只在"启用磁盘缓存"时才会被调到**（见 [createCachedFactory]）。
+         *
+         * @param sizeMb 上限（MB）。SimpleCache 的淘汰器上限**首次创建即定型** ⇒
+         *   改大小必须重启进程才生效（设置页那一行已写明"重启后生效"）。
+         */
+        private fun getCache(context: Context, sizeMb: Int): SimpleCache {
             // 用 applicationContext：StandaloneDatabaseProvider 会被静态 videoCache 持有，
             // 传 Activity 会在进程存活期间 pin 住首个 Activity 实例
             val appContext = context.applicationContext
             return videoCache ?: synchronized(this) {
                 videoCache ?: SimpleCache(
-                    File(appContext.externalCacheDir ?: appContext.cacheDir, "video_cache"),
-                    LeastRecentlyUsedCacheEvictor(getCacheMaxSize(appContext)),
+                    VideoCacheUtil.dir(appContext),
+                    LeastRecentlyUsedCacheEvictor(sizeMb * 1024L * 1024L),
                     StandaloneDatabaseProvider(appContext)
-                ).also { videoCache = it }
+                ).also {
+                    videoCache = it
+                    // 「清除视频播放磁盘缓存」要先放掉这份活实例、再删目录（见 VideoCacheUtil.clear）
+                    VideoCacheUtil.onBeforeClear = { releaseCache() }
+                }
+            }
+        }
+
+        /** 放掉进程内缓存实例；下次用到时按**当时**的上限重建（清缓存那条路会调它） */
+        private fun releaseCache() {
+            synchronized(this) {
+                runCatching { videoCache?.release() }
+                videoCache = null
             }
         }
 
@@ -222,7 +245,17 @@ class PlayerDelegate2(
                 } else {
                     httpFactory
                 }
-            val cache = getCache(context)
+            // ★ 0 = 不启用磁盘缓存（产品决定 2026-10-15）：**整条缓存链路都不套** ——
+            //   不建 SimpleCache、不落盘、也不读旧条目；拿到的就是纯回源流。
+            //   （以前 0 被夹成 100MB，"关了还在写盘"。要清掉以前留下的文件，用设置页的
+            //    「清除视频播放磁盘缓存」。）
+            val cacheSizeMb = getCacheSizeMb(context)
+            if (cacheSizeMb <= 0) {
+                PlayerDiag.log("cache", "磁盘缓存：已停用（设置 0）→ 本次播放不套 CacheDataSource")
+                return upstreamFactory
+            }
+            val cache = getCache(context, cacheSizeMb)
+            PlayerDiag.log("cache", "磁盘缓存：上限 ${cacheSizeMb}MB（进程内首次创建时定型）")
             // 自定义 CacheKeyFactory：只取 path 作为缓存 key，跨 CDN 节点互通
             // Bilibili 同个视频在不同 API 调用中可能返回不同的 CDN host，
             // 若不统一 key，则每次重建播放器都会因 URL host 变化而缓存不命中
@@ -234,10 +267,12 @@ class PlayerDelegate2(
             //   表现就是"这几个剧集怎么都播不出来（黑屏、连报错都没有）"，而 MP4（另一个 path）却没事。
             //   改 key 前缀 = 旧的污染条目全部作废（由 LRU 自然淘汰），新数据重新落盘；
             //   以后万一再出类似事故，改这个前缀就能一键隔离。
+            //
+            // ★★ 2026-10-15：path 的取法改成 [cacheKeyPathOf]（原先是裸 `uri.path`）——
+            //   官方网关那种"没有 path"的 URL 会让**所有**流塌成同一个 key，正是用户
+            //   "放的是上一个视频/黑屏"的根因，详见 [cacheKeyPathOf] 的 KDoc。
             val cacheKeyFactory = CacheKeyFactory { dataSpec ->
-                val path = dataSpec.uri.path
-                    ?: dataSpec.uri.buildUpon().clearQuery().build().toString()
-                "v2:$path"
+                "v2:" + cacheKeyPathOf(dataSpec.uri)
             }
             // cacheReadDataSourceFactory 使用 DefaultDataSource 支持本地文件读取，
             // 确保已缓存的内容直接从本地存储读取而不走网络
@@ -248,6 +283,46 @@ class PlayerDelegate2(
                 .setCacheReadDataSourceFactory(cacheReadFactory)
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
                 .setUpstreamDataSourceFactory(upstreamFactory)
+        }
+
+        /**
+         * 缓存 key 里那截"路径"。★★ 2026-10-15 修的是"播放新视频却放上一个视频的音频 / 黑屏"的根因。
+         *
+         * 事故链：
+         *  1. vc207 加了「候选全是真 P2P → 官方网关」兜底（`UrlUtil.proxyTfUrl`），
+         *     把地址改写成 `https://proxy-tf-all-ws.bilivideo.com?url=<整体编码的原地址>`；
+         *  2. 这种 URL **没有 path 段** —— `uri.path` 是空串（若是 null 则走原来那个
+         *     `clearQuery()` 分支，结果是 `v2:https://proxy-tf-all-ws.bilivideo.com`）；
+         *     **两种情况下所有走网关的流都塌成同一个 key**：不分视频、不分清晰度、
+         *     不分音/视频轨、不分分段号；
+         *  3. `CacheDataSource` 于是把**第一个**落盘的文件的字节，喂给**后面每一个**请求：
+         *     音频轨读到上一集的 AAC（能解码 ⇒ 听到的是上一集的音频）、视频轨读到混入的
+         *     字节（⇒ 黑屏 / Invalid NAL length），而且**每次开播都命中**、清掉缓存目录才好。
+         *     这也是"把 CDN 恢复默认也没用"的原因 —— 旧 key 里根本没有 host。
+         *
+         * 修法：path 取不到（空串或只有 `/`）时，把网关 `?url=` 里的**原地址**解出来取它的 path。
+         * 这样"直连"和"走网关"命中同一个条目（跨 host 依然互通、不会重复缓存），
+         * 而每条流仍然各有各的 key。
+         *
+         * 兜底：连原地址都解不出来时，用**整个 URL（含 query）**当 key —— 它至少是"这一个请求"
+         * 独有的，绝不会让不同视频共用一个条目（代价只是签名变化后不命中；宁可少命中，
+         * 也绝不能读错内容）。
+         */
+        private fun cacheKeyPathOf(uri: Uri): String {
+            uri.path?.takeIf { it.isNotEmpty() && it != "/" }?.let { return it }
+            // ★必须先判 isHierarchical：`getQueryParameter` 对**不透明** URI（`data:`/`mailto:` 这类，
+            //   或者畸形串）会抛 UnsupportedOperationException，而老代码（裸取 path）从不抛 ——
+            //   不能让缓存 key 的计算把一次播放打挂。不透明 URI 直接走下面的兜底。
+            if (uri.isHierarchical) {
+                val encodedInner = uri.getQueryParameter("url")
+                if (!encodedInner.isNullOrBlank()) {
+                    runCatching { Uri.parse(encodedInner).path }
+                        .getOrNull()
+                        ?.takeIf { it.isNotEmpty() && it != "/" }
+                        ?.let { return it }
+                }
+            }
+            return uri.toString()
         }
 
         /**

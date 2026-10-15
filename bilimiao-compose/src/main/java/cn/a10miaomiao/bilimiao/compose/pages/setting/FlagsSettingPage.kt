@@ -40,6 +40,7 @@ import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
 import cn.a10miaomiao.bilimiao.compose.common.preference.rememberPreferenceFlow
 import cn.a10miaomiao.bilimiao.compose.components.preference.glidePreference
+import cn.a10miaomiao.bilimiao.compose.components.preference.videoCachePreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.textIntPreference
 import cn.a10miaomiao.bilimiao.compose.components.preference.sliderIntPreference
 import com.a10miaomiao.bilimiao.comm.toast
@@ -1227,8 +1228,17 @@ private fun FlagsSettingPageContent(
                 defaultValue = 512,
                 title = { Text("视频播放磁盘缓存") },
                 label = " MB",
-                summary = { Text("当前：${it}MB，调大可缓存更久") },
+                // ★0 = 停用（产品决定 2026-10-15）：以前 0 会被悄悄夹成 100MB，看着像关了其实还在写盘。
+                //   ★必须写"重启后生效"：SimpleCache 的淘汰上限首次创建就定型，改大小不重启不生效。
+                summary = {
+                    Text(
+                        if (it <= 0) "已停用（不写磁盘缓存），重启后生效"
+                        else "当前：${it}MB，重启后生效；填 0 停用"
+                    )
+                },
             )
+            // 缓存里进过坏数据时，用户得能一键清掉（清完自动重启）
+            videoCachePreference(key = "clear_video_cache")
             preference(
                 key = "reset_all",
                 title = {

@@ -103,6 +103,13 @@ internal class MoreConditionsDialogState(
 
     fun handleSelectedTimeType(timeType: Int) {
         _timeTypeSelected.intValue = timeType
+        // ★与"选日期"对称的互斥（2026-10-15）：选"最近 N 天"就清掉自定义区间。
+        //   `setTimeBound` 早就会把 chip 复位，反方向却一直没做 ⇒ "chip 高亮着、
+        //   实际按区间查"。现在两边都是**后一次操作生效**。
+        if (timeType != 0) {
+            _timeFrom.value = 0L
+            _timeTo.value = 0L
+        }
     }
 
     fun handleSelectedDuration(duration: Int) {
@@ -201,6 +208,19 @@ internal class MoreConditionsDialogState(
     }
 
     fun handleConfirm() {
+        // ★半开区间补全（产品决定 2026-10-15）：**只选了"起"时，终点默认落到今天**（含当天）。
+        //   只点一次、"起"到"现在"本该是合法查询，以前却靠"确认键置灰"拦半开 ⇒ 点了日期按不动确认。
+        //   现在照常搜，且外面那行显示的就是实际会查的区间。
+        //   "只选了止"（起点为空）不动：起点不传 = 从最早开始，也就是"至 X"。
+        if (_timeFrom.longValue > 0L && _timeTo.longValue <= 0L) {
+            _timeTo.longValue = todayEndSeconds()
+        }
+        // ★区间有值时把"发布时间"chip 归 0：请求里区间优先
+        //   （`SearchAllContent.loadData` 会把 timeType 丢掉），不归 0 就会出现
+        //   "外面高亮最近半年、实际按区间查"的看到≠发出。
+        if (_timeFrom.longValue > 0L || _timeTo.longValue > 0L) {
+            _timeTypeSelected.intValue = 0
+        }
         _data = MoreConditionsInfo(
             timeType = timeTypeSelected,
             durationList = durationSelectedList,
@@ -244,11 +264,19 @@ internal class MoreConditionsDialogState(
             _timeTypeSelected.intValue = _data.timeType
             _durationSelectedList.value = _data.durationList
             _regionSelectedList.value = _data.regionList
-            // 半开（只有一端）与反向都**整对丢弃**：前者会让请求变"无上限"、后者会被服务端拒，
-            // 而且这两种脏值在界面上看不出来（旧版本单日选择就曾只写 from）。
-            if ((_data.timeFrom > 0) != (_data.timeTo > 0) ||
-                (_data.timeFrom > 0 && _data.timeFrom > _data.timeTo)
-            ) {
+            // ★半开现在**是合法态**（"X 起" / "至 X"），不再整对丢弃；只丢"反向"（from > to）。
+            //   旧版本"单日选择"曾只写 from（半开）—— 它当时的意思就是"从那天起"，
+            //   这里补成"至今天"，与 handleConfirm 的补全口径一致（不再把用户的筛选静默扔掉）。
+            //   ★补全之后必须**重新**判一次反向：sanitize 的合法上界是
+            //     "现在 + 1 天"，比"今天末秒"宽 —— 盘上 from 落在"今天末秒 ~ 现在+1 天"这段时
+            //     （时钟回拨 / 设置导入能写进来），补出的 to 会小于 from。旧写法是 `else if`，
+            //     补完就不再判 ⇒ 界面显示"10-15 至 10-14"、请求下发反向区间。
+            //     ★不能用 `maxOf(todayEndSeconds(), endOfLocalDay(from))` 去夹：那会补出
+            //     "明天的 23:59:59"，下次启动又被上界砍回 0，每次开机都回到反向态。
+            if (_data.timeFrom > 0 && _data.timeTo <= 0) {
+                _data = _data.copy(timeTo = todayEndSeconds())
+            }
+            if (_data.timeFrom > 0 && _data.timeTo > 0 && _data.timeFrom > _data.timeTo) {
                 _data = _data.copy(timeFrom = 0L, timeTo = 0L)
             }
             _timeFrom.value = _data.timeFrom
@@ -357,11 +385,10 @@ internal fun MoreConditionsDialog(
             },
             confirmButton = {
                 TextButton(
-                    // ★只拦"半开"（只有一端）：那种状态会让请求变成"无上限"，用户看不出来。
-                    //   **空区间 (0,0) 必须放行** —— 它正是「清除」的落点，也是从没选过日期的默认态；
-                    //   写成"两端都必须有值"会把确认键恒灰，导致其它三组筛选全部提交不了。
-                    enabled = (state.timeFrom <= 0 && state.timeTo <= 0) ||
-                        (state.timeFrom > 0 && state.timeTo > 0),
+                    // ★半开也放行（产品决定 2026-10-15）：只选一端时由 [handleConfirm] 补全另一端
+                    //   （只选"起" → 终点=今天；只选"止" → 起点不传）。
+                    //   **空区间 (0,0) 也必须放行** —— 它正是「清除」的落点，也是从没选过日期的默认态；
+                    //   以前写成"两端都必须有值 / 半开置灰"会让确认键恒灰，用户点完日期搜不了。
                     onClick = state::handleConfirm
                 ) {
                     Text("确认")
@@ -506,6 +533,21 @@ private fun endOfLocalDay(localDaySeconds: Long): Long =
         set(Calendar.SECOND, 0)
         set(Calendar.MILLISECOND, 0)
     }.timeInMillis / 1000L - 1
+
+/**
+ * **今天**（设备时区）的最后一秒 —— "只选了起点"时终点默认落在这里（= 起到现在）。
+ *
+ * 为什么要落到"今天末秒"而不是"此刻"：与截止日"含当天"的口径一致，
+ * 且同一天内多次搜/重开弹窗都是同一个值，不会每点一次就漂一点。
+ */
+private fun todayEndSeconds(): Long {
+    val now = Calendar.getInstance()
+    val startOfToday = Calendar.getInstance().apply {
+        clear()
+        set(now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+    }.timeInMillis / 1000L
+    return endOfLocalDay(startOfToday)
+}
 
 /**
  * 校验落盘的区间端点（epoch 秒）：只接受 `[MinSelectableDaySeconds, 明天]` 之内、且为正的值，

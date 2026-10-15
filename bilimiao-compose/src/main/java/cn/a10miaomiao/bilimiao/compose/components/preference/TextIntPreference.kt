@@ -98,8 +98,11 @@ fun TextIntPreference(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val newValue = tempValue.text.toIntOrNull() ?: 0
-                        value = newValue
+                        // ★空输入 / 超 Int 的输入（`toIntOrNull()` 返回 null）**不提交**：
+                        //   以前 `?: 0` 会把它写成 0 —— 而「视频播放磁盘缓存」的 0 现在表示
+                        //   **停用磁盘缓存**，清空输入框点确定就会把缓存静默关掉（改前 0 只是被夹成 100MB，
+                        //   所以这个坑是这次语义变化带来的）。
+                        tempValue.text.toIntOrNull()?.let { value = it }
                         showDialog = false
                     }
                 ) {
