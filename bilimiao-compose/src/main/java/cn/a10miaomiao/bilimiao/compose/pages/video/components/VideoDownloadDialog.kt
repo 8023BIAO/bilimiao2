@@ -69,7 +69,7 @@ import android.content.Context
 import com.a10miaomiao.bilimiao.comm.datastore.SettingPreferences
 import kotlinx.coroutines.withContext
 import java.lang.annotation.Inherited
-import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadSearchBox
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSearchField
 
 @Stable
 class VideoDownloadDialogState(
@@ -765,7 +765,7 @@ fun VideoDownloadDialog(
                     val isPagesTab = (tabs.size == 1 && hasPages) || pagerState.currentPage == 0
                     val isSeasonTab = (tabs.size == 1 && hasSeason) || pagerState.currentPage == 1
                     if (isPagesTab && hasPages && state.list.size > 5) {
-                        DownloadSearchBox(
+                        MiaoSearchField(
                             value = state.pageKeyword.value,
                             onValueChange = { state.pageKeyword.value = it },
                             placeholder = "搜索分P标题",
@@ -773,7 +773,7 @@ fun VideoDownloadDialog(
                         )
                     }
                     if (isSeasonTab && hasSeason && state.seasonEpisodes.size > 5) {
-                        DownloadSearchBox(
+                        MiaoSearchField(
                             value = state.seasonKeyword.value,
                             onValueChange = { state.seasonKeyword.value = it },
                             placeholder = "搜索合集内视频标题",

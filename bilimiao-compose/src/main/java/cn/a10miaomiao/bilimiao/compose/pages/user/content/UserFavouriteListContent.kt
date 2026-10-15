@@ -12,13 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,12 +26,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.R
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSearchField
 import cn.a10miaomiao.bilimiao.compose.components.list.ListStateBox
 import cn.a10miaomiao.bilimiao.compose.components.list.SwipeToRefresh
 import cn.a10miaomiao.bilimiao.compose.components.miao.MiaoCard
@@ -97,36 +91,16 @@ internal fun UserFavouriteListContent(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 搜索栏
-        OutlinedTextField(
+        // 搜索栏：用公共件（左侧放大镜 + **右侧一键清空**，点叉清空关键字）
+        MiaoSearchField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            placeholder = {
-                Text(
-                    text = if (folderType == UserFavouriteFolderType.Created) {
-                        "搜索我创建的收藏夹"
-                    } else {
-                        "搜索我订阅的收藏夹"
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                )
+            placeholder = if (folderType == UserFavouriteFolderType.Created) {
+                "搜索我创建的收藏夹"
+            } else {
+                "搜索我订阅的收藏夹"
             },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "搜索",
-                    tint = MaterialTheme.colorScheme.outline,
-                )
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = { /* already filtered via LaunchedEffect */ }
-            ),
-            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         )
 
         SwipeToRefresh(

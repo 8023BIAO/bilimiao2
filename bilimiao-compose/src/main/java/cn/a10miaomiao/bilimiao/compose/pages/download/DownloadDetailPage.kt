@@ -40,7 +40,7 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
-import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadSearchBox
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSearchField
 
 @Serializable
 data class DownloadDetailPage(
@@ -268,7 +268,7 @@ internal fun DownloadDetailPageContent(
 
     Column(modifier = Modifier.fillMaxSize()) {
         // 搜索框：改用公共组件（与下载列表页/下载面板同一个，右侧带"一键清空"的叉）
-        DownloadSearchBox(
+        MiaoSearchField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
             placeholder = "搜索下载视频",

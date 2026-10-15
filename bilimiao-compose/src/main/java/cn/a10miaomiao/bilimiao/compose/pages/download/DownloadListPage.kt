@@ -46,7 +46,7 @@ import org.kodein.di.DI
 import org.kodein.di.DIAware
 import org.kodein.di.compose.rememberInstance
 import org.kodein.di.instance
-import cn.a10miaomiao.bilimiao.compose.pages.download.components.DownloadSearchBox
+import cn.a10miaomiao.bilimiao.compose.components.input.MiaoSearchField
 
 @Serializable
 class DownloadListPage : ComposePage() {
@@ -396,8 +396,8 @@ internal fun DownloadListPageContent(
         Column(modifier = Modifier.fillMaxSize()) {
             // 搜索栏
             if (!isEditMode) {
-                // 公共搜索框组件（下载面板也用同一个，见 components/DownloadSearchBox.kt）
-                DownloadSearchBox(
+                // 公共搜索框组件（带右侧一键清空；下载面板也用同一个，见 components/input/MiaoSearchField.kt）
+                MiaoSearchField(
                     value = searchText,
                     onValueChange = { searchText = it },
                     placeholder = "搜索下载标题",
