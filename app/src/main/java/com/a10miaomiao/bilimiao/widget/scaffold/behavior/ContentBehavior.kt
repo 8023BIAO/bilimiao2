@@ -36,8 +36,14 @@ class ContentBehavior : CoordinatorLayout.Behavior<View> {
         if (parent is ScaffoldView) {
             parentRef = parent
             if (parent.fullScreenPlayer) {
-                height = 0
-                width = 0
+                // ★全屏时**只把内容 layout 成 0×0（不绘制、不 overdraw），测量尺寸必须保持真实窗口尺寸**。
+                //   以前这里把 height/width 也设成 0，下面的 layoutParams 同步块就会把子 View 的 layoutParams
+                //   压成 0×0 + requestLayout ⇒ 内容里的 ComposeView 被 EXACTLY 0×0 约束测量。
+                //   Compose Pager 在 0 视口下会把 currentPage 写成 pageCount-1（最后一页），
+                //   而 PagerState 多数活在 ViewModel 里 ⇒ 退出全屏后搜索页等所有内容区 tab
+                //   100% 跳到最后一个（专栏），与用返回键/缩小/左上返回哪条退出路径无关。
+                height = parent.measuredHeight
+                width = parent.measuredWidth
                 child.layout(0, 0, 0, 0)
             } else {
                 height = parent.measuredHeight
