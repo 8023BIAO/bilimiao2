@@ -66,6 +66,7 @@ import com.a10miaomiao.bilimiao.comm.entity.player.SubtitleJsonInfo
 import com.a10miaomiao.bilimiao.comm.exception.AreaLimitException
 import com.a10miaomiao.bilimiao.comm.exception.DabianException
 import com.a10miaomiao.bilimiao.comm.network
+import com.a10miaomiao.bilimiao.comm.apis.PlayerAPI
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp.Companion.json
@@ -397,6 +398,13 @@ class PlayerDelegate2(
     private var lastPosition = 0L
     private val playerCoroutineScope = PlayerCoroutineScope()
 
+    /** 高能进度条数据缓存：按 cid 存（返回 <1KB），换视频/换清晰度不重复请求。 */
+    private val highEnergyBarCache = object : java.util.LinkedHashMap<String, PlayerAPI.HighEnergyBarData>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PlayerAPI.HighEnergyBarData>?): Boolean {
+            return size > 24
+        }
+    }
+
     /**
      * 取流/重载的互斥锁。**必须是实例级**：
      * 以前它是文件级（整个进程一把锁）—— 旧播放实例的慢加载会把新实例的加载锁在后面，
@@ -536,6 +544,65 @@ class PlayerDelegate2(
         // 否则通知栏/蓝牙控制、章节跳转、进度保存、播放源相关 UI 全部失效
         if (playerSource == null && (isPlaying() || isPause())) {
             restoreKeptSource()
+        }
+    }
+
+    /**
+     * 高能进度条：按当前视频的 aid/bvid/cid 拉 pbp 数据，失败/无数据就隐藏。
+     * 只在点播源（普通视频 / 番剧影视）尝试；直播/本地文件没有进度条，直接跳过。
+     */
+    private fun loadHighEnergyBar(source: BasePlayerSource, enabled: Boolean) {
+        val p = player ?: return
+        if (!enabled) {
+            p.setHighEnergyBarData(null, 0)
+            return
+        }
+        val aid: String
+        val bvid: String
+        val cid: String
+        when (source) {
+            is VideoPlayerSource -> {
+                aid = source.aid
+                bvid = source.effectiveBvid
+                cid = source.id
+            }
+            is BangumiPlayerSource -> {
+                aid = source.aid
+                bvid = ""
+                cid = source.id
+            }
+            else -> {
+                p.setHighEnergyBarData(null, 0)
+                return
+            }
+        }
+        if (cid.isBlank()) {
+            p.setHighEnergyBarData(null, 0)
+            return
+        }
+        val cached = synchronized(highEnergyBarCache) { highEnergyBarCache[cid] }
+        if (cached != null) {
+            p.setHighEnergyBarData(cached.values, cached.stepSec)
+            return
+        }
+        // 换视频/重载时先清掉旧曲线，避免显示上一个视频的波动
+        p.setHighEnergyBarData(null, 0)
+        playerCoroutineScope.launch(Dispatchers.IO) {
+            val data = try {
+                BiliApiService.playerAPI.getHighEnergyBar(aid, bvid, cid)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            if (data != null) {
+                synchronized(highEnergyBarCache) { highEnergyBarCache[cid] = data }
+            }
+            withContext(Dispatchers.Main) {
+                if (!playerClosed) {
+                    player?.setHighEnergyBarData(data?.values, data?.stepSec ?: 0)
+                }
+            }
         }
     }
 
@@ -1657,6 +1724,8 @@ class PlayerDelegate2(
 
     override fun openPlayer(source: BasePlayerSource) {
         playerClosed = false
+        // 先清上一视频的高能曲线：loadPlayerSource 失败/取消时不会走到 fetch，避免残影
+        views.videoPlayer?.setHighEnergyBarData(null, 0)
         // 换视频要复位锁定：否则锁定状态下自动连播下一集，新视频开局就是锁死的
         // （控件全隐藏、返回键还会被静默吞掉）
         views.videoPlayer?.isLock = false
@@ -1707,6 +1776,7 @@ class PlayerDelegate2(
             setThumbImageView(source.coverUrl)
             playerCoroutineScope.launch(Dispatchers.Main) {
                 var selectedHost = "default"
+                var highEnergyBarEnabled = false
                 SettingPreferences.getData(activity) {
                     fnval = it[PlayerFnval] ?: SettingConstants.PLAYER_FNVAL_DASH
                     // ★ 番剧/影视**跟随设置**（用户 2026-09-19 明确要求）：
@@ -1734,6 +1804,7 @@ class PlayerDelegate2(
                     source.cdnRaceEnabled = it[SettingPreferences.CdnRaceEnabled] ?: true
                     source.audioIndependentCdn = it[SettingPreferences.AudioIndependentCdn] ?: false
                     selectedHost = it[SettingPreferences.SelectedCdnHost] ?: "default"
+                    highEnergyBarEnabled = it[SettingPreferences.ShowHighEnergyBar] ?: false
                 }
                 if (selectedHost.isNotEmpty()) {
                     val cdnInfo = CdnHosts.list.find { it.key == selectedHost }
@@ -1750,6 +1821,9 @@ class PlayerDelegate2(
                     startPlaybackService()
                 }
                 loadPlayerSource()
+                if (!playerClosed) {
+                    loadHighEnergyBar(source, highEnergyBarEnabled)
+                }
                 // loadPlayerSource 末尾已在成功路径刷新通知栏元数据
                 // Media3 通过 ExoPlayer 自动处理通知栏，无需手动控制
                 player?.setSpeed(speed, true)

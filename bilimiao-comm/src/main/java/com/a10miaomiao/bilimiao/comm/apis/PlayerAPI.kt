@@ -6,6 +6,7 @@ import com.a10miaomiao.bilimiao.comm.BilimiaoCommApp
 import com.a10miaomiao.bilimiao.comm.entity.ResponseData
 import com.a10miaomiao.bilimiao.comm.entity.ResultInfo
 import com.a10miaomiao.bilimiao.comm.exception.AreaLimitException
+import com.a10miaomiao.bilimiao.comm.miao.MiaoJson
 import com.a10miaomiao.bilimiao.comm.network.ApiHelper
 import com.a10miaomiao.bilimiao.comm.network.BiliApiService
 import com.a10miaomiao.bilimiao.comm.network.MiaoHttp
@@ -350,6 +351,104 @@ class PlayerAPI {
         }
         return null
     }
+
+    /**
+     * 高能进度条（弹幕热度顶点）。
+     *
+     * 接口：`https://bvc.bilivideo.com/pbp/data?aid=&bvid=&cid=&r=loader`
+     * - aid 只认纯数字；aid 是 BV 串时改发 bvid；
+     * - 返回 `modules[0].params.data.events.default`（或旧版直接 `events.default`）；
+     * - 不需要登录/WBI；失败返回 null（播放器侧隐藏，不弹错）。
+     */
+    suspend fun getHighEnergyBar(
+        aid: String,
+        bvid: String?,
+        cid: String,
+    ): HighEnergyBarData? {
+        if (cid.isBlank()) return null
+        val rawAid = aid.removePrefix("av").trim()
+        val numericAid = rawAid.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+        val bv = listOfNotNull(bvid?.trim(), rawAid).firstOrNull {
+            it.isNotEmpty() && BvUtils.isValidBvid(it)
+        }
+        // ★ pbp 接口 aid 必填（只发 bvid 实测 400）：aid 非数字（收藏夹/合集入口可能是 BV 串）
+        // 时先用 view 接口把 BV 反查成数字 aid；查不到就隐藏曲线，不浪费一次注定 400 的请求。
+        val finalAid = numericAid ?: bv?.let { resolveAidByBvid(it) } ?: return null
+        val params = mutableMapOf<String, String>(
+            "aid" to finalAid,
+            "cid" to cid,
+            "r" to "loader",
+        )
+        if (bv != null) params["bvid"] = bv
+        return try {
+            val text = MiaoHttp.request {
+                url = "https://bvc.bilivideo.com/pbp/data?" + ApiHelper.urlencode(params)
+                headers["Origin"] = "https://www.bilibili.com"
+            }.awaitCall().body?.string().orEmpty()
+            val root = MiaoJson.fromJson<PbpResponse>(text)
+            val moduleData = root.modules?.firstOrNull()?.params?.data
+            val values = moduleData?.events?.default ?: root.events?.default.orEmpty()
+            if (values.size < 2) return null
+            if (values.maxOrNull()?.let { it <= 0.0 } != false) return null
+            val stepSec = moduleData?.step_sec ?: root.step_sec ?: 0
+            if (stepSec <= 0) return null
+            HighEnergyBarData(stepSec = stepSec, values = values)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 用 BV 反查数字 aid（只在 pbp 的 aid 位置传入 BV 串时兜底用）。 */
+    private suspend fun resolveAidByBvid(bvid: String): String? {
+        return try {
+            val text = MiaoHttp.request {
+                isWebApi = true
+                url = BiliApiService.biliApi("x/web-interface/view", "bvid" to bvid)
+            }.awaitCall().body?.string().orEmpty()
+            val root = MiaoJson.fromJson<ViewAidResponse>(text)
+            root.data?.aid?.toString()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    @Serializable
+    data class HighEnergyBarData(
+        val stepSec: Int,
+        val values: List<Double>,
+    )
+
+    @Serializable
+    private data class ViewAidResponse(val data: ViewAidData? = null)
+
+    @Serializable
+    private data class ViewAidData(val aid: Long? = null)
+
+    @Serializable
+    private data class PbpResponse(
+        val modules: List<PbpModule>? = null,
+        val step_sec: Int? = null,
+        val events: PbpEvents? = null,
+    )
+
+    @Serializable
+    private data class PbpModule(val params: PbpParams? = null)
+
+    @Serializable
+    private data class PbpParams(val data: PbpModuleData? = null)
+
+    @Serializable
+    private data class PbpModuleData(
+        val step_sec: Int? = null,
+        val events: PbpEvents? = null,
+    )
+
+    @Serializable
+    private data class PbpEvents(val default: List<Double> = emptyList())
 
     /**
      * 缩略图雪碧图数据。

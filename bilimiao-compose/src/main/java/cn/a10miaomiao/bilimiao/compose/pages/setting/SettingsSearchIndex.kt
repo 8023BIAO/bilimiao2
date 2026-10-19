@@ -13,8 +13,8 @@ import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
  * 数据源：各设置页里真实存在的 switchPreference / sliderIntPreference / sliderPreference /
  * textIntPreference 调用点（`components/preference/` 下的 DSL 定义本身不算），外加 listPreference /
  * multiSelectIntPreference / listStylePreference / customSetsPreference 这类**搜索页改不了、
- * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 102 个调用点，
- * 收录 143 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
+ * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 103 个调用点，
+ * 收录 144 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
  * （注释掉的调用、`key = item.prefKey` 这类动态渲染、`preference(...)+onClick` 动作项等）。
  *
  * ★搜索结果必须用**与原设置页同款控件**：Kind 与控件一一对应 —— [SettingSearchItem.Kind.SWITCH]
@@ -126,7 +126,7 @@ data class SettingSearchItem(
 
 object SettingsSearchIndex {
 
-    /** 143 条；由 gen_settings_index.py 生成（覆盖 102 个调用点） */
+    /** 144 条；由 gen_settings_index.py 生成（覆盖 103 个调用点） */
     val items: List<SettingSearchItem> = listOf(
         SettingSearchItem(prefName = "PlayerBackground", prefKey = "player_background", title = "后台播放", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "后台播放 ① 播放 播放器设置 PlayerBackground player_background"),
@@ -148,6 +148,8 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "显示通知栏播放器控制器 ① 播放 播放器设置 播放控制设置 PlayerNotification player_notification"),
         SettingSearchItem(prefName = "PlayerOrderRandom", prefKey = "player_order_random", title = "随机播放", category = "① 播放", page = "播放器设置", section = "播放控制设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "随机播放 ① 播放 播放器设置 播放控制设置 PlayerOrderRandom player_order_random"),
+        SettingSearchItem(prefName = "ShowHighEnergyBar", prefKey = "show_high_energy_bar", title = "显示高能进度条", category = "① 播放", page = "播放器设置", section = "播放控制设置",
+            kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "显示高能进度条 ① 播放 播放器设置 播放控制设置 ShowHighEnergyBar show_high_energy_bar"),
         SettingSearchItem(prefName = "PlayerSeekPreviewShow", prefKey = "player_seek_preview_show", title = "拖动进度显示预览图", category = "① 播放", page = "播放器设置", section = "播放控制设置",
             kind = SettingSearchItem.Kind.SWITCH, default = true, keywords = "拖动进度显示预览图 ① 播放 播放器设置 播放控制设置 PlayerSeekPreviewShow player_seek_preview_show"),
         SettingSearchItem(prefName = "PlayerSmallDraggable", prefKey = "player_small_draggable", title = "小屏时整个播放器可拖拽", category = "① 播放", page = "播放器设置", section = "横屏状态小屏设置",

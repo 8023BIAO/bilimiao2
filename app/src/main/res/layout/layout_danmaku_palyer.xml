@@ -83,7 +83,8 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="40dp"
+            android:layout_height="wrap_content"
+            android:minHeight="40dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -95,20 +96,42 @@
                 android:text="00:00"
                 android:textColor="#ffffff" />
 
-            <SeekBar
-                android:id="@+id/progress"
+            <!-- 曲线与 SeekBar 放在同一个加权容器里：宽度严格 1:1，不再整屏拉宽 -->
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center_vertical"
-                android:layout_weight="1.0"
-                android:background="@null"
-                android:max="100"
-                android:maxHeight="4dp"
-                android:minHeight="4dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:progressDrawable="@drawable/layer_progress"
-                android:thumb="@drawable/video_seek_thumb" />
+                android:layout_weight="1.0">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:orientation="vertical">
+
+                    <com.a10miaomiao.bilimiao.widget.player.HighEnergyBarView
+                        android:id="@+id/high_energy_bar"
+                        android:layout_width="match_parent"
+                        android:layout_height="12dp"
+                        android:visibility="gone"
+                        android:clickable="false"
+                        android:focusable="false"
+                        android:importantForAccessibility="no" />
+
+                    <SeekBar
+                        android:id="@+id/progress"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@null"
+                        android:max="100"
+                        android:maxHeight="4dp"
+                        android:minHeight="4dp"
+                        android:paddingTop="8dp"
+                        android:paddingBottom="8dp"
+                        android:progressDrawable="@drawable/layer_progress"
+                        android:thumb="@drawable/video_seek_thumb" />
+                </LinearLayout>
+            </FrameLayout>
 
             <TextView
                 android:id="@+id/total"
@@ -148,14 +171,23 @@
 
         </LinearLayout>
 
-        <LinearLayout
-            android:id="@+id/layout_full_mode_bottom"
+        <!-- 小屏/分屏时整行可能超出屏幕：横向滚动，保证发送弹幕和右侧控件都够得到 -->
+        <HorizontalScrollView
+            android:id="@+id/full_mode_bottom_scroll"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingHorizontal="12dp"
-            android:visibility="gone">
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/layout_full_mode_bottom"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp"
+                android:visibility="gone">
 
             <ImageView
                 android:id="@+id/buttom_play"
@@ -172,8 +204,9 @@
                  白字压白药丸 = 看不见（审计发现） -->
             <TextView
                 android:id="@+id/send_danmaku"
-                android:layout_width="0dp"
+                android:layout_width="120dp"
                 android:layout_height="30dp"
+                android:minWidth="120dp"
                 android:layout_weight="1"
                 android:text="发送弹幕"
                 android:textColor="#FF212121"
@@ -411,7 +444,8 @@
                     android:textSize="@dimen/default_tiny_text_size" />
             </LinearLayout>
 
-        </LinearLayout>
+            </LinearLayout>
+        </HorizontalScrollView>
 
     </LinearLayout>
 

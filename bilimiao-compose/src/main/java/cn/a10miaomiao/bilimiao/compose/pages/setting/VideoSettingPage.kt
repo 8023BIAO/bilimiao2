@@ -404,6 +404,16 @@ private fun VideoSettingPageContent(
                 values = viewModel.bottomProgressBarShowSelectionList,
                 valueToText = viewModel::bottomProgressBarShowName
             )
+            switchPreference(
+                key = SettingPreferences.ShowHighEnergyBar.name,
+                title = {
+                    Text("显示高能进度条")
+                },
+                summary = {
+                    Text("在进度条上方显示弹幕热度曲线（点播/番剧/影视；无数据时不显示）")
+                },
+                defaultValue = false,
+            )
             customSetsPreference(
                 key = SettingPreferences.PlayerSpeedValues.name,
                 title = {

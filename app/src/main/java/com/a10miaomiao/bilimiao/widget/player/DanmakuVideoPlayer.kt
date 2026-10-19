@@ -97,6 +97,7 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     }
     // 主题颜色
     private var mThemeColor = Color.BLUE
+    private var highEnergyTrackBound = false
     val themeColor: Int get() = mThemeColor  // 公开给 PlayerController 弹窗用
     // 弹幕引擎
     private val mDanmakuView: DanmakuView by lazy { findViewById(R.id.danmaku_view) }
@@ -131,6 +132,7 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
 
     // 底栏布局
     private val mBottomLayout: LinearLayout by lazy { findViewById(R.id.layout_bottom) }
+    private val mHighEnergyBar: HighEnergyBarView by lazy { findViewById(R.id.high_energy_bar) }
 
     // 全屏时底栏布局
     private val mFullModeBottomContainer: ViewGroup by lazy { findViewById(R.id.layout_full_mode_bottom) }
@@ -3529,11 +3531,53 @@ initDanmakuTouchListener()
         changeTextureViewShowType()
     }
 
+    /**
+     * 让高能曲线的绘制范围严格等于 SeekBar 真实轨道 bounds。
+     * ProgressBar 可能给 drawable 留 padding / 圆角内缩，直接读 bounds 最稳。
+     */
+    private fun syncHighEnergyTrackInsets() {
+        val bounds = mProgressBar.progressDrawable?.bounds ?: return
+        if (bounds.width() <= 0 || mProgressBar.width <= 0 || mHighEnergyBar.width <= 0) return
+        val sbLoc = IntArray(2)
+        val chartLoc = IntArray(2)
+        mProgressBar.getLocationInWindow(sbLoc)
+        mHighEnergyBar.getLocationInWindow(chartLoc)
+        // 轨道真实窗口坐标 = SeekBar 窗口 x + paddingLeft + drawable.bounds
+        val trackLeftWindow = sbLoc[0] + mProgressBar.paddingLeft + bounds.left
+        val trackRightWindow = sbLoc[0] + mProgressBar.paddingLeft + bounds.right
+        // 换算成曲线 View 自己内部的绘制坐标（不再假设两个 View 一定同 x / 同宽）
+        val left = (trackLeftWindow - chartLoc[0]).coerceIn(0, mHighEnergyBar.width)
+        val right = (mHighEnergyBar.width - (trackRightWindow - chartLoc[0]))
+            .coerceIn(0, mHighEnergyBar.width)
+        mHighEnergyBar.setHorizontalInsets(left, right)
+    }
+
+    /** 设置高能进度条数据；null/空列表会隐藏（随控制条一起显示/隐藏）。 */
+    fun setHighEnergyBarData(values: List<Double>?, stepSec: Int) {
+        mHighEnergyBar.setData(values, stepSec)
+        // 曲线 GONE 时 width=0，同步会 skip；setData 后 post 到下一帧再按可见尺寸算 inset
+        mHighEnergyBar.post { syncHighEnergyTrackInsets() }
+    }
+
     fun updateThemeColor(
         context: Context,
         themeColor: Int,
     ) {
         mThemeColor = themeColor
+        mHighEnergyBar.setBarColor(themeColor)
+        // 真实轨道范围直接读 SeekBar 的 progressDrawable.bounds（AOSP ProgressBar.updateDrawableBounds 设置），
+        // 不再靠 padding/thumbOffset 猜。布局/全屏变化后重新同步一次。
+        mProgressBar.post {
+            if (!highEnergyTrackBound) {
+                highEnergyTrackBound = true
+                val relayout = android.view.View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    mHighEnergyBar.post { syncHighEnergyTrackInsets() }
+                }
+                mProgressBar.addOnLayoutChangeListener(relayout)
+                mHighEnergyBar.addOnLayoutChangeListener(relayout)
+            }
+            syncHighEnergyTrackInsets()
+        }
         mDialogSeekTime?.setTextColor(mThemeColor)
         mDialogOffsetText?.setTextColor(mThemeColor)
 

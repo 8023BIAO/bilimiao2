@@ -317,6 +317,9 @@ object SettingPreferences {
     val PlayerAiSubtitleShow = booleanPreferencesKey("player_ai_subtitle_show")
     // 拖动进度条时在画面中央显示预览缩略图（默认开）
     val PlayerSeekPreviewShow = booleanPreferencesKey("player_seek_preview_show")
+
+    /** 进度条上方的「高能进度条」（弹幕热度曲线；数据来自 bvc pbp 接口，无数据时不显示） */
+    val ShowHighEnergyBar = booleanPreferencesKey("show_high_energy_bar")
     // 音量手势滑动距离：整条音量行程 = 画面高的百分之多少（30~200，步进 5，默认 50 = PiliPlus 的 0.5）
     val PlayerVolumeSwipePercent = intPreferencesKey("player_volume_swipe_percent")
 
