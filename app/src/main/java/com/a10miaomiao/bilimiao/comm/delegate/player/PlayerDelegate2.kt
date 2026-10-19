@@ -1,5 +1,6 @@
 package com.a10miaomiao.bilimiao.comm.delegate.player
 
+import com.a10miaomiao.bilimiao.comm.utils.TitleCleaner
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -996,7 +997,7 @@ class PlayerDelegate2(
         return playerSource?.let {
             val artworkUri = Uri.parse(UrlUtil.autoHttps(it.coverUrl) + "@300w_300h_1c_")
             val metaData = MediaMetadata.Builder()
-                .setTitle(it.title)
+                .setTitle(if (it is BangumiPlayerSource) it.title else TitleCleaner.cleanIfEnabled(it.title) ?: it.title)
                 .setArtist(it.ownerName)     // 通知栏小标题：普通视频=UP主，番剧/影视=系列名
                 .setArtworkUri(artworkUri)
                 .setAlbumTitle(it.ownerName)
@@ -1332,7 +1333,7 @@ class PlayerDelegate2(
                 false,
                 null,
                 sourceInfo.header,
-                source.title
+                if (source is BangumiPlayerSource) source.title else TitleCleaner.cleanIfEnabled(source.title) ?: source.title
             )
             loadingBoxController.hideLoading()
             // ★ P0 守卫：lastPosition 接近末尾时从头开始，避免 seek 到末尾立即 STATE_ENDED

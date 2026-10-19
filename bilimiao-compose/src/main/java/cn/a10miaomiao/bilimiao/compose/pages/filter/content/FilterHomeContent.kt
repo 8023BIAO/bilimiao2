@@ -161,6 +161,12 @@ fun FilterHomeContent(
                 defaultValue = false,
             )
             switchPreference(
+                key = SettingPreferences.TitleFilterEnabled.name,
+                title = { Text("标题净化") },
+                summary = { Text("清洗首页、热门、搜索、相关视频、排行榜的标题（仅显示层，默认关）") },
+                defaultValue = false,
+            )
+            switchPreference(
                 key = SettingPreferences.FilterTagStrict.name,
                 title = { Text("标签查询失败时拦截") },
                 summary = { Text("开启后，标签信息查询失败的视频按已屏蔽处理（默认放行，避免网络波动误杀；开启可消除标签屏蔽视频时隐时现）") },

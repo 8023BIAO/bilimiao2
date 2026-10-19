@@ -141,6 +141,8 @@ object SettingPreferences {
     val VideoHideCover = booleanPreferencesKey("video_hide_cover")
     // 隐藏视频详情页相关推荐
     val VideoHideRelates = booleanPreferencesKey("video_hide_relates")
+    // 标题净化：首页推荐/热门/搜索综合/相关视频/排行榜 的标题清洗与超长缩短（默认关）
+    val TitleFilterEnabled = booleanPreferencesKey("title_filter_enabled")
 
     // ===== 时光精选 =====
     val TimeSelectShow = booleanPreferencesKey("time_select_show")

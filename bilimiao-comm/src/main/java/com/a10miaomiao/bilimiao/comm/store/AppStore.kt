@@ -74,6 +74,13 @@ class AppStore(override val di: DI) :
          * 各页面自己 collect 一份 datastore 就会重演"同一件事两条流"的老问题。
          */
         var autoPlayEnable: Boolean = true,
+        /**
+         * 标题净化（默认关）。
+         *
+         * Compose 侧由 [cn.a10miaomiao.bilimiao.compose.BilimiaoTheme] 的 CompositionLocal 下发；
+         * 播放器标题/通知等非 Compose 场景同步写 [com.a10miaomiao.bilimiao.comm.utils.TitleCleaner.enabled]。
+         */
+        var titleFilterEnabled: Boolean = false,
     )
 
     override val stateFlow = MutableStateFlow(State())
@@ -83,6 +90,11 @@ class AppStore(override val di: DI) :
 
     override fun init(context: Context) {
         super.init(context)
+        // 冷启动兜底：datastore 异步读回之前先用内存快照同步一次，避免播放器首帧用旧开关值。
+        SettingPreferences.cachedPreferencesOrNull()?.let { prefs ->
+            com.a10miaomiao.bilimiao.comm.utils.TitleCleaner.enabled =
+                prefs[SettingPreferences.TitleFilterEnabled] ?: false
+        }
         SettingPreferences.launch(viewModelScope) {
             context.dataStore.data.collect {
                 val themeType = it[ThemeType] ?: SettingConstants.THEME_TYPE_DEFAULT
@@ -91,8 +103,12 @@ class AppStore(override val di: DI) :
                 } else {
                     (it[ThemeColor] ?: 0xFF2196F3).toInt()
                 }
+                val titleFilterEnabled = it[SettingPreferences.TitleFilterEnabled] ?: false
+                // 非 Compose 场景（播放器标题/通知/媒体元数据）走静态开关；Compose 侧由 BilimiaoTheme 下发。
+                com.a10miaomiao.bilimiao.comm.utils.TitleCleaner.enabled = titleFilterEnabled
                 setState {
                     autoPlayEnable = it[AutoPlayEnable] ?: true
+                    this.titleFilterEnabled = titleFilterEnabled
                     home = HomeSettingState(
                         showTimeMachine = it[HomeTimeMachineShow] ?: false,
                         showPopular = it[HomePopularShow] ?: false,

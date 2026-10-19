@@ -1,5 +1,7 @@
 package cn.a10miaomiao.bilimiao.compose
 
+import cn.a10miaomiao.bilimiao.compose.common.cleanDisplayTitle
+
 import android.content.Context
 import android.os.Build
 import android.widget.Toast
@@ -301,7 +303,7 @@ private fun StartIndexList(
             ) {
                 StartPlayerCard(
                     aid = playerState.aid,
-                    title = playerState.title,
+                    title = if (playerState.type == "video") cleanDisplayTitle(playerState.title) ?: playerState.title else playerState.title,
                     cover = playerState.cover,
                     onClick = {
                         if (playerState.type === "video") {

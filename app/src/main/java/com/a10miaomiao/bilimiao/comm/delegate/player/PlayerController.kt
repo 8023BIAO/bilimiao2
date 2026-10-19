@@ -963,6 +963,29 @@ class PlayerController(
     }
 
     /**
+     * 播放完成（无下一集/未开循环）时的统一收尾。
+     *
+     * 设置「播放完成后自动关闭」= 等同用户点完成页的「关闭播放」：
+     * 退出小窗 → 隐藏完成框 → 关闭播放器（保留当前页面，不退出 Activity）。
+     * 关闭设置时保留原来的完成框行为（含 PiP 自动退到后台）。
+     */
+    private fun finishPlayback(autoClose: Boolean) {
+        // 极端情况下完成回调可能重复触发：播放器已关就直接返回，别二次 closePlayer
+        if (!delegate.isOpened()) return
+        if (autoClose) {
+            // 与完成页「关闭播放」按钮完全同序：退出小窗 → 隐藏完成框 → 关闭播放器
+            delegate.controller.smallScreen()
+            delegate.completionBoxController.hide()
+            delegate.closePlayer()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity.isInPictureInPictureMode) {
+            activity.moveTaskToBack(true)
+        }
+        delegate.completionBoxController.show()
+    }
+
+    /**
      * 播放结束
      */
     override fun onAutoCompletion() {
@@ -970,10 +993,12 @@ class PlayerController(
         scope.launch {
             val currentPlayerSourceInfo = delegate.playerSource ?: return@launch
             val nextPlayerSourceInfo = currentPlayerSourceInfo.next()
-            val (order, orderRandom) = SettingPreferences.mapData(activity) {
+            val (order, orderRandom, autoCloseOnCompletion) = SettingPreferences.mapData(activity) {
                 val order = it[PlayerOrder] ?: SettingConstants.PLAYER_ORDER_DEFAULT
                 val orderRandom = it[PlayerOrderRandom] ?: false
-                order to orderRandom
+                val openMode = it[PlayerOpenMode] ?: SettingConstants.PLAYER_OPEN_MODE_DEFAULT
+                val autoClose = openMode and SettingConstants.PLAYER_OPEN_MODE_AUTO_CLOSE_ON_COMPLETION != 0
+                Triple(order, orderRandom, autoClose)
             }
             // 循环播放
             val isLoop = order and SettingConstants.PLAYER_ORDER_LOOP != 0
@@ -986,10 +1011,7 @@ class PlayerController(
             val nextIsSameAsCurrent = nextPlayerSourceInfo != null
                 && nextPlayerSourceInfo!!.id == currentPlayerSourceInfo.id
             if (nextIsSameAsCurrent && !isLoop) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity.isInPictureInPictureMode) {
-                    activity.moveTaskToBack(true)
-                }
-                delegate.completionBoxController.show()
+                finishPlayback(autoCloseOnCompletion)
                 return@launch
             }
             if (nextPlayerSourceInfo is VideoPlayerSource
@@ -1063,11 +1085,7 @@ class PlayerController(
                 currentPlayerSourceInfo.isLoop = true
                 delegate.openPlayer(currentPlayerSourceInfo)
             } else {
-                // 小窗播放结束自动退出 PIP
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity.isInPictureInPictureMode) {
-                    activity.moveTaskToBack(true)
-                }
-                delegate.completionBoxController.show()
+                finishPlayback(autoCloseOnCompletion)
             }
         }
     }

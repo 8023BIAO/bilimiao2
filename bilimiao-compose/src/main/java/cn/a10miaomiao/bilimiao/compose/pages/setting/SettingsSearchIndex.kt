@@ -13,8 +13,8 @@ import com.a10miaomiao.bilimiao.comm.live.danmaku.LiveDanmakuSettings
  * 数据源：各设置页里真实存在的 switchPreference / sliderIntPreference / sliderPreference /
  * textIntPreference 调用点（`components/preference/` 下的 DSL 定义本身不算），外加 listPreference /
  * multiSelectIntPreference / listStylePreference / customSetsPreference 这类**搜索页改不了、
- * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 101 个调用点，
- * 收录 142 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
+ * 但页面上真有**的项（后者收成 Kind.LINK，只为搜得到）。本次扫描到 102 个调用点，
+ * 收录 143 条（按存储键去重）；未收录的调用点及原因由生成器打印在 stdout 报告里
  * （注释掉的调用、`key = item.prefKey` 这类动态渲染、`preference(...)+onClick` 动作项等）。
  *
  * ★搜索结果必须用**与原设置页同款控件**：Kind 与控件一一对应 —— [SettingSearchItem.Kind.SWITCH]
@@ -126,7 +126,7 @@ data class SettingSearchItem(
 
 object SettingsSearchIndex {
 
-    /** 142 条；由 gen_settings_index.py 生成（覆盖 101 个调用点） */
+    /** 143 条；由 gen_settings_index.py 生成（覆盖 102 个调用点） */
     val items: List<SettingSearchItem> = listOf(
         SettingSearchItem(prefName = "PlayerBackground", prefKey = "player_background", title = "后台播放", category = "① 播放", page = "播放器设置", section = "播放器设置",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "后台播放 ① 播放 播放器设置 PlayerBackground player_background"),
@@ -474,6 +474,8 @@ object SettingsSearchIndex {
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "已关注UP主白名单 ③ 内容与评论 推荐过滤 FollowWhitelistEnabled follow_whitelist_enabled"),
         SettingSearchItem(prefName = "BlockPromotion", prefKey = "block_promotion", title = "屏蔽推广视频", category = "③ 内容与评论", page = "推荐过滤", section = "",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "屏蔽推广视频 ③ 内容与评论 推荐过滤 BlockPromotion block_promotion filter block 屏蔽词"),
+        SettingSearchItem(prefName = "TitleFilterEnabled", prefKey = "title_filter_enabled", title = "标题净化", category = "③ 内容与评论", page = "推荐过滤", section = "",
+            kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "标题净化 ③ 内容与评论 推荐过滤 TitleFilterEnabled title_filter_enabled"),
         SettingSearchItem(prefName = "FilterTagStrict", prefKey = "filter_tag_strict", title = "标签查询失败时拦截", category = "③ 内容与评论", page = "推荐过滤", section = "",
             kind = SettingSearchItem.Kind.SWITCH, default = false, keywords = "标签查询失败时拦截 ③ 内容与评论 推荐过滤 FilterTagStrict filter_tag_strict filter block 屏蔽词"),
         SettingSearchItem(prefName = "CommentSubReplyPreview", prefKey = "comment_sub_reply_preview", title = "显示二级回复", category = "③ 内容与评论", page = "评论区", section = "",
@@ -521,7 +523,7 @@ object SettingsSearchIndex {
         SettingSearchItem(prefName = "PlayerDashBufferSec", prefKey = "player_dash_buffer_sec", title = "播放缓冲时长", category = "① 播放", page = "播放器设置", section = "视频源设置",
             kind = SettingSearchItem.Kind.LINK, default = 15, keywords = "播放缓冲时长 ① 播放 播放器设置 视频源设置 PlayerDashBufferSec player_dash_buffer_sec 分钟 秒 filter 点开对应页面改 不能在搜索页改 link 去设置页"),
         SettingSearchItem(prefName = "PlayerOpenMode", prefKey = "player_open_mode", title = "播放器自动控制", category = "① 播放", page = "播放器设置", section = "播放控制设置",
-            kind = SettingSearchItem.Kind.LINK, default = SettingConstants.PLAYER_OPEN_MODE_DEFAULT, keywords = "播放器自动控制 ① 播放 播放器设置 播放控制设置 PlayerOpenMode player_open_mode 点开对应页面改 不能在搜索页改 link 去设置页"),
+            kind = SettingSearchItem.Kind.LINK, default = SettingConstants.PLAYER_OPEN_MODE_DEFAULT, keywords = "播放器自动控制 ① 播放 播放器设置 播放控制设置 PlayerOpenMode player_open_mode 播放完成时自动关闭 播放完成后自动关闭 完成播放自动关闭播放器 点开对应页面改 不能在搜索页改 link 去设置页"),
         SettingSearchItem(prefName = "PlayerOrder", prefKey = "player_order", title = "播放器播放顺序", category = "① 播放", page = "播放器设置", section = "播放控制设置",
             kind = SettingSearchItem.Kind.LINK, default = SettingConstants.PLAYER_ORDER_DEFAULT, keywords = "播放器播放顺序 ① 播放 播放器设置 播放控制设置 PlayerOrder player_order 点开对应页面改 不能在搜索页改 link 去设置页"),
         SettingSearchItem(prefName = "PlayerFullMode", prefKey = "player_full_mode", title = "全屏播放屏幕方向", category = "① 播放", page = "播放器设置", section = "播放控制设置",

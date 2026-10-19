@@ -1,5 +1,6 @@
 package com.a10miaomiao.bilimiao.service
 
+import com.a10miaomiao.bilimiao.comm.utils.TitleCleaner
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -75,7 +76,7 @@ class PlaybackService : MediaSessionService(), MediaSession.Callback {
     }
 
     fun saveSourceInfo(title: String, cover: String, type: String) {
-        savedSourceTitle = title
+        savedSourceTitle = if (type == "bangumi") title else TitleCleaner.cleanIfEnabled(title) ?: title
         savedSourceCover = cover
         savedSourceType = type
     }

@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import cn.a10miaomiao.bilimiao.compose.common.LocalTitleFilterEnabled
 import cn.a10miaomiao.bilimiao.compose.common.platform.rememberMaterialYouColorScheme
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.store.AppStore
@@ -24,10 +26,14 @@ fun BilimiaoTheme(
     MaterialTheme(
         colorScheme = appColorScheme(themeState, systemDark),
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
+        CompositionLocalProvider(
+            LocalTitleFilterEnabled provides appState.titleFilterEnabled,
         ) {
-            content()
+            Box(
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                content()
+            }
         }
     }
 }

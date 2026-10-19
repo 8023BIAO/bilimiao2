@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.rank.content
 
+import cn.a10miaomiao.bilimiao.compose.common.cleanDisplayTitle
 import android.app.Activity
 import android.net.Uri
 import androidx.compose.foundation.layout.Row
@@ -210,7 +211,7 @@ internal fun RankListContent(
                     )
                     VideoItemBox(
                         modifier = Modifier.weight(1f),
-                        title = item.title,
+                        title = cleanDisplayTitle(item.title),
                         pic = item.cover,
                         upperName = item.name,
                         playNum = item.play.toString(),

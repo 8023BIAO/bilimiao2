@@ -1,5 +1,7 @@
 package com.a10miaomiao.bilimiao
 
+import com.a10miaomiao.bilimiao.comm.utils.TitleCleaner
+
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
@@ -25,6 +27,7 @@ import androidx.lifecycle.lifecycleScope
 import com.a10miaomiao.bilimiao.comm.datastore.SettingConstants
 import com.a10miaomiao.bilimiao.comm.delegate.helper.PicInPicHelper
 import com.a10miaomiao.bilimiao.comm.delegate.helper.StatusBarHelper
+import com.a10miaomiao.bilimiao.comm.delegate.player.BangumiPlayerSource
 import com.a10miaomiao.bilimiao.comm.delegate.player.PlayerDelegate2
 import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerLauncher
 import com.a10miaomiao.bilimiao.comm.delegate.player.VideoPlayerSource
@@ -195,7 +198,7 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
         }
         root.rootWindowInsets?.let { applyWindowInsets(it) }
 
-        hintView.text = "正在播放：${source.title}\n\n（按返回键回到上一页）"
+        hintView.text = "正在播放：${if (source is BangumiPlayerSource) source.title else TitleCleaner.cleanIfEnabled(source.title) ?: source.title}\n\n（按返回键回到上一页）"
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -214,7 +217,7 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
         if (!root.fullScreenPlayer) {
             playerDelegate.controller.fullScreen(SettingConstants.PLAYER_FULL_MODE_UNSPECIFIED)
         }
-        hintView.text = "正在播放：${source.title}\n\n（按返回键回到上一页）"
+        hintView.text = "正在播放：${if (source is BangumiPlayerSource) source.title else TitleCleaner.cleanIfEnabled(source.title) ?: source.title}\n\n（按返回键回到上一页）"
     }
 
     override fun onStart() {
@@ -494,7 +497,7 @@ class VideoPlayerActivity : AppCompatActivity(), DIAware {
         next.cdnRaceEnabled = source.cdnRaceEnabled
         next.audioIndependentCdn = source.audioIndependentCdn
         playerDelegate.openPlayer(next)
-        hintView.text = "正在播放：${next.title}\n\n（按返回键回到上一页）"
+        hintView.text = "正在播放：${TitleCleaner.cleanIfEnabled(next.title) ?: next.title}\n\n（按返回键回到上一页）"
     }
 
     // ══════════════════════════════════════════════════════════════════════

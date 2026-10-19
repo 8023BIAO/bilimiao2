@@ -111,12 +111,13 @@ private class VideoSettingPageViewModel(
 
     private val openModeSelection = mapOf(
         SettingConstants.PLAYER_OPEN_MODE_AUTO_PLAY to AnnotatedString("无视频播放时，自动播放"),
-        SettingConstants.PLAYER_OPEN_MODE_AUTO_REPLACE to AnnotatedString("正在播放时，自动替换播放"),
-        SettingConstants.PLAYER_OPEN_MODE_AUTO_REPLACE_PAUSE to AnnotatedString("暂停播放时，自动替换播放"),
-        SettingConstants.PLAYER_OPEN_MODE_AUTO_REPLACE_COMPLETE to AnnotatedString("完成播放时，自动替换播放"),
+        SettingConstants.PLAYER_OPEN_MODE_AUTO_REPLACE to AnnotatedString("播放时，打开新视频自动替换"),
+        SettingConstants.PLAYER_OPEN_MODE_AUTO_REPLACE_PAUSE to AnnotatedString("暂停播放时，打开新视频自动替换"),
+        SettingConstants.PLAYER_OPEN_MODE_AUTO_REPLACE_COMPLETE to AnnotatedString("播完后，打开新视频自动替换"),
+        SettingConstants.PLAYER_OPEN_MODE_AUTO_CLOSE_ON_COMPLETION to AnnotatedString("播完后无下一个，自动关闭"),
         SettingConstants.PLAYER_OPEN_MODE_AUTO_CLOSE to AnnotatedString("退出详情页时，自动关闭"),
-        SettingConstants.PLAYER_OPEN_MODE_AUTO_FULL_SCREEN to AnnotatedString("设备竖屏状态时，自动全屏播放"),
-        SettingConstants.PLAYER_OPEN_MODE_AUTO_FULL_SCREEN_LANDSCAPE to AnnotatedString("设备横屏状态时，自动全屏播放"),
+        SettingConstants.PLAYER_OPEN_MODE_AUTO_FULL_SCREEN to AnnotatedString("竖屏时，自动全屏播放"),
+        SettingConstants.PLAYER_OPEN_MODE_AUTO_FULL_SCREEN_LANDSCAPE to AnnotatedString("横屏时，自动全屏播放"),
 
     )
 
@@ -354,7 +355,7 @@ private fun VideoSettingPageContent(
                     Text("播放器自动控制")
                 },
                 summary = {
-                    Text("打开或关闭详情页时的自动操作")
+                    Text("打开/关闭详情页或播放完成时的自动操作")
                 },
                 values = viewModel.openModeSelectionList,
                 defaultValue = SettingConstants.PLAYER_OPEN_MODE_DEFAULT,

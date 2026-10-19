@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.home.content
 
+import cn.a10miaomiao.bilimiao.compose.common.cleanDisplayTitle
 import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.layout.Column
@@ -320,7 +321,7 @@ internal fun HomeRecommendContent() {
                             horizontal = 10.dp,
                             vertical = 5.dp
                         ),
-                        title = it.title,
+                        title = if (it.goto == "av" || it.goto == "vertical_av") cleanDisplayTitle(it.title) else it.title,
                         pic = it.cover,
                         upperName = it.args?.up_name,
                         playNum = it.cover_left_text_1,
@@ -333,7 +334,7 @@ internal fun HomeRecommendContent() {
                 } else {
                     MiniVideoItemBox(
                         modifier = Modifier.padding(5.dp),
-                        title = it.title,
+                        title = if (it.goto == "av" || it.goto == "vertical_av") cleanDisplayTitle(it.title) else it.title,
                         pic = it.cover,
                         upperName = it.args?.up_name,
                         playNum = it.cover_left_text_1,

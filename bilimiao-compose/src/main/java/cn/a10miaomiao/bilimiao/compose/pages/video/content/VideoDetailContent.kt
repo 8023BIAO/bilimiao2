@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.video.content
 
+import cn.a10miaomiao.bilimiao.compose.common.cleanDisplayTitle
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.Box
@@ -326,7 +327,7 @@ fun VideoDetailContent(
                     horizontal = 10.dp,
                     vertical = 5.dp
                 ),
-                title = it.title,
+                title = cleanDisplayTitle(it.title),
                 pic = it.pic,
                 upperName = it.author?.name,
                 playNum = it.stat?.view?.let(NumberUtil::converString),

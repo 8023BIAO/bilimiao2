@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.home.content
 
+import cn.a10miaomiao.bilimiao.compose.common.cleanDisplayTitle
 import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.clickable
@@ -330,7 +331,7 @@ internal fun HomePopularContent() {
                         horizontal = 10.dp,
                         vertical = 5.dp
                     ),
-                    title = it.base?.title,
+                    title = cleanDisplayTitle(it.base?.title),
                     pic =it.base?.cover,
                     upperName = it.rightDesc1,
                     playNum = it.rightDesc2,

@@ -39,7 +39,7 @@ object SettingConstants {
     const val PLAYER_OPEN_MODE_AUTO_REPLACE = 2
     // 0000 0100：自动替换暂停暂停的视频
     const val PLAYER_OPEN_MODE_AUTO_REPLACE_PAUSE = 4
-    // 0000 1000：自动替换播放完成的视频
+    // 0000 1000：当前视频已播完时，打开新视频 → 自动替换播放（不是“播完自动关”）
     const val PLAYER_OPEN_MODE_AUTO_REPLACE_COMPLETE = 8
     // 0001 0000：自动关闭
     const val PLAYER_OPEN_MODE_AUTO_CLOSE = 16
@@ -47,6 +47,8 @@ object SettingConstants {
     const val PLAYER_OPEN_MODE_AUTO_FULL_SCREEN = 32
     // 0100 0000：横屏状态自动横屏
     const val PLAYER_OPEN_MODE_AUTO_FULL_SCREEN_LANDSCAPE = 64
+    // 1000 0000：视频自然播完且没有下一个/循环时，自动关闭播放器（不是“替换播放”）
+    const val PLAYER_OPEN_MODE_AUTO_CLOSE_ON_COMPLETION = 128
 
     // 0000：播放完结束
     const val PLAYER_ORDER_END = 0

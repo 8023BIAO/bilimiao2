@@ -1,5 +1,6 @@
 package cn.a10miaomiao.bilimiao.compose.pages.search.components
 
+import cn.a10miaomiao.bilimiao.compose.common.cleanDisplayTitle
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -22,7 +23,7 @@ internal fun SearchItemCard(
                     horizontal = 10.dp,
                     vertical = 5.dp
                 ),
-                title = avItem.title,
+                title = cleanDisplayTitle(avItem.title),
                 pic = avItem.cover,
                 upperName = avItem.author + " " + avItem.showCardDesc2,
                 playNum = NumberUtil.converString(avItem.play),
