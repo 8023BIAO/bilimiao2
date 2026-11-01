@@ -149,8 +149,9 @@ public class DanmakuUtils {
         if (r != 0)
             return r < 0 ? -1 : 1;
 
-        r = obj1.hashCode() - obj1.hashCode();
-        return r;
+        // 时间和序号都相同时再按 hashCode 兜底：不同对象的 hashCode 一般不同，
+        // 不能返回 0，否则 TreeSet 会把这条弹幕当成重复元素丢弃
+        return Integer.compare(obj1.hashCode(), obj2.hashCode());
     }
 
     public final static boolean isOverSize(IDisplayer disp, BaseDanmaku item) {

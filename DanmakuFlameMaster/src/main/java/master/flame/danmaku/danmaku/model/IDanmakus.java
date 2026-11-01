@@ -146,7 +146,14 @@ public interface IDanmakus {
             if (mDuplicateMergingEnable && DanmakuUtils.isDuplicate(obj1, obj2)) {
                 return 0;
             }
-            return Float.compare(obj1.getTop(), obj2.getTop());
+            int result = Float.compare(obj1.getTop(), obj2.getTop());
+            if (result != 0) {
+                return result;
+            }
+            // y 相同的两条弹幕不能返回 0：轨道集合是 TreeSet，
+            // compare 返回 0 会被当成重复元素直接丢弃，这条弹幕下次又要重新分配轨道，
+            // 表现为滚动弹幕上下跳行。用时间+序号兜底，保证不同弹幕之间比较结果稳定且唯一。
+            return DanmakuUtils.compare(obj1, obj2);
         }
     }
 
@@ -161,7 +168,11 @@ public interface IDanmakus {
             if (mDuplicateMergingEnable && DanmakuUtils.isDuplicate(obj1, obj2)) {
                 return 0;
             }
-            return Float.compare(obj2.getTop(), obj1.getTop());
+            int result = Float.compare(obj2.getTop(), obj1.getTop());
+            if (result != 0) {
+                return result;
+            }
+            return DanmakuUtils.compare(obj1, obj2);
         }
     }
 

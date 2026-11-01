@@ -1,20 +1,14 @@
 package cn.a10miaomiao.bilimiao.compose.components.layout
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateIntAsState
-import androidx.compose.animation.core.animateIntOffsetAsState
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
@@ -74,35 +68,25 @@ fun DoubleColumnAutofitLayout(
                 }
             }
         } else {
-            val density = LocalDensity.current
-            val leftMaxHeightPx = remember(density, leftMaxHeight, chainScrollableLayoutState.minScrollPosition) {
-                density.run {
-                    leftMaxHeight.roundToPx().toFloat() - chainScrollableLayoutState.minScrollPosition.roundToPx()
-                }
-            }
             val scrollableState = rememberScrollState()
             ChainScrollableLayout(
                 modifier = modifier,
                 state = chainScrollableLayoutState,
             ) { state ->
-                // 分母可能为 0（番剧详情页左栏高度给的是 0.dp）→ 0/0=NaN，
-                // .alpha(NaN) 会导致整块内容不绘制；这里兜底并夹到 0..1
-                val alpha = if (leftMaxHeightPx > 0f) {
-                    ((leftMaxHeightPx + state.getOffsetYValue()) / leftMaxHeightPx).coerceIn(0f, 1f)
-                } else {
-                    1f
-                }
-                val offsetY by animateIntAsState(
-                    targetValue = state.getOffsetYValue().roundToInt(), label = "",
-                )
                 Box(
                     modifier = Modifier
                         .animateContentSize()
                         .height(leftMaxHeight)
+                        // 偏移与透明度都在布局/绘制阶段读取 state：
+                        // 头部高度变化（如视频详情页封面显示/隐藏）以及滚动时都能立即跟随，
+                        // 且不再触发每帧重组；透明度分母为 0（番剧详情页左栏高度给 0.dp）时
+                        // headerFraction 兜底为 1，不会出现 alpha=NaN 整块不绘制
                         .offset {
-                            IntOffset(0, offsetY)
+                            IntOffset(0, state.getOffsetYValue().roundToInt())
                         }
-                        .alpha(alpha)
+                        .graphicsLayer {
+                            alpha = state.headerFraction
+                        }
                         .nestedScroll(state.nestedScroll)
                         .scrollable(scrollableState, Orientation.Vertical),
                 ) {
@@ -120,7 +104,7 @@ fun DoubleColumnAutofitLayout(
                         .offset {
                             IntOffset(
                                 0,
-                                state.maxPx.roundToInt() + offsetY
+                                (state.maxPx + state.getOffsetYValue()).roundToInt()
                             )
                         }
                 ) {
@@ -132,7 +116,6 @@ fun DoubleColumnAutofitLayout(
                             bottom = max(innerBottom + chainScrollableLayoutState.minScrollPosition, 0.dp),
                             left = innerStart,
                             right = innerEnd,
-//                            top = density.run { (state.maxPx + state.getOffsetYValue()).toDp() }
                         )
                     )
                 }
