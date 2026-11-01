@@ -4,6 +4,7 @@ import android.content.*
 import android.graphics.Bitmap
 import android.graphics.Outline
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
@@ -222,36 +223,66 @@ class CoverActivity : AppCompatActivity() {
      */
     private fun saveImage(bitmap: Bitmap) {
         val fileName = "${viewModel.fileName.value ?: "未命名"}.jpg"
-        try {
-            saveToAlbum(fileName, bitmap)
+        if (saveToAlbum(fileName, bitmap)) {
             toast("封面已保存至相册")
-        } catch (e: Exception) {
-            try {
-                File(path).let {
-                    if (!it.exists()) it.mkdirs()
-                }
-                val outFile = File(path + fileName)
-                outFile.writeBitmap(bitmap)
-                toast("封面已保存至本地")
-            } catch (e2: Exception) {
-                e2.printStackTrace()
-                toast("保存失败")
+            return
+        }
+        try {
+            File(path).let {
+                if (!it.exists()) it.mkdirs()
             }
+            val outFile = File(path + fileName)
+            outFile.writeBitmap(bitmap)
+            toast("封面已保存至本地")
+        } catch (e2: Exception) {
+            e2.printStackTrace()
+            toast("保存失败")
         }
     }
 
-    private fun saveToAlbum(fileName: String, bitmap: Bitmap) {
+    /**
+     * 保存到系统相册
+     * @return 只有整张图片真正写完并发布到媒体库才返回 true
+     */
+    private fun saveToAlbum(fileName: String, bitmap: Bitmap): Boolean {
+        // Android 10 以下写公共相册需要存储权限、也没有 RELATIVE_PATH，直接走私有目录兜底
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return false
+        }
+        val resolver = contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Bilimiao")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Bilimiao")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
         }
-        contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)?.let { uri ->
-            contentResolver.openOutputStream(uri)?.use { stream ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                stream.flush()
+        val uri = try {
+            resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } ?: return false
+        return try {
+            val stream = resolver.openOutputStream(uri) ?: throw Exception("无法打开输出流")
+            stream.use {
+                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)) {
+                    throw Exception("封面编码失败")
+                }
+                it.flush()
             }
-        } ?: throw Exception("MediaStore insert failed")
+            resolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                null,
+                null
+            )
+            true
+        } catch (e: Exception) {
+            // 写入失败时删除半成品记录，避免相册里留下 0 字节空图
+            e.printStackTrace()
+            runCatching { resolver.delete(uri, null, null) }
+            false
+        }
     }
 
     /**
