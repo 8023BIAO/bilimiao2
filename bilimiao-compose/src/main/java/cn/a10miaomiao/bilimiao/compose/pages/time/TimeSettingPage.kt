@@ -60,6 +60,24 @@ private fun TimeSettingPageContent(
 
     val scrollState = rememberScrollState()
 
+    // 「自定义范围」卡片激活后自动滚到底：500dp 弹窗里默认视图看不到摘要，
+    // 最底一行日期还会被悬浮「确定」按钮盖住（点它会误触确定）。卡片展开是动画，
+    // 可滚高度要等几帧才稳定，所以等 maxValue 连续两帧不变再平滑滚过去。
+    LaunchedEffect(cardIndex) {
+        if (cardIndex != TimeSettingStore.TIME_TYPE_CUSTOM) return@LaunchedEffect
+        var prev = -1
+        repeat(40) {
+            withFrameNanos { }
+            val cur = scrollState.maxValue
+            if (cur == prev && cur > 0) {
+                scrollState.animateScrollTo(cur)
+                return@LaunchedEffect
+            }
+            prev = cur
+        }
+        scrollState.animateScrollTo(scrollState.maxValue)
+    }
+
     Box(
         modifier = Modifier.fillMaxSize()
     ) {

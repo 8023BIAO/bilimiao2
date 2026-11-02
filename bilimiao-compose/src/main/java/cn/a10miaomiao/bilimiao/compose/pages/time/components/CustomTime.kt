@@ -74,7 +74,8 @@ private val DayCircleSize = 32.dp
 /**
  * 胶囊条里的星期行。
  *
- * 圆角和底色由外层胶囊统一提供，这里只负责文字：周末（六、日）用正文色并加粗，和工作日区分。
+ * 圆角和底色由外层胶囊统一提供，这里只负责文字：**全部同一档颜色**，周末只用字重区分。
+ * 原来周末用正文色、工作日用弱化色，真机上被读成"周六日可选、工作日不可选"（用户反馈）。
  */
 @Composable
 private fun WeekdayRow(
@@ -87,18 +88,14 @@ private fun WeekdayRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         WeekTitles.forEachIndexed { index, title ->
-            val weekend = index >= 5
             Text(
                 text = title,
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (weekend) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (weekend) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                // 周末只保留字重差；颜色统一，避免亮度差再被读成"可选/不可选"
+                fontWeight = if (index >= 5) FontWeight.SemiBold else FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -242,7 +239,9 @@ private fun MonthCell(
                 color = when {
                     active -> MaterialTheme.colorScheme.onPrimary
                     enabled -> MaterialTheme.colorScheme.onSurface
-                    else -> MaterialTheme.colorScheme.outlineVariant
+                    // 与日期格的"不可选"统一用 outline：原来 outlineVariant 太淡，
+                    // 两处"灰"深浅不一，用户更容易把颜色误读成别的含义
+                    else -> MaterialTheme.colorScheme.outline
                 },
             )
         }
@@ -372,12 +371,13 @@ private fun DateGrid(
                                 TextBoxStatus.Middle -> RangeSide.Full
                                 else -> RangeSide.None
                             },
-                            textColor = when {
-                                status == TextBoxStatus.Disable ->
-                                    MaterialTheme.colorScheme.outlineVariant
-                                // 周六、日（列 5、6）
-                                column >= 5 -> MaterialTheme.colorScheme.onBackground
-                                else -> MaterialTheme.colorScheme.outline
+                            // 可选日期一律亮色（onSurface），不再按平/周末分亮度 —— 原来工作日用
+                            // outline 偏灰，用户误读成"灰=超出 90 天不可选"。现在灰色只有一个含义：
+                            // Disable（真超 90 天）才用 outline 压暗一档。
+                            textColor = if (status == TextBoxStatus.Disable) {
+                                MaterialTheme.colorScheme.outline
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
                             },
                             modifier = Modifier
                                 .weight(1f)
