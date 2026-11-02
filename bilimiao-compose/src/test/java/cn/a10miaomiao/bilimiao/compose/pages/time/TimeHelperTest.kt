@@ -2,7 +2,6 @@ package cn.a10miaomiao.bilimiao.compose.pages.time
 
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.MAX_SPAN_DAYS
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.daysBetween
-import cn.a10miaomiao.bilimiao.compose.pages.time.components.getCalendarRowCount
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.getMonthDayNum
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.getWeek
 import cn.a10miaomiao.bilimiao.compose.pages.time.components.isLeapYear
@@ -20,7 +19,7 @@ import org.junit.Test
  * 每个月都错位一格。这里用真实日历锁定 0=周一..6=周日 的约定。
  *
  * 自定义范围的"整日差"与"含首尾天数"（daysBetween / spanDays）不用系统时区的毫秒差，
- * 见 TimeHelper 注释；日历行数（getCalendarRowCount）锁定"不多画一整行空白"。
+ * 见 TimeHelper 注释。
  */
 class TimeHelperTest {
 
@@ -108,31 +107,5 @@ class TimeHelperTest {
         // 注意：这里断言的是天数本身，**不要**写成 MAX_SPAN_DAYS ——
         // 那会把"算法正确"和"上限取值"绑在一起（2026-10-02 上限由 30 抬到 90 时就这么挂过一次）。
         assertTrue("上限必须是正数", MAX_SPAN_DAYS > 0)
-    }
-
-    @Test
-    fun calendarRowCount_coversEveryDayWithNoBlankRow() {
-        // 注意：这是**等价重构的看护测试**，不是"修了 bug"——
-        // 老的 `while (num < total)` 与新公式 2009-2030 逐月 0 差异（见 verify-timepicker-abc.md）。
-        // 月首周一 + 31 天：正好 5 行（5×7=35 格，末行是 27-31 号，不多画空白行）
-        assertEquals(0, getWeek(2024, 1, 1))
-        assertEquals(5, getCalendarRowCount(2024, 1))
-        // 月首周一 + 28 天：正好 4 行
-        assertEquals(4, getCalendarRowCount(2027, 2))
-        // 月首周日 + 30 天：首行只 1 格，月末那天单独占最后一行 → 6 行
-        assertEquals(6, getCalendarRowCount(2024, 9))
-    }
-
-    @Test
-    fun calendarRowCount_coversAllDays() {
-        for (y in 2009..2030) {
-            for (m in 1..12) {
-                val cells = getCalendarRowCount(y, m) * 7
-                val used = getWeek(y, m, 1) + getMonthDayNum(y, m)
-                assertTrue("y=$y m=$m cells=$cells used=$used", cells >= used)
-                // 最多只多出最后一行的空格，不允许整整多一行
-                assertTrue("y=$y m=$m cells=$cells used=$used", cells - used < 7)
-            }
-        }
     }
 }

@@ -31,7 +31,9 @@ internal fun TimeCard(
             .padding(10.dp, 0.dp, 10.dp, 10.dp)
             .alpha(alpha),
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
+        // 用 surfaceContainerLow（上游同款改动）：日历胶囊是 surfaceContainerHigh、选中是 primary，
+        // 原来压 surfaceVariant 时三者亮度太接近，胶囊和色带都看不出层次。
+        color = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(
             modifier = Modifier.clickable(

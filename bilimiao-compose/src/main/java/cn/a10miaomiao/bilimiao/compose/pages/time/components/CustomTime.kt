@@ -1,42 +1,38 @@
 package cn.a10miaomiao.bilimiao.compose.pages.time.components
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.KeyboardArrowLeft
-import androidx.compose.material.icons.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.KeyboardDoubleArrowLeft
+import androidx.compose.material.icons.outlined.KeyboardDoubleArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.pages.time.TimeSettingViewMode
 import com.a10miaomiao.bilimiao.comm.store.model.DateModel
-import java.util.Date
 import com.a10miaomiao.bilimiao.comm.toast
+import java.util.Date
 
 /** 年月日 → DateModel（日历里到处都在拼这个，抽一处） */
 private fun dateOf(year: Int, month: Int, day: Int) = DateModel().also {
     it.year = year
     it.month = month
     it.date = day
-}
-
-@Composable
-internal fun MonthText(y: Int, m: Int): String {
-    if (m > 12) {
-        return "${y+1}年1月"
-    } else if (m < 1) {
-        return "${y-1}年12月"
-    } else {
-        return "${y}年${m}月"
-    }
 }
 
 internal enum class TextBoxStatus {
@@ -47,205 +43,575 @@ internal enum class TextBoxStatus {
     Disable,
 }
 
-@Composable
-internal fun TextBox(
-    modifier: Modifier,
-    text: String,
-    textColor: Color = Color.Unspecified,
-    height: Dp = 25.dp,
-    onClick: (() -> Unit)? = null,
-    status: TextBoxStatus = TextBoxStatus.Enable,
-    /**
-     * 区间端点是否画「起」/「止」小字。默认 **true**（时光姬页面就靠这两个字分辨哪端是起、哪端是止
-     * —— 两端的底色块完全一样）。
-     * 搜索筛选那边是"一次只选一天"，传 `showRangeLabels = !singleDate` 即自动不画。
-     */
-    showRangeLabels: Boolean = true,
-) {
-    // 选中态（起 / 止 / 区间内）统一用**主题强调色**（primaryContainer）。
-    // 原来用的是 tertiaryContainer——本主题的 tertiary 是偏粉的强调色，压在"选中"这个语义上
-    // 看着像"没跟主题"（用户 2026-10-02 反馈"选中间那个一直是粉色固定的"）。
-    // （tertiaryContainer 全仓另有几处，但都是别的语义：CDN 延迟色阶 / 调色板预览 / 测试页，别去动。）
-    val containerColor = MaterialTheme.colorScheme.primaryContainer
-    val onContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
-    // 注意：区间内（Middle）的文字也是压在 primaryContainer 上的，必须一起换成 onPrimaryContainer，
-    // 否则会拿星期/次要文字色去压强调色底 → 对比度不够。
-    val selected = status == TextBoxStatus.Start ||
-        status == TextBoxStatus.End ||
-        status == TextBoxStatus.Middle
+/** 头部胶囊内侧的纵向留白 */
+private val CapsulePadding = 5.dp
 
-    Surface(
-        modifier = if (onClick != null) {
-            modifier.clickable(onClick = onClick)
-        } else modifier,
-        color = if (status == TextBoxStatus.Start || status == TextBoxStatus.End) {
-            containerColor
-        } else Color.Transparent,
-        shape = RoundedCornerShape(5.dp),
+/** 胶囊里选择器行的高度 */
+private val SelectorRowHeight = 38.dp
+
+/** 胶囊里星期/「选择月份」提示行的高度（两种视图共用，胶囊高度才不变） */
+private val SubRowHeight = 26.dp
+
+/** 日期格行高（比 M3 默认更紧凑，6 行塞得下整月） */
+private val CalendarRowHeight = 36.dp
+
+/** 固定 6 行：不同月份长度、日期视图 ↔ 月份视图高度完全一致，切换时卡片不跳动 */
+private const val CalendarRowCount = 6
+
+/** 头部胶囊与网格之间的间距 */
+private val CalendarGap = 4.dp
+
+/** 整个日历区域的高度：胶囊 + 间距 + 6 行网格，日期/月份视图共用 */
+private val CalendarAreaHeight =
+    CapsulePadding * 2 + SelectorRowHeight + SubRowHeight + CalendarGap +
+        CalendarRowHeight * CalendarRowCount
+
+private val WeekTitles = listOf("一", "二", "三", "四", "五", "六", "日")
+
+/** 日期选中圆的直径；区间色带也用它做高度，保证和圆点同高 */
+private val DayCircleSize = 32.dp
+
+/**
+ * 胶囊条里的星期行。
+ *
+ * 圆角和底色由外层胶囊统一提供，这里只负责文字：周末（六、日）用正文色并加粗，和工作日区分。
+ */
+@Composable
+private fun WeekdayRow(
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(SubRowHeight),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
-            modifier = Modifier
-                .padding(vertical = 5.dp)
-                .fillMaxWidth()
-                .height(height)
-                .let {
-                      if (status == TextBoxStatus.Middle) {
-                          it.background(containerColor)
-                      } else it
+        WeekTitles.forEachIndexed { index, title ->
+            val weekend = index >= 5
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (weekend) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (weekend) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
                 },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+            )
+        }
+    }
+}
+
+/**
+ * 胶囊条里的副标题行：月份视图下顶替星期行的位置，保证胶囊高度不变。
+ */
+@Composable
+private fun MonthHintRow(
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(SubRowHeight),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "选择月份",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** 日期格在选中区间中的位置，用于绘制区间色带 */
+private enum class RangeSide {
+    None,
+    Start,
+    End,
+    Full,
+}
+
+/**
+ * 日期格。
+ *
+ * Material 3 Expressive 风格：选中态是实心主色圆点；区间中段铺一条与圆点同高的色带
+ * （起点只画右半格、终点只画左半格，与相邻格连成一条）。日期格不画点击涟漪 ——
+ * 圆点已经是选中反馈，涟漪会在圆外多出一圈方块残影。
+ */
+@Composable
+private fun DayCell(
+    text: String,
+    status: TextBoxStatus,
+    textColor: Color,
+    rangeSide: RangeSide,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val selected = status == TextBoxStatus.Start || status == TextBoxStatus.End
+    Box(
+        modifier = modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onClick,
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (rangeSide) {
+            RangeSide.Start -> Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxWidth(0.5f)
+                    .height(DayCircleSize)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            )
+
+            RangeSide.End -> Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth(0.5f)
+                    .height(DayCircleSize)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            )
+
+            RangeSide.Full -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(DayCircleSize)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            )
+
+            RangeSide.None -> Unit
+        }
+        Box(
+            modifier = Modifier
+                .size(DayCircleSize)
+                .clip(CircleShape)
+                .background(
+                    if (selected) MaterialTheme.colorScheme.primary else Color.Transparent
+                ),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = text,
-                color = if (selected) onContainerColor else textColor
+                color = when {
+                    selected -> MaterialTheme.colorScheme.onPrimary
+                    status == TextBoxStatus.Middle -> MaterialTheme.colorScheme.onSurface
+                    else -> textColor
+                },
+                fontSize = 14.sp,
+                lineHeight = 16.sp,
             )
-            if (showRangeLabels && status == TextBoxStatus.Start) {
-                Text(
-                    text = "起",
-                    color = onContainerColor,
-                    fontSize = 10.sp,
-                )
-            } else if (showRangeLabels && status == TextBoxStatus.End) {
-                Text(
-                    text = "止",
-                    color = onContainerColor,
-                    fontSize = 10.sp,
-                )
-            }
         }
     }
 }
 
+/**
+ * 月份格：未选中透明圆、选中实心主色圆；超出可选范围（首/末年份）用弱化色且不可点。
+ */
 @Composable
-fun MonthTextBox(
-    year: Int,
-    month: Int,
-    textColor: Color = Color.Unspecified,
-    arrowLeft: Boolean = false,
-    arrowRight: Boolean = false,
+private fun MonthCell(
+    text: String,
+    active: Boolean,
     enabled: Boolean = true,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = Modifier
-            .size(120.dp, 40.dp)
-            .clickable(enabled, onClick = onClick),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        modifier = modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            enabled = enabled,
+            onClick = onClick,
+        ),
+        contentAlignment = Alignment.Center,
     ) {
-        if (enabled) {
-            if (arrowLeft) {
-                Icon(
-                    Icons.Outlined.KeyboardArrowLeft,
-                    "上月",
-                    modifier = Modifier.size(20.dp),
-                    tint = textColor,
-                )
-            }
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(
+                    if (active) MaterialTheme.colorScheme.primary else Color.Transparent
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
             Text(
-                text = MonthText(year, month),
-                fontSize = 16.sp,
-                color = textColor,
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                color = when {
+                    active -> MaterialTheme.colorScheme.onPrimary
+                    enabled -> MaterialTheme.colorScheme.onSurface
+                    else -> MaterialTheme.colorScheme.outlineVariant
+                },
             )
-            if (arrowRight) {
-                Icon(
-                    Icons.Outlined.KeyboardArrowRight,
-                    "下月",
-                    modifier = Modifier.size(20.dp),
-                    tint = textColor,
-                )
+        }
+    }
+}
+
+/**
+ * 月份网格：4 行 × 3 列，与日期网格共用同一块固定高度，切换视图时高度不变。
+ */
+@Composable
+private fun MonthGrid(
+    month: Int,
+    minMonth: Int,
+    maxMonth: Int,
+    onClick: (month: Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val rows = 4
+    val columns = 3
+    Column(modifier = modifier.fillMaxSize()) {
+        for (row in 0 until rows) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) {
+                for (column in 0 until columns) {
+                    val value = row * columns + column + 1
+                    MonthCell(
+                        text = "${value}月",
+                        active = value == month,
+                        enabled = value in minMonth..maxMonth,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        onClick = { onClick(value) },
+                    )
+                }
             }
         }
     }
-
 }
 
+/**
+ * 日期网格：固定 [CalendarRowCount] 行，跨月空白格用占位，保证行数恒定。
+ *
+ * 列偏移用我们自己的 `getWeek(y, m, 1)`（**0=周一 … 6=周日**，与表头「一 … 日」对齐），
+ * 不再引入上游 sunday-based 的 `getMonthStartOffset`，免得同一份代码里两套口径。
+ */
 @Composable
-fun Header(
+private fun DateGrid(
+    year: Int,
+    month: Int,
+    maxDate: DateModel,
+    monthStartWeek: Int,
+    monthDayNum: Int,
+    startTime: DateModel?,
+    endTime: DateModel?,
+    singleDate: Boolean,
+    onClick: (day: Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isMaxMonth = year == maxDate.year && month == maxDate.month
+    Column(modifier = modifier.fillMaxSize()) {
+        repeat(CalendarRowCount) { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) {
+                for (column in 0..6) {
+                    val day = row * 7 + column - monthStartWeek + 1
+                    if (day in 1..monthDayNum && !(isMaxMonth && day > maxDate.date)) {
+                        val curTime = dateOf(year, month, day)
+                        val _startTime = startTime
+                        val _endTime = endTime
+                        val status = if (singleDate) {
+                            // 单日模式只有"选中/没选中"，不参与区间/上限那套状态
+                            if (_startTime != null && curTime == _startTime) {
+                                TextBoxStatus.Start
+                            } else {
+                                TextBoxStatus.Enable
+                            }
+                        } else if (_startTime == null) {
+                            TextBoxStatus.Enable
+                        } else if (curTime == _startTime) {
+                            TextBoxStatus.Start
+                        } else if (_endTime == null) {
+                            // 选了起点、还没选终点：离起点超过上限的格子用禁用视觉，
+                            // 但仍可点 —— 点了由 itemClick 弹 toast 说明为什么没生效
+                            if (spanDays(_startTime, curTime) > MAX_SPAN_DAYS) {
+                                TextBoxStatus.Disable
+                            } else {
+                                TextBoxStatus.Enable
+                            }
+                        } else if (curTime == _endTime) {
+                            TextBoxStatus.End
+                        } else {
+                            if (daysBetween(_startTime, curTime) > 0
+                                && daysBetween(curTime, _endTime) > 0
+                            ) {
+                                TextBoxStatus.Middle
+                            } else {
+                                TextBoxStatus.Enable
+                            }
+                        }
+
+                        DayCell(
+                            text = day.toString(),
+                            status = status,
+                            rangeSide = if (singleDate) {
+                                // 单日模式两端都是同一天，画半条色带会看着像"区间没选完"
+                                RangeSide.None
+                            } else when (status) {
+                                // 起止同一天（同一天点两次 = 单日区间）只画圆点：半条色带伸出去
+                                // 会让人误以为区间还在等第二端（上游漏了这个情况）
+                                TextBoxStatus.Start ->
+                                    if (_endTime != null && curTime != _endTime) {
+                                        RangeSide.Start
+                                    } else {
+                                        RangeSide.None
+                                    }
+
+                                TextBoxStatus.End ->
+                                    if (_startTime != null) RangeSide.End else RangeSide.None
+
+                                TextBoxStatus.Middle -> RangeSide.Full
+                                else -> RangeSide.None
+                            },
+                            textColor = when {
+                                status == TextBoxStatus.Disable ->
+                                    MaterialTheme.colorScheme.outlineVariant
+                                // 周六、日（列 5、6）
+                                column >= 5 -> MaterialTheme.colorScheme.onBackground
+                                else -> MaterialTheme.colorScheme.outline
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            onClick = { onClick(day) },
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 标题栏里的可点区域（年月合并成一个按钮）。
+ *
+ * 上游为桌面端加了一层 hover 底色；手机没有 hover，交给默认点击涟漪即可。
+ */
+@Composable
+private fun TitlePart(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        content = content,
+    )
+}
+
+/**
+ * 日历头部。
+ *
+ * 日期视图：单箭头切月、双层箭头切年，点中间标题进入月份视图；
+ * 月份视图：单箭头切年、双层箭头跨十年，点中间标题弹年份下拉。
+ * 越界方向箭头禁用；换年/跨十年后把月份夹到边界月份，避免落到可选范围之外。
+ */
+@Composable
+private fun Header(
     year: MutableState<Int>,
     month: MutableState<Int>,
     maxDate: DateModel,
     minDate: DateModel,
+    monthMode: Boolean,
+    onMonthModeChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val titles = remember {
-        listOf("一", "二", "三", "四", "五", "六", "日")
-    }
     var expanded by remember { mutableStateOf(false) }
 
-    Column() {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
+    fun clampMonth() {
+        if (year.value <= minDate.year) {
+            month.value = month.value.coerceAtLeast(minDate.month)
+        }
+        if (year.value >= maxDate.year) {
+            month.value = month.value.coerceAtMost(maxDate.month)
+        }
+    }
+
+    fun prevMonth() {
+        if (month.value == 1) {
+            month.value = 12
+            year.value--
+        } else {
+            month.value--
+        }
+    }
+
+    fun nextMonth() {
+        if (month.value == 12) {
+            month.value = 1
+            year.value++
+        } else {
+            month.value++
+        }
+    }
+
+    fun prevYear() {
+        if (year.value > minDate.year) {
+            year.value--
+            clampMonth()
+        }
+    }
+
+    fun nextYear() {
+        if (year.value < maxDate.year) {
+            year.value++
+            clampMonth()
+        }
+    }
+
+    fun jumpYears(step: Int) {
+        year.value = (year.value + step).coerceIn(minDate.year, maxDate.year)
+        clampMonth()
+    }
+
+    val atMinMonth = year.value == minDate.year && month.value == minDate.month
+    val atMaxMonth = year.value == maxDate.year && month.value == maxDate.month
+    val atMinYear = year.value <= minDate.year
+    val atMaxYear = year.value >= maxDate.year
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(SelectorRowHeight),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 外层：日期视图切一年、月份视图跨十年
+        ArrowButton(
+            imageVector = Icons.Outlined.KeyboardDoubleArrowLeft,
+            contentDescription = if (monthMode) "上十年" else "上一年",
+            enabled = !atMinYear,
+            onClick = {
+                if (monthMode) jumpYears(-10) else prevYear()
+            },
+        )
+        // 内层：日期视图切一月、月份视图切一年
+        ArrowButton(
+            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
+            contentDescription = if (monthMode) "上一年" else "上一月",
+            enabled = if (monthMode) !atMinYear else !atMinMonth,
+            onClick = {
+                if (monthMode) prevYear() else prevMonth()
+            },
+        )
+        // 标题区用 weight 吃掉剩余宽度：上游写 widthIn(min = 130dp)，
+        // 但窄屏/大字号下会把两侧箭头挤出屏幕，weight 能自动缩，视觉上仍居中。
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center,
         ) {
-            MonthTextBox(
-                year = year.value,
-                month = month.value - 1,
-                textColor = MaterialTheme.colorScheme.outline,
-                arrowLeft = true,
-                enabled = year.value != minDate.year || month.value != minDate.month,
-                onClick = {
-                    if (month.value == 1) {
-                        month.value = 12
-                        year.value--
-                    } else {
-                        month.value--
-                    }
-                }
-            )
             Box {
-                MonthTextBox(
-                    year = year.value,
-                    month = month.value,
-                    textColor = MaterialTheme.colorScheme.onBackground,
-                    onClick = {  expanded = !expanded },
-                )
+                // 年月合并成一个按钮：日期视图点开月份网格，月份视图点开年份下拉
+                TitlePart(
+                    onClick = {
+                        if (monthMode) {
+                            expanded = true
+                        } else {
+                            onMonthModeChange(true)
+                        }
+                    },
+                ) {
+                    Text(
+                        text = if (monthMode) {
+                            "${year.value}年"
+                        } else {
+                            "${year.value}年 ${month.value}月"
+                        },
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        color = MaterialTheme.colorScheme.onBackground,
+                    )
+                }
                 DropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
                 ) {
                     for (y in minDate.year..maxDate.year) {
                         DropdownMenuItem(
-                            text = {
-                                Text(text = "${y}年")
-                            },
+                            text = { Text(text = "${y}年") },
                             onClick = {
                                 year.value = y
+                                clampMonth()
                                 expanded = false
-                            }
+                            },
                         )
                     }
                 }
             }
-            MonthTextBox(
-                year = year.value,
-                month = month.value + 1,
-                textColor = MaterialTheme.colorScheme.outline,
-                arrowRight = true,
-                enabled = year.value != maxDate.year || month.value != maxDate.month,
-                onClick = {
-                    if (month.value == 12) {
-                        month.value = 1
-                        year.value++
-                    } else {
-                        month.value++
-                    }
-                }
-            )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
+        // 内层：日期视图切一月、月份视图切一年
+        ArrowButton(
+            imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = if (monthMode) "下一年" else "下一月",
+            enabled = if (monthMode) !atMaxYear else !atMaxMonth,
+            onClick = {
+                if (monthMode) nextYear() else nextMonth()
+            },
+        )
+        // 外层：日期视图切一年、月份视图跨十年
+        ArrowButton(
+            imageVector = Icons.Outlined.KeyboardDoubleArrowRight,
+            contentDescription = if (monthMode) "下十年" else "下一年",
+            enabled = !atMaxYear,
+            onClick = {
+                if (monthMode) jumpYears(10) else nextYear()
+            },
+        )
+    }
+}
+
+/**
+ * 合并胶囊条：选择器行（箭头 + 年月）和星期行放进同一个大圆角容器。
+ *
+ * 月份视图下星期行换成「选择月份」提示行，两行高度一致，保证切换视图时
+ * 胶囊和整个日历区域的高度都不变。
+ */
+@Composable
+private fun CalendarHeader(
+    year: MutableState<Int>,
+    month: MutableState<Int>,
+    maxDate: DateModel,
+    minDate: DateModel,
+    monthMode: Boolean,
+    onMonthModeChange: (Boolean) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = CapsulePadding),
         ) {
-            titles.forEachIndexed { index, s ->
-                TextBox(
-                    text = s,
-                    modifier = Modifier.weight(1f),
-                    textColor = if (index > 4) {
-                        MaterialTheme.colorScheme.onBackground
-                    } else {
-                        MaterialTheme.colorScheme.outline
-                    }
-                )
+            Header(
+                modifier = Modifier.padding(horizontal = 6.dp),
+                year = year,
+                month = month,
+                maxDate = maxDate,
+                minDate = minDate,
+                monthMode = monthMode,
+                onMonthModeChange = onMonthModeChange,
+            )
+            if (monthMode) {
+                MonthHintRow()
+            } else {
+                WeekdayRow()
             }
         }
     }
@@ -273,9 +639,13 @@ internal fun CustomTime(
 /**
  * 自绘日历区间选择（从时光姬的 `CustomTime` 抽出来的**纯参数**版本，供别处复用）。
  *
- * 为什么抽出来：这套组件已经有完整能力 —— 星期头是单字「一 二 三 四 五 六 日」、年月导航带年份下拉、
+ * 为什么抽出来：这套组件已经有完整能力 —— 星期头是单字「一 二 三 四 五 六 日」、年月导航带年份选择、
  * 起止两端点击成一个区间、点区间内部只移动更近的一端、同一天点两次=单日、有上下限与最大跨度，
  * 并且**几何全在自己手里**（不依赖任何框架内部尺寸）。搜索页的「自定义时间区间」需要的就是它。
+ *
+ * 视觉照上游 11bedec3 的 M3 Expressive 版：头部胶囊（箭头 + 年月 + 星期/月份提示）、
+ * 固定 6 行的紧凑网格、选中实心圆点 + 区间色带、点标题切 4×3 月份网格、日历下方一行摘要。
+ * 行为（点击语义 / 90 天上限 / 单日模式 / 预填）与旧版逐条一致，改动集中在视觉层。
  *
  * @param timeFrom 区间起点；`year == -1` 表示"未选完整"（点了第一端、还没点第二端）
  * @param timeTo   区间终点
@@ -293,11 +663,10 @@ internal fun CustomTimeContent(
      * 「点日期选择开始与结束」提示）——那些是时光姬的规则，套用过来反而不对。
      */
     singleDate: Boolean = false,
-    /** 是否显示日历上方那行摘要（单日模式且空间紧张时可以关掉）。 */
+    /** 是否显示日历下方那行摘要（单日模式且空间紧张时可以关掉）。 */
     showSummary: Boolean = true,
     onRangeChange: (DateModel?, DateModel?) -> Unit,
 ) {
-
     // 初始显示的月份从入参推导（原来写死 2009/9，只有时光姬那个"进来就被 LaunchedEffect 覆盖"的
     // 场景才碰巧看不出问题；复用到别处时写死值会让用户先看到一个无关的月份）。
     val seedDate = when {
@@ -311,15 +680,15 @@ internal fun CustomTimeContent(
     var month = remember {
         mutableStateOf(seedDate.month)
     }
+    // 月份视图：由日历头部标题切换，选完月份自动回到日期视图
+    var monthMode by remember {
+        mutableStateOf(false)
+    }
     val monthStartWeek = remember(year.value, month.value) {
         getWeek(year.value, month.value, 1)
     }
     val monthDayNum = remember(year.value, month.value) {
         getMonthDayNum(year.value, month.value)
-    }
-    // 行数 = ⌈(月首列偏移 + 当月天数) / 7⌉：月底不再多画一整行空白
-    val rowCount = remember(year.value, month.value) {
-        getCalendarRowCount(year.value, month.value)
     }
 
     var startTime by remember {
@@ -356,54 +725,54 @@ internal fun CustomTimeContent(
                 endTime = clicked
                 onRangeChange(clicked, clicked)
             } else {
-            val _startTime = startTime
-            val _endTime = endTime
-            when {
-                // 还没选开始：落一个起点，并告诉 ViewModel"未选完整"
-                //（否则点一下再按"确定"会把上一次的旧区间静默存下去）
-                _startTime == null -> {
-                    startTime = clicked
-                    endTime = null
-                    onRangeChange(clicked, null)
-                }
-                // 选了开始、还没选结束
-                _endTime == null -> {
-                    val gap = daysBetween(_startTime, clicked) // 有符号整日差
-                    if (gap == 0) {
-                        // 同一天点两次 = 单日区间（以前 gap==0 时 > 和 < 都不成立，选择会一直悬着）
-                        endTime = clicked
-                        onRangeChange(startTime, endTime)
-                    } else if (spanDays(_startTime, clicked) > MAX_SPAN_DAYS) {
-                        // 超过上限给明确反馈，不再静默：起点保留，等用户点一个更近的日期
-                        toast("最多只能选 $MAX_SPAN_DAYS 天，请重新选择")
-                    } else if (gap > 0) {
-                        endTime = clicked
-                        onRangeChange(startTime, endTime)
-                    } else {
-                        startTime = clicked
-                        endTime = _startTime
-                        onRangeChange(startTime, endTime)
-                    }
-                }
-                // 已选完整区间
-                else -> {
-                    if (daysBetween(_startTime, clicked) >= 0 && daysBetween(clicked, _endTime) >= 0) {
-                        // 点区间内部（含两端）→ 只移动更近的那一端，不再把整个区间清掉；
-                        // 正好落在中点时移动终点。
-                        if (daysBetween(_startTime, clicked) < daysBetween(clicked, _endTime)) {
-                            startTime = clicked
-                        } else {
-                            endTime = clicked
-                        }
-                        onRangeChange(startTime, endTime)
-                    } else {
-                        // 点在区间外 → 以这一格为新起点重新选，保留"再点一次可以重来"的旧手感
+                val _startTime = startTime
+                val _endTime = endTime
+                when {
+                    // 还没选开始：落一个起点，并告诉 ViewModel"未选完整"
+                    //（否则点一下再按"确定"会把上一次的旧区间静默存下去）
+                    _startTime == null -> {
                         startTime = clicked
                         endTime = null
                         onRangeChange(clicked, null)
                     }
+                    // 选了开始、还没选结束
+                    _endTime == null -> {
+                        val gap = daysBetween(_startTime, clicked) // 有符号整日差
+                        if (gap == 0) {
+                            // 同一天点两次 = 单日区间（以前 gap==0 时 > 和 < 都不成立，选择会一直悬着）
+                            endTime = clicked
+                            onRangeChange(startTime, endTime)
+                        } else if (spanDays(_startTime, clicked) > MAX_SPAN_DAYS) {
+                            // 超过上限给明确反馈，不再静默：起点保留，等用户点一个更近的日期
+                            toast("最多只能选 $MAX_SPAN_DAYS 天，请重新选择")
+                        } else if (gap > 0) {
+                            endTime = clicked
+                            onRangeChange(startTime, endTime)
+                        } else {
+                            startTime = clicked
+                            endTime = _startTime
+                            onRangeChange(startTime, endTime)
+                        }
+                    }
+                    // 已选完整区间
+                    else -> {
+                        if (daysBetween(_startTime, clicked) >= 0 && daysBetween(clicked, _endTime) >= 0) {
+                            // 点区间内部（含两端）→ 只移动更近的那一端，不再把整个区间清掉；
+                            // 正好落在中点时移动终点。
+                            if (daysBetween(_startTime, clicked) < daysBetween(clicked, _endTime)) {
+                                startTime = clicked
+                            } else {
+                                endTime = clicked
+                            }
+                            onRangeChange(startTime, endTime)
+                        } else {
+                            // 点在区间外 → 以这一格为新起点重新选，保留"再点一次可以重来"的旧手感
+                            startTime = clicked
+                            endTime = null
+                            onRangeChange(clicked, null)
+                        }
+                    }
                 }
-            }
             }
             Unit
         }
@@ -411,111 +780,83 @@ internal fun CustomTimeContent(
 
     val selectedStart = startTime
     val selectedEnd = endTime
-    // 摘要放日历上方：原来那行在日历下方，会被底部"确定"按钮压住
+    // 摘要放日历下方（与上游一致）：单日模式沿用旧文案，区间模式按"已选择时间线：X 至 Y"汇报三态。
     val summaryText = if (singleDate) {
         if (selectedStart == null) "点一个日期" else "已选 ${selectedStart.getValue("-")}"
     } else {
         when {
-            selectedStart == null -> "点日期选择开始与结束（最多 $MAX_SPAN_DAYS 天）"
-            selectedEnd == null -> "开始 ${selectedStart.getValue("-")}，请再点一个日期作为结束（最多 $MAX_SPAN_DAYS 天）"
-            else -> "${selectedStart.getValue("-")} → ${selectedEnd.getValue("-")}（共 ${spanDays(selectedStart, selectedEnd)} 天，上限 $MAX_SPAN_DAYS 天）"
+            selectedStart == null ->
+                "已选择时间线：未选择 至 未选择"
+
+            selectedEnd == null ->
+                "已选择时间线：${selectedStart.getValue("-")} 至 未选择（再点一个日期选择结束，最多 $MAX_SPAN_DAYS 天）"
+
+            else ->
+                "已选择时间线：${selectedStart.getValue("-")} 至 ${selectedEnd.getValue("-")}（共 ${spanDays(selectedStart, selectedEnd)} 天，上限 $MAX_SPAN_DAYS 天）"
         }
     }
 
     Column() {
 
-        if (showSummary) Text(
-            text = summaryText,
-            fontSize = 15.sp,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        Header(
-            year = year,
-            month = month,
-            maxDate = maxDate,
-            minDate = minDate,
-        )
-
+        // 头部胶囊 + 网格：整体固定高度，日期/月份视图切换时卡片高度不变
         Column(
-//            modifier = Modifier.height(350.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(CalendarAreaHeight)
         ) {
-            for (row in 0 until rowCount) {
-                val num = row * 7
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    val isMaxMonth = (year.value == maxDate.year && month.value == maxDate.month)
-                    for (dayOfWeek in num..(num + 6)) {
-                        val day = dayOfWeek - monthStartWeek + 1
-                        if (day in 1..monthDayNum && !(isMaxMonth && day > maxDate.date)) {
-                            val curTime = dateOf(year.value, month.value, day)
-                            val _startTime = startTime
-                            val _endTime = endTime
-
-                            val status = if (singleDate) {
-                                if (_startTime != null && curTime == _startTime) {
-                                    TextBoxStatus.Start
-                                } else {
-                                    TextBoxStatus.Enable
-                                }
-                            } else if (_startTime == null) {
-                                TextBoxStatus.Enable
-                            } else if (curTime == _startTime) {
-                                TextBoxStatus.Start
-                            } else if (_endTime == null) {
-                                if (spanDays(_startTime, curTime) > MAX_SPAN_DAYS) {
-                                    TextBoxStatus.Disable
-                                } else {
-                                    TextBoxStatus.Enable
-                                }
-                            } else if (curTime == _endTime) {
-                                TextBoxStatus.End
-                            } else {
-                                if (daysBetween(_startTime, curTime) > 0
-                                    && daysBetween(curTime, _endTime) > 0
-                                ) {
-                                    TextBoxStatus.Middle
-                                } else {
-                                    TextBoxStatus.Enable
-                                }
-                            }
-
-                            TextBox(
-                                text =  day.toString(),
-                                showRangeLabels = !singleDate,
-                                modifier = Modifier.weight(1f),
-                                textColor = if (status == TextBoxStatus.Disable) {
-                                    // 禁用
-                                    MaterialTheme.colorScheme.outlineVariant
-                                } else if (dayOfWeek % 7 > 4) {
-                                    // 周六、日
-                                    MaterialTheme.colorScheme.onBackground
-                                } else {
-                                    MaterialTheme.colorScheme.outline
-                                },
-                                height = 48.dp,
-                                status = status,
-                                onClick = {
-                                    itemClick(day)
-                                }
-                            )
-                        } else {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
+            CalendarHeader(
+                year = year,
+                month = month,
+                maxDate = maxDate,
+                minDate = minDate,
+                monthMode = monthMode,
+                onMonthModeChange = { monthMode = it },
+            )
+            Spacer(modifier = Modifier.height(CalendarGap))
+            Crossfade(
+                targetState = monthMode,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) { showMonths ->
+                if (showMonths) {
+                    MonthGrid(
+                        month = month.value,
+                        minMonth = if (year.value == minDate.year) minDate.month else 1,
+                        maxMonth = if (year.value == maxDate.year) maxDate.month else 12,
+                        modifier = Modifier.fillMaxSize(),
+                        onClick = {
+                            month.value = it
+                            monthMode = false
+                        },
+                    )
+                } else {
+                    DateGrid(
+                        year = year.value,
+                        month = month.value,
+                        maxDate = maxDate,
+                        monthStartWeek = monthStartWeek,
+                        monthDayNum = monthDayNum,
+                        startTime = startTime,
+                        endTime = endTime,
+                        singleDate = singleDate,
+                        modifier = Modifier.fillMaxSize(),
+                        onClick = itemClick,
+                    )
                 }
             }
         }
+
+        if (showSummary) {
+            Text(
+                text = summaryText,
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(top = 5.dp)
+            )
+        }
     }
 }
-
-//@Preview
-//@Composable
-//fun CustomTimePreview() {
-//    CurrentTime()
-//}
 
 /** 把日期夹进 `[minDate, maxDate]`（单日模式用；月份导航本来也会挡，但直接调进来时仍需兜底）。 */
 private fun clampToSelectable(date: DateModel, minDate: DateModel, maxDate: DateModel): DateModel = when {
