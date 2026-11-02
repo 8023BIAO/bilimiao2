@@ -575,6 +575,31 @@
         </LinearLayout>
 
         <!--
+          弹幕开关（竖屏顶栏，仅图标）：全屏底栏本来就有带文字的同一个开关，这里复用它的图标 / isShowDanmaku 状态
+          与点击回调（见 DanmakuVideoPlayer.resolveDanmakuShow / setDanmakuSwitchOnClickListener），不新开状态。
+          位置：听视频（audio_only_switch）左边 → 实际顺序 [弹幕开关][听视频][盾·提交][ADS][小窗][倍速][播放设置]。
+          只在非 FULL 的小窗模式显示；FULL（全屏，横竖屏都算）由代码 updateMode() 设 GONE —— FULL 底栏本来就有那个带文字的开关，别重复。
+          XML 不写死 visibility，首帧的显隐由 updateMode() 决定。
+        -->
+        <LinearLayout
+            android:id="@+id/portrait_danmaku_switch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/portrait_danmaku_switch_icon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:src="@drawable/bili_player_danmaku_is_open"
+                android:contentDescription="弹幕开关" />
+
+        </LinearLayout>
+
+        <!--
           听视频（仅音频）：进顶栏、紧挨空降助手两个按钮的左边（用户在底栏点的位置够不着 + 图标风格不统一）。
           位置：XML 里放在 chapter_btn_layout 之后、play_speed 之前；空降两个按钮是运行时插在
           chapter_btn_layout 后面的，所以最终顺序 = [听视频] [盾·空降] [盾·提交]。

@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 全屏：两个对角括号 + 45° 双向箭头，关于对角线对称 -->
+<!-- 全屏：标准四角圆角括号（无对角箭头）。
+     用户明确要求换成这种标准原版样式；原来的「两个括号 + 45° 双向箭头」被嫌像"拉伸"按钮。
+     四个角各一段圆角括号（圆角半径 2），strokeWidth 2.0、round cap/join，24dp / 24 viewport、纯白描边。
+     同一张图还被 include_player_loading.xml 的加载页全屏按钮使用（语义一致，引用/尺寸不改）。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <path android:pathData="M2.6,9.6 L2.6,4.8 Q2.6,2.6 4.8,2.6 L9.6,2.6" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:pathData="M14.4,21.4 L19.2,21.4 Q21.4,21.4 21.4,19.2 L21.4,14.4" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:pathData="M8.6,15.4 L15.4,8.6" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:pathData="M11.6,8.6 L15.4,8.6 L15.4,12.4" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:pathData="M12.4,15.4 L8.6,15.4 L8.6,11.6" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M4,9 L4,6 Q4,4 6,4 L9,4" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M15,4 L18,4 Q20,4 20,6 L20,9" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M20,15 L20,18 Q20,20 18,20 L15,20" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9,20 L6,20 Q4,20 4,18 L4,15" android:strokeColor="#FFFFFF" android:strokeWidth="2.0" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>

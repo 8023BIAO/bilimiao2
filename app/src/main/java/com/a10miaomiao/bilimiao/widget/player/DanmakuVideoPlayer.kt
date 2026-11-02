@@ -199,6 +199,10 @@ class DanmakuVideoPlayer : StandardGSYVideoPlayer {
     // 弹幕开关文字
     private val mDanmakuSwitchTV: TextView by lazy { findViewById(R.id.danmaku_switch_text) }
 
+    // 竖屏顶栏的弹幕开关（与全屏底栏那个完全共用 isShowDanmaku 状态 / resolveDanmakuShow / 点击回调，这里只是另一个图标视图）
+    private val mPortraitDanmakuSwitch: ViewGroup by lazy { findViewById(R.id.portrait_danmaku_switch) }
+    private val mPortraitDanmakuSwitchIV: ImageView by lazy { findViewById(R.id.portrait_danmaku_switch_icon) }
+
     private val mMiniSendDanmakuIV: ImageView by lazy { findViewById(R.id.send_danmaku_mini) }
     private val mSendDanmakuTV: TextView by lazy { findViewById(R.id.send_danmaku) }
 
@@ -1051,6 +1055,8 @@ initDanmakuTouchListener()
     private fun updateMode() {
         when (mode) {
             PlayerMode.SMALL_TOP, PlayerMode.SMALL_FLOAT -> {
+                // 竖屏顶栏的弹幕开关：小窗模式显示（FULL 时全屏底栏已有带文字的同一个开关，别重复）
+                mPortraitDanmakuSwitch.visibility = VISIBLE
                 mFullModeBottomContainer.visibility = GONE
                 mPlaySpeedName.visibility = GONE
                 mMiniSendDanmakuIV.visibility = VISIBLE
@@ -1064,6 +1070,8 @@ initDanmakuTouchListener()
                 updateDanmakuMargin()
             }
             PlayerMode.FULL -> {
+                // FULL（全屏，横竖屏都算）隐藏竖屏顶栏那个，只留 FULL 底栏带文字的开关
+                mPortraitDanmakuSwitch.visibility = GONE
                 mFullModeBottomContainer.visibility = VISIBLE
                 mPlaySpeedName.visibility = VISIBLE
                 mMiniSendDanmakuIV.visibility = GONE
@@ -3069,6 +3077,8 @@ initDanmakuTouchListener()
                     mDanmakuView.show()
                 }
                 mDanmakuSwitchIV.setImageResource(R.drawable.bili_player_danmaku_is_open)
+                // 竖屏顶栏的同一个开关：图标与 mDanmakuSwitchIV 同源更新（状态只有 isShowDanmaku 一份，别新开变量）
+                mPortraitDanmakuSwitchIV.setImageResource(R.drawable.bili_player_danmaku_is_open)
                 mDanmakuSwitchTV.text = "弹幕开"
                 mMiniSendDanmakuIV.alpha = 1f
             } else {
@@ -3077,6 +3087,7 @@ initDanmakuTouchListener()
                 // 【已移除】V2隐藏 — V2引擎已废弃
                 }
                 mDanmakuSwitchIV.setImageResource(R.drawable.bili_player_danmaku_is_closed)
+                mPortraitDanmakuSwitchIV.setImageResource(R.drawable.bili_player_danmaku_is_closed)
                 mDanmakuSwitchTV.text = "弹幕关"
                 mMiniSendDanmakuIV.alpha = 0.5f
             }
@@ -3106,6 +3117,11 @@ initDanmakuTouchListener()
      */
     fun setDanmakuSwitchOnClickListener(l: OnClickListener) {
         mDanmakuSwitch.setOnClickListener {
+            startDismissControlViewTimer()
+            l.onClick(it)
+        }
+        // 竖屏顶栏的弹幕开关：与全屏底栏共用同一个回调（点击后同样续上控制栏自动隐藏计时）
+        mPortraitDanmakuSwitch.setOnClickListener {
             startDismissControlViewTimer()
             l.onClick(it)
         }
