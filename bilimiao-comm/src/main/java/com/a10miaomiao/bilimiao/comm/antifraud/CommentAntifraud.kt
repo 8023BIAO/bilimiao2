@@ -147,7 +147,7 @@ object CommentAntifraud {
 
         var attempt = 1
         var elapsed = 0L
-        // 最近一次**拿到响应**的结果（含 FAILED）：全失败时给"最后一次：…"用
+        // 最近一次**拿到响应**的结果（含 FAILED）：全失败时给『最近一次响应』用
         var last = first
         // ★ 计数口径：复查结束的总结必须如实 —— 接口失败不能算成功，也不能写『都正常』：
         //   okCount 只算 state != FAILED 的 —— 接口失败就是没查到，不能算成功；
@@ -223,7 +223,7 @@ object CommentAntifraud {
             // 一次都没拿到明确结论 → 只能说"没查成"，绝不能写"都正常"
             val r = AntifraudResult(
                 AntifraudState.FAILED,
-                "复查 $attempt 次全部失败，没能确认这条评论的状态（最后一次：${last.detail}）",
+                "复查 $attempt 次全部失败，没能确认这条评论的状态（最近一次响应：${last.detail}）",
             )
             AntifraudDiag.finish("FAILED｜${r.detail}")
             return r
@@ -233,12 +233,19 @@ object CommentAntifraud {
                 val base = "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟"
                 // ★ 中途出现过『疑似审核中』就不能说『持续都正常』：
                 //   正常 → 审核中 → 正常 这种，最后一次是正常，但中间并不正常。
+                // ★ 同理，中途只要有过失败（failedCount > 0）也不能说『都正常』：
+                //   首查正常 + 之后复查全失败时只有 1 次成功，写『持续 X 分钟都正常』就是假总结。
+                //   先报审核中、再报失败次数，都不命中才敢说都正常。
                 if (sawUnderReview) "$base；中途出现过『疑似审核中』，最后一次是正常"
+                else if (failedCount > 0) "$base；另有 $failedCount 次没查成，最后一次是正常"
                 else "${base}都正常"
             }
-            AntifraudState.UNDER_REVIEW ->
-                "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟；" +
+            AntifraudState.UNDER_REVIEW -> {
+                val base = "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟；" +
                     "最后仍为『疑似审核中』，没有变成限流/删除"
+                // 与 NORMAL 口径一致：有失败次数就如实报出来，别把「成功次数少于总次数」藏着
+                if (failedCount > 0) "$base；另有 $failedCount 次没查成" else base
+            }
             // 理论上到不了这里：中途一旦出现限流/不可见/已删除（isBad）循环就提前返回了。
             // 留个兜底分支只为让 when 穷尽 —— 同样不写"都正常"。
             else ->
@@ -321,8 +328,9 @@ object CommentAntifraud {
             // ★ 12006 和 12022 一样是**决定性结论**，不是"接口返回异常"：
             //   游客列表里翻不到、登录态取回复页也回『没有该评论』 ⇒ 这条评论确实不存在了
             //   （产品决定（2026-11-06）：接口回『没有该评论』就是结论；旧逻辑当 FAILED，
-            //   isBad=false → 复查不停、不弹窗，白盯满 15 分钟）。判成 DELETED 后复查循环立即返回、
-            //   Launcher 弹结果窗，不再继续监控。
+            //   isBad=false → 复查照旧跑满 15 分钟，最后弹的是『检测没能完成』窗（不是『已删除』），
+            //   总结还错写成『都正常』）。判成 DELETED 后复查循环立即返回、Launcher 弹结果窗，
+            //   不再继续监控。
             if (withAcc.code == CODE_COMMENT_NOT_EXIST) {
                 return AntifraudResult(
                     AntifraudState.DELETED,
