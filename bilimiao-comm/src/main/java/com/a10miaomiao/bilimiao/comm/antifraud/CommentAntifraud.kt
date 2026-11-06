@@ -231,14 +231,18 @@ object CommentAntifraud {
         val finalDetail = when (lastOkResult.state) {
             AntifraudState.NORMAL -> {
                 val base = "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟"
-                // ★ 中途出现过『疑似审核中』就不能说『持续都正常』：
-                //   正常 → 审核中 → 正常 这种，最后一次是正常，但中间并不正常。
-                // ★ 同理，中途只要有过失败（failedCount > 0）也不能说『都正常』：
-                //   首查正常 + 之后复查全失败时只有 1 次成功，写『持续 X 分钟都正常』就是假总结。
-                //   先报审核中、再报失败次数，都不命中才敢说都正常。
-                if (sawUnderReview) "$base；中途出现过『疑似审核中』，最后一次是正常"
-                else if (failedCount > 0) "$base；另有 $failedCount 次没查成，最后一次是正常"
-                else "${base}都正常"
+                // ★ 两种「不完整正常」都要如实披露，而且可能同时出现（不能用 else-if 互斥）：
+                //   ① 中途出现过『疑似审核中』（正常 → 审核中 → 正常 这种，中间并不正常）；
+                //   ② 有失败次数（首查正常 + 之后复查全失败时只有 1 次成功，写『持续 X 分钟都正常』就是假总结）。
+                //   两段都披露完，才轮到 tail；都没有才敢说『都正常』。
+                val extras = buildString {
+                    if (sawUnderReview) append("；中途出现过『疑似审核中』")
+                    if (failedCount > 0) append("；另有 $failedCount 次没查成")
+                }
+                if (extras.isEmpty()) "${base}都正常"
+                // tail 用『最近一次查到的是正常』而不是『最后一次是正常』：
+                // 最近一次**尝试**可能恰好失败了，这里保证的只是最近一次**成功查到**的那次是正常。
+                else "$base$extras；最近一次查到的是正常"
             }
             AntifraudState.UNDER_REVIEW -> {
                 val base = "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟；" +
