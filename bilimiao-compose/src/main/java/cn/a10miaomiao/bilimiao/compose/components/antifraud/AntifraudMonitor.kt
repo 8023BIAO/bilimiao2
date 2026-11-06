@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.a10miaomiao.bilimiao.comm.antifraud.AntifraudState
+import kotlinx.coroutines.Job
 
 /**
  * 「正在监控中的评论」的共享状态。
@@ -78,6 +79,15 @@ class AntifraudMonitorSession(
     var lastDetail by mutableStateOf("等待首查（${firstWaitMs / 1000} 秒后开始）")
 
     var finished by mutableStateOf(false)
+
+    /**
+     * 这一轮监控协程的 Job（设置页点「取消监控」时 cancel 它），由 CommentAntifraudLauncher
+     * 在 start() 协程里挂上。
+     *
+     * 为什么放这儿：协程 Job 本身不是 Compose 状态（不需要触发重组），只是给取消入口一个把手；
+     * 取消后 `finish()` 由 `cancelMonitor` 与协程 finally 各调一次 —— `finish()` 幂等，重复调用无害。
+     */
+    var job: Job? = null
 
     /** 已监控毫秒数 */
     fun elapsedMs(now: Long): Long = (now - startedAt).coerceAtLeast(0L)

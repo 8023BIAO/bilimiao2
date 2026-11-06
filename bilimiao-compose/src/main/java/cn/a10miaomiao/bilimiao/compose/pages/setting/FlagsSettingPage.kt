@@ -2,6 +2,7 @@ package cn.a10miaomiao.bilimiao.compose.pages.setting
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitor
+import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudMonitorSession
 import cn.a10miaomiao.bilimiao.compose.components.antifraud.AntifraudResultState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -285,6 +286,8 @@ private fun FlagsSettingPageContent(
     val scope = rememberCoroutineScope()
     var showResetDialog by remember { mutableStateOf(false) }
     var showGuestConfirmDialog by remember { mutableStateOf(false) }
+    // 点「正在监控」那一行 → 先记下要取消的是哪条（弹确认窗；确认后调 Launcher.cancelMonitor）
+    var monitorToCancel by remember { mutableStateOf<AntifraudMonitorSession?>(null) }
     // 分段并发下载：本机最多能开多少连接 = 处理器核数（并发设置页滑块的上限也是它）
     val maxThreads = remember {
         Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
@@ -835,10 +838,13 @@ private fun FlagsSettingPageContent(
                                 Text(
                                     "第 ${m.attempt}/${m.planned} 次 · 已盯 ${fmtDuration(elapsed)} / " +
                                         "共 ${fmtDuration(m.totalMs)}（$pct%）\n" +
-                                        "上次结论：${m.lastDetail.ifBlank { "等待中" }}"
+                                        "上次结论：${m.lastDetail.ifBlank { "等待中" }}\n" +
+                                        "（点按这行可取消监控）"
                                 )
                             }
                         },
+                        // 点这一行 → 先弹确认窗，确认后才取消（误触一下不该直接停掉 15 分钟的监控）
+                        onClick = { monitorToCancel = m },
                     )
                 }
             }
@@ -1316,6 +1322,38 @@ private fun FlagsSettingPageContent(
                     )
                 )
             }
+        }
+
+        // 点「正在监控」那一行 → 确认后才真取消（产品决定（2026-11-06）：监控中途允许取消）
+        monitorToCancel?.let { m ->
+            OverlayAlertDialog(
+                onDismissRequest = { monitorToCancel = null },
+                title = { Text("取消监控") },
+                text = {
+                    val elapsed = m.elapsedMs(nowTick)
+                    Text(
+                        "${m.label} · 评论 ${m.rpid}\n" +
+                            "已盯 ${fmtDuration(elapsed)} · 第 ${m.attempt}/${m.planned} 次\n" +
+                            "上次结论：${m.lastDetail.ifBlank { "等待中" }}\n\n" +
+                            "取消后不再复查这条评论，这次不会写入『上次检测结果』"
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        // 先收弹窗再真取消：取消会立刻把这一行从列表里移除，界面不留"已取消还弹着"的错觉
+                        monitorToCancel = null
+                        cn.a10miaomiao.bilimiao.compose.pages.community.components.CommentAntifraudLauncher
+                            .cancelMonitor(m)
+                    }) {
+                        Text("取消监控")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { monitorToCancel = null }) {
+                        Text("继续监控")
+                    }
+                }
+            )
         }
 
         if (showGuestConfirmDialog) {

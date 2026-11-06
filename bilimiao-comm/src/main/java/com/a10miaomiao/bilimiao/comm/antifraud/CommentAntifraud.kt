@@ -147,8 +147,19 @@ object CommentAntifraud {
 
         var attempt = 1
         var elapsed = 0L
+        // 最近一次**拿到响应**的结果（含 FAILED）：全失败时给"最后一次：…"用
         var last = first
-        var failed = 0
+        // ★ 计数口径：复查结束的总结必须如实 —— 接口失败不能算成功，也不能写『都正常』：
+        //   okCount 只算 state != FAILED 的 —— 接口失败就是没查到，不能算成功；
+        //   failedCount 覆盖"抛异常"与"接口明确回 FAILED"两种；两者之和恒等于 attempt。
+        var okCount = if (first.state == AntifraudState.FAILED) 0 else 1
+        var failedCount = if (first.state == AntifraudState.FAILED) 1 else 0
+        // 最近一次**成功**（state != FAILED）的结果，收尾结论按它写。
+        // 不能继续用 last：接口失败的结果会把 last 覆盖成 FAILED，最后就会写出
+        // "一次都没查成，却说持续 X 分钟都正常"这种假总结。
+        var lastOk: AntifraudResult? = first.takeIf { it.state != AntifraudState.FAILED }
+        // 中途有没有出现过『疑似审核中』（含首查）：出现过，收尾就不能说『持续 X 分钟都正常』
+        var sawUnderReview = first.state == AntifraudState.UNDER_REVIEW
         // 首查已经等过 5/20 秒了，复查从这会儿开始计时
         AntifraudDiag.info("进入自动复查：每 ${RECHECK_INTERVAL_MS / 1000} 秒一次，共 ${recheckTotalMs / 60000} 分钟")
         while (elapsed < recheckTotalMs) {
@@ -160,11 +171,11 @@ object CommentAntifraud {
                 doCheck(oid, type, rpid, root, sentTimeSec)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                failed++
+                failedCount++
                 AntifraudDiag.step("复查抛异常：${e.javaClass.simpleName} ${e.message ?: ""}")
                 AntifraudDiag.finish("FAILED｜复查异常", mirror = false)
                 // ★ 以前这里只 continue：失败的那几次不计数，最后还会写"共复查 N 次都是正常"——
-                //   一次都没成功却报"正常"（审查发现）。现在如实回调 FAILED 并计数。
+                //   一次都没成功却报"正常"（审查发现）。现在如实回调 FAILED 并计入 failedCount。
                 onAttempt?.invoke(
                     attempt, plannedAttempts(true, recheckTotalMs),
                     AntifraudResult(AntifraudState.FAILED, "第 $attempt 次复查失败：${e.javaClass.simpleName}")
@@ -173,34 +184,70 @@ object CommentAntifraud {
             }
             AntifraudDiag.finish("${r.state}｜${r.detail}", mirror = false)
             onAttempt?.invoke(attempt, plannedAttempts(true, recheckTotalMs), r)
+            last = r
+            if (r.state == AntifraudState.FAILED) {
+                failedCount++
+            } else {
+                okCount++
+                lastOk = r
+                if (r.state == AntifraudState.UNDER_REVIEW) sawUnderReview = true
+            }
             if (r.isBad) {
                 // ★ 就是这种情况：首次正常，后来才被限流
                 val afterText = if (elapsed < 60_000) "${elapsed / 1000} 秒后"
                 else "${elapsed / 60_000} 分钟后"
-                val changed = r.copy(
-                    detail = r.detail + "\n（首次检测是正常的，$afterText 复查才发现变化 —— B站这种『先放出来再限流』很常见）"
-                )
+                // ★ 变化说明要跟着最终状态走：限流/不可见确实是"先放出来再限流"；
+                //   但 DELETED（尤其 12006 没有该评论）再说"再限流"就自相矛盾 —— 评论都已经没了。
+                // ★ 只有首查确实是正常时才能说『首次检测是正常的』：首查也可能是 FAILED /
+                //   疑似审核中（只是不 isBad），那时要用中性的『第 X 次复查发现变化』。
+                val firstWasNormal = first.state == AntifraudState.NORMAL
+                val changeText = when {
+                    r.state == AntifraudState.DELETED && firstWasNormal ->
+                        "（首次检测是正常的，$afterText 复查发现评论已经没了 —— 先放出来、过一会儿又没了）"
+                    r.state == AntifraudState.DELETED ->
+                        "（第 $attempt 次复查发现评论已经没了）"
+                    firstWasNormal ->
+                        "（首次检测是正常的，$afterText 复查才发现变化 —— B站这种『先放出来再限流』很常见）"
+                    else ->
+                        "（第 $attempt 次复查发现变化 —— B站这种『先放出来再限流』很常见）"
+                }
+                val changed = r.copy(detail = r.detail + "\n" + changeText)
                 AntifraudDiag.finish("${changed.state}｜${changed.detail}")
                 return changed
             }
-            last = r
         }
-        // 全程跑完：按"成功了几次"给结论，别把失败也算成"正常"
-        val okCount = attempt - failed
-        if (okCount <= 0) {
+        // 全程跑完：按"最后成功的那次状态"给结论，别把失败也算成"正常"
+        AntifraudDiag.info("复查结束：共查 $attempt 次，成功 $okCount 次，失败 $failedCount 次")
+        val lastOkResult = lastOk
+        if (lastOkResult == null) {
+            // 一次都没拿到明确结论 → 只能说"没查成"，绝不能写"都正常"
             val r = AntifraudResult(
                 AntifraudState.FAILED,
-                "复查 $attempt 次全部失败，没能确认这条评论的状态（${last.detail}）",
+                "复查 $attempt 次全部失败，没能确认这条评论的状态（最后一次：${last.detail}）",
             )
             AntifraudDiag.finish("FAILED｜${r.detail}")
             return r
         }
-        val finalNormal = last.copy(
-            detail = last.detail +
-                "\n（共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟都正常）"
-        )
-        AntifraudDiag.finish("${finalNormal.state}｜${finalNormal.detail}")
-        return finalNormal
+        val finalDetail = when (lastOkResult.state) {
+            AntifraudState.NORMAL -> {
+                val base = "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟"
+                // ★ 中途出现过『疑似审核中』就不能说『持续都正常』：
+                //   正常 → 审核中 → 正常 这种，最后一次是正常，但中间并不正常。
+                if (sawUnderReview) "$base；中途出现过『疑似审核中』，最后一次是正常"
+                else "${base}都正常"
+            }
+            AntifraudState.UNDER_REVIEW ->
+                "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟；" +
+                    "最后仍为『疑似审核中』，没有变成限流/删除"
+            // 理论上到不了这里：中途一旦出现限流/不可见/已删除（isBad）循环就提前返回了。
+            // 留个兜底分支只为让 when 穷尽 —— 同样不写"都正常"。
+            else ->
+                "共查 $attempt 次，其中 $okCount 次成功、持续 ${recheckTotalMs / 60000} 分钟；" +
+                    "最后一次判断是『${lastOkResult.title}』"
+        }
+        val finalResult = lastOkResult.copy(detail = lastOkResult.detail + "\n（$finalDetail）")
+        AntifraudDiag.finish("${finalResult.state}｜${finalResult.detail}")
+        return finalResult
     }
 
     /** 预计查几次（给界面显示用）：首次 + 复查次数 */
@@ -268,6 +315,19 @@ object CommentAntifraud {
                 return AntifraudResult(
                     AntifraudState.DELETED,
                     "评论被系统秒删（登录状态也查不到了）",
+                    withAcc.code, withAcc.message,
+                )
+            }
+            // ★ 12006 和 12022 一样是**决定性结论**，不是"接口返回异常"：
+            //   游客列表里翻不到、登录态取回复页也回『没有该评论』 ⇒ 这条评论确实不存在了
+            //   （产品决定（2026-11-06）：接口回『没有该评论』就是结论；旧逻辑当 FAILED，
+            //   isBad=false → 复查不停、不弹窗，白盯满 15 分钟）。判成 DELETED 后复查循环立即返回、
+            //   Launcher 弹结果窗，不再继续监控。
+            if (withAcc.code == CODE_COMMENT_NOT_EXIST) {
+                return AntifraudResult(
+                    AntifraudState.DELETED,
+                    "评论已不存在：接口返回 12006『没有该评论』——登录状态下也查不到这条评论了" +
+                        "（可能是自己删的，也可能是被系统删除）",
                     withAcc.code, withAcc.message,
                 )
             }

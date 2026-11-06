@@ -24,6 +24,7 @@ import com.a10miaomiao.bilimiao.comm.toast
 import com.a10miaomiao.bilimiao.comm.utils.BvUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -167,6 +168,10 @@ object CommentAntifraudLauncher {
                     recheckTotalMs = recheckMs,
                     planned = planned,
                 )
+                // ★ 把这一轮协程的 Job 挂到监控条目上：设置页点「取消监控」时要 cancel 它。
+                //   必须紧跟在 start() 之后 —— 中间不要插挂起点/切线程（下面的 withContext），
+                //   否则那一小段时间里 job 还是 null，用户点了取消只会移除条目、协程照旧跑完。
+                monitor?.job = coroutineContext[Job]
                 toast(
                     if (!settings.recheckEnabled) {
                         if (hasPictures) "评论已发出，20 秒后检测一次（没开自动复查）"
@@ -233,6 +238,39 @@ object CommentAntifraudLauncher {
                 // 最终结论已经弹过窗了 → 从"监控中"列表移除
                 monitor?.let { m -> scope.launch { AntifraudMonitor.finish(m) } }
             }
+        }
+    }
+
+    /**
+     * **取消**一条正在监控的评论（设置页「正在监控」那一行 → 确认弹窗 → 这里）。
+     *
+     * 为什么需要：自动复查默认要盯 15 分钟，中途想放弃时以前只能干等它跑完
+     * （产品决定（2026-11-06）：监控中途允许取消）。
+     *
+     * 取消 = cancel 掉 [start] 里那轮协程 → 复查循环停在下一个挂起点，**不弹结果窗**、
+     * 也不写「上次检测结果」（用户主动放弃的东西，不该覆盖掉上一条真实结论）。
+     * 取消后协程的 finally 会归还 activeChecks 并**再 finish 一次** —— [AntifraudMonitor.finish] 幂等，
+     * 重复调用无害（这里先 finish 一次是为了让设置页立刻把条目去掉，不用等协程调度到 finally）。
+     *
+     * 只在 UI 主线程调用（设置页点击回调）。
+     */
+    fun cancelMonitor(session: AntifraudMonitorSession) {
+        val elapsedSec = (session.elapsedMs(System.currentTimeMillis()) / 1000).coerceAtLeast(0L)
+        AntifraudDiag.start("评论反诈：用户取消监控")
+        AntifraudDiag.step(
+            "评论 ${session.rpid}（${session.label}）第 ${session.attempt}/${session.planned} 次，" +
+                "已监控 ${elapsedSec} 秒 → 用户点按取消"
+        )
+        AntifraudDiag.finish("CANCELLED｜用户手动取消监控")
+        val job = session.job
+        if (job != null && job.isActive) {
+            // 先 cancel 协程，再立刻把条目从设置页移除（协程自己的 finally 稍后才跑，不等它）
+            job.cancel()
+            AntifraudMonitor.finish(session)
+            toast("已取消这条评论的监控")
+        } else {
+            // 防御：协程已经自己结束了（正常跑完 / 别的路径取消过）→ 只清掉残留条目
+            AntifraudMonitor.finish(session)
         }
     }
 
