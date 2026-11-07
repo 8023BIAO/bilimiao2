@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.floor
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
  * 长图判定阈值：高/宽 > 2.6 视为长图（产品决定（2026-11-07），与 PiliPlus 的 imgMaxRatio 一致）。
@@ -28,8 +29,11 @@ private const val DEFAULT_GPU_MAX_TEXTURE_SIZE = 8192
 private const val MIN_TEXTURE_SIZE = 4096
 private const val MAX_TEXTURE_SIZE = 16384
 
-// 直接加载原图时的像素总数上限：沿用改造前 4096x4096 的防护量级（约 67MB bitmap），
-// 防止超宽长图（高度未超纹理上限、但宽度很大）重新引入 Canvas 崩溃
+// 长图预览的像素预算：沿用改造前 4096x4096 的防护量级（约 67MB bitmap）。
+// 原图直链与缩图请求**两条分支**都受它约束：
+// - 原图直链：高度未超纹理上限时，按原图像素数直接拦；
+// - 缩图请求：图床只缩不放，请求框 ≥ 原图时会原样返回，所以要先按两种输出形态
+//   （「请求宽 × 上限高」与「请求宽² × 高宽比」）反推最大请求宽，再发请求。
 private const val MAX_ORIGINAL_PIXEL_COUNT = 4096L * 4096L
 
 // 进程内缓存：0 表示尚未查询
@@ -166,13 +170,15 @@ private fun queryGpuMaxTextureSize(): Int {
 }
 
 /**
- * 计算长图预览地址：按屏幕宽度与 GPU 纹理上限向图床请求等比缩图。
+ * 计算长图预览地址：按屏幕宽度、GPU 纹理上限与像素预算向图床请求等比缩图。
  *
- * - 原图高度不超过纹理上限、且像素总数不超过改造前的 4096x4096 防护量级：直接返回原图
+ * - 原图高度不超过纹理上限、且像素总数不超过 [MAX_ORIGINAL_PIXEL_COUNT]：直接返回原图
  *   （图床只缩不放，原图最清晰）；
- * - 否则请求 `@<宽>w_<上限>h`：高度不超过上限，宽度不超过屏幕宽与原图宽，
- *   避免 19:1 这类长图被统一压到 4096 高度后再被铺屏拉宽（约 6 倍拉伸）。
+ * - 否则请求 `@<宽>w_<上限>h`：高度不超过上限，宽度取屏幕宽、原图宽与像素预算反推的最大
+ *   请求宽三者最小，避免 19:1 这类长图被统一压到 4096 高度后再被铺屏拉宽（约 6 倍拉伸），
+ *   也避免超宽长图（如横屏 2800×16000）解码出 170MB 级 bitmap。
  *
+ * 两条分支的输出都不超过 [MAX_ORIGINAL_PIXEL_COUNT]（约 67MB bitmap）。
  * 仅用于 hdslb 图床且 URL 本身不带 `@` 参数的情况，调用方负责判断。
  */
 internal fun longImagePreviewUrl(
@@ -188,7 +194,14 @@ internal fun longImagePreviewUrl(
     }
     val ratio = imageHeight / imageWidth
     val heightLimitedWidth = floor(maxTextureSizePx / ratio).toInt()
+    // 像素预算：缩图分支同样不能超过原图守卫的 4096² 量级。
+    // capHeightLimitedWidth 覆盖「高度顶格」的输出（宽 × 上限高）；
+    // ratioLimitedWidth 覆盖「只按宽缩」的输出（宽² × 高宽比），由 宽² ≤ 预算/高宽比 反推。
+    val capHeightLimitedWidth = (MAX_ORIGINAL_PIXEL_COUNT / maxTextureSizePx).toInt()
+    val ratioLimitedWidth = floor(sqrt(MAX_ORIGINAL_PIXEL_COUNT / ratio)).toInt()
     val requestWidth = min(imageWidth.toInt(), min(screenWidthPx, heightLimitedWidth))
+        .coerceAtMost(capHeightLimitedWidth)
+        .coerceAtMost(ratioLimitedWidth)
         .coerceAtLeast(1)
     return originalUrl + "@${requestWidth}w_${maxTextureSizePx}h"
 }
