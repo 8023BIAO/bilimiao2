@@ -105,7 +105,10 @@ fun StartLibraryCard(
                                         )
                                     )
                                 } else {
-                                    toast("无默认收藏夹信息")
+                                    // 数据未加载 / 登录后未刷新 / 接口失败时拿不到默认收藏夹 id，
+                                    // 兜底进「收藏」卡片同一个落点：收藏夹列表页自己会加载列表、有 loading / 失败态，
+                                    // 不再只弹 toast 让用户无路可走
+                                    navigateTo(UserFavouritePage(userId.toString()))
                                 }
                             }
                             .padding(vertical = 4.dp, horizontal = 8.dp)

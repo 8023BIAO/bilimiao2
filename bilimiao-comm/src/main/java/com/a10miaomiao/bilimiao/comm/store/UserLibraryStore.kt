@@ -174,7 +174,9 @@ class UserLibraryStore (override val di: DI) :
             favourite = FavouriteInfo(
                 defaultFavCount = defaultFav?.media_count ?: 0,
                 defaultFavId = defaultFav?.id ?: "",
-                defaultFavTitle = defaultFav?.title ?: "",
+                // 接口失败 / 未取到默认收藏夹时回落到数据类默认标题「默认收藏夹」，
+                // 避免首页 chip 显示空白（id 仍为 ""，点击时由页面侧兜底进收藏夹列表）
+                defaultFavTitle = defaultFav?.title?.takeIf { it.isNotBlank() } ?: FavouriteInfo().defaultFavTitle,
 //                subscriptionCount = collectedResult.getOrElse { 0 },
             )
         )
