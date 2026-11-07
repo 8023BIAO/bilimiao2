@@ -11,8 +11,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -116,6 +116,20 @@ fun ZoomableView(
                 )
             }
 
+            // 长图：容器尺寸就绪后一次性顶部对齐。
+            // 内容 Box 居中时 offset=0 对应画面正中，长图需要先把 Y 偏移设到顶部（initialOffsetY）。
+            // 只应用一次，避免每次重组把手势拖到的位置覆盖掉；已缩放的场景（如旋转后恢复）保留用户状态。
+            if (isLongImage && !initialPositionApplied &&
+                scale.value == DEFAULT_SCALE &&
+                containerWidth > 0f && containerHeight > 0f
+            ) {
+                initialPositionApplied = true
+                scope.launch {
+                    offsetX.snapTo(DEFAULT_OFFSET_X)
+                    offsetY.snapTo(initialOffsetY)
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .graphicsLayer {
@@ -126,8 +140,11 @@ fun ZoomableView(
                         translationY = offsetY.value
                         rotationZ = rotation.value
                     }
-                    .width(density.run { displayWidth.toDp() })
-                    .height(density.run { displayHeight.toDp() })
+                    // 长图的显示高度会超过容器高度：普通 width/height 会把尺寸夹回容器，
+                    // 导致超出部分不参与布局、放大/上拖看不到内容；required* 忽略传入约束，
+                    // 普通图 display ≤ 容器，测量结果与 width/height 完全相同
+                    .requiredWidth(density.run { displayWidth.toDp() })
+                    .requiredHeight(density.run { displayHeight.toDp() })
             ) {
                 content()
             }

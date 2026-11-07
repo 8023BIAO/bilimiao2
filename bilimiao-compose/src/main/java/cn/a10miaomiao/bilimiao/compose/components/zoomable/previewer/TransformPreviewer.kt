@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
+import cn.a10miaomiao.bilimiao.compose.components.image.isLongImage
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.pager.DEFAULT_BEYOND_VIEWPORT_ITEM_COUNT
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.pager.DEFAULT_ITEM_SPACE
 import cn.a10miaomiao.bilimiao.compose.components.zoomable.pager.PagerGestureScope
@@ -327,7 +328,8 @@ fun getDisplaySize(contentSize: Size, containerSize: Size): Size {
     val contentRatio = contentSize.run {
         width.div(height)
     }
-    val widthFixed = contentRatio > containerRatio
+    // 长图一律按宽度适配（与 ZoomableState.scale1x 保持一致），普通图逻辑不变
+    val widthFixed = contentRatio > containerRatio || contentSize.isLongImage()
     val scale1x = if (widthFixed) {
         containerSize.width.div(contentSize.width)
     } else {

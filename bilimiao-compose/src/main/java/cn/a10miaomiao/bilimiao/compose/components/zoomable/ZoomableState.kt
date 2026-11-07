@@ -16,6 +16,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import cn.a10miaomiao.bilimiao.compose.components.image.isLongImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.async
@@ -134,9 +135,13 @@ open class ZoomableViewState(
             width.div(height)
         }
 
-    // 宽度是否对齐视口
+    // 是否为长图（高/宽 > 2.6，见 LongImageSupport）
+    val isLongImage: Boolean
+        get() = contentSize.isLongImage()
+
+    // 宽度是否对齐视口：长图一律宽度适配，普通图保持原来的 contain 判定
     private val widthFixed: Boolean
-        get() = contentRatio > containerRatio
+        get() = isLongImage || contentRatio > containerRatio
 
     // 1倍缩放率
     internal val scale1x: Float
@@ -163,6 +168,19 @@ open class ZoomableViewState(
             return contentSize.height.times(scale1x)
         }
 
+    /**
+     * 长图的初始 Y 偏移：内容 Box 在容器中居中，长图要顶部对齐，
+     * 需要把内容向下移动 (显示高 - 容器高) / 2（普通图保持居中，偏移为 0）。
+     */
+    val initialOffsetY: Float
+        get() {
+            return if (isLongImage) {
+                (displayHeight - containerHeight) / 2f
+            } else {
+                DEFAULT_OFFSET_Y
+            }
+        }
+
     val realSize: Size
         get() {
             return Size(
@@ -186,6 +204,9 @@ open class ZoomableViewState(
     // 手势实时的偏移范围
     var boundX = Pair(0F, 0F)
     var boundY = Pair(0F, 0F)
+
+    // 长图的顶部对齐是否已经应用过（只应用一次，避免反复覆盖用户手势）
+    internal var initialPositionApplied = false
 
     // 计算边界使用的缩放率
     var boundScale = 1F
@@ -240,7 +261,8 @@ open class ZoomableViewState(
     suspend fun resetImmediately() {
         rotation.snapTo(DEFAULT_ROTATION)
         offsetX.snapTo(DEFAULT_OFFSET_X)
-        offsetY.snapTo(DEFAULT_OFFSET_Y)
+        // 长图还原到顶部对齐（产品决定（2026-11-07）：长图不再回弹成居中的窄条）
+        offsetY.snapTo(if (isLongImage) initialOffsetY else DEFAULT_OFFSET_Y)
         scale.snapTo(DEFAULT_SCALE)
     }
 
@@ -274,6 +296,8 @@ open class ZoomableViewState(
      * 设置回初始值
      */
     suspend fun reset(animationSpec: AnimationSpec<Float> = defaultAnimateSpec) {
+        // 长图还原到顶部对齐，普通图仍然回 (0, 0) 居中
+        val targetOffsetY = if (isLongImage) initialOffsetY else DEFAULT_OFFSET_Y
         coroutineScope {
             listOf(
                 async {
@@ -283,7 +307,7 @@ open class ZoomableViewState(
                     offsetX.animateTo(DEFAULT_OFFSET_X, animationSpec)
                 },
                 async {
-                    offsetY.animateTo(DEFAULT_OFFSET_Y, animationSpec)
+                    offsetY.animateTo(targetOffsetY, animationSpec)
                 },
                 async {
                     scale.animateTo(DEFAULT_SCALE, animationSpec)
@@ -301,8 +325,22 @@ open class ZoomableViewState(
     ) {
         val currentAnimateSpec = animationSpec ?: defaultAnimateSpec
 
-        var nextOffsetX = (containerWidth / 2 - offset.x) * maxScale
-        var nextOffsetY = (containerHeight / 2 - offset.y) * maxScale
+        var nextOffsetX: Float
+        var nextOffsetY: Float
+        if (isLongImage) {
+            // 长图初始 offset 不为 0，旧公式 (容器/2 - 点击点) * maxScale 只有在 1 倍且 offset=0 时
+            // 才近似锚定；长图直接套用会把画面甩到图片其它位置。改为按当前变换反推：
+            // 缩放前后，手指点下的内容点保持在同一屏幕位置。
+            // t_new = p - C/2 - (s_new / s_old) * (p - C/2 - t_old)，逐轴计算
+            val scaleRatio = maxScale / scale.value
+            nextOffsetX = offset.x - containerWidth / 2f -
+                    scaleRatio * (offset.x - containerWidth / 2f - offsetX.value)
+            nextOffsetY = offset.y - containerHeight / 2f -
+                    scaleRatio * (offset.y - containerHeight / 2f - offsetY.value)
+        } else {
+            nextOffsetX = (containerWidth / 2 - offset.x) * maxScale
+            nextOffsetY = (containerHeight / 2 - offset.y) * maxScale
+        }
 
         val boundX = getBound(maxScale, containerWidth, displayWidth)
         val boundY = getBound(maxScale, containerHeight, displayHeight)

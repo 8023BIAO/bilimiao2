@@ -243,24 +243,60 @@ fun MyImagePreviewer(
             // 而不是抛 IndexOutOfBounds 崩在组合期
             val model = imagePreviewerState.imageModels.getOrNull(page)
             val imageUrl = model?.originalUrl ?: ""
+            val imageSize = Size(model?.width ?: 0f, model?.height ?: 0f)
+            val isImageHosted = imageUrl.contains("hdslb.com") && "@" !in imageUrl
             // 超大图限制：图床 URL 加最长边 4096px 后缀（图床只缩不放，普通图无损），
             // 防止原图 bitmap 超限导致 Canvas 崩溃 (upstream #245: 175MB bitmap)
             // 4096x4096 ≈ 67MB，远低于崩溃线，同时保留放大查看的清晰度
-            val previewUrl = if (imageUrl.contains("hdslb.com") && "@" !in imageUrl) {
+            val defaultPreviewUrl = if (isImageHosted) {
                 imageUrl + "@4096w_4096h"
             } else {
                 imageUrl
+            }
+            // 长图（高/宽 > 2.6）：统一 4096 高度会把 19:1 的长图压成 214x4096，铺屏后约 6 倍拉伸；
+            // 改为按屏幕宽与设备 GPU 纹理上限请求（产品决定（2026-11-07））
+            val longImage = imageSize.isLongImage()
+            val gpuMaxTextureSize = remember { mutableStateOf(0) }
+            if (longImage && isImageHosted && gpuMaxTextureSize.value == 0) {
+                LaunchedEffect(Unit) {
+                    gpuMaxTextureSize.value = gpuMaxTextureSizePx(activity)
+                }
+            }
+            val previewUrl = if (longImage && isImageHosted) {
+                if (gpuMaxTextureSize.value == 0) {
+                    // 纹理上限查询完成前先不请求，下一帧拿到上限后按长图地址加载
+                    null
+                } else {
+                    longImagePreviewUrl(
+                        originalUrl = imageUrl,
+                        imageWidth = imageSize.width,
+                        imageHeight = imageSize.height,
+                        screenWidthPx = activity.resources.displayMetrics.widthPixels,
+                        maxTextureSizePx = gpuMaxTextureSize.value,
+                    )
+                }
+            } else {
+                defaultPreviewUrl
             }
             // ★ Glide Compose 1.0.0-beta10 删掉了 GlideSubcomposition / RequestState，
             //   这里改成「Glide 自己取 Drawable + accompanist 的 rememberDrawablePainter 转 Painter」：
             //   行为跟以前一致 —— 图到了就给出 painter，并标记"原图已下载"。
             val drawableState = remember(previewUrl) { mutableStateOf<Drawable?>(null) }
             LaunchedEffect(previewUrl) {
-                val drawable = runCatching {
-                    withContext(Dispatchers.IO) {
-                        Glide.with(activity).asDrawable().load(previewUrl).submit().get()
-                    }
-                }.getOrNull()
+                val url = previewUrl ?: return@LaunchedEffect
+                // 长图高清地址失败时回退到旧的 4096 限制地址，避免长图一直停在加载中
+                val candidateUrls = if (url != defaultPreviewUrl) {
+                    listOf(url, defaultPreviewUrl)
+                } else {
+                    listOf(url)
+                }
+                val drawable = candidateUrls.firstNotNullOfOrNull { candidate ->
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            Glide.with(activity).asDrawable().load(candidate).submit().get()
+                        }
+                    }.getOrNull()
+                }
                 if (drawable != null) {
                     drawableState.value = drawable
                     // 设置原图已下载标志
@@ -270,7 +306,7 @@ fun MyImagePreviewer(
             val loadedDrawable = drawableState.value
             return@ImagePreviewer Pair(
                 if (loadedDrawable != null) rememberDrawablePainter(loadedDrawable) else null,
-                Size(model?.width ?: 0f, model?.height ?: 0f)
+                imageSize,
             )
         }
     )
