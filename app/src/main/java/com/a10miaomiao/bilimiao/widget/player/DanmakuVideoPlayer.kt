@@ -1537,6 +1537,19 @@ initDanmakuTouchListener()
     /** DOWN 事件的绝对屏幕 X 坐标，用于精确左右半区判定（不受 view 坐标系影响） */
     private var rawDownX = 0f
 
+    /**
+     * DOWN 事件的绝对屏幕 Y 坐标（与 [rawDownX] 同一套坐标）。
+     * 唯一消费端是全屏「顶栏手势盾」的**起手**判定（见 [isInTopGestureShield]）：
+     * 只有按下那一刻的位置算数，起手后手指滑到哪都不改变判定。
+     */
+    private var rawDownY = 0f
+
+    /**
+     * 复用同一个两元数组装"顶栏在屏幕上的坐标"（[isInTopGestureShield] 用）。
+     * 手势热路径上**不做每次事件分配**：这个数组整个播放器生命周期只 new 这一次。
+     */
+    private val topShieldLocation = IntArray(2)
+
     /** 双指缩放锁：进入即锁死单指手势，直到所有手指抬起（ACTION_UP）才解锁 */
     private var isPinching = false
 
@@ -1598,8 +1611,9 @@ initDanmakuTouchListener()
             touchViewWidth = v.width
         }
         if (v != null && event?.action == MotionEvent.ACTION_DOWN) {
-            // 捕获绝对屏幕坐标，用于精确左右半区判定
+            // 捕获绝对屏幕坐标：X 用于精确左右半区判定，Y 用于全屏顶栏手势盾的起手判定
             rawDownX = event.rawX
+            rawDownY = event.rawY
         }
         if (event != null) {
             // 双指变换激活时，完全拦截事件给 pinchToZoom
@@ -1689,6 +1703,50 @@ initDanmakuTouchListener()
         return super.onTouch(v, event)
     }
 
+    /**
+     * 全屏（[PlayerMode.FULL]）顶部「顶栏安全区」手势盾：按下点在这条线之上时**不进**进度/亮度/音量手势。
+     *
+     * ## 为什么要有它
+     * 全屏画面是铺满的，顶栏那一块也是画面：从屏幕顶部（顶栏/状态栏那一条）起手往下滑，
+     * 本来想拉出系统状态栏/通知栏，却会命中左右半区的亮度/音量/进度手势。
+     * 这里只拦**手势的起手区**，版式与画面高度一个字节都不动：顶栏那一块仍然是画面的一部分，
+     * 单击/双击/长按、锁定、双指缩放、SeekBar 语义全都不改 —— 与直播页第十五批第 4 条同一口径
+     * （`LivePlayerActivity.landscapeGestureShieldBottomPx`："只加判据、不改版式"）。
+     * ★直播页只在横屏生效，是因为它的竖屏顶栏不压在画面上；点播的顶栏在**横竖屏全屏**时都压在
+     *   画面最顶上（竖屏全屏同样会误触），所以这里只在 [PlayerMode.FULL] 上判、不分方向。
+     *
+     * ## 底边怎么取
+     * ```
+     * 顶栏量出了几何（height > 0）→ 顶栏自己的真实矩形：屏幕 Y + height
+     *    （它的 padding 里已经含状态栏那一截，见 [setWindowInsets]，所以状态栏临时露出来时
+     *      这条线自己会跟着下移，不用另加）
+     * 拿不到（height <= 0 / mTopContainer 为空 / 读几何抛异常）→ 兜底：
+     *    状态栏高度 + 40dp（layout_danmaku_palyer.xml 里顶栏内容高 40dp）
+     * ```
+     * ★顶栏被隐藏时仍读得到它**最后一次布局**的位置：`INVISIBLE` 只是不画、布局照旧；
+     *   `GONE` 时父布局不再给它重新 layout，`top/height` 保留原值 —— 而"顶栏显示时压着的那块
+     *   区域"正是要挡的地方，所以判据**不与顶栏显隐联动**（与直播页同一事实）。
+     * ★兜底**绝不返回 0**：拿不到几何就整体失效，等于这个 bug 又回来了。
+     * ★判据用 [rawDownY]（ACTION_DOWN 时的绝对屏幕 Y，与 `event.rawY` 同一套坐标）—— 只认
+     *   **起手点**；坐标数组复用 [topShieldLocation]，零分配。
+     */
+    private fun isInTopGestureShield(): Boolean {
+        if (mode != PlayerMode.FULL) return false
+        val top = mTopContainer
+        if (top != null) {
+            val h = top.height
+            if (h > 0) {
+                try {
+                    top.getLocationOnScreen(topShieldLocation)
+                    return rawDownY < topShieldLocation[1] + h
+                } catch (_: Exception) {
+                    // 极端时序（View 正在 detach 等）：落到下面的兜底，宁可多挡也不能整体失效
+                }
+            }
+        }
+        return rawDownY < (statusBarHelper?.getStatusBarHeight() ?: 0) + context.dip(40)
+    }
+
     override fun touchSurfaceDown(x: Float, y: Float) {
         super.touchSurfaceDown(x, y)
         // 保存当前播放位置，防止双指缩放时 seek 被误触
@@ -1721,8 +1779,9 @@ initDanmakuTouchListener()
             mChangePosition=false
             return
         }
-        if (mDownY<context.dip(25)){
-            //顶部防误触
+        if (mDownY<context.dip(25) || isInTopGestureShield()){
+            //顶部防误触（老 25dp 死区）+ 全屏顶栏手势盾（见 [isInTopGestureShield]：
+            //顶栏那一条起手不调音量/亮度/进度；命中也走同一条早退）
             mChangePosition=false
             return
         }
@@ -1828,6 +1887,10 @@ initDanmakuTouchListener()
             super.touchSurfaceMoveFullLogic(0f, 0f)
             return
         }
+        // 全屏「顶栏手势盾」：起手在顶栏安全区内 → 不进入进度/亮度/音量手势，直接返回。
+        // 必须放在下面**任何 flag 赋值之前**：一旦置了 mChangePosition/mChangeVolume/mBrightness，
+        // base 的 onTouch 后续 MOVE 就不再进本函数（它的守卫是三个 flag 全 false），盾会失效。
+        if (isInTopGestureShield()) return
         // ★ 用绝对屏幕坐标判定左右半区，彻底解决坐标系不匹配导致音量失效
         val screenLocation = IntArray(2)
         getLocationOnScreen(screenLocation)
