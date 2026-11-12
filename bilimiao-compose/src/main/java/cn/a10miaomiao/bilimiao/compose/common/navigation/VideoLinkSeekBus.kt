@@ -16,8 +16,8 @@ package cn.a10miaomiao.bilimiao.compose.common.navigation
 object VideoLinkSeekBus {
 
     /**
-     * 参数：视频 id（BV 号或 av 号）+ 目标毫秒位置。
+     * 参数：视频 id（BV 号或 av 号）+ 目标毫秒位置 + 链接 `?p=` 指定的分P（无则 null）。
      * 返回 true = 当前视频详情页已接管；false = 不是它的视频（或详情还没加载好，让导航层兜底）。
      */
-    var onSeek: ((videoId: String, seekMs: Long) -> Boolean)? = null
+    var onSeek: ((videoId: String, seekMs: Long, pageIndex: Int?) -> Boolean)? = null
 }

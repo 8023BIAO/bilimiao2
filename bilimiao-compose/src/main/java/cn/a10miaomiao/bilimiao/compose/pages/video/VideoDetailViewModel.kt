@@ -93,6 +93,7 @@ class VideoDetailViewModel(
     id: String,
     seekPosition: Long? = null,
     private val highlightDanmakuText: String? = null,
+    pageIndex: Int? = null,
 ) : ViewModel(), DIAware {
     private val activity by instance<Activity>()
     private val appStore by instance<AppStore>()
@@ -132,6 +133,15 @@ class VideoDetailViewModel(
      * 否则切分P/切集重新播放时会一直带着进入页面时那个旧弹幕时间点起播。
      */
     private var pendingSeekPosition: Long? = seekPosition
+
+    /**
+     * 完整链接 `?p=` 指定的分P（从 1 开始），与 [pendingSeekPosition] 一样只能消费一次。
+     *
+     * 为什么必须带 P：多P视频里 `?t=` 是相对「链接指定/默认 P1」的时间，只 seek 不切 P
+     * 会按历史选页 —— 用户上次看的可能是 P2，于是跳到另一个 P 的同一秒数，内容就对不上了
+     * （例：BV1tsWJ6cEy7 的 P1 背景音乐版 / P2 无音乐版）。
+     */
+    private var pendingPageIndex: Int? = pageIndex
 
     val coinDialogState = VideoCoinDialogState(
         scope = viewModelScope,
@@ -353,16 +363,28 @@ class VideoDetailViewModel(
     }
 
     private fun autoStartPlay() = viewModelScope.launch(Dispatchers.Main) {
-        val arcData = detailData.value?.getArcData() ?: return@launch
+        val detail = detailData.value ?: return@launch
+        val arcData = detail.getArcData() ?: return@launch
         if (basePlayerDelegate.getSourceIds().aid == arcData.aid.toString()) {
-            // 同个视频不替换播放。
-            // 但这次导航可能带 seekPosition（消息页/完整链接 `?t=`）：播放器已经在放这条视频，
-            // 不替换播放就不会有人走 playVideo(page) 去消费 pendingSeekPosition —— 点了链接
-            // 等于没跳。这里补一次消费：先取出并置空，再 seek（seekToPosition 内部可能再走
-            // playVideoAtPosition，避免重入时重复消费）。
-            pendingSeekPosition?.let { seek ->
-                pendingSeekPosition = null
-                seekToPosition(seek)
+            // 同个视频不替换播放。但这次导航可能带 seekPosition（消息页/完整链接 `?t=`）：
+            // 播放器已经在放这条视频，不替换播放就没人会走 playVideo(page) 去消费
+            // pendingSeekPosition —— 点了链接等于没跳。分P同理：链接里的 p 与当前播放的 P
+            // 不同时必须切 P，单 seek 会把时间点落到另一条内容上（音乐版/无音乐版）。
+            // 先取出并置空再动作（playVideo/seekToPosition 内部都可能重入，避免重复消费）。
+            val seek = pendingSeekPosition
+            val wantPage = pendingPageIndex
+            pendingSeekPosition = null
+            pendingPageIndex = null
+            if (seek != null) {
+                val targetPage = wantPage?.let { want ->
+                    detail.getPages().firstOrNull { it.page == want }
+                }
+                if (targetPage != null && playerStore.state.cid != targetPage.cid.toString()) {
+                    // 目标 P 不是当前在放的 P：整条重新拉起（seekOverride 保证直接落到秒数）
+                    playVideo(targetPage, seekOverride = seek)
+                } else {
+                    seekToPosition(seek)
+                }
             }
             return@launch
         }
@@ -398,15 +420,21 @@ class VideoDetailViewModel(
     fun playVideo() {
         val detail = detailData.value ?: return
         val pages = detail.getPages()
+        // 链接 `?p=` 指定的分P优先（只消费一次）；没指定（或这一 P 不存在）才回到历史/P1。
+        // 多P视频里 t 是相对指定 P 的，选错 P 就会把 529.7s 放到另一条内容上。
+        val wantPage = pendingPageIndex
+        pendingPageIndex = null
         val history = detail.history
         if (pages.isNotEmpty()) {
-            val page = history?.let { h ->
-                pages.find { it.cid == h.cid }
-            } ?: pages[0] ?: return
+            val page = wantPage?.let { want -> pages.firstOrNull { it.page == want } }
+                ?: history?.let { h -> pages.find { it.cid == h.cid } }
+                ?: pages[0] ?: return
             playVideo(page)
         }
     }
     fun playVideo(page: Page, seekOverride: Long? = null) {
+        // 已经由显式 page 决定播哪一P了：链接里的 p 使命到此为止，别留给下一次播放
+        pendingPageIndex = null
         val detail = detailData.value ?: return
         val arc = detail.getArcData() ?: return
         val author = arc.author ?: return
@@ -559,17 +587,18 @@ class VideoDetailViewModel(
     }
 
     /**
-     * 完整视频链接带 `?t=` 秒数、且目标就是本页视频时的原地跳转。
+     * 完整视频链接带 `?t=`/`?p=`、且目标就是本页视频时的原地跳转。
      *
      * 为什么不在 [BilibiliNavigation] 里直接 seek：播放器没打开/正在准备时，只有本页
      * ViewModel 手里有详情与分P，能把它拉起来并落到目标时间点（与评论区空降共用
-     * [seekToPosition] 这条路，不另写一套播放器逻辑）。
+     * [seekToPosition] 这条路，不另写一套播放器逻辑）；分P同理，导航层不碰播放器。
      *
      * @param videoId 链接里的视频 id：BV 号（`BV1xx…`）或 av 号（纯数字）
      * @param seekMs 目标毫秒位置
+     * @param pageIndex 链接 `?p=` 指定的分P（从 1 开始）；null = 不指定
      * @return true = 已接管；false = 不是本页视频 / 详情还没加载好，让导航层按普通链接打开新页
      */
-    fun seekFromVideoLink(videoId: String, seekMs: Long): Boolean {
+    fun seekFromVideoLink(videoId: String, seekMs: Long, pageIndex: Int?): Boolean {
         if (seekMs <= 0L) return false
         // 详情还没加载好时没有分P/作者，拉不起播放器 —— 交给导航兜底（与消息页 seekPosition 同路）
         val detail = _detailData.value ?: return false
@@ -581,9 +610,24 @@ class VideoDetailViewModel(
                 videoId == bvid ||
                 BvUtils.toBvid(videoId) == bvid
         if (!sameVideo) return false
+        // 链接指定了分P：多P视频的 t 是相对指定P的，播放器不在「同一条视频同一P」上时
+        // 单 seek 会落到另一条内容的同一秒数，必须整条切过去（切P/拉起/替换播放都交给 playVideo）。
+        val targetPage = pageIndex?.let { want ->
+            detail.getPages().firstOrNull { it.page == want }
+        }
+        if (targetPage != null) {
+            val playingTargetPage = playerStore.state.aid == pageAid &&
+                    playerStore.state.cid == targetPage.cid.toString()
+            if (playingTargetPage) {
+                seekToPosition(seekMs)
+            } else {
+                playVideo(targetPage, seekOverride = seekMs)
+            }
+            return true
+        }
+        // 目标P找不到（或链接没带 p）→ 退回原来"不指定P"的逻辑；不能 return false 再压一层详情页。
         // 播放器在放别的视频（小窗/不自动替换）时，seekToPosition 只会把位置发给"正在播的那条"，
-        // 而用户点的是本页这条；也不能 return false 让导航层再压一层同 id 的详情页
-        // （用户要的只是把本页视频从该时间点放出来）。这里直接用本页详情替换播放器并落到目标点。
+        // 而用户点的是本页这条；这里直接用本页详情替换播放器并落到目标点。
         if (playerStore.state.aid.isNotBlank() && playerStore.state.aid != pageAid) {
             playVideoAtPosition(seekMs)
             return true

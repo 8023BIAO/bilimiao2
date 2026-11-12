@@ -115,6 +115,8 @@ class VideoDetailPage(
     val id: String,
     val seekPosition: Long? = null,
     val highlightDanmakuText: String? = null,
+    /** 链接 `?p=` 指定的分P（仅带 `?t=` 的完整视频链接才有值；null = 按历史/P1 播） */
+    val pageIndex: Int? = null,
 ) : ComposePage() {
 
     /**
@@ -130,7 +132,7 @@ class VideoDetailPage(
         //   旧的全部留在 ViewModelStore 里直到这一页真正退出 —— 连播 50 集就是 50 个 VM，
         //   每个都攥着自己那份详情/评论状态。现在整页只用一个 VM，id 变了换目标。
         val viewModel: VideoDetailViewModel = diViewModel {
-            VideoDetailViewModel(it, id, seekPosition, highlightDanmakuText)
+            VideoDetailViewModel(it, id, seekPosition, highlightDanmakuText, pageIndex)
         }
         // 首次组合时 id 与 VM 构造时一致（VM 内部直接返回，不会重复加载）
         LaunchedEffect(id, seekPosition) {
@@ -138,8 +140,8 @@ class VideoDetailPage(
         }
         // ★ 稳定 lambda：DisposableEffect 只注册一次；闭包里只认 viewModel，
         //   页面复用（连播/切集换 id）后 bus 照样落到当前视频上。
-        val seekFromVideoLink: (String, Long) -> Boolean = remember(viewModel) {
-            { videoId, seekMs -> viewModel.seekFromVideoLink(videoId, seekMs) }
+        val seekFromVideoLink: (String, Long, Int?) -> Boolean = remember(viewModel) {
+            { videoId, seekMs, pageIndex -> viewModel.seekFromVideoLink(videoId, seekMs, pageIndex) }
         }
         // 完整视频链接带 `?t=` 且目标就是本页视频时，导航层通过这个 bus 先问当前页能不能
         // 原地接管（复用评论区空降）。只有当前组合中的视频详情页持有它。

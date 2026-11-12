@@ -39,6 +39,10 @@ object BilibiliNavigation {
         // 完整视频链接里的 `?t=` 秒数（见 parseSeekMs）。四条视频分支共用，
         // 非视频分支不会用到它，解析一次即可。
         val seekMs = parseSeekMs(uri)
+        // 分P只在带 t 时有意义：B 站多P链接的 t 是相对「链接指定/默认 P1」的时间，
+        // 所以没有 p 就按 P1（与 B 站语义一致）。不带 t 的链接 pageIndex 一律 null，
+        // 行为与改动前完全一致。
+        val pageIndex = if (seekMs != null) parsePageIndex(uri) ?: 1 else null
 
         // ---- 视频路由只匹配 path，且仅限视频深链/视频 URL ----
         // 之前用 find() 扫整串 URL（含 query 参数），opus/动态深链里夹带的
@@ -50,12 +54,12 @@ object BilibiliNavigation {
             var matcher = compile.matcher(path)
             if (matcher.find()) {
                 val id = matcher.group(1)
-                return openVideo(pageNavigation, "BV$id", seekMs)
+                return openVideo(pageNavigation, "BV$id", seekMs, pageIndex)
             }
             compile = Pattern.compile("av(\\d+)")
             matcher = compile.matcher(path.lowercase())
             if (matcher.find()) {
-                return openVideo(pageNavigation, matcher.group(1), seekMs)
+                return openVideo(pageNavigation, matcher.group(1), seekMs, pageIndex)
             }
             // 视频深链未匹配到 id 时交给路由表（类型安全路由兜底）
             return pageNavigation.navigateByUri(uri)
@@ -97,12 +101,12 @@ object BilibiliNavigation {
             var matcher = compile.matcher(path)
             if (matcher.find()) {
                 val id = matcher.group(1)
-                return openVideo(pageNavigation, "BV$id", seekMs)
+                return openVideo(pageNavigation, "BV$id", seekMs, pageIndex)
             }
             compile = Pattern.compile("av(\\d+)")
             matcher = compile.matcher(path.lowercase())
             if (matcher.find()) {
-                return openVideo(pageNavigation, matcher.group(1), seekMs)
+                return openVideo(pageNavigation, matcher.group(1), seekMs, pageIndex)
             }
             compile = Pattern.compile("ss(\\d+)")
             matcher = compile.matcher(url)
@@ -171,22 +175,35 @@ object BilibiliNavigation {
     }
 
     /**
+     * 解析完整视频链接里的 `?p=` 分P（从 1 开始）。
+     *
+     * 为什么只认正整数：`p=0`、负数、`p=abc` 都是脏参数，一律当成"没带 p"（调用方按 P1 处理），
+     * 免得把用户指到一个不存在的分P上。
+     */
+    private fun parsePageIndex(uri: Uri): Int? {
+        val raw = runCatching { uri.getQueryParameter("p") }.getOrNull() ?: return null
+        return raw.toIntOrNull()?.takeIf { it > 0 }
+    }
+
+    /**
      * 打开视频详情页（四条视频分支的唯一入口）。
      *
      * 为什么先问 [VideoLinkSeekBus]：带 `?t=` 且目标就是当前详情页那条视频时，再压一层
      * 详情页会让整页（含播放器/评论区）重建、返回还要多按一次；交给当前页原地 seek 才是
      * 用户预期。当前页接不住（不是它的视频 / 详情还没加载好）时由这里正常导航兜底。
+     * 分P也必须一起带过去：多P视频的 `t` 是相对指定 P 的，选错 P 时间点就落到别的内容上了。
      */
     private fun openVideo(
         pageNavigation: PageNavigation,
         id: String,
         seekMs: Long?,
+        pageIndex: Int?,
     ): Boolean {
-        if (seekMs != null && VideoLinkSeekBus.onSeek?.invoke(id, seekMs) == true) {
+        if (seekMs != null && VideoLinkSeekBus.onSeek?.invoke(id, seekMs, pageIndex) == true) {
             return true
         }
         pageNavigation.navigate(
-            VideoDetailPage(id, seekPosition = seekMs),
+            VideoDetailPage(id, seekPosition = seekMs, pageIndex = pageIndex),
             cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions
         )
         return true
