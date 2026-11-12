@@ -16,7 +16,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = 211
-        versionName = "v2026.11.08"
+        versionName = "v2026.11.12"
 
         flavorDimensions("default")
 
