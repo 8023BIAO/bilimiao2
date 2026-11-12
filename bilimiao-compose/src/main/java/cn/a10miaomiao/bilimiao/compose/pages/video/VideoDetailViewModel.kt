@@ -355,7 +355,15 @@ class VideoDetailViewModel(
     private fun autoStartPlay() = viewModelScope.launch(Dispatchers.Main) {
         val arcData = detailData.value?.getArcData() ?: return@launch
         if (basePlayerDelegate.getSourceIds().aid == arcData.aid.toString()) {
-            // 同个视频不替换播放
+            // 同个视频不替换播放。
+            // 但这次导航可能带 seekPosition（消息页/完整链接 `?t=`）：播放器已经在放这条视频，
+            // 不替换播放就不会有人走 playVideo(page) 去消费 pendingSeekPosition —— 点了链接
+            // 等于没跳。这里补一次消费：先取出并置空，再 seek（seekToPosition 内部可能再走
+            // playVideoAtPosition，避免重入时重复消费）。
+            pendingSeekPosition?.let { seek ->
+                pendingSeekPosition = null
+                seekToPosition(seek)
+            }
             return@launch
         }
         val openMode = SettingPreferences.mapData(activity) {
@@ -510,7 +518,8 @@ class VideoDetailViewModel(
     }
 
     /**
-     * 从评论区空降跳转到指定位置（无视频播放时调用）
+     * 从评论区空降/完整链接 `?t=` 跳转到指定位置（播放器未打开，或需要把播放器
+     * 替换成本页这条视频时调用）
      */
     fun playVideoAtPosition(seekMs: Long) {
         val detail = detailData.value ?: return
@@ -547,6 +556,40 @@ class VideoDetailViewModel(
             // 播放器未打开 → 重新打开并等待加载完成后跳转
             playVideoAtPosition(seekMs)
         }
+    }
+
+    /**
+     * 完整视频链接带 `?t=` 秒数、且目标就是本页视频时的原地跳转。
+     *
+     * 为什么不在 [BilibiliNavigation] 里直接 seek：播放器没打开/正在准备时，只有本页
+     * ViewModel 手里有详情与分P，能把它拉起来并落到目标时间点（与评论区空降共用
+     * [seekToPosition] 这条路，不另写一套播放器逻辑）。
+     *
+     * @param videoId 链接里的视频 id：BV 号（`BV1xx…`）或 av 号（纯数字）
+     * @param seekMs 目标毫秒位置
+     * @return true = 已接管；false = 不是本页视频 / 详情还没加载好，让导航层按普通链接打开新页
+     */
+    fun seekFromVideoLink(videoId: String, seekMs: Long): Boolean {
+        if (seekMs <= 0L) return false
+        // 详情还没加载好时没有分P/作者，拉不起播放器 —— 交给导航兜底（与消息页 seekPosition 同路）
+        val detail = _detailData.value ?: return false
+        val arc = detail.getArcData() ?: return false
+        val pageAid = arc.aid.toString()
+        val bvid = detail.getBvid()
+        // BV/av 两种写法都认：深链可能带 BV 号，也可能是 av 号
+        val sameVideo = videoId == pageAid ||
+                videoId == bvid ||
+                BvUtils.toBvid(videoId) == bvid
+        if (!sameVideo) return false
+        // 播放器在放别的视频（小窗/不自动替换）时，seekToPosition 只会把位置发给"正在播的那条"，
+        // 而用户点的是本页这条；也不能 return false 让导航层再压一层同 id 的详情页
+        // （用户要的只是把本页视频从该时间点放出来）。这里直接用本页详情替换播放器并落到目标点。
+        if (playerStore.state.aid.isNotBlank() && playerStore.state.aid != pageAid) {
+            playVideoAtPosition(seekMs)
+            return true
+        }
+        seekToPosition(seekMs)
+        return true
     }
 
     /**

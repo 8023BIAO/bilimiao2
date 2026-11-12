@@ -17,6 +17,7 @@ import cn.a10miaomiao.bilimiao.compose.pages.web.WebPage
 import com.a10miaomiao.bilimiao.comm.utils.miaoLogger
 import com.a10miaomiao.bilimiao.comm.toast
 import java.util.regex.Pattern
+import kotlin.math.roundToLong
 import cn.a10miaomiao.bilimiao.compose.pages.video.VideoDetailPage
 
 object BilibiliNavigation {
@@ -35,6 +36,9 @@ object BilibiliNavigation {
         val scheme = uri.scheme
         val host = uri.host
         val path = uri.path ?: ""
+        // 完整视频链接里的 `?t=` 秒数（见 parseSeekMs）。四条视频分支共用，
+        // 非视频分支不会用到它，解析一次即可。
+        val seekMs = parseSeekMs(uri)
 
         // ---- 视频路由只匹配 path，且仅限视频深链/视频 URL ----
         // 之前用 find() 扫整串 URL（含 query 参数），opus/动态深链里夹带的
@@ -46,14 +50,12 @@ object BilibiliNavigation {
             var matcher = compile.matcher(path)
             if (matcher.find()) {
                 val id = matcher.group(1)
-                pageNavigation.navigate(VideoDetailPage("BV$id"), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
-                return true
+                return openVideo(pageNavigation, "BV$id", seekMs)
             }
             compile = Pattern.compile("av(\\d+)")
             matcher = compile.matcher(path.lowercase())
             if (matcher.find()) {
-                pageNavigation.navigate(VideoDetailPage(matcher.group(1)), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
-                return true
+                return openVideo(pageNavigation, matcher.group(1), seekMs)
             }
             // 视频深链未匹配到 id 时交给路由表（类型安全路由兜底）
             return pageNavigation.navigateByUri(uri)
@@ -95,14 +97,12 @@ object BilibiliNavigation {
             var matcher = compile.matcher(path)
             if (matcher.find()) {
                 val id = matcher.group(1)
-                pageNavigation.navigate(VideoDetailPage("BV$id"), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
-                return true
+                return openVideo(pageNavigation, "BV$id", seekMs)
             }
             compile = Pattern.compile("av(\\d+)")
             matcher = compile.matcher(path.lowercase())
             if (matcher.find()) {
-                pageNavigation.navigate(VideoDetailPage(matcher.group(1)), cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions)
-                return true
+                return openVideo(pageNavigation, matcher.group(1), seekMs)
             }
             compile = Pattern.compile("ss(\\d+)")
             matcher = compile.matcher(url)
@@ -153,6 +153,43 @@ object BilibiliNavigation {
         }
 
         return pageNavigation.navigateByUri(uri)
+    }
+
+    /**
+     * 解析完整视频链接里的 `?t=` 秒数（可带小数，如 `529.7` → 529700ms）。
+     *
+     * 为什么统一抽出来：BV/av、深链/网页一共四条视频分支都要用；`t` 缺失、非数字、
+     * `NaN`/无穷、`<= 0` 一律当成"没带 t"（不 seek）—— 脏参数不该把用户莫名跳到片头。
+     */
+    private fun parseSeekMs(uri: Uri): Long? {
+        // 链接正文来自评论区，畸形转义（如 `t=100%`）会让 getQueryParameter 抛异常；
+        // 不能因为一个坏 query 崩掉整次跳转，当作没带 t 处理。
+        val raw = runCatching { uri.getQueryParameter("t") }.getOrNull() ?: return null
+        val seconds = raw.toDoubleOrNull() ?: return null
+        if (!seconds.isFinite() || seconds <= 0.0) return null
+        return (seconds * 1000).roundToLong()
+    }
+
+    /**
+     * 打开视频详情页（四条视频分支的唯一入口）。
+     *
+     * 为什么先问 [VideoLinkSeekBus]：带 `?t=` 且目标就是当前详情页那条视频时，再压一层
+     * 详情页会让整页（含播放器/评论区）重建、返回还要多按一次；交给当前页原地 seek 才是
+     * 用户预期。当前页接不住（不是它的视频 / 详情还没加载好）时由这里正常导航兜底。
+     */
+    private fun openVideo(
+        pageNavigation: PageNavigation,
+        id: String,
+        seekMs: Long?,
+    ): Boolean {
+        if (seekMs != null && VideoLinkSeekBus.onSeek?.invoke(id, seekMs) == true) {
+            return true
+        }
+        pageNavigation.navigate(
+            VideoDetailPage(id, seekPosition = seekMs),
+            cn.a10miaomiao.bilimiao.compose.common.defaultNavOptions
+        )
+        return true
     }
 
     /**

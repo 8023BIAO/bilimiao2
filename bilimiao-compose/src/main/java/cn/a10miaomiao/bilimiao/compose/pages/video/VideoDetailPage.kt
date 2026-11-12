@@ -40,6 +40,7 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -69,6 +70,7 @@ import cn.a10miaomiao.bilimiao.compose.common.foundation.pagerTabIndicatorOffset
 import cn.a10miaomiao.bilimiao.compose.common.localContainerView
 import cn.a10miaomiao.bilimiao.compose.common.mypage.PageConfig
 import cn.a10miaomiao.bilimiao.compose.common.navigation.PageNavigation
+import cn.a10miaomiao.bilimiao.compose.common.navigation.VideoLinkSeekBus
 import cn.a10miaomiao.bilimiao.compose.common.toPaddingValues
 import cn.a10miaomiao.bilimiao.compose.components.layout.DataDrivenNavigator
 import cn.a10miaomiao.bilimiao.compose.components.layout.DoubleColumnAutofitLayout
@@ -133,6 +135,23 @@ class VideoDetailPage(
         // 首次组合时 id 与 VM 构造时一致（VM 内部直接返回，不会重复加载）
         LaunchedEffect(id, seekPosition) {
             viewModel.changeVideoIfNeeded(id, seekPosition)
+        }
+        // ★ 稳定 lambda：DisposableEffect 只注册一次；闭包里只认 viewModel，
+        //   页面复用（连播/切集换 id）后 bus 照样落到当前视频上。
+        val seekFromVideoLink: (String, Long) -> Boolean = remember(viewModel) {
+            { videoId, seekMs -> viewModel.seekFromVideoLink(videoId, seekMs) }
+        }
+        // 完整视频链接带 `?t=` 且目标就是本页视频时，导航层通过这个 bus 先问当前页能不能
+        // 原地接管（复用评论区空降）。只有当前组合中的视频详情页持有它。
+        DisposableEffect(seekFromVideoLink) {
+            VideoLinkSeekBus.onSeek = seekFromVideoLink
+            onDispose {
+                // 只清自己：转场期间新页面可能已经先注册、旧页面随后才销毁，
+                // 不比较引用会把新页的 handler 清掉，刚打开的页面就接不住 seek 了。
+                if (VideoLinkSeekBus.onSeek === seekFromVideoLink) {
+                    VideoLinkSeekBus.onSeek = null
+                }
+            }
         }
         val windowStore: WindowStore by rememberInstance()
         val windowState = windowStore.stateFlow.collectAsStateWithLifecycle().value
